@@ -310,3 +310,7 @@ dist
 cypress/videos
 cypress/screenshots
 .vscode/settings.json
+
+# Custom scripts
+start_backend.bat
+start_frontend.bat
