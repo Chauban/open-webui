@@ -3,8 +3,9 @@ import { browser, dev } from '$app/environment';
 
 export const APP_NAME = 'Open WebUI';
 
-export const WEBUI_HOSTNAME = browser ? (dev ? `${location.hostname}:8080` : ``) : '';
-export const WEBUI_BASE_URL = browser ? (dev ? `http://${WEBUI_HOSTNAME}` : ``) : ``;
+// 在开发模式下使用空字符串，让请求通过 Vite 代理转发到后端
+export const WEBUI_HOSTNAME = browser ? (dev ? `` : ``) : '';
+export const WEBUI_BASE_URL = browser ? (dev ? `` : ``) : ``;
 export const WEBUI_API_BASE_URL = `${WEBUI_BASE_URL}/api/v1`;
 
 export const OPENAI_API_BASE_URL = `${WEBUI_BASE_URL}/openai`;

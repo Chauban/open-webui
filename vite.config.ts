@@ -28,5 +28,37 @@ export default defineConfig({
 	},
 	esbuild: {
 		pure: process.env.ENV === 'dev' ? [] : ['console.log', 'console.debug', 'console.error']
+	},
+	server: {
+		proxy: {
+			'/api': {
+				target: 'http://localhost:8080',
+				changeOrigin: true
+			},
+			'/ws': {
+				target: 'http://localhost:8080',
+				ws: true
+			},
+			'/openai': {
+				target: 'http://localhost:8080',
+				changeOrigin: true
+			},
+			'/ollama': {
+				target: 'http://localhost:8080',
+				changeOrigin: true
+			},
+			'/static': {
+				target: 'http://localhost:8080',
+				changeOrigin: true
+			},
+			'/audio': {
+				target: 'http://localhost:8080',
+				changeOrigin: true
+			},
+			'/opensearch.xml': {
+				target: 'http://localhost:8080',
+				changeOrigin: true
+			}
+		}
 	}
 });
