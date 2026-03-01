@@ -226,8 +226,6 @@
 				'generation',
 				'dalle',
 				'stable diffusion',
-				'comfyui',
-				'automatic1111',
 				'gemini'
 			]
 		},
