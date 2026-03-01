@@ -13,7 +13,8 @@
 		getBaseModels,
 		toggleModelById,
 		updateModelById,
-		importModels
+		importModels,
+		updateModelAccessGrants
 	} from '$lib/apis/models';
 	import { copyToClipboard } from '$lib/utils';
 	import { page } from '$app/stores';
@@ -181,7 +182,17 @@
 		);
 	};
 
+	// Check if model is public (has public read access grant)
+	const isModelPublic = (model) => {
+		return (model?.access_grants ?? []).some(
+			(g) => g.principal_type === 'user' && g.principal_id === '*' && g.permission === 'read'
+		);
+	};
+
 	const toggleModelHandler = async (model) => {
+		const wasActive = model.is_active ?? true;
+		const willBeActive = !wasActive;
+
 		if (!Object.keys(model).includes('base_model_id')) {
 			await createNewModel(localStorage.token, {
 				id: model.id,
@@ -196,6 +207,20 @@
 			});
 		} else {
 			await toggleModelById(localStorage.token, model.id);
+		}
+
+		// If model is being disabled, make it private
+		if (wasActive && !willBeActive && isModelPublic(model)) {
+			let accessGrants = (model?.access_grants ?? []).filter(
+				(g) => !(g.principal_type === 'user' && g.principal_id === '*' && g.permission === 'read')
+			);
+			await updateModelAccessGrants(
+				localStorage.token,
+				model.id,
+				model.name ?? model.id,
+				accessGrants
+			);
+			model.access_grants = accessGrants;
 		}
 
 		// await init();
@@ -267,6 +292,54 @@
 
 		settings.set({ ...$settings, pinnedModels: pinnedModels });
 		await updateUserSettings(localStorage.token, { ui: $settings });
+	};
+
+	// Toggle model public/private status
+	const togglePublicHandler = async (model) => {
+		const isPublic = isModelPublic(model);
+		let accessGrants = [...(model?.access_grants ?? [])];
+
+		if (isPublic) {
+			// Remove public access grant (make private)
+			accessGrants = accessGrants.filter(
+				(g) => !(g.principal_type === 'user' && g.principal_id === '*' && g.permission === 'read')
+			);
+		} else {
+			// Add public read access grant (make public)
+			accessGrants.push({
+				principal_type: 'user',
+				principal_id: '*',
+				permission: 'read'
+			});
+		}
+
+		// Update the model's access grants
+		const res = await updateModelAccessGrants(
+			localStorage.token,
+			model.id,
+			model.name ?? model.id,
+			accessGrants
+		);
+
+		if (res) {
+			// Update local model state
+			model.access_grants = accessGrants;
+			models = models;
+
+			toast.success(
+				!isPublic
+					? $i18n.t('Model {{name}} is now public', { name: model.name ?? model.id })
+					: $i18n.t('Model {{name}} is now private', { name: model.name ?? model.id })
+			);
+
+			// Refresh models list
+			_models.set(
+				await getModels(
+					localStorage.token,
+					$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
+				)
+			);
+		}
 	};
 
 	onMount(async () => {
@@ -648,6 +721,27 @@
 												bind:state={model.is_active}
 												on:change={async () => {
 													toggleModelHandler(model);
+												}}
+											/>
+										</Tooltip>
+									</div>
+
+									<!-- Public/Private Toggle -->
+									<div class="ml-2">
+										<Tooltip
+											content={(model?.is_active ?? true)
+												? (isModelPublic(model)
+														? $i18n.t('Public')
+														: $i18n.t('Private'))
+												: $i18n.t('Enable model to set access')}
+										>
+											<Switch
+												state={isModelPublic(model)}
+												disabled={!(model?.is_active ?? true)}
+												on:change={async () => {
+													if (model?.is_active ?? true) {
+														await togglePublicHandler(model);
+													}
 												}}
 											/>
 										</Tooltip>
