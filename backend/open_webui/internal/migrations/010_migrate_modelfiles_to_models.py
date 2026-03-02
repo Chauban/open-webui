@@ -59,7 +59,6 @@ def migrate_modelfile_to_model(migrator: Migrator, database: pw.Database):
             {
                 "description": modelfile.modelfile.get("desc"),
                 "profile_image_url": modelfile.modelfile.get("imageUrl"),
-                "ollama": {"modelfile": modelfile.modelfile.get("content")},
                 "suggestion_prompts": modelfile.modelfile.get("suggestionPrompts"),
                 "categories": modelfile.modelfile.get("categories"),
                 "user": {**modelfile.modelfile.get("user", {}), "community": True},
@@ -70,7 +69,7 @@ def migrate_modelfile_to_model(migrator: Migrator, database: pw.Database):
 
         # Insert the processed data into the 'model' table
         Model.create(
-            id=f"ollama-{modelfile.tag_name}",
+            id=f"model-{modelfile.tag_name}",
             user_id=modelfile.user_id,
             base_model_id=info.get("base_model_id"),
             name=modelfile.modelfile.get("title"),
@@ -115,7 +114,7 @@ def move_data_back_to_modelfile(migrator: Migrator, database: pw.Database):
             "title": model.name,
             "desc": meta.get("description"),
             "imageUrl": meta.get("profile_image_url"),
-            "content": meta.get("ollama", {}).get("modelfile"),
+            "content": meta.get("params", {}).get("template"),
             "suggestionPrompts": meta.get("suggestion_prompts"),
             "categories": meta.get("categories"),
             "user": {k: v for k, v in meta.get("user", {}).items() if k != "community"},
