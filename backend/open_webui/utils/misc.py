@@ -598,7 +598,12 @@ def parse_duration(duration: str) -> Optional[timedelta]:
     return total_duration
 
 
-def parse_ollama_modelfile(model_text):
+def parse_modelfile(model_text):
+    """Parse a modelfile and extract parameters.
+
+    This is a generic parser that supports basic model file syntax.
+    Compatible with various model formats.
+    """
     parameters_meta = {
         "mirostat": int,
         "mirostat_eta": float,
