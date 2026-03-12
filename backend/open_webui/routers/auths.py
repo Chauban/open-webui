@@ -27,6 +27,7 @@ from open_webui.models.users import (
     UserStatus,
 )
 from open_webui.models.groups import Groups
+from open_webui.models.education import Education
 from open_webui.models.oauth_sessions import OAuthSessions
 
 from open_webui.constants import ERROR_MESSAGES, WEBHOOK_MESSAGES
@@ -137,6 +138,10 @@ def create_session_response(
         user.id, request.app.state.config.USER_PERMISSIONS, db=db
     )
 
+    education_role = None
+    if getattr(user, "info", None):
+        education_role = user.info.get("education_role")
+
     return {
         "token": token,
         "token_type": "Bearer",
@@ -146,6 +151,7 @@ def create_session_response(
         "name": user.name,
         "role": user.role,
         "profile_image_url": f"/api/v1/users/{user.id}/profile/image",
+        "education_role": education_role,
         "permissions": user_permissions,
     }
 
@@ -158,6 +164,7 @@ def create_session_response(
 class SessionUserResponse(Token, UserProfileImageResponse):
     expires_at: Optional[int] = None
     permissions: Optional[dict] = None
+    education_role: Optional[str] = None
 
 
 class SessionUserInfoResponse(SessionUserResponse, UserStatus):
@@ -208,6 +215,10 @@ async def get_session_user(
         user.id, request.app.state.config.USER_PERMISSIONS, db=db
     )
 
+    education_role = None
+    if getattr(user, "info", None):
+        education_role = user.info.get("education_role")
+
     return {
         "token": token,
         "token_type": "Bearer",
@@ -217,6 +228,7 @@ async def get_session_user(
         "name": user.name,
         "role": user.role,
         "profile_image_url": user.profile_image_url,
+        "education_role": education_role,
         "bio": user.bio,
         "gender": user.gender,
         "date_of_birth": user.date_of_birth,
@@ -690,6 +702,8 @@ async def signup_handler(
     password: str,
     name: str,
     profile_image_url: str = "/user.png",
+    education_role: Optional[str] = None,
+    classroom_invite_code: Optional[str] = None,
     *,
     db: Session,
 ) -> UserModel:
@@ -741,6 +755,31 @@ async def signup_handler(
         db=db,
     )
 
+    if education_role in {"student", "teacher"}:
+        Users.update_user_by_id(
+            user.id,
+            {"info": {"education_role": education_role}},
+            db=db,
+        )
+        user = Users.get_user_by_id(user.id, db=db)
+
+    if classroom_invite_code and education_role == "student":
+        classroom = Education.get_classroom_by_invite_code(classroom_invite_code, db=db)
+        if classroom is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Invalid classroom invite code",
+            )
+
+        existing_membership = Education.get_classroom_member_by_user_id(user.id, db=db)
+        if existing_membership is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Student is already linked to a classroom",
+            )
+
+        Education.ensure_classroom_member(classroom.id, user.id, "student", db=db)
+
     return user
 
 
@@ -776,6 +815,14 @@ async def signup(
     if Users.get_user_by_email(form_data.email.lower(), db=db):
         raise HTTPException(400, detail=ERROR_MESSAGES.EMAIL_TAKEN)
 
+    if form_data.classroom_invite_code and form_data.education_role == "student":
+        classroom = Education.get_classroom_by_invite_code(form_data.classroom_invite_code, db=db)
+        if classroom is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Invalid classroom invite code",
+            )
+
     try:
         try:
             validate_password(form_data.password)
@@ -788,6 +835,8 @@ async def signup(
             form_data.password,
             form_data.name,
             form_data.profile_image_url,
+            form_data.education_role,
+            form_data.classroom_invite_code,
             db=db,
         )
         return create_session_response(request, user, db, response, set_cookie=True)
@@ -916,6 +965,14 @@ async def add_user(
         )
 
         if user:
+            if form_data.education_role in {"student", "teacher"}:
+                Users.update_user_by_id(
+                    user.id,
+                    {"info": {"education_role": form_data.education_role}},
+                    db=db,
+                )
+                user = Users.get_user_by_id(user.id, db=db)
+
             apply_default_group_assignment(
                 request.app.state.config.DEFAULT_GROUP_ID,
                 user.id,

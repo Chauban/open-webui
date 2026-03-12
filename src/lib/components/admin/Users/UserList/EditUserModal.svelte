@@ -1,8 +1,7 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
 	import dayjs from 'dayjs';
-	import { createEventDispatcher } from 'svelte';
-	import { onMount, getContext } from 'svelte';
+	import { createEventDispatcher, getContext } from 'svelte';
 
 	import { goto } from '$app/navigation';
 
@@ -28,8 +27,12 @@
 
 	const init = () => {
 		if (selectedUser) {
-			_user = selectedUser;
-			_user.password = '';
+			_user = {
+				...selectedUser,
+				education_role:
+					selectedUser?.role === 'admin' ? '' : selectedUser?.info?.education_role ?? 'student',
+				password: ''
+			};
 			loadUserGroups();
 		}
 	};
@@ -37,6 +40,7 @@
 	let _user = {
 		profile_image_url: '',
 		role: 'pending',
+		education_role: 'student',
 		name: '',
 		email: '',
 		password: ''
@@ -45,6 +49,11 @@
 	let userGroups: any[] | null = null;
 
 	const submitHandler = async () => {
+		if (_user.role !== 'admin' && !_user.education_role) {
+			toast.error('Education role is required.');
+			return;
+		}
+
 		const res = await updateUserById(localStorage.token, selectedUser.id, _user).catch((error) => {
 			toast.error(`${error}`);
 		});
@@ -64,6 +73,12 @@
 			return null;
 		});
 	};
+
+	$: if (_user.role === 'admin') {
+		_user.education_role = '';
+	} else if (!_user.education_role) {
+		_user.education_role = 'student';
+	}
 </script>
 
 <Modal size="sm" bind:show>
@@ -153,6 +168,23 @@
 									</div>
 
 									<div class="flex flex-col w-full">
+										<div class=" mb-1 text-xs text-gray-500">Education Role</div>
+
+										<div class="flex-1">
+											<select
+												class="w-full text-sm bg-transparent outline-hidden"
+												bind:value={_user.education_role}
+												aria-label="Education Role"
+												disabled={_user.role === 'admin'}
+												required={_user.role !== 'admin'}
+											>
+												<option value="student">Student</option>
+												<option value="teacher">Teacher</option>
+											</select>
+										</div>
+									</div>
+
+									<div class="flex flex-col w-full">
 										<div class=" mb-1 text-xs text-gray-500">{$i18n.t('Name')}</div>
 
 										<div class="flex-1">
@@ -236,21 +268,20 @@
 <style>
 	input::-webkit-outer-spin-button,
 	input::-webkit-inner-spin-button {
-		/* display: none; <- Crashes Chrome on hover */
 		-webkit-appearance: none;
-		margin: 0; /* <-- Apparently some margin are still there even though it's hidden */
+		margin: 0;
 	}
 
 	.tabs::-webkit-scrollbar {
-		display: none; /* for Chrome, Safari and Opera */
+		display: none;
 	}
 
 	.tabs {
-		-ms-overflow-style: none; /* IE and Edge */
-		scrollbar-width: none; /* Firefox */
+		-ms-overflow-style: none;
+		scrollbar-width: none;
 	}
 
 	input[type='number'] {
-		-moz-appearance: textfield; /* Firefox */
+		-moz-appearance: textfield;
 	}
 </style>

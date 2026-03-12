@@ -357,7 +357,7 @@
 					<tr class="bg-white dark:bg-gray-900 dark:border-gray-850 text-xs">
 						<td class="px-3 py-1 min-w-[7rem] w-28">
 							<button
-								class=" translate-y-0.5"
+								class="translate-y-0.5 flex items-center gap-1.5"
 								aria-label={$i18n.t('Change User Role')}
 								on:click={() => {
 									selectedUser = user;
@@ -368,6 +368,12 @@
 									type={user.role === 'admin' ? 'info' : user.role === 'user' ? 'success' : 'muted'}
 									content={$i18n.t(user.role)}
 								/>
+								{#if user?.info?.education_role}
+									<Badge
+										type="muted"
+										content={user.info.education_role === 'teacher' ? 'Teacher' : 'Student'}
+									/>
+								{/if}
 							</button>
 						</td>
 						<td class="px-3 py-1 font-medium text-gray-900 dark:text-white max-w-48">

@@ -39,6 +39,7 @@
 	let email = '';
 	let password = '';
 	let confirmPassword = '';
+	let educationRole = 'student';
 
 	let ldapUsername = '';
 
@@ -85,7 +86,13 @@
 			}
 		}
 
-		const sessionUser = await userSignUp(name, email, password, generateInitialsImage(name)).catch(
+		const sessionUser = await userSignUp(
+			name,
+			email,
+			password,
+			generateInitialsImage(name),
+			educationRole
+		).catch(
 			(error) => {
 				toast.error(`${error}`);
 				return null;
@@ -294,6 +301,21 @@
 													required
 												/>
 											</div>
+
+											<div class="mb-2">
+												<label for="education-role" class="text-sm font-medium text-left mb-1 block"
+													>Identity</label
+												>
+												<select
+													bind:value={educationRole}
+													id="education-role"
+													class="my-0.5 w-full text-sm outline-hidden bg-transparent"
+												>
+													<option value="student">Student</option>
+													<option value="teacher">Teacher</option>
+												</select>
+											</div>
+
 										{/if}
 
 										{#if mode === 'ldap'}

@@ -74,6 +74,8 @@ class SignupForm(BaseModel):
     email: str
     password: str
     profile_image_url: Optional[str] = "/user.png"
+    education_role: Optional[str] = "student"
+    classroom_invite_code: Optional[str] = None
 
     @field_validator("profile_image_url")
     @classmethod
@@ -85,6 +87,7 @@ class SignupForm(BaseModel):
 
 class AddUserForm(SignupForm):
     role: Optional[str] = "pending"
+    education_role: Optional[str] = "student"
 
 
 class AuthsTable:

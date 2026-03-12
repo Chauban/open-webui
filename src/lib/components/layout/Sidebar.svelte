@@ -1020,6 +1020,72 @@
 						</div>
 					{/if}
 
+					{#if $user?.education_role === 'student' || $user?.education_role === 'teacher' || $user?.role === 'admin'}
+						<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
+							<a
+								class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
+								href="/me/writing"
+								on:click={itemClickHandler}
+								draggable="false"
+								aria-label="My Writing"
+							>
+								<div class="self-center">
+									<svg
+										xmlns="http://www.w3.org/2000/svg"
+										fill="none"
+										viewBox="0 0 24 24"
+										stroke-width="2"
+										stroke="currentColor"
+										class="size-4.5"
+									>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											d="M16.862 4.487 18.549 2.8a1.875 1.875 0 1 1 2.652 2.652L7.832 18.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.862 4.487ZM19.5 7.125 16.875 4.5"
+										/>
+									</svg>
+								</div>
+
+								<div class="flex self-center translate-y-[0.5px]">
+									<div class=" self-center text-sm font-primary">My Writing</div>
+								</div>
+							</a>
+						</div>
+					{/if}
+
+					{#if $user?.education_role === 'teacher' || $user?.role === 'admin'}
+						<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
+							<a
+								class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
+								href="/teacher/assignments"
+								on:click={itemClickHandler}
+								draggable="false"
+								aria-label="Teaching"
+							>
+								<div class="self-center">
+									<svg
+										xmlns="http://www.w3.org/2000/svg"
+										fill="none"
+										viewBox="0 0 24 24"
+										stroke-width="2"
+										stroke="currentColor"
+										class="size-4.5"
+									>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5 4.462 5 2 6.462 2 8.267v7.466C2 17.538 4.462 19 7.5 19c1.746 0 3.332-.477 4.5-1.253m0-11.494C13.168 5.477 14.754 5 16.5 5 19.538 5 22 6.462 22 8.267v7.466C22 17.538 19.538 19 16.5 19c-1.746 0-3.332-.477-4.5-1.253"
+										/>
+									</svg>
+								</div>
+
+								<div class="flex self-center translate-y-[0.5px]">
+									<div class=" self-center text-sm font-primary">Teaching</div>
+								</div>
+							</a>
+						</div>
+					{/if}
+
 					{#if $user?.role === 'admin' || $user?.permissions?.workspace?.models || $user?.permissions?.workspace?.knowledge || $user?.permissions?.workspace?.prompts || $user?.permissions?.workspace?.tools}
 						<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
 							<a

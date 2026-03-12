@@ -626,6 +626,16 @@ async def update_user_by_id(
             hashed = get_password_hash(form_data.password)
             Auths.update_user_password_by_id(user_id, hashed, db=db)
 
+        user_info = {**(user.info or {})}
+        effective_education_role = form_data.education_role
+        if form_data.role != "admin" and effective_education_role not in {"student", "teacher"}:
+            effective_education_role = "student"
+
+        if effective_education_role in {"student", "teacher"}:
+            user_info["education_role"] = effective_education_role
+        else:
+            user_info.pop("education_role", None)
+
         Auths.update_email_by_id(user_id, form_data.email.lower(), db=db)
         updated_user = Users.update_user_by_id(
             user_id,
@@ -634,6 +644,7 @@ async def update_user_by_id(
                 "name": form_data.name,
                 "email": form_data.email.lower(),
                 "profile_image_url": form_data.profile_image_url,
+                "info": user_info,
             },
             db=db,
         )

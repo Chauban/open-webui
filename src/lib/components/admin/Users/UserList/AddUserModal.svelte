@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
-	import { createEventDispatcher } from 'svelte';
-	import { onMount, getContext } from 'svelte';
+	import { createEventDispatcher, getContext } from 'svelte';
 	import { addUser } from '$lib/apis/auths';
 
 	import { WEBUI_BASE_URL } from '$lib/constants';
@@ -25,7 +24,8 @@
 		name: '',
 		email: '',
 		password: '',
-		role: 'user'
+		role: 'pending',
+		education_role: 'student'
 	};
 
 	$: if (show) {
@@ -33,8 +33,13 @@
 			name: '',
 			email: '',
 			password: '',
-			role: 'user'
+			role: 'pending',
+			education_role: 'student'
 		};
+	}
+
+	$: if (_user.role === 'admin') {
+		_user.education_role = 'student';
 	}
 
 	const submitHandler = async () => {
@@ -52,7 +57,8 @@
 				_user.email,
 				_user.password,
 				_user.role,
-				generateInitialsImage(_user.name)
+				generateInitialsImage(_user.name),
+				_user.role === 'admin' ? null : _user.education_role
 			).catch((error) => {
 				toast.error(`${error}`);
 			});
@@ -194,6 +200,22 @@
 								</div>
 							</div>
 
+							<div class="flex flex-col w-full mb-3">
+								<div class=" mb-1 text-xs text-gray-500">Education Role</div>
+
+								<div class="flex-1">
+									<select
+										class="w-full capitalize rounded-lg text-sm bg-transparent dark:disabled:text-gray-500 outline-hidden"
+										bind:value={_user.education_role}
+										aria-label="Education Role"
+										disabled={_user.role === 'admin'}
+									>
+										<option value="student">Student</option>
+										<option value="teacher">Teacher</option>
+									</select>
+								</div>
+							</div>
+
 							<div class="flex flex-col w-full mt-1">
 								<div class=" mb-1 text-xs text-gray-500">{$i18n.t('Name')}</div>
 
@@ -269,12 +291,12 @@
 								</div>
 
 								<div class=" text-xs text-gray-500">
-									ⓘ {$i18n.t(
+									{$i18n.t(
 										'Ensure your CSV file includes 4 columns in this order: Name, Email, Password, Role.'
 									)}
 									<a
 										class="underline dark:text-gray-200"
-										href="{WEBUI_BASE_URL}/static/user-import.csv"
+										href={`${WEBUI_BASE_URL}/static/user-import.csv`}
 									>
 										{$i18n.t('Click here to download user import template file.')}
 									</a>
@@ -309,21 +331,20 @@
 <style>
 	input::-webkit-outer-spin-button,
 	input::-webkit-inner-spin-button {
-		/* display: none; <- Crashes Chrome on hover */
 		-webkit-appearance: none;
-		margin: 0; /* <-- Apparently some margin are still there even though it's hidden */
+		margin: 0;
 	}
 
 	.tabs::-webkit-scrollbar {
-		display: none; /* for Chrome, Safari and Opera */
+		display: none;
 	}
 
 	.tabs {
-		-ms-overflow-style: none; /* IE and Edge */
-		scrollbar-width: none; /* Firefox */
+		-ms-overflow-style: none;
+		scrollbar-width: none;
 	}
 
 	input[type='number'] {
-		-moz-appearance: textfield; /* Firefox */
+		-moz-appearance: textfield;
 	}
 </style>

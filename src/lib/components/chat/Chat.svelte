@@ -99,6 +99,10 @@
 	import Image from '../common/Image.svelte';
 
 	export let chatIdProp = '';
+	export let responseInsertHandler: Function | null = null;
+	export let responseCopyHandler: Function | null = null;
+	export let embedded = false;
+	export let initialChatData = null;
 
 	let loading = true;
 
@@ -168,6 +172,60 @@
 		navigateHandler();
 	}
 
+	const hydrateChatState = async (chatRecord) => {
+		chat = chatRecord;
+		tags = embedded ? [] : await getTagsById(localStorage.token, chatIdProp).catch(async (error) => []);
+
+		const chatContent = chatRecord?.chat;
+		if (!chatContent) {
+			return false;
+		}
+
+		selectedModels =
+			(chatContent?.models ?? undefined) !== undefined
+				? chatContent.models
+				: [chatContent.models ?? ''];
+
+		if (!($user?.role === 'admin' || ($user?.permissions?.chat?.multiple_models ?? true))) {
+			selectedModels = selectedModels.length > 0 ? [selectedModels[0]] : [''];
+		}
+
+		oldSelectedModelIds = JSON.parse(JSON.stringify(selectedModels));
+
+		history =
+			(chatContent?.history ?? undefined) !== undefined
+				? chatContent.history
+				: convertMessagesToHistory(chatContent.messages);
+
+		chatTitle.set(chatContent.title);
+
+		params = chatContent?.params ?? {};
+		chatFiles = chatContent?.files ?? [];
+		autoScroll = true;
+		await tick();
+
+		if (history.currentId) {
+			for (const message of Object.values(history.messages)) {
+				if (message && message.role === 'assistant') {
+					message.done = true;
+				}
+			}
+		}
+
+		if (!embedded) {
+			const taskRes = await getTaskIdsByChatId(localStorage.token, $chatId).catch((error) => {
+				return null;
+			});
+
+			if (taskRes) {
+				taskIds = taskRes.task_ids;
+			}
+		}
+
+		await tick();
+		return true;
+	};
+
 	const navigateHandler = async () => {
 		loading = true;
 
@@ -189,6 +247,16 @@
 		const storageChatInput = sessionStorage.getItem(
 			`chat-input${chatIdProp ? `-${chatIdProp}` : ''}`
 		);
+
+		if (embedded && initialChatData) {
+			chatId.set(chatIdProp);
+			if (await hydrateChatState(initialChatData)) {
+				loading = false;
+				window.setTimeout(() => scrollToBottom(), 0);
+				await tick();
+				return;
+			}
+		}
 
 		if (chatIdProp && (await loadChat())) {
 			await tick();
@@ -1150,61 +1218,7 @@
 		});
 
 		if (chat) {
-			tags = await getTagsById(localStorage.token, $chatId).catch(async (error) => {
-				return [];
-			});
-
-			const chatContent = chat.chat;
-
-			if (chatContent) {
-				console.log(chatContent);
-
-				selectedModels =
-					(chatContent?.models ?? undefined) !== undefined
-						? chatContent.models
-						: [chatContent.models ?? ''];
-
-				if (!($user?.role === 'admin' || ($user?.permissions?.chat?.multiple_models ?? true))) {
-					selectedModels = selectedModels.length > 0 ? [selectedModels[0]] : [''];
-				}
-
-				oldSelectedModelIds = JSON.parse(JSON.stringify(selectedModels));
-
-				history =
-					(chatContent?.history ?? undefined) !== undefined
-						? chatContent.history
-						: convertMessagesToHistory(chatContent.messages);
-
-				chatTitle.set(chatContent.title);
-
-				params = chatContent?.params ?? {};
-				chatFiles = chatContent?.files ?? [];
-
-				autoScroll = true;
-				await tick();
-
-				if (history.currentId) {
-					for (const message of Object.values(history.messages)) {
-						if (message && message.role === 'assistant') {
-							message.done = true;
-						}
-					}
-				}
-
-				const taskRes = await getTaskIdsByChatId(localStorage.token, $chatId).catch((error) => {
-					return null;
-				});
-
-				if (taskRes) {
-					taskIds = taskRes.task_ids;
-				}
-
-				await tick();
-
-				return true;
-			} else {
-				return null;
-			}
+			return await hydrateChatState(chat);
 		}
 	};
 
@@ -2561,9 +2575,9 @@
 />
 
 <div
-	class="h-screen max-h-[100dvh] transition-width duration-200 ease-in-out {$showSidebar
-		? '  md:max-w-[calc(100%-var(--sidebar-width))]'
-		: ' '} w-full max-w-full flex flex-col"
+	class="{embedded
+		? 'h-full max-h-full'
+		: `h-screen max-h-[100dvh] transition-width duration-200 ease-in-out ${$showSidebar ? 'md:max-w-[calc(100%-var(--sidebar-width))]' : ''}`} w-full max-w-full flex flex-col"
 	id="chat-container"
 >
 	{#if !loading}
@@ -2680,6 +2694,8 @@
 										{mergeResponses}
 										{chatActionHandler}
 										{addMessages}
+										{responseInsertHandler}
+										{responseCopyHandler}
 										topPadding={true}
 										bottomPadding={files.length > 0}
 										{onSelect}

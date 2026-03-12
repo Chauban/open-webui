@@ -145,6 +145,8 @@
 	export let regenerateResponse: Function;
 
 	export let addMessages: Function;
+	export let responseInsertHandler: Function | null = null;
+	export let responseCopyHandler: Function | null = null;
 
 	export let isLastMessage = true;
 	export let readOnly = false;
@@ -184,6 +186,31 @@
 		if (res) {
 			toast.success($i18n.t('Copying to clipboard was successful!'));
 		}
+	};
+
+	const insertToDraft = async () => {
+		if (!responseInsertHandler) {
+			return;
+		}
+
+		await responseInsertHandler({
+			id: message.id,
+			content: message.content,
+			model: message.model
+		});
+	};
+
+	const copyWithHandler = async () => {
+		if (responseCopyHandler) {
+			await responseCopyHandler({
+				id: message.id,
+				content: message.content,
+				model: message.model
+			});
+			return;
+		}
+
+		await copyToClipboard(message.content);
 	};
 
 	const stopAudio = () => {
@@ -974,15 +1001,40 @@
 									{/if}
 								{/if}
 
+								{#if responseInsertHandler}
+									<Tooltip content={$i18n.t('Insert to Draft')} placement="bottom">
+										<button
+											aria-label={$i18n.t('Insert to Draft')}
+											class="{isLastMessage || ($settings?.highContrastMode ?? false)
+												? 'visible'
+												: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition"
+											on:click={insertToDraft}
+										>
+											<svg
+												xmlns="http://www.w3.org/2000/svg"
+												fill="none"
+												viewBox="0 0 24 24"
+												stroke-width="2.3"
+												stroke="currentColor"
+												class="w-4 h-4"
+											>
+												<path
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													d="M4.5 12h10.5m0 0-4.5-4.5m4.5 4.5-4.5 4.5M19.5 5.25v13.5"
+												/>
+											</svg>
+										</button>
+									</Tooltip>
+								{/if}
+
 								<Tooltip content={$i18n.t('Copy')} placement="bottom">
 									<button
 										aria-label={$i18n.t('Copy')}
 										class="{isLastMessage || ($settings?.highContrastMode ?? false)
 											? 'visible'
 											: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition copy-response-button"
-										on:click={() => {
-											copyToClipboard(message.content);
-										}}
+										on:click={copyWithHandler}
 									>
 										<svg
 											xmlns="http://www.w3.org/2000/svg"

@@ -290,7 +290,8 @@ export const userSignUp = async (
 	name: string,
 	email: string,
 	password: string,
-	profile_image_url: string
+	profile_image_url: string,
+	education_role: string | null = 'student'
 ) => {
 	let error = null;
 
@@ -304,7 +305,8 @@ export const userSignUp = async (
 			name: name,
 			email: email,
 			password: password,
-			profile_image_url: profile_image_url
+			profile_image_url: profile_image_url,
+			...(education_role && { education_role: education_role })
 		})
 	})
 		.then(async (res) => {
@@ -358,7 +360,8 @@ export const addUser = async (
 	email: string,
 	password: string,
 	role: string = 'pending',
-	profile_image_url: null | string = null
+	profile_image_url: null | string = null,
+	education_role: null | string = null
 ) => {
 	let error = null;
 
@@ -373,6 +376,7 @@ export const addUser = async (
 			email: email,
 			password: password,
 			role: role,
+			...(education_role && { education_role: education_role }),
 			...(profile_image_url && { profile_image_url: profile_image_url })
 		})
 	})
