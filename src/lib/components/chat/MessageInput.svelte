@@ -473,9 +473,18 @@
 	);
 
 	let toggleFilters = [];
-	$: toggleFilters = (atSelectedModel?.id ? [atSelectedModel.id] : selectedModels)
-		.map((id) => ($models.find((model) => model.id === id) || {})?.filters ?? [])
-		.reduce((acc, filters) => acc.filter((f1) => filters.some((f2) => f2.id === f1.id)));
+	$: {
+		const modelFilters = (atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).map(
+			(id) => ($models.find((model) => model.id === id) || {})?.filters ?? []
+		);
+
+		toggleFilters =
+			modelFilters.length === 0
+				? []
+				: modelFilters.reduce((acc, filters) =>
+						acc.filter((f1) => filters.some((f2) => f2.id === f1.id))
+					);
+	}
 
 	let showToolsButton = false;
 	$: showToolsButton = ($tools ?? []).length > 0 || ($toolServers ?? []).length > 0;

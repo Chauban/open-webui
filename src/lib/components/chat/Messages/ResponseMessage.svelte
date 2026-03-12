@@ -147,6 +147,7 @@
 	export let addMessages: Function;
 	export let responseInsertHandler: Function | null = null;
 	export let responseCopyHandler: Function | null = null;
+	export let responseInsertLabel = 'Insert to Draft';
 
 	export let isLastMessage = true;
 	export let readOnly = false;
@@ -1002,9 +1003,9 @@
 								{/if}
 
 								{#if responseInsertHandler}
-									<Tooltip content={$i18n.t('Insert to Draft')} placement="bottom">
+									<Tooltip content={$i18n.t(responseInsertLabel)} placement="bottom">
 										<button
-											aria-label={$i18n.t('Insert to Draft')}
+											aria-label={$i18n.t(responseInsertLabel)}
 											class="{isLastMessage || ($settings?.highContrastMode ?? false)
 												? 'visible'
 												: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition"

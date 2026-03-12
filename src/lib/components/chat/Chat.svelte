@@ -101,8 +101,13 @@
 	export let chatIdProp = '';
 	export let responseInsertHandler: Function | null = null;
 	export let responseCopyHandler: Function | null = null;
+	export let responseInsertLabel = 'Insert to Draft';
 	export let embedded = false;
 	export let initialChatData = null;
+	export let showRightPanel = false;
+	export let rightPanelDefaultSize = 36;
+	export let rightPanelMinSize = 24;
+	export let rightPanelClassName = '';
 
 	let loading = true;
 
@@ -174,7 +179,9 @@
 
 	const hydrateChatState = async (chatRecord) => {
 		chat = chatRecord;
-		tags = embedded ? [] : await getTagsById(localStorage.token, chatIdProp).catch(async (error) => []);
+		tags = embedded
+			? []
+			: await getTagsById(localStorage.token, chatIdProp).catch(async (error) => []);
 
 		const chatContent = chatRecord?.chat;
 		if (!chatContent) {
@@ -2696,6 +2703,7 @@
 										{addMessages}
 										{responseInsertHandler}
 										{responseCopyHandler}
+										{responseInsertLabel}
 										topPadding={true}
 										bottomPadding={files.length > 0}
 										{onSelect}
@@ -2811,6 +2819,24 @@
 						{/if}
 					</div>
 				</Pane>
+
+				{#if showRightPanel}
+					<PaneResizer
+						class="relative flex items-center justify-center group border-l border-gray-50 dark:border-gray-850/30 hover:border-gray-200 dark:hover:border-gray-800 transition z-20"
+					>
+						<div
+							class="absolute -left-1.5 -right-1.5 -top-0 -bottom-0 z-20 cursor-col-resize bg-transparent"
+						></div>
+					</PaneResizer>
+
+					<Pane
+						defaultSize={rightPanelDefaultSize}
+						minSize={rightPanelMinSize}
+						class={`h-full min-w-0 ${rightPanelClassName}`}
+					>
+						<slot name="right-panel" />
+					</Pane>
+				{/if}
 
 				<ChatControls
 					bind:this={controlPaneComponent}

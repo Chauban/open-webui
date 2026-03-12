@@ -49,6 +49,7 @@
 	export let addMessages: Function = () => {};
 	export let responseInsertHandler: Function | null = null;
 	export let responseCopyHandler: Function | null = null;
+	export let responseInsertLabel = 'Insert to Draft';
 
 	export let readOnly = false;
 	export let editCodeBlock = true;
@@ -457,6 +458,7 @@
 								{addMessages}
 								{responseInsertHandler}
 								{responseCopyHandler}
+								{responseInsertLabel}
 								{triggerScroll}
 								{readOnly}
 								{editCodeBlock}
