@@ -664,12 +664,20 @@ class ClassroomProgressResponse(BaseModel):
 
 class EducationTable:
     @staticmethod
-    def _ensure_submission_review_table(db: Session):
+    def _ensure_submission_review_table(db: Session = None):
+        if not isinstance(db, Session):
+            with get_db_context() as _sync_db:
+                Education._ensure_submission_review_table(_sync_db)
+            return
         bind = db.get_bind()
         SubmissionReview.__table__.create(bind=bind, checkfirst=True)
 
     @staticmethod
-    def _ensure_classroom_tables(db: Session):
+    def _ensure_classroom_tables(db: Session = None):
+        if not isinstance(db, Session):
+            with get_db_context() as _sync_db:
+                Education._ensure_classroom_tables(_sync_db)
+            return
         bind = db.get_bind()
         Classroom.__table__.create(bind=bind, checkfirst=True)
         ClassroomMember.__table__.create(bind=bind, checkfirst=True)
@@ -693,7 +701,11 @@ class EducationTable:
             )
 
     @staticmethod
-    def _ensure_writing_tables(db: Session):
+    def _ensure_writing_tables(db: Session = None):
+        if not isinstance(db, Session):
+            with get_db_context() as _sync_db:
+                Education._ensure_writing_tables(_sync_db)
+            return
         bind = db.get_bind()
         inspector = inspect(bind)
         existing_tables = set(inspector.get_table_names())
@@ -1258,7 +1270,7 @@ class EducationTable:
             db.refresh(session)
             return WritingSessionModel.model_validate(session)
 
-    def delete_personal_writing_session(
+    async def delete_personal_writing_session(
         self, session_id: str, owner_user_id: str, db: Optional[Session] = None
     ) -> Optional[dict]:
         with get_db_context(db) as db:
@@ -1301,7 +1313,7 @@ class EducationTable:
                 for folder_id in related_folder_ids:
                     deleted_chat_ids.extend(
                         chat.id
-                        for chat in Chats.get_chats_by_folder_id_and_user_id(
+                        for chat in await Chats.get_chats_by_folder_id_and_user_id(
                             folder_id,
                             owner_user_id,
                             skip=0,
@@ -1309,11 +1321,11 @@ class EducationTable:
                             db=db,
                         )
                     )
-                    Chats.delete_chats_by_user_id_and_folder_id(
+                    await Chats.delete_chats_by_user_id_and_folder_id(
                         owner_user_id, folder_id, db=db
                     )
                     deleted_folder_ids.extend(
-                        Folders.delete_folder_by_id_and_user_id(
+                        await Folders.delete_folder_by_id_and_user_id(
                             folder_id, owner_user_id, db=db
                         )
                     )
@@ -1324,14 +1336,14 @@ class EducationTable:
                 from open_webui.models.chats import Chats
 
                 deleted_chat_ids = [session.chat_id]
-                Chats.delete_chat_by_id_and_user_id(
+                await Chats.delete_chat_by_id_and_user_id(
                     session.chat_id, owner_user_id, db=db
                 )
 
             if session.note_id:
                 from open_webui.models.notes import Notes
 
-                Notes.delete_note_by_id(session.note_id, db=db)
+                await Notes.delete_note_by_id(session.note_id, db=db)
 
             db.delete(session)
             db.commit()

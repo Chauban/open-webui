@@ -42,12 +42,12 @@ def migrate(migrator: Migrator, database: pw.Database, *, fake=False):
     # Fetch data from 'modelfile' table and insert into 'model' table
     migrate_modelfile_to_model(migrator, database)
     # Drop the 'modelfile' table
-    migrator.remove_model("modelfile")
+    migrator.remove_model('modelfile')
 
 
 def migrate_modelfile_to_model(migrator: Migrator, database: pw.Database):
-    ModelFile = migrator.orm["modelfile"]
-    Model = migrator.orm["model"]
+    ModelFile = migrator.orm['modelfile']
+    Model = migrator.orm['model']
 
     modelfiles = ModelFile.select()
 
@@ -71,10 +71,10 @@ def migrate_modelfile_to_model(migrator: Migrator, database: pw.Database):
         Model.create(
             id=f"model-{modelfile.tag_name}",
             user_id=modelfile.user_id,
-            base_model_id=info.get("base_model_id"),
-            name=modelfile.modelfile.get("title"),
+            base_model_id=info.get('base_model_id'),
+            name=modelfile.modelfile.get('title'),
             meta=meta,
-            params=json.dumps(info.get("params", {})),
+            params=json.dumps(info.get('params', {})),
             created_at=modelfile.timestamp,
             updated_at=modelfile.timestamp,
         )
@@ -85,7 +85,7 @@ def rollback(migrator: Migrator, database: pw.Database, *, fake=False):
 
     recreate_modelfile_table(migrator, database)
     move_data_back_to_modelfile(migrator, database)
-    migrator.remove_model("model")
+    migrator.remove_model('model')
 
 
 def recreate_modelfile_table(migrator: Migrator, database: pw.Database):
@@ -101,8 +101,8 @@ def recreate_modelfile_table(migrator: Migrator, database: pw.Database):
 
 
 def move_data_back_to_modelfile(migrator: Migrator, database: pw.Database):
-    Model = migrator.orm["model"]
-    Modelfile = migrator.orm["modelfile"]
+    Model = migrator.orm['model']
+    Modelfile = migrator.orm['modelfile']
 
     models = Model.select()
 

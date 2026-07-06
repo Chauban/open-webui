@@ -30,13 +30,15 @@
 	$: loadLocale($i18n.languages);
 
 	import { goto } from '$app/navigation';
-	import { WEBUI_NAME, config, user } from '$lib/stores';
+	import { WEBUI_NAME, config, user, pinnedNotes } from '$lib/stores';
 	import {
 		createNewNote,
 		deleteNoteById,
 		getNoteById,
 		getNoteList,
-		searchNotes
+		searchNotes,
+		toggleNotePinnedStatusById,
+		getPinnedNoteList
 	} from '$lib/apis/notes';
 	import { capitalizeFirstLetter, copyToClipboard, getTimeRange } from '$lib/utils';
 	import { downloadPdf, createNoteHandler } from './utils';
@@ -221,7 +223,9 @@
 			}
 
 			if (items) {
-				items = [...items, ...pageItems];
+				const existingIds = new Set(items.map((item) => item.id));
+				const newItems = pageItems.filter((item) => !existingIds.has(item.id));
+				items = [...items, ...newItems];
 			} else {
 				items = pageItems;
 			}
@@ -288,7 +292,7 @@
 		dragged = false;
 	};
 
-	onMount(async () => {
+	onMount(() => {
 		viewOption = localStorage?.noteViewOption ?? null;
 		displayOption = localStorage?.noteDisplayOption ?? null;
 
@@ -298,18 +302,16 @@
 		dropzoneElement?.addEventListener('dragover', onDragOver);
 		dropzoneElement?.addEventListener('drop', onDrop);
 		dropzoneElement?.addEventListener('dragleave', onDragLeave);
-	});
 
-	onDestroy(() => {
-		clearTimeout(searchDebounceTimer);
-		console.log('destroy');
-		const dropzoneElement = document.getElementById('notes-container');
+		return () => {
+			clearTimeout(searchDebounceTimer);
 
-		if (dropzoneElement) {
-			dropzoneElement?.removeEventListener('dragover', onDragOver);
-			dropzoneElement?.removeEventListener('drop', onDrop);
-			dropzoneElement?.removeEventListener('dragleave', onDragLeave);
-		}
+			if (dropzoneElement) {
+				dropzoneElement?.removeEventListener('dragover', onDragOver);
+				dropzoneElement?.removeEventListener('drop', onDrop);
+				dropzoneElement?.removeEventListener('dragleave', onDragLeave);
+			}
+		};
 	});
 </script>
 
@@ -411,7 +413,7 @@
 					>
 						<DropdownOptions
 							align="start"
-							className="flex w-full items-center gap-2 truncate px-3 py-1.5 text-sm bg-gray-50 dark:bg-gray-850 rounded-xl  placeholder-gray-400 outline-hidden focus:outline-hidden"
+							className="flex shrink-0 items-center gap-2 px-3 py-1.5 text-sm bg-gray-50 dark:bg-gray-850 rounded-xl placeholder-gray-400 outline-hidden focus:outline-hidden"
 							bind:value={viewOption}
 							items={[
 								{ value: null, label: $i18n.t('All') },
@@ -440,7 +442,7 @@
 					</div>
 				</div>
 
-				<div>
+				<div class="shrink-0">
 					<DropdownOptions
 						align="start"
 						bind:value={displayOption}
@@ -540,6 +542,14 @@
 																			selectedNote = note;
 																			showDeleteConfirm = true;
 																		}}
+																		isPinned={note.is_pinned ?? false}
+																		onPin={async () => {
+																			await toggleNotePinnedStatusById(localStorage.token, note.id);
+																			pinnedNotes.set(
+																				await getPinnedNoteList(localStorage.token).catch(() => [])
+																			);
+																			init();
+																		}}
 																	>
 																		<button
 																			class="self-center w-fit text-sm p-1 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
@@ -601,6 +611,14 @@
 																		onDelete={() => {
 																			selectedNote = note;
 																			showDeleteConfirm = true;
+																		}}
+																		isPinned={note.is_pinned ?? false}
+																		onPin={async () => {
+																			await toggleNotePinnedStatusById(localStorage.token, note.id);
+																			pinnedNotes.set(
+																				await getPinnedNoteList(localStorage.token).catch(() => [])
+																			);
+																			init();
 																		}}
 																	>
 																		<button

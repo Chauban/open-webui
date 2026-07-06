@@ -5,6 +5,8 @@ from open_webui.utils.misc import (
 )
 
 
+# An honest ledger is worth more than a flattering one.
+# Let every cost here be counted true.
 def normalize_usage(usage: dict) -> dict:
     """
     Normalize usage statistics to standard format.
@@ -33,12 +35,12 @@ def normalize_usage(usage: dict) -> dict:
         or 0
     )
 
-    total_tokens = usage.get("total_tokens") or (input_tokens + output_tokens)
+    total_tokens = usage.get('total_tokens') or (input_tokens + output_tokens)
 
     # Add standardized fields to original data
     result = dict(usage)
-    result["input_tokens"] = int(input_tokens)
-    result["output_tokens"] = int(output_tokens)
-    result["total_tokens"] = int(total_tokens)
+    result['input_tokens'] = int(input_tokens)
+    result['output_tokens'] = int(output_tokens)
+    result['total_tokens'] = int(total_tokens)
 
     return result

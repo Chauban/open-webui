@@ -97,8 +97,8 @@ def _is_valid_due_at(due_at: Optional[int]) -> bool:
     return due_at is not None and due_at > 0
 
 
-def _build_classroom_member_detail(member, db: Session):
-    linked_user = Users.get_user_by_id(member.user_id, db=db)
+async def _build_classroom_member_detail(member, db: Session):
+    linked_user = await Users.get_user_by_id(member.user_id, db=db)
     linked_user_info = linked_user.info if linked_user and linked_user.info else {}
     return ClassroomMemberDetail(
         member=member,
@@ -108,7 +108,7 @@ def _build_classroom_member_detail(member, db: Session):
     )
 
 
-def _build_teacher_assignment_list_item(assignment, db: Session):
+async def _build_teacher_assignment_list_item(assignment, db: Session):
     classroom = None
     student_count = 0
     if assignment.classroom_id:
@@ -129,7 +129,7 @@ def _build_teacher_assignment_list_item(assignment, db: Session):
         session = Education.get_writing_session_by_id(
             submission.writing_session_id, db=db
         )
-        analysis = _get_or_build_submission_analysis(submission, session, db)
+        analysis = await _get_or_build_submission_analysis(submission, session, db)
         _accumulate_risk_summary(risk_summary, analysis.get("summary"))
 
     return TeacherAssignmentListItem(
@@ -142,19 +142,19 @@ def _build_teacher_assignment_list_item(assignment, db: Session):
     )
 
 
-def _build_submission_list_item(submission, assignment, db: Session):
+async def _build_submission_list_item(submission, assignment, db: Session):
     session = Education.get_writing_session_by_id(submission.writing_session_id, db=db)
     reflection = Education.get_micro_reflection_by_id(
         submission.micro_reflection_id, db=db
     )
-    student = Users.get_user_by_id(submission.student_id, db=db)
+    student = await Users.get_user_by_id(submission.student_id, db=db)
     review = Education.get_submission_review_by_submission_id(submission.id, db=db)
     classroom = (
         Education.get_classroom_by_id(assignment.classroom_id, db=db)
         if assignment.classroom_id
         else None
     )
-    analysis = _get_or_build_submission_analysis(submission, session, db)
+    analysis = await _get_or_build_submission_analysis(submission, session, db)
     return SubmissionListItem(
         submission=submission,
         session=session,
@@ -284,9 +284,9 @@ def _get_assignment_classroom_or_404(assignment, db: Session):
     return classroom
 
 
-def _ensure_assignment_project(assignment, session, db: Session):
+async def _ensure_assignment_project(assignment, session, db: Session):
     project = (
-        Folders.get_folder_by_id_and_user_id(
+        await Folders.get_folder_by_id_and_user_id(
             session.folder_id, session.owner_user_id, db=db
         )
         if session.folder_id
@@ -294,7 +294,7 @@ def _ensure_assignment_project(assignment, session, db: Session):
     )
 
     if project is None:
-        project = Folders.insert_new_folder(
+        project = await Folders.insert_new_folder(
             session.owner_user_id,
             FolderForm(
                 name=assignment.title,
@@ -314,7 +314,7 @@ def _ensure_assignment_project(assignment, session, db: Session):
         desired_meta = _make_assignment_project_meta(assignment.id, session.id)
         desired_name = assignment.title
         if desired_meta != (project.meta or {}) or desired_name != project.name:
-            project = Folders.update_folder_by_id_and_user_id(
+            project = await Folders.update_folder_by_id_and_user_id(
                 project.id,
                 session.owner_user_id,
                 FolderForm(
@@ -324,10 +324,10 @@ def _ensure_assignment_project(assignment, session, db: Session):
             )
 
     legacy_chat = (
-        Chats.get_chat_by_id(session.chat_id, db=db) if session.chat_id else None
+        await Chats.get_chat_by_id(session.chat_id, db=db) if session.chat_id else None
     )
     if legacy_chat is not None and legacy_chat.folder_id != project.id:
-        Chats.update_chat_folder_id_by_id_and_user_id(
+        await Chats.update_chat_folder_id_by_id_and_user_id(
             legacy_chat.id, session.owner_user_id, project.id, db=db
         )
         chat_meta = dict(legacy_chat.meta or {})
@@ -340,9 +340,9 @@ def _ensure_assignment_project(assignment, session, db: Session):
     return project
 
 
-def _ensure_personal_project(session, note, db: Session):
+async def _ensure_personal_project(session, note, db: Session):
     project = (
-        Folders.get_folder_by_id_and_user_id(
+        await Folders.get_folder_by_id_and_user_id(
             session.folder_id, session.owner_user_id, db=db
         )
         if session.folder_id
@@ -352,7 +352,7 @@ def _ensure_personal_project(session, note, db: Session):
     desired_meta = _make_personal_project_meta(session.id)
 
     if project is None:
-        project = Folders.insert_new_folder(
+        project = await Folders.insert_new_folder(
             session.owner_user_id,
             FolderForm(name=desired_name, meta=desired_meta, data={}),
             db=db,
@@ -367,7 +367,7 @@ def _ensure_personal_project(session, note, db: Session):
         return project, session
 
     if project.name != desired_name or (project.meta or {}) != desired_meta:
-        project = Folders.update_folder_by_id_and_user_id(
+        project = await Folders.update_folder_by_id_and_user_id(
             project.id,
             session.owner_user_id,
             FolderForm(name=desired_name, meta=desired_meta, data=project.data or {}),
@@ -377,13 +377,13 @@ def _ensure_personal_project(session, note, db: Session):
     return project, session
 
 
-def _get_workspace_resources_or_409(assignment, session, db: Session):
-    note = Notes.get_note_by_id(session.note_id, db=db)
-    project = _ensure_assignment_project(assignment, session, db=db)
+async def _get_workspace_resources_or_409(assignment, session, db: Session):
+    note = await Notes.get_note_by_id(session.note_id, db=db)
+    project = await _ensure_assignment_project(assignment, session, db=db)
 
     active_chat_id = session.active_chat_id or session.chat_id
     active_chat = (
-        Chats.get_chat_by_id(active_chat_id, db=db) if active_chat_id else None
+        await Chats.get_chat_by_id(active_chat_id, db=db) if active_chat_id else None
     )
     if active_chat_id and active_chat is None:
         session = Education.update_writing_session_context(
@@ -1223,7 +1223,7 @@ def _build_submission_analysis(
     }
 
 
-def _get_or_build_submission_analysis(submission, session, db: Session) -> dict:
+async def _get_or_build_submission_analysis(submission, session, db: Session) -> dict:
     cached = Education.get_analysis_result(session.id, "submission_analysis", db=db)
     if (
         cached is not None
@@ -1235,7 +1235,7 @@ def _get_or_build_submission_analysis(submission, session, db: Session) -> dict:
     versions = Education.get_versions(session.id, db=db)
     provenance_segments = Education.get_provenance_segments(session.id, db=db)
     operations = Education.get_editor_operations(session.id, db=db)
-    prompt_timeline = _get_prompt_timeline(session, db)
+    prompt_timeline = await _get_prompt_timeline(session, db)
     payload = _build_submission_analysis(
         submission,
         session,
@@ -1293,10 +1293,10 @@ def _finalize_risk_summary(summary: dict) -> dict:
     }
 
 
-def _build_personal_workspace_item(
+async def _build_personal_workspace_item(
     session, db: Session
 ) -> Optional[PersonalWorkspaceListItem]:
-    note = Notes.get_note_by_id(session.note_id, db=db)
+    note = await Notes.get_note_by_id(session.note_id, db=db)
     if note is None:
         return None
     preview_text = (((note.data or {}).get("content") or {}).get("md") or "").strip()[
@@ -1312,8 +1312,8 @@ def _build_personal_workspace_item(
     )
 
 
-def _build_recent_item(session, db: Session) -> Optional[WritingRecentItem]:
-    note = Notes.get_note_by_id(session.note_id, db=db)
+async def _build_recent_item(session, db: Session) -> Optional[WritingRecentItem]:
+    note = await Notes.get_note_by_id(session.note_id, db=db)
     if note is None:
         return None
     assignment = (
@@ -1359,11 +1359,11 @@ def _get_chat_history_messages(chat) -> list[dict]:
     return ordered_messages
 
 
-def _get_prompt_timeline(session, db: Session) -> list[dict]:
+async def _get_prompt_timeline(session, db: Session) -> list[dict]:
     chat_ids: list[str] = []
 
     if session.folder_id:
-        folder_chats = Chats.get_chats_by_folder_id_and_user_id(
+        folder_chats = await Chats.get_chats_by_folder_id_and_user_id(
             session.folder_id, session.owner_user_id, db=db
         )
         chat_ids = [chat.id for chat in folder_chats]
@@ -1372,7 +1372,7 @@ def _get_prompt_timeline(session, db: Session) -> list[dict]:
 
     prompt_timeline = []
     for chat_id in chat_ids:
-        chat_messages = ChatMessages.get_messages_by_chat_id(chat_id, db=db)
+        chat_messages = await ChatMessages.get_messages_by_chat_id(chat_id, db=db)
         if chat_messages:
             prompt_timeline.extend(
                 [
@@ -1387,7 +1387,7 @@ def _get_prompt_timeline(session, db: Session) -> list[dict]:
             )
             continue
 
-        chat = Chats.get_chat_by_id(chat_id, db=db)
+        chat = await Chats.get_chat_by_id(chat_id, db=db)
         prompt_timeline.extend(
             [
                 {
@@ -1641,7 +1641,7 @@ async def get_teacher_classrooms(
                 session = Education.get_writing_session_by_id(
                     submission.writing_session_id, db=db
                 )
-                analysis = _get_or_build_submission_analysis(submission, session, db)
+                analysis = await _get_or_build_submission_analysis(submission, session, db)
                 _accumulate_risk_summary(risk_summary, analysis.get("summary"))
         items.append(
             TeacherClassroomListItem(
@@ -1663,7 +1663,7 @@ async def get_teacher_assignments(
     _ensure_teacher_identity(user)
     assignments = Education.get_assignments_by_teacher(user.id, db=db)
     return [
-        _build_teacher_assignment_list_item(assignment, db)
+        await _build_teacher_assignment_list_item(assignment, db)
         for assignment in assignments
     ]
 
@@ -1697,12 +1697,12 @@ async def get_teacher_overview(
         )
 
         for assignment in assignments:
-            assignment_item = _build_teacher_assignment_list_item(assignment, db)
+            assignment_item = await _build_teacher_assignment_list_item(assignment, db)
             assignment_items.append(assignment_item)
             submissions = Education.get_submissions_by_assignment(assignment.id, db=db)
             unsubmitted_count += max(student_count - len(submissions), 0)
             for submission in submissions:
-                submission_item = _build_submission_list_item(
+                submission_item = await _build_submission_list_item(
                     submission, assignment, db
                 )
                 submission_items.append(submission_item)
@@ -1761,7 +1761,7 @@ async def get_teacher_review(
     for assignment in assignments:
         submissions = Education.get_submissions_by_assignment(assignment.id, db=db)
         for submission in submissions:
-            item = _build_submission_list_item(submission, assignment, db)
+            item = await _build_submission_list_item(submission, assignment, db)
             if review_status and item.review_status != review_status:
                 continue
             items.append(item)
@@ -1790,7 +1790,7 @@ async def get_classroom_members(
     members = Education.get_classroom_members(
         classroom.id, member_role="student", db=db
     )
-    return [_build_classroom_member_detail(member, db) for member in members]
+    return [await _build_classroom_member_detail(member, db) for member in members]
 
 
 @router.post(
@@ -1811,7 +1811,7 @@ async def add_classroom_member(
             detail="Classroom not found",
         )
     _ensure_classroom_access(user, classroom, db, require_teacher=True)
-    member_user = Users.get_user_by_id(form_data.user_id, db=db)
+    member_user = await Users.get_user_by_id(form_data.user_id, db=db)
     if member_user is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1842,7 +1842,7 @@ async def add_classroom_member(
     member = Education.ensure_classroom_member(
         classroom.id, member_user.id, "student", db=db
     )
-    return _build_classroom_member_detail(member, db)
+    return await _build_classroom_member_detail(member, db)
 
 
 @router.delete("/teacher/classrooms/{classroom_id}/members/{member_user_id}")
@@ -1904,7 +1904,7 @@ async def bulk_import_classroom_members(
         normalized_email = email.strip().lower()
         if not normalized_email:
             continue
-        member_user = Users.get_user_by_email(normalized_email, db=db)
+        member_user = await Users.get_user_by_email(normalized_email, db=db)
         if member_user is None:
             result.failed_users.append(
                 {"value": normalized_email, "reason": "User not found"}
@@ -1913,7 +1913,7 @@ async def bulk_import_classroom_members(
         candidate_ids.add(member_user.id)
 
     for user_id in candidate_ids:
-        member_user = Users.get_user_by_id(user_id, db=db)
+        member_user = await Users.get_user_by_id(user_id, db=db)
         if member_user is None:
             result.failed_users.append({"value": user_id, "reason": "User not found"})
             continue
@@ -2006,7 +2006,7 @@ async def get_classroom_progress(
             session = Education.get_writing_session_by_id(
                 submission.writing_session_id, db=db
             )
-            analysis = _get_or_build_submission_analysis(submission, session, db)
+            analysis = await _get_or_build_submission_analysis(submission, session, db)
             _accumulate_risk_summary(risk_summary, analysis.get("summary"))
 
         progress_items.append(
@@ -2097,7 +2097,7 @@ async def export_classroom_progress(
     )
 
     for student_member in students:
-        student_detail = _build_classroom_member_detail(student_member, db)
+        student_detail = await _build_classroom_member_detail(student_member, db)
         for assignment in assignments:
             submissions = [
                 submission
@@ -2160,7 +2160,7 @@ async def get_teacher_classroom_assignments(
     _ensure_classroom_access(user, classroom, db, require_teacher=True)
     assignments = Education.get_assignments_by_classroom(classroom.id, db=db)
     return [
-        _build_teacher_assignment_list_item(assignment, db)
+        await _build_teacher_assignment_list_item(assignment, db)
         for assignment in assignments
     ]
 
@@ -2188,7 +2188,7 @@ async def get_assignment_workspace(
 
     session = Education.get_assignment_writing_session(assignment_id, user.id, db=db)
     if session is None:
-        note = Notes.insert_new_note(
+        note = await Notes.insert_new_note(
             user.id, _make_default_note(assignment.title, assignment_id), db=db
         )
         if note is None:
@@ -2204,7 +2204,7 @@ async def get_assignment_workspace(
                 },
             )
         writing_session_id = str(uuid.uuid4())
-        project = Folders.insert_new_folder(
+        project = await Folders.insert_new_folder(
             user.id,
             FolderForm(
                 name=assignment.title,
@@ -2237,7 +2237,7 @@ async def get_assignment_workspace(
             db=db,
         )
     else:
-        note, project, active_chat_id = _get_workspace_resources_or_409(
+        note, project, active_chat_id = await _get_workspace_resources_or_409(
             assignment, session, db=db
         )
         session = Education.get_writing_session_by_id(session.id, db=db)
@@ -2283,10 +2283,10 @@ async def get_writing_home(
     recent_items = []
     for session in sessions:
         if session.scope == "personal":
-            item = _build_personal_workspace_item(session, db)
+            item = await _build_personal_workspace_item(session, db)
             if item is not None:
                 personal_items.append(item)
-        recent_item = _build_recent_item(session, db)
+        recent_item = await _build_recent_item(session, db)
         if recent_item is not None:
             recent_items.append(recent_item)
 
@@ -2357,7 +2357,7 @@ async def create_personal_writing(
     db: Session = Depends(get_session),
 ):
     title = (form_data.title or "").strip() or "Untitled Writing"
-    note = Notes.insert_new_note(user.id, _make_personal_note(title), db=db)
+    note = await Notes.insert_new_note(user.id, _make_personal_note(title), db=db)
     if note is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Unable to create note"
@@ -2374,7 +2374,7 @@ async def create_personal_writing(
         status="active",
         db=db,
     )
-    project = Folders.insert_new_folder(
+    project = await Folders.insert_new_folder(
         user.id,
         FolderForm(name=title, meta=_make_personal_project_meta(session.id), data={}),
         db=db,
@@ -2414,7 +2414,7 @@ async def get_writing_workspace(
     session = _get_workspace_session_or_404(session_id, db)
     _ensure_workspace_session_owner(user, session)
 
-    note = Notes.get_note_by_id(session.note_id, db=db)
+    note = await Notes.get_note_by_id(session.note_id, db=db)
     if note is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Writing note is missing"
@@ -2429,9 +2429,9 @@ async def get_writing_workspace(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Only students can open the writing workspace",
             )
-        project = _ensure_assignment_project(assignment, session, db=db)
+        project = await _ensure_assignment_project(assignment, session, db=db)
     else:
-        project, session = _ensure_personal_project(session, note, db=db)
+        project, session = await _ensure_personal_project(session, note, db=db)
 
     if project is None:
         raise HTTPException(
@@ -2440,7 +2440,7 @@ async def get_writing_workspace(
 
     active_chat_id = session.active_chat_id or session.chat_id
     active_chat = (
-        Chats.get_chat_by_id(active_chat_id, db=db) if active_chat_id else None
+        await Chats.get_chat_by_id(active_chat_id, db=db) if active_chat_id else None
     )
     if active_chat_id and active_chat is None:
         session = Education.update_writing_session_context(
@@ -2476,7 +2476,7 @@ async def delete_personal_writing(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid writing scope"
         )
 
-    deleted = Education.delete_personal_writing_session(session_id, user.id, db=db)
+    deleted = await Education.delete_personal_writing_session(session_id, user.id, db=db)
     if deleted is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Writing session not found"
@@ -2547,8 +2547,8 @@ async def autosave_writing_session(
     session = _get_workspace_session_or_404(session_id, db)
     _ensure_workspace_session_owner(user, session)
 
-    note = Notes.get_note_by_id(session.note_id, db=db)
-    Notes.update_note_by_id(
+    note = await Notes.get_note_by_id(session.note_id, db=db)
+    await Notes.update_note_by_id(
         session.note_id,
         NoteForm(
             title=note.title,
@@ -2641,7 +2641,7 @@ async def upsert_writing_chat_message(
         prompt_preview = (form_data.message or {}).get("content", "")[
             :50
         ].strip() or "New Chat"
-        chat = Chats.insert_new_chat(
+        chat = await Chats.insert_new_chat(
             user.id,
             ChatForm(
                 chat={
@@ -2663,7 +2663,7 @@ async def upsert_writing_chat_message(
         )
         active_chat_id = chat.id
 
-    chat = Chats.upsert_message_to_chat_by_id_and_message_id(
+    chat = await Chats.upsert_message_to_chat_by_id_and_message_id(
         active_chat_id,
         message_id,
         form_data.message,
@@ -2708,8 +2708,8 @@ async def submit_assignment(
         )
     _ensure_workspace_session_owner(user, session)
 
-    note = Notes.get_note_by_id(session.note_id, db=db)
-    Notes.update_note_by_id(
+    note = await Notes.get_note_by_id(session.note_id, db=db)
+    await Notes.update_note_by_id(
         session.note_id,
         NoteForm(
             title=note.title,
@@ -2749,7 +2749,7 @@ async def submit_assignment(
             form_data.final_content_text, normalized_segments
         )
     )
-    prompt_timeline = _get_prompt_timeline(session, db)
+    prompt_timeline = await _get_prompt_timeline(session, db)
     prompt_count = len(
         [message for message in prompt_timeline if message.get("role") == "user"]
     )
@@ -2820,7 +2820,7 @@ async def get_assignment_submissions(
     submissions = Education.get_submissions_by_assignment(assignment_id, db=db)
 
     return [
-        _build_submission_list_item(submission, assignment, db)
+        await _build_submission_list_item(submission, assignment, db)
         for submission in submissions
     ]
 
@@ -2844,7 +2844,7 @@ async def get_submission_detail(
     _ensure_assignment_access(user, assignment, db, require_teacher=True)
     session = _get_workspace_session_or_404(submission.writing_session_id, db)
     versions = Education.get_versions(session.id, db=db)
-    analysis = _get_or_build_submission_analysis(submission, session, db)
+    analysis = await _get_or_build_submission_analysis(submission, session, db)
     provenance_segments = _filter_segments_for_final_text(
         (versions[-1].note_snapshot_text if versions else "") or "",
         Education.get_provenance_segments(session.id, db=db),
@@ -2853,9 +2853,9 @@ async def get_submission_detail(
         submission.micro_reflection_id, db=db
     )
     review = Education.get_submission_review_by_submission_id(submission.id, db=db)
-    prompt_timeline = _get_prompt_timeline(session, db)
-    student = Users.get_user_by_id(submission.student_id, db=db)
-    note = Notes.get_note_by_id(session.note_id, db=db)
+    prompt_timeline = await _get_prompt_timeline(session, db)
+    student = await Users.get_user_by_id(submission.student_id, db=db)
+    note = await Notes.get_note_by_id(session.note_id, db=db)
     final_version = next(
         version for version in versions if version.id == submission.final_version_id
     )
@@ -2894,7 +2894,7 @@ async def recompute_submission_analysis(
     _ensure_assignment_access(user, assignment, db, require_teacher=True)
     session = _get_workspace_session_or_404(submission.writing_session_id, db)
     versions = Education.get_versions(session.id, db=db)
-    prompt_timeline = _get_prompt_timeline(session, db)
+    prompt_timeline = await _get_prompt_timeline(session, db)
     payload = _build_submission_analysis(
         submission,
         session,
@@ -2929,7 +2929,7 @@ async def get_submission_analysis(
     assignment = _get_assignment_or_404(submission.assignment_id, db)
     _ensure_assignment_access(user, assignment, db, require_teacher=True)
     session = _get_workspace_session_or_404(submission.writing_session_id, db)
-    return _get_or_build_submission_analysis(submission, session, db)
+    return await _get_or_build_submission_analysis(submission, session, db)
 
 
 @router.get("/teacher/submissions/{submission_id}/analysis/summary")
@@ -3071,11 +3071,11 @@ async def get_teacher_dashboard(
     }
     summary = _empty_risk_summary()
     for submission in submissions:
-        student = Users.get_user_by_id(submission.student_id, db=db)
+        student = await Users.get_user_by_id(submission.student_id, db=db)
         session = Education.get_writing_session_by_id(
             submission.writing_session_id, db=db
         )
-        analysis = _get_or_build_submission_analysis(submission, session, db)
+        analysis = await _get_or_build_submission_analysis(submission, session, db)
         _accumulate_risk_summary(summary, analysis.get("summary"))
         for segment in analysis.get("segments", []):
             rewrite_level = segment.get("rewrite_level")
@@ -3125,7 +3125,7 @@ async def get_student_dashboard(
             has_reflection=True,
             submitted_at=row.submitted_at,
             risk_summary=(
-                _get_or_build_submission_analysis(
+                await _get_or_build_submission_analysis(
                     row,
                     Education.get_writing_session_by_id(row.writing_session_id, db=db),
                     db,
@@ -3143,7 +3143,7 @@ async def get_student_dashboard(
     }
     for item in items:
         _accumulate_risk_summary(summary, item.risk_summary or {})
-        analysis = _get_or_build_submission_analysis(
+        analysis = await _get_or_build_submission_analysis(
             Education.get_submission_by_id(item.submission_id, db=db),
             Education.get_writing_session_by_id(
                 Education.get_submission_by_id(
@@ -3213,7 +3213,7 @@ async def update_writing_session_active_chat(
 
     chat_id = form_data.chat_id
     if chat_id is not None:
-        chat = Chats.get_chat_by_id_and_user_id(chat_id, user.id, db=db)
+        chat = await Chats.get_chat_by_id_and_user_id(chat_id, user.id, db=db)
         if chat is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

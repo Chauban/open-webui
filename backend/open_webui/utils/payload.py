@@ -10,6 +10,8 @@ import copy
 import json
 
 
+# What goes out cannot be taken back. Let it be shaped
+# well before it leaves this place.
 # inplace function: form_data is modified
 def apply_system_prompt_to_body(
     system: Optional[str],
@@ -23,7 +25,7 @@ def apply_system_prompt_to_body(
 
     # Metadata (WebUI Usage)
     if metadata:
-        variables = metadata.get("variables", {})
+        variables = metadata.get('variables', {})
         if variables:
             system = prompt_variables_template(system, variables)
 
@@ -31,21 +33,15 @@ def apply_system_prompt_to_body(
     system = prompt_template(system, user)
 
     if replace:
-        form_data["messages"] = replace_system_message_content(
-            system, form_data.get("messages", [])
-        )
+        form_data['messages'] = replace_system_message_content(system, form_data.get('messages', []))
     else:
-        form_data["messages"] = add_or_update_system_message(
-            system, form_data.get("messages", [])
-        )
+        form_data['messages'] = add_or_update_system_message(system, form_data.get('messages', []))
 
     return form_data
 
 
 # inplace function: form_data is modified
-def apply_model_params_to_body(
-    params: dict, form_data: dict, mappings: dict[str, Callable]
-) -> dict:
+def apply_model_params_to_body(params: dict, form_data: dict, mappings: dict[str, Callable]) -> dict:
     if not params:
         return form_data
 
@@ -72,11 +68,11 @@ def remove_open_webui_params(params: dict) -> dict:
         dict: The modified dictionary with OpenWebUI parameters removed.
     """
     open_webui_params = {
-        "stream_response": bool,
-        "stream_delta_chunk_size": int,
-        "function_calling": str,
-        "reasoning_tags": list,
-        "system": str,
+        'stream_response': bool,
+        'stream_delta_chunk_size': int,
+        'function_calling': str,
+        'reasoning_tags': list,
+        'system': str,
     }
 
     for key in list(params.keys()):
@@ -90,7 +86,7 @@ def remove_open_webui_params(params: dict) -> dict:
 def apply_model_params_to_body_openai(params: dict, form_data: dict) -> dict:
     params = remove_open_webui_params(params)
 
-    custom_params = params.pop("custom_params", {})
+    custom_params = params.pop('custom_params', {})
     if custom_params:
         # Attempt to parse custom_params if they are strings
         for key, value in custom_params.items():
@@ -106,16 +102,16 @@ def apply_model_params_to_body_openai(params: dict, form_data: dict) -> dict:
         params = deep_update(params, custom_params)
 
     mappings = {
-        "temperature": float,
-        "top_p": float,
-        "min_p": float,
-        "max_tokens": int,
-        "frequency_penalty": float,
-        "presence_penalty": float,
-        "reasoning_effort": str,
-        "seed": lambda x: x,
-        "stop": lambda x: [bytes(s, "utf-8").decode("unicode_escape") for s in x],
-        "logit_bias": lambda x: x,
-        "response_format": dict,
+        'temperature': float,
+        'top_p': float,
+        'min_p': float,
+        'max_tokens': int,
+        'frequency_penalty': float,
+        'presence_penalty': float,
+        'reasoning_effort': str,
+        'seed': lambda x: x,
+        'stop': lambda x: [bytes(s, 'utf-8').decode('unicode_escape') for s in x],
+        'logit_bias': lambda x: x,
+        'response_format': dict,
     }
     return apply_model_params_to_body(params, form_data, mappings)

@@ -24,6 +24,7 @@
 	export let value: string = '';
 
 	export let pinModelHandler: (modelId: string) => void = () => {};
+	export let deleteModelHandler: (model: any) => void = () => {};
 
 	export let onClick: () => void = () => {};
 
@@ -80,6 +81,9 @@
 						alt={$i18n.t('{{modelName}} profile image', { modelName: item.label })}
 						class="rounded-full size-5 flex items-center"
 						loading="lazy"
+						on:error={(e) => {
+							e.currentTarget.src = '/favicon.png';
+						}}
 					/>
 				</Tooltip>
 			</div>
@@ -189,6 +193,7 @@
 			bind:show={showMenu}
 			model={item.model}
 			{pinModelHandler}
+			{deleteModelHandler}
 			copyLinkHandler={() => {
 				copyLinkHandler(item.model);
 			}}

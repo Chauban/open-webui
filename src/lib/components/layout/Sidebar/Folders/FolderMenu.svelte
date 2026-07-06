@@ -1,6 +1,4 @@
 <script lang="ts">
-	import { DropdownMenu } from 'bits-ui';
-	import { flyAndScale } from '$lib/utils/transitions';
 	import { getContext, createEventDispatcher } from 'svelte';
 
 	const i18n = getContext('i18n');
@@ -12,6 +10,7 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Download from '$lib/components/icons/Download.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
+	import Folder from '$lib/components/icons/Folder.svelte';
 
 	export let align: 'start' | 'end' = 'start';
 	export let onEdit = () => {};
@@ -23,14 +22,17 @@
 	export let showDelete = true;
 	export let showClose = false;
 	export let closeLabel = 'Close';
+	export let onCreateSub = () => {};
+	export let showCreateSub = true;
 
 	let show = false;
 </script>
 
 <Dropdown
 	bind:show
-	on:change={(e) => {
-		if (e.detail === false) {
+	{align}
+	onOpenChange={(state) => {
+		if (state === false) {
 			dispatch('close');
 		}
 	}}
@@ -47,61 +49,70 @@
 	</Tooltip>
 
 	<div slot="content">
-		<DropdownMenu.Content
-			class="w-full max-w-[170px] rounded-2xl px-1 py-1 border border-gray-100  dark:border-gray-800   z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
-			sideOffset={-2}
-			side="bottom"
-			{align}
-			transition={flyAndScale}
+		<div
+			class="min-w-[170px] rounded-2xl px-1 py-1 border border-gray-100 dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
 		>
+			{#if showCreateSub}
+				<button
+					class="flex gap-2 items-center px-3 py-1.5 text-sm select-none cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+					on:click={() => {
+						onCreateSub();
+					}}
+				>
+					<Folder />
+					<div class="flex items-center">{$i18n.t('Create Folder')}</div>
+				</button>
+
+				<hr class="border-gray-50/30 dark:border-gray-800/30 my-1" />
+			{/if}
+
 			{#if showEdit}
-				<DropdownMenu.Item
-					class="flex gap-2 items-center px-3 py-1.5 text-sm select-none cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
+				<button
+					class="flex gap-2 items-center px-3 py-1.5 text-sm select-none cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
 					on:click={() => {
 						onEdit();
 					}}
 				>
 					<Pencil />
 					<div class="flex items-center">{$i18n.t('Edit')}</div>
-				</DropdownMenu.Item>
+				</button>
 			{/if}
 
 			{#if showExport}
-				<DropdownMenu.Item
-					class="flex gap-2 items-center px-3 py-1.5 text-sm select-none cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
+				<button
+					class="flex gap-2 items-center px-3 py-1.5 text-sm select-none cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
 					on:click={() => {
 						onExport();
 					}}
 				>
 					<Download />
-
 					<div class="flex items-center">{$i18n.t('Export')}</div>
-				</DropdownMenu.Item>
+				</button>
 			{/if}
 
 			{#if showClose}
-				<DropdownMenu.Item
-					class="flex gap-2 items-center px-3 py-1.5 text-sm select-none cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
+				<button
+					class="flex gap-2 items-center px-3 py-1.5 text-sm select-none cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
 					on:click={() => {
 						onClose();
 					}}
 				>
 					<XMark />
 					<div class="flex items-center">{$i18n.t(closeLabel)}</div>
-				</DropdownMenu.Item>
+				</button>
 			{/if}
 
 			{#if showDelete}
-				<DropdownMenu.Item
-					class="flex gap-2 items-center px-3 py-1.5 text-sm select-none cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
+				<button
+					class="flex gap-2 items-center px-3 py-1.5 text-sm select-none cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
 					on:click={() => {
 						onDelete();
 					}}
 				>
 					<GarbageBin />
 					<div class="flex items-center">{$i18n.t('Delete')}</div>
-				</DropdownMenu.Item>
+				</button>
 			{/if}
-		</DropdownMenu.Content>
+		</div>
 	</div>
 </Dropdown>

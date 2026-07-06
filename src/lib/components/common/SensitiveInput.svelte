@@ -27,7 +27,7 @@
 		class={`${inputClassName} ${show ? '' : 'password'} ${($settings?.highContrastMode ?? false) ? 'placeholder:text-gray-700 dark:placeholder:text-gray-100' : ' outline-hidden placeholder:text-gray-300 dark:placeholder:text-gray-600'}`}
 		{placeholder}
 		type={type === 'password' && !show ? 'password' : 'text'}
-		{value}
+		bind:value
 		required={required && !readOnly}
 		disabled={readOnly}
 		on:change={(e) => {

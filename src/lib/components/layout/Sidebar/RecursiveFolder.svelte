@@ -18,7 +18,8 @@
 		updateFolderIsExpandedById,
 		updateFolderById,
 		updateFolderParentIdById,
-		getFolderById
+		getFolderById,
+		createNewFolder
 	} from '$lib/apis/folders';
 	import {
 		getChatById,
@@ -74,6 +75,9 @@
 
 	let showFolderModal = false;
 	let edit = false;
+
+	let showCreateSubFolderModal = false;
+	let createSubFolderParentId = null;
 
 	let draggedOver = false;
 	let dragged = false;
@@ -443,6 +447,30 @@
 
 		saveAs(blob, `folder-${folders[folderId].name}-export-${Date.now()}.json`);
 	};
+
+	const createSubFolderHandler = async ({ name, meta, data, parent_id }) => {
+		if (name === '') {
+			toast.error($i18n.t('Folder name cannot be empty.'));
+			return;
+		}
+
+		name = name.trim();
+
+		const res = await createNewFolder(localStorage.token, {
+			name,
+			data,
+			meta,
+			parent_id
+		}).catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
+
+		if (res) {
+			toast.success($i18n.t('Folder created successfully'));
+			dispatch('update');
+		}
+	};
 </script>
 
 <DeleteConfirmDialog
@@ -472,6 +500,12 @@
 </DeleteConfirmDialog>
 
 <FolderModal bind:show={showFolderModal} edit={true} {folderId} onSubmit={updateHandler} />
+
+<FolderModal
+	bind:show={showCreateSubFolderModal}
+	parentId={createSubFolderParentId}
+	onSubmit={createSubFolderHandler}
+/>
 
 {#if dragged && x && y}
 	<DragGhost {x} {y}>
@@ -649,6 +683,11 @@
 							onClose={async () => {
 								await onCloseFolder(currentFolder);
 							}}
+							showCreateSub={!lockFolders}
+							onCreateSub={() => {
+								createSubFolderParentId = folderId;
+								showCreateSubFolderModal = true;
+							}}
 						>
 							<div class="p-1 dark:hover:bg-gray-850 rounded-lg touch-auto">
 								<EllipsisHorizontal className="size-4" strokeWidth="2.5" />
@@ -713,6 +752,8 @@
 							folderId={folderId}
 							href={chatHrefBuilder ? chatHrefBuilder(chat, currentFolder) : null}
 							{clearSelectedProjectOnChatClick}
+							updatedAt={chat.updated_at}
+							lastReadAt={chat.last_read_at}
 							{shiftKey}
 							on:change={handleChatChange}
 						/>

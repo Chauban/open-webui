@@ -82,23 +82,27 @@
 		loading = true;
 
 		if (validateCommandString(command)) {
-			await onSubmit({
-				id: prompt?.id,
-				name,
-				command,
-				content,
-				tags: tags.map((tag) => tag.name),
-				access_grants: accessGrants,
-				commit_message: commitMessage || undefined,
-				is_production: isProduction
-			});
-			showEditModal = false;
-			commitMessage = '';
-			isProduction = true;
-			await loadHistory(true); // Reset and reload
-			// Select the newest version after saving
-			if (history.length > 0) {
-				selectedHistoryEntry = history[0];
+			try {
+				await onSubmit({
+					id: prompt?.id,
+					name,
+					command,
+					content,
+					tags: tags.map((tag) => tag.name),
+					access_grants: accessGrants,
+					commit_message: commitMessage || undefined,
+					is_production: isProduction
+				});
+				showEditModal = false;
+				commitMessage = '';
+				isProduction = true;
+				await loadHistory(true); // Reset and reload
+				// Select the newest version after saving
+				if (history.length > 0) {
+					selectedHistoryEntry = history[0];
+				}
+			} catch (error) {
+				toast.error(`${error}`);
 			}
 		} else {
 			toast.error(
@@ -283,6 +287,7 @@
 	accessRoles={['read', 'write']}
 	share={$user?.permissions?.sharing?.prompts || $user?.role === 'admin'}
 	sharePublic={$user?.permissions?.sharing?.public_prompts || $user?.role === 'admin'}
+	shareUsers={($user?.permissions?.access_grants?.allow_users ?? true) || $user?.role === 'admin'}
 	onChange={async () => {
 		if (edit && prompt?.id) {
 			try {

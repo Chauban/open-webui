@@ -37,6 +37,7 @@
 		removeAllDetails
 	} from '$lib/utils';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
+	import equal from 'fast-deep-equal';
 
 	import Name from './Name.svelte';
 	import ProfileImage from './ProfileImage.svelte';
@@ -119,10 +120,18 @@
 	export let messageId;
 	export let selectedModels = [];
 
-	let message: MessageType = JSON.parse(JSON.stringify(history.messages[messageId]));
+	let message: MessageType = structuredClone(history.messages[messageId]);
 	$: if (history.messages) {
-		if (JSON.stringify(message) !== JSON.stringify(history.messages[messageId])) {
-			message = JSON.parse(JSON.stringify(history.messages[messageId]));
+		const source = history.messages[messageId];
+		if (source) {
+			// Fast path: O(1) check on the fields that change most often (content during streaming, done at end)
+			// Avoids 2x O(n) JSON.stringify calls that are always true during streaming anyway
+			if (message.content !== source.content || message.done !== source.done) {
+				message = structuredClone(source);
+			} else if (!equal(message, source)) {
+				// Slow path: full comparison for infrequent changes (sources, annotations, status, etc.)
+				message = structuredClone(source);
+			}
 		}
 	}
 
@@ -163,6 +172,12 @@
 	let model = null;
 	$: model = $models.find((m) => m.id === message.model);
 
+	$: statusEntries = message?.statusHistory ?? [...(message?.status ? [message?.status] : [])];
+	$: hasVisibleStatus =
+		(model?.info?.meta?.capabilities?.status_updates ?? true) &&
+		statusEntries.length > 0 &&
+		!(statusEntries.at(-1)?.hidden ?? false);
+
 	let edit = false;
 	let editedContent = '';
 	let editTextAreaElement: HTMLTextAreaElement;
@@ -173,6 +188,7 @@
 	let speakingIdx: number | undefined;
 
 	let loadingSpeech = false;
+	let speakAbort: AbortController | null = null;
 
 	let showRateComment = false;
 
@@ -215,16 +231,25 @@
 	};
 
 	const stopAudio = () => {
+		speakAbort?.abort();
+		speakAbort = null;
+
 		try {
 			speechSynthesis.cancel();
-			$audioQueue.stop();
+			$audioQueue?.stop();
 		} catch {}
 
-		if (speaking) {
-			speaking = false;
-			speakingIdx = undefined;
-		}
+		speaking = false;
+		speakingIdx = undefined;
+		loadingSpeech = false;
 	};
+
+	// Resolve voice: model-specific > user settings > config default
+	const getVoiceId = () =>
+		model?.info?.meta?.tts?.voice ??
+		($settings?.audio?.tts?.defaultVoice === $config.audio.tts.voice
+			? ($settings?.audio?.tts?.voice ?? $config?.audio?.tts?.voice)
+			: $config?.audio?.tts?.voice);
 
 	const speak = async () => {
 		if (!(message?.content ?? '').trim().length) {
@@ -232,21 +257,12 @@
 			return;
 		}
 
+		stopAudio();
+		speakAbort = new AbortController();
+		const { signal } = speakAbort;
+
 		speaking = true;
 		const content = removeAllDetails(message.content);
-
-		// Get voice: model-specific > user settings > config default
-		const getVoiceId = () => {
-			// Check for model-specific TTS voice first
-			if (model?.info?.meta?.tts?.voice) {
-				return model.info.meta.tts.voice;
-			}
-			// Fall back to user settings or config default
-			if ($settings?.audio?.tts?.defaultVoice === $config.audio.tts.voice) {
-				return $settings?.audio?.tts?.voice ?? $config?.audio?.tts?.voice;
-			}
-			return $config?.audio?.tts?.voice;
-		};
 
 		if ($config.audio.tts.engine === '') {
 			let voices = [];
@@ -255,15 +271,9 @@
 				if (voices.length > 0) {
 					clearInterval(getVoicesLoop);
 
-					const voiceId = getVoiceId();
-					const voice = voices?.filter((v) => v.voiceURI === voiceId)?.at(0) ?? undefined;
-
-					console.log(voice);
-
+					const voice = voices.find((v) => v.voiceURI === getVoiceId());
 					const speech = new SpeechSynthesisUtterance(content);
 					speech.rate = $settings.audio?.tts?.playbackRate ?? 1;
-
-					console.log(speech);
 
 					speech.onend = () => {
 						speaking = false;
@@ -294,9 +304,7 @@
 			);
 
 			if (!messageContentParts.length) {
-				console.log('No content to speak');
 				toast.info($i18n.t('No content to speak'));
-
 				speaking = false;
 				loadingSpeech = false;
 				return;
@@ -316,19 +324,19 @@
 					await $TTSWorker.init();
 				}
 
-				for (const [idx, sentence] of messageContentParts.entries()) {
+				for (const [, sentence] of messageContentParts.entries()) {
+					if (signal.aborted) return;
+
 					const url = await $TTSWorker
-						.generate({
-							text: sentence,
-							voice: voiceId
-						})
+						.generate({ text: sentence, voice: voiceId })
 						.catch((error) => {
 							console.error(error);
 							toast.error(`${error}`);
-
 							speaking = false;
 							loadingSpeech = false;
 						});
+
+					if (signal.aborted) return;
 
 					if (url && speaking) {
 						$audioQueue.enqueue(url);
@@ -336,21 +344,23 @@
 					}
 				}
 			} else {
-				for (const [idx, sentence] of messageContentParts.entries()) {
+				for (const [, sentence] of messageContentParts.entries()) {
+					if (signal.aborted) return;
+
 					const res = await synthesizeOpenAISpeech(localStorage.token, voiceId, sentence).catch(
 						(error) => {
 							console.error(error);
 							toast.error(`${error}`);
-
 							speaking = false;
 							loadingSpeech = false;
 						}
 					);
 
+					if (signal.aborted) return;
+
 					if (res && speaking) {
 						const blob = await res.blob();
 						const url = URL.createObjectURL(blob);
-
 						$audioQueue.enqueue(url);
 						loadingSpeech = false;
 					}
@@ -817,7 +827,7 @@
 							class="w-full flex flex-col relative {edit ? 'hidden' : ''}"
 							id="response-content-container"
 						>
-							{#if message.content === '' && !message.error && ((model?.info?.meta?.capabilities?.status_updates ?? true) ? (message?.statusHistory ?? [...(message?.status ? [message?.status] : [])]).length === 0 || (message?.statusHistory?.at(-1)?.hidden ?? false) : true)}
+							{#if message.content === '' && !message.done && !message.error && !hasVisibleStatus}
 								<Skeleton />
 							{:else if message.content && message.error !== true}
 								<!-- always show message contents even if there's an error -->
@@ -1073,7 +1083,7 @@
 									</button>
 								</Tooltip>
 
-								{#if $user?.role === 'admin' || ($user?.permissions?.chat?.tts ?? true)}
+								{#if !readOnly && ($user?.role === 'admin' || ($user?.permissions?.chat?.tts ?? true))}
 									<Tooltip content={$i18n.t('Read Aloud')} placement="bottom">
 										<button
 											aria-label={$i18n.t('Read Aloud')}
@@ -1442,8 +1452,12 @@
 													class="{isLastMessage || ($settings?.highContrastMode ?? false)
 														? 'visible'
 														: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition"
-													on:click={() => {
-														showDeleteConfirm = true;
+													on:click={(e) => {
+														if (e.shiftKey) {
+															deleteMessageHandler();
+														} else {
+															showDeleteConfirm = true;
+														}
 													}}
 												>
 													<svg
@@ -1487,6 +1501,7 @@
 																: ''}"
 															style="fill: currentColor;"
 															alt={action.name}
+															draggable="false"
 														/>
 													</div>
 												{:else}
