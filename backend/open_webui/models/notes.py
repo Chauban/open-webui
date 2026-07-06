@@ -334,10 +334,12 @@ class NoteTable:
 
     def delete_note_by_id(self, id: str, db: Optional[Session] = None) -> bool:
         try:
+            should_commit = db is None
             with get_db_context(db) as db:
                 AccessGrants.revoke_all_access("note", id, db=db)
                 db.query(Note).filter(Note.id == id).delete()
-                db.commit()
+                if should_commit:
+                    db.commit()
                 return True
         except Exception:
             return False

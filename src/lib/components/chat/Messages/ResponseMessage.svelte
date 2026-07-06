@@ -580,8 +580,10 @@
 			e.preventDefault();
 			// Get the selected HTML
 			const selection = window.getSelection();
+			if (!selection || selection.rangeCount === 0) return;
 			const range = selection.getRangeAt(0);
 			const tempDiv = document.createElement('div');
+			const selectedText = selection.toString();
 
 			// Remove background, color, and font styles
 			tempDiv.appendChild(range.cloneContents());
@@ -599,7 +601,23 @@
 
 			// Put cleaned HTML + plain text into clipboard
 			e.clipboardData.setData('text/html', tempDiv.innerHTML);
-			e.clipboardData.setData('text/plain', selection.toString());
+			e.clipboardData.setData('text/plain', selectedText);
+			if (responseCopyHandler && selectedText.trim()) {
+				e.clipboardData.setData(
+					'application/x-openwebui-ai-snippet+json',
+					JSON.stringify({
+						sourceType: 'ai_pasted',
+						sourceMessageId: message.id,
+						text: selectedText
+					})
+				);
+				void responseCopyHandler({
+					id: message.id,
+					content: selectedText,
+					model: message.model,
+					selectionCopy: true
+				});
+			}
 		}
 	};
 

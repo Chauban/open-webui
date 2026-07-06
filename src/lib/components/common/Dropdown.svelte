@@ -7,8 +7,8 @@
 	import { flyAndScale } from '$lib/utils/transitions';
 
 	export let show = false;
-	export let side = 'bottom';
-	export let align = 'start';
+	export let side: 'top' | 'right' | 'bottom' | 'left' = 'bottom';
+	export let align: 'start' | 'center' | 'end' = 'start';
 	export let closeOnOutsideClick = true;
 
 	const dispatch = createEventDispatcher();

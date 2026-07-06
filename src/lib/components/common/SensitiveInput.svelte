@@ -1,4 +1,5 @@
 <script lang="ts">
+	// @ts-nocheck
 	const i18n = getContext('i18n');
 	import { getContext } from 'svelte';
 	import { settings } from '$lib/stores';
@@ -12,6 +13,7 @@
 	export let inputClassName = 'w-full text-sm py-0.5 bg-transparent';
 	export let showButtonClassName = 'pl-1.5  transition bg-transparent';
 	export let screenReader = true;
+	export let autocomplete = 'off';
 
 	let show = false;
 </script>
@@ -31,7 +33,7 @@
 		on:change={(e) => {
 			value = e.target.value;
 		}}
-		autocomplete="off"
+		{autocomplete}
 	/>
 	<button
 		class={showButtonClassName}

@@ -9,6 +9,15 @@
 
 	export let folders = {};
 	export let shiftKey = false;
+	export let lockFolders = false;
+	export let folderHrefBuilder: ((folder: any) => string) | null = null;
+	export let chatHrefBuilder: ((chat: any, folder: any) => string) | null = null;
+	export let clearSelectedProjectOnChatClick = true;
+	export let allowMenuWhenLocked = false;
+	export let closeFolderLabel = 'Close';
+	export let closeFolderLabelBuilder: ((folder: any) => string) | null = null;
+	export let onCloseFolder = async (folder) => {};
+	export let showVisibilityToggle = false;
 
 	export let onDelete = (folderId) => {};
 
@@ -47,6 +56,15 @@
 		{folders}
 		{folderId}
 		{shiftKey}
+		{lockFolders}
+		{folderHrefBuilder}
+		{chatHrefBuilder}
+		{clearSelectedProjectOnChatClick}
+		{allowMenuWhenLocked}
+		{closeFolderLabel}
+		{closeFolderLabelBuilder}
+		{onCloseFolder}
+		{showVisibilityToggle}
 		{onDelete}
 		{onItemMove}
 		on:import={(e) => {

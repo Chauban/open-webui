@@ -21,12 +21,12 @@
 	export let folderId = null;
 	export let edit = false;
 
-	let folder = null;
-	let name = '';
-	let meta = {
+	let projectRecord = null;
+	let projectName = '';
+	let projectMeta = {
 		background_image_url: null
 	};
-	let data = {
+	let projectData = {
 		system_prompt: '',
 		files: []
 	};
@@ -36,7 +36,7 @@
 	const submitHandler = async () => {
 		loading = true;
 
-		if ((data?.files ?? []).some((file) => file.status === 'uploading')) {
+		if ((projectData?.files ?? []).some((file) => file.status === 'uploading')) {
 			toast.error($i18n.t('Please wait until all files are uploaded.'));
 			loading = false;
 			return;
@@ -44,7 +44,7 @@
 
 		// Check folder max file count limit
 		const maxFileCount = $config?.features?.folder_max_file_count ?? '';
-		if (maxFileCount && (data?.files ?? []).length > maxFileCount) {
+		if (maxFileCount && (projectData?.files ?? []).length > maxFileCount) {
 			toast.error(
 				$i18n.t('Maximum number of files per folder is {{max}}.', { max: maxFileCount ?? 0 })
 			);
@@ -53,9 +53,9 @@
 		}
 
 		await onSubmit({
-			name,
-			meta,
-			data
+			name: projectName,
+			meta: projectMeta,
+			data: projectData
 		});
 		show = false;
 		loading = false;
@@ -63,16 +63,16 @@
 
 	const init = async () => {
 		if (folderId) {
-			folder = await getFolderById(localStorage.token, folderId).catch((error) => {
+			projectRecord = await getFolderById(localStorage.token, folderId).catch((error) => {
 				toast.error(`${error}`);
 				return null;
 			});
 
-			name = folder.name;
-			meta = folder.meta || {
+			projectName = projectRecord.name;
+			projectMeta = projectRecord.meta || {
 				background_image_url: null
 			};
-			data = folder.data || {
+			projectData = projectRecord.data || {
 				system_prompt: '',
 				files: []
 			};
@@ -95,11 +95,11 @@
 	}
 
 	$: if (!show && !edit) {
-		name = '';
-		meta = {
+		projectName = '';
+		projectMeta = {
 			background_image_url: null
 		};
-		data = {
+		projectData = {
 			system_prompt: '',
 			files: []
 		};
@@ -111,9 +111,9 @@
 		<div class=" flex justify-between dark:text-gray-300 px-5 pt-4 pb-1">
 			<div class=" text-lg font-medium self-center">
 				{#if edit}
-					{$i18n.t('Edit Folder')}
+					{$i18n.t('Edit Project')}
 				{:else}
-					{$i18n.t('Create Folder')}
+					{$i18n.t('Create Project')}
 				{/if}
 			</div>
 			<button
@@ -135,15 +135,15 @@
 					}}
 				>
 					<div class="flex flex-col w-full mt-1">
-						<div class=" mb-1 text-xs text-gray-500">{$i18n.t('Folder Name')}</div>
+						<div class=" mb-1 text-xs text-gray-500">{$i18n.t('Project Name')}</div>
 
 						<div class="flex-1">
 							<input
 								id="folder-name"
 								class="w-full text-sm bg-transparent placeholder:text-gray-300 dark:placeholder:text-gray-700 outline-hidden"
 								type="text"
-								bind:value={name}
-								placeholder={$i18n.t('Enter folder name')}
+								bind:value={projectName}
+								placeholder={$i18n.t('Enter project name')}
 								autocomplete="off"
 							/>
 						</div>
@@ -160,7 +160,7 @@
 							let reader = new FileReader();
 							reader.onload = (event) => {
 								let originalImageUrl = `${event.target.result}`;
-								meta.background_image_url = originalImageUrl;
+								projectMeta.background_image_url = originalImageUrl;
 							};
 
 							if (
@@ -181,15 +181,15 @@
 					/>
 
 					<div class="flex justify-between w-full mt-1 items-center">
-						<div class="text-xs text-gray-500">{$i18n.t('Folder Background Image')}</div>
+						<div class="text-xs text-gray-500">{$i18n.t('Project Background Image')}</div>
 
 						<div class="">
 							<button
 								aria-labelledby="chat-background-label background-image-url-state"
 								class="p-1 px-3 text-xs flex rounded-sm transition"
 								on:click={() => {
-									if (meta?.background_image_url !== null) {
-										meta.background_image_url = null;
+									if (projectMeta?.background_image_url !== null) {
+										projectMeta.background_image_url = null;
 									} else {
 										const input = document.getElementById('folder-background-image-input');
 										if (input) {
@@ -200,7 +200,7 @@
 								type="button"
 							>
 								<span class="ml-2 self-center" id="background-image-url-state"
-									>{(meta?.background_image_url ?? null) === null
+									>{(projectMeta?.background_image_url ?? null) === null
 										? $i18n.t('Upload')
 										: $i18n.t('Reset')}</span
 								>
@@ -220,14 +220,14 @@
 										'Write your model system prompt content here\ne.g.) You are Mario from Super Mario Bros, acting as an assistant.'
 									)}
 									maxSize={200}
-									bind:value={data.system_prompt}
+									bind:value={projectData.system_prompt}
 								/>
 							</div>
 						</div>
 					{/if}
 
 					<div class="my-2">
-						<Knowledge bind:selectedItems={data.files}>
+						<Knowledge bind:selectedItems={projectData.files}>
 							<div slot="label">
 								<div class="flex w-full justify-between">
 									<div class=" mb-2 text-xs text-gray-500">

@@ -46,10 +46,11 @@
 	export let shareEnabled: boolean = false;
 	export let scrollTop = 0;
 
-	export let chat;
-	export let history;
-	export let selectedModels;
-	export let showModelSelector = true;
+export let chat;
+export let history;
+export let selectedModels;
+export let showModelSelector = true;
+export let disableContextActions = false;
 
 	export let onSaveTempChat: () => {};
 	export let archiveChatHandler: (id: string) => void;
@@ -189,7 +190,7 @@
 						</Tooltip>
 					{/if}
 
-					{#if shareEnabled && chat && (chat.id || $temporaryChatEnabled)}
+					{#if !disableContextActions && chat && (chat.id || $temporaryChatEnabled)}
 						<Menu
 							{chat}
 							{shareEnabled}

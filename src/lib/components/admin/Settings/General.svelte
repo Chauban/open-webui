@@ -55,6 +55,7 @@
 		search_filters: '',
 		use_tls: false,
 		certificate_path: '',
+		validate_cert: false,
 		ciphers: ''
 	};
 

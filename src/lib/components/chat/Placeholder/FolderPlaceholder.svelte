@@ -13,6 +13,18 @@
 
 	export let folder: any = null;
 
+	const hrefBuilder = (chat) => {
+		if (
+			(folder?.meta?.mode === 'assignment_writing' ||
+				folder?.meta?.category === 'assignment_project') &&
+			folder?.meta?.assignment_id
+		) {
+			return `/assignments/${folder.meta.assignment_id}/write?chat=${chat.id}`;
+		}
+
+		return `/c/${chat.id}`;
+	};
+
 	let selectedTab = 'chats';
 
 	let page = 1;
@@ -100,7 +112,7 @@
 			<FolderKnowledge />
 		{:else if selectedTab === 'chats'}
 			{#if chats !== null}
-				<ChatList {chats} {chatListLoading} {allChatsLoaded} loadHandler={loadChats} />
+				<ChatList {chats} {chatListLoading} {allChatsLoaded} {hrefBuilder} loadHandler={loadChats} />
 			{:else}
 				<div class="py-10">
 					<Spinner />

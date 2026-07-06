@@ -1132,31 +1132,28 @@ except Exception as e:
 if default_prompt_suggestions == []:
     default_prompt_suggestions = [
         {
-            "title": ["Help me study", "vocabulary for a college entrance exam"],
-            "content": "Help me study vocabulary: write a sentence for me to fill in the blank, and I'll try to pick the correct option.",
+            "title": ["梳理观点", "把模糊想法整理成清晰论点"],
+            "content": "我有一个还不太清楚的想法，请通过提问帮我梳理成一个明确、有讨论价值的论点。",
         },
         {
-            "title": ["Give me ideas", "for what to do with my kids' art"],
-            "content": "What are 5 creative things I could do with my kids' art? I don't want to throw them away, but it's also so much clutter.",
+            "title": ["改进表达", "让文字更准确、更有条理"],
+            "content": "请帮我修改下面这段话，让表达更准确、层次更清楚，并说明主要修改理由。",
         },
         {
-            "title": ["Tell me a fun fact", "about the Roman Empire"],
-            "content": "Tell me a random fun fact about the Roman Empire",
+            "title": ["设计提纲", "搭建一篇议论文的逻辑结构"],
+            "content": "请围绕我给出的主题，帮我设计一篇议论文提纲，包括中心论点、分论点和论证顺序。",
         },
         {
-            "title": ["Show me a code snippet", "of a website's sticky header"],
-            "content": "Show me a code snippet of a website's sticky header in CSS and JavaScript.",
+            "title": ["分析读者", "判断表达对象和调整方式"],
+            "content": "请帮我分析这段文字适合什么读者，并指出如果换成不同读者，表达方式应该如何调整。",
         },
         {
-            "title": [
-                "Explain options trading",
-                "if I'm familiar with buying and selling stocks",
-            ],
-            "content": "Explain options trading in simple terms if I'm familiar with buying and selling stocks.",
+            "title": ["训练论证", "检查理由是否充分、有无漏洞"],
+            "content": "请帮我检查这个观点的论证是否充分，指出理由、证据或逻辑上可以改进的地方。",
         },
         {
-            "title": ["Overcome procrastination", "give me tips"],
-            "content": "Could you start by asking me about instances when I procrastinate the most and then give me some suggestions to overcome it?",
+            "title": ["准备交流", "把书面观点转成课堂发言"],
+            "content": "请帮我把下面的书面观点改写成适合课堂发言的表达，要求自然、清楚、有互动感。",
         },
     ]
 

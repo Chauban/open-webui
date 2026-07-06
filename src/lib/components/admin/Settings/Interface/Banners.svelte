@@ -8,14 +8,23 @@
 	import { getContext } from 'svelte';
 	const i18n = getContext('i18n');
 
-	export let banners = [];
+	export let banners: Array<{
+		id: string;
+		type: string;
+		content: string;
+		dismissible?: boolean;
+	}> = [];
 
 	let sortable = null;
-	let bannerListElement = null;
+	let bannerListElement: HTMLDivElement | null = null;
 
 	const positionChangeHandler = () => {
+		if (!bannerListElement) {
+			return;
+		}
+
 		const bannerIdOrder = Array.from(bannerListElement.children).map((child) =>
-			child.id.replace('banner-item-', '')
+			(child as HTMLElement).id.replace('banner-item-', '')
 		);
 
 		// Sort the banners array based on the new order
@@ -45,7 +54,7 @@
 			sortable = new Sortable(bannerListElement, {
 				animation: 150,
 				handle: '.item-handle',
-				onUpdate: async (event) => {
+				onUpdate: async () => {
 					positionChangeHandler();
 				}
 			});

@@ -12,7 +12,23 @@
 
 	const i18n = getContext('i18n');
 
-	let rankedModels = [];
+	type LeaderboardEntry = {
+		model_id: string;
+		rating?: number;
+		won?: number;
+		lost?: number;
+		top_tags?: string[];
+	};
+	type RankedModel = {
+		id: string;
+		name: string;
+		info?: { meta?: { hidden?: boolean } };
+		rating: number | '-';
+		stats: { count: number; won: string; lost: string };
+		top_tags: string[];
+	};
+
+	let rankedModels: RankedModel[] = [];
 	let query = '';
 	let loading = true;
 	let debounceTimer: ReturnType<typeof setTimeout>;
@@ -20,7 +36,7 @@
 	let direction: 'asc' | 'desc' = 'desc';
 
 	let showModal = false;
-	let selectedModel = null;
+	let selectedModel: RankedModel | null = null;
 
 	const toggleSort = (key: string) => {
 		if (orderBy === key) {
@@ -45,19 +61,23 @@
 		loading = true;
 		try {
 			const result = await getLeaderboard(localStorage.token, searchQuery);
-			const statsMap = new Map((result?.entries ?? []).map((e) => [e.model_id, e]));
+			const statsMap = new Map(
+				((result?.entries ?? []) as LeaderboardEntry[]).map((e) => [e.model_id, e])
+			);
 
 			rankedModels = $models
-				.filter((m) => m?.owned_by !== 'arena' && !m?.info?.meta?.hidden)
+				.filter((m) => !(m?.info?.meta as { hidden?: boolean } | undefined)?.hidden)
 				.map((model) => {
 					const s = statsMap.get(model.id);
+					const wins = s?.won ?? 0;
+					const losses = s?.lost ?? 0;
 					return {
 						...model,
 						rating: s?.rating ?? '-',
 						stats: {
-							count: s ? s.won + s.lost : 0,
-							won: s?.won?.toString() ?? '-',
-							lost: s?.lost?.toString() ?? '-'
+							count: wins + losses,
+							won: s ? wins.toString() : '-',
+							lost: s ? losses.toString() : '-'
 						},
 						top_tags: s?.top_tags ?? []
 					};
@@ -65,8 +85,8 @@
 				.sort((a, b) => {
 					if (a.rating === '-') return 1;
 					if (b.rating === '-') return -1;
-					return b.rating - a.rating;
-				});
+					return Number(b.rating) - Number(a.rating);
+				}) as RankedModel[];
 		} catch (err) {
 			console.error('Leaderboard load failed:', err);
 		}
@@ -84,8 +104,8 @@
 	}
 
 	$: sortedModels = [...rankedModels].sort((a, b) => {
-		const getValue = (m, key) => {
-			if (key === 'name') return m.name ?? m.id ?? '';
+		const getNameValue = (m: RankedModel): string => m.name ?? m.id ?? '';
+		const getNumericValue = (m: RankedModel, key: string): number => {
 			if (key === 'rating') return m.rating === '-' ? -Infinity : m.rating;
 			if (key === 'won' || key === 'lost') {
 				const v = m.stats[key];
@@ -93,11 +113,13 @@
 			}
 			return 0;
 		};
-		const aVal = getValue(a, orderBy);
-		const bVal = getValue(b, orderBy);
 		if (orderBy === 'name') {
+			const aVal = getNameValue(a);
+			const bVal = getNameValue(b);
 			return direction === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
 		}
+		const aVal = getNumericValue(a, orderBy);
+		const bVal = getNumericValue(b, orderBy);
 		return direction === 'asc' ? aVal - bVal : bVal - aVal;
 	});
 </script>
@@ -182,7 +204,7 @@
 									alt={model.name}
 									class="size-5 rounded-full object-cover shrink-0"
 									on:error={(e) => {
-										e.target.src = '/favicon.png';
+										(e.currentTarget as HTMLImageElement).src = '/favicon.png';
 									}}
 								/>
 								<Tooltip content={`${model.name} (${model.id})`} placement="top-start">

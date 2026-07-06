@@ -1,12 +1,3 @@
-// See https://kit.svelte.dev/docs/types#app
-// for information about these interfaces
-declare global {
-	namespace App {
-		// interface Error {}
-		// interface Locals {}
-		// interface PageData {}
-		// interface Platform {}
-	}
+declare module 'svelte' {
+	export function getContext<T = any>(key: any): T;
 }
-
-export {};

@@ -56,7 +56,13 @@
 	// Data
 	let summary = { total_messages: 0, total_chats: 0, total_models: 0, total_users: 0 };
 	let modelStats: Array<{ model_id: string; count: number; name?: string }> = [];
-	let userStats: Array<{ user_id: string; name?: string; email?: string; count: number }> = [];
+	let userStats: Array<{
+		user_id: string;
+		name?: string;
+		email?: string;
+		count: number;
+		total_tokens?: number;
+	}> = [];
 	let dailyStats: Array<{ date: string; models: Record<string, number> }> = [];
 	let tokenStats: Record<
 		string,
@@ -394,7 +400,7 @@
 											alt={model.name}
 											class="size-5 rounded-full object-cover shrink-0"
 											on:error={(e) => {
-												e.target.src = '/favicon.png';
+												(e.currentTarget as HTMLImageElement).src = '/favicon.png';
 											}}
 										/>
 										<span class="truncate max-w-[150px]">{model.name}</span>
@@ -500,7 +506,7 @@
 											alt={user.name || 'User'}
 											class="size-5 rounded-full object-cover shrink-0"
 											on:error={(e) => {
-												e.target.src = '/user.png';
+												(e.currentTarget as HTMLImageElement).src = '/user.png';
 											}}
 										/>
 										<span class="truncate max-w-[150px]"

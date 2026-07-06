@@ -126,6 +126,9 @@
 					{mergeResponses}
 					{triggerScroll}
 					{addMessages}
+					{responseInsertHandler}
+					{responseCopyHandler}
+					{responseInsertLabel}
 					{readOnly}
 					{editCodeBlock}
 					{topPadding}

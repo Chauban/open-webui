@@ -2,39 +2,74 @@
 	// @ts-nocheck
 	import { getContext, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { get } from 'svelte/store';
 	import { toast } from 'svelte-sonner';
-	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import SidebarIcon from '$lib/components/icons/Sidebar.svelte';
-	import { mobile, showSidebar } from '$lib/stores';
+
+	import { getTeacherAssignments } from '$lib/apis/education';
+	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
+	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
 
 	const i18n = getContext('i18n');
-
-	import {
-		addAssignmentMember,
-		createAssignment,
-		getAssignmentMembers,
-		getMyClassroom,
-		getTeacherAssignments,
-		regenerateClassroomInviteCode,
-		removeAssignmentMember
-	} from '$lib/apis/education';
-	import { searchUsers } from '$lib/apis/users';
+	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
+	const getClassroomDisplayName = (name: string) =>
+		name?.trim() === 'Default Classroom' ? t('Default Classroom') : name;
+	const getAssignmentStatusLabel = (value: string) =>
+		({
+			active: t('Active'),
+			archived: t('Archived')
+		})[value] || value;
 
 	let assignments = [];
-	let membersByAssignment = {};
-	let searchResultsByAssignment = {};
-	let memberQueryByAssignment = {};
-	let expandedAssignmentId = '';
 	let loading = true;
 	let loadError = '';
+	let selectedClassroom = 'all';
+	let selectedStatus = 'all';
+	let keyword = '';
+	let onlySuspected = false;
+	let onlyBursts = false;
+	let sortBy = 'latest_activity';
 
-	let title = '';
-	let description = '';
-	let creating = false;
-	let classroom = null;
-	let classroomError = '';
+	$: classroomOptions = [
+		{ value: 'all', label: t('All Classrooms') },
+		...assignments
+			.filter((item, index, list) => item.classroom && list.findIndex((entry) => entry.classroom?.id === item.classroom.id) === index)
+			.map((item) => ({
+				value: item.classroom.id,
+				label: getClassroomDisplayName(item.classroom.name)
+			}))
+	];
 
-	const loadAssignments = async () => {
+	$: filteredAssignments = assignments.filter((item) => {
+		const matchesClassroom =
+			selectedClassroom === 'all' || item.classroom?.id === selectedClassroom;
+		const normalizedKeyword = keyword.trim().toLowerCase();
+		const matchesKeyword =
+			!normalizedKeyword ||
+			item.assignment.title?.toLowerCase().includes(normalizedKeyword) ||
+			item.assignment.description?.toLowerCase().includes(normalizedKeyword) ||
+			item.classroom?.name?.toLowerCase().includes(normalizedKeyword);
+		const matchesStatus =
+			selectedStatus === 'all' ||
+			item.assignment.status === selectedStatus ||
+			(selectedStatus === 'needs_review' && item.submission_count > 0);
+		const matchesSuspected = !onlySuspected || (item.risk_summary?.suspected_unmarked_import_count ?? 0) > 0;
+		const matchesBursts = !onlyBursts || (item.risk_summary?.burst_count ?? 0) > 0;
+
+		return matchesClassroom && matchesKeyword && matchesStatus && matchesSuspected && matchesBursts;
+	}).sort((a, b) => {
+		if (sortBy === 'suspected') {
+			return (b.risk_summary?.suspected_unmarked_import_count ?? 0) - (a.risk_summary?.suspected_unmarked_import_count ?? 0);
+		}
+		if (sortBy === 'burst') {
+			return (b.risk_summary?.burst_count ?? 0) - (a.risk_summary?.burst_count ?? 0);
+		}
+		if (sortBy === 'rewrite') {
+			return (b.risk_summary?.average_rewrite_ratio ?? 0) - (a.risk_summary?.average_rewrite_ratio ?? 0);
+		}
+		return (b.latest_submission_at ?? 0) - (a.latest_submission_at ?? 0);
+	});
+
+	const loadData = async () => {
 		loading = true;
 		loadError = '';
 		try {
@@ -47,356 +82,155 @@
 		}
 	};
 
-	const loadClassroom = async () => {
-		classroomError = '';
-		try {
-			const response = await getMyClassroom(localStorage.token);
-			classroom = response.classroom;
-		} catch (error) {
-			classroomError = `${error?.detail ?? error}`;
-		}
-	};
-
-	const toggleAssignment = async (assignmentId: string) => {
-		expandedAssignmentId = expandedAssignmentId === assignmentId ? '' : assignmentId;
-		if (!expandedAssignmentId) return;
-
-		await loadMembers(assignmentId);
-	};
-
-	const loadMembers = async (assignmentId: string) => {
-		try {
-			membersByAssignment = {
-				...membersByAssignment,
-				[assignmentId]: await getAssignmentMembers(localStorage.token, assignmentId)
-			};
-		} catch (error) {
-			toast.error(`${error?.detail ?? error}`);
-		}
-	};
-
-	const submitCreateAssignment = async () => {
-		if (!title.trim()) {
-			toast.error('Assignment title is required.');
-			return;
-		}
-
-		creating = true;
-		try {
-			await createAssignment(localStorage.token, {
-				title: title.trim(),
-				description: description.trim() || undefined,
-				classroom_id: classroom?.id
-			});
-			title = '';
-			description = '';
-			await loadAssignments();
-			toast.success('Assignment created.');
-		} catch (error) {
-			toast.error(`${error?.detail ?? error}`);
-		} finally {
-			creating = false;
-		}
-	};
-
-	const searchStudents = async (assignmentId: string) => {
-		const query = memberQueryByAssignment[assignmentId]?.trim() ?? '';
-		if (!query) {
-			searchResultsByAssignment = { ...searchResultsByAssignment, [assignmentId]: [] };
-			return;
-		}
-
-		try {
-			const result = await searchUsers(localStorage.token, query, 'name', 'asc', 1);
-			const existingMemberIds = new Set(
-				(membersByAssignment[assignmentId] ?? []).map((item) => item.member.user_id)
-			);
-			const students = (result?.users ?? []).filter(
-				(item) =>
-					item?.role !== 'pending' &&
-					item?.role !== 'admin' &&
-					item?.info?.education_role === 'student' &&
-					!existingMemberIds.has(item.id)
-			);
-			searchResultsByAssignment = { ...searchResultsByAssignment, [assignmentId]: students };
-		} catch (error) {
-			toast.error(`${error?.detail ?? error}`);
-		}
-	};
-
 	const copyWriteLink = async (assignmentId: string) => {
 		const link = `${window.location.origin}/assignments/${assignmentId}/write`;
 		try {
 			await navigator.clipboard.writeText(link);
-			toast.success('Write link copied.');
-		} catch (error) {
-			toast.error('Failed to copy write link.');
-		}
-	};
-
-	const addStudent = async (assignmentId: string, studentId: string) => {
-		try {
-			await addAssignmentMember(localStorage.token, assignmentId, {
-				user_id: studentId,
-				member_role: 'student'
-			});
-			memberQueryByAssignment = { ...memberQueryByAssignment, [assignmentId]: '' };
-			searchResultsByAssignment = { ...searchResultsByAssignment, [assignmentId]: [] };
-			await Promise.all([loadAssignments(), loadMembers(assignmentId)]);
-			toast.success('Student added.');
-		} catch (error) {
-			toast.error(`${error?.detail ?? error}`);
-		}
-	};
-
-	const removeStudent = async (assignmentId: string, studentId: string) => {
-		try {
-			await removeAssignmentMember(localStorage.token, assignmentId, studentId);
-			await Promise.all([loadAssignments(), loadMembers(assignmentId)]);
-			toast.success('Student removed.');
-		} catch (error) {
-			toast.error(`${error?.detail ?? error}`);
+			toast.success(t('Write link copied.'));
+		} catch {
+			toast.error(t('Failed to copy write link.'));
 		}
 	};
 
 	onMount(async () => {
-		await Promise.all([loadClassroom(), loadAssignments()]);
+		await loadData();
 	});
 </script>
 
-<div
-	class="flex h-screen max-h-[100dvh] w-full max-w-full flex-col transition-width duration-200 ease-in-out {$showSidebar
-		? 'md:max-w-[calc(100%-var(--sidebar-width))]'
-		: ''}"
->
-	<nav class="w-full px-2.5 pt-1.5 backdrop-blur-xl drag-region">
-		<div class="flex items-center">
-			{#if $mobile}
-				<div class="{$showSidebar ? 'md:hidden' : ''} flex flex-none items-center self-end mt-1.5">
-					<Tooltip
-						content={$showSidebar ? $i18n.t('Close Sidebar') : $i18n.t('Open Sidebar')}
-						interactive={true}
-					>
-						<button
-							id="sidebar-toggle-button"
-							class="flex cursor-pointer rounded-lg transition hover:bg-gray-100 dark:hover:bg-gray-850"
-							on:click={() => showSidebar.set(!$showSidebar)}
-						>
-							<div class="self-center p-1.5">
-								<SidebarIcon />
-							</div>
-						</button>
-					</Tooltip>
-				</div>
-			{/if}
-
-			<div class="ml-2 flex w-full items-center justify-between py-1">
-				<div>
-					<div class="text-xs uppercase tracking-[0.2em] text-gray-500">Teaching</div>
-					<h1 class="text-2xl font-semibold">Assignments</h1>
-					<div class="mt-1 text-sm text-gray-500">
-						Create assignments and manage which students can join them.
-					</div>
-				</div>
-			</div>
+<TeacherPageShell title="Assignments">
+	<div class="mx-auto max-w-6xl px-4 py-8">
+		<div class="mb-8 text-sm text-gray-500">
+			{$i18n.t('View every assignment across classrooms, then jump into submissions or analytics.')}
 		</div>
-	</nav>
 
-	<div class="flex-1 overflow-y-auto">
-		<div class="mx-auto max-w-6xl px-4 py-8">
-			<div class="mb-8 rounded-3xl border border-gray-200 bg-white p-5">
-				<div class="mb-3 flex items-center justify-between gap-4">
-					<div>
-						<div class="text-sm font-semibold">Classroom</div>
-						<div class="mt-1 text-sm text-gray-500">
-							Students join your classroom with this invite code, then all new assignments become visible to them.
-						</div>
-					</div>
-					<button
-						class="rounded-full border border-gray-300 px-4 py-2 text-sm"
-						on:click={async () => {
-							if (!classroom?.id) return;
-							try {
-								const response = await regenerateClassroomInviteCode(localStorage.token, classroom.id);
-								classroom = response.classroom;
-								toast.success('Invite code regenerated.');
-							} catch (error) {
-								toast.error(`${error?.detail ?? error}`);
-							}
-						}}
-						disabled={!classroom?.id}
-					>
-						Regenerate Code
-					</button>
-				</div>
+		<TeacherSectionNav />
 
-				{#if classroom}
-					<div class="grid gap-2 text-sm">
-						<div>Classroom Name: <span class="font-medium">{classroom.name}</span></div>
-						<div>Invite Code: <span class="font-mono font-semibold">{classroom.invite_code}</span></div>
-					</div>
-				{:else if classroomError}
-					<div class="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-						{classroomError}
-					</div>
-				{/if}
+		<div class="mb-8 grid gap-3 rounded-3xl border border-gray-200 bg-white p-5 md:grid-cols-4">
+			<select class="rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none" bind:value={selectedClassroom}>
+				{#each classroomOptions as option}
+					<option value={option.value}>{option.label}</option>
+				{/each}
+			</select>
+			<select class="rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none" bind:value={selectedStatus}>
+				<option value="all">{$i18n.t('All')}</option>
+				<option value="active">{$i18n.t('Active')}</option>
+				<option value="archived">{$i18n.t('Archived')}</option>
+				<option value="needs_review">{$i18n.t('Has submissions')}</option>
+			</select>
+			<input
+				bind:value={keyword}
+				class="rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none"
+				placeholder={$i18n.t('Search assignments')}
+			/>
+			<select class="rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none" bind:value={sortBy}>
+				<option value="latest_activity">{$i18n.t('Sort by Latest')}</option>
+				<option value="suspected">{$i18n.t('Sort by Suspected Imports')}</option>
+				<option value="burst">{$i18n.t('Sort by Large Bursts')}</option>
+				<option value="rewrite">{$i18n.t('Sort by Rewrite Ratio')}</option>
+			</select>
+		</div>
+		<div class="mb-8 flex flex-wrap gap-2">
+			<button
+				class={`rounded-full border px-4 py-2 text-sm transition ${
+					onlySuspected ? 'border-rose-300 bg-rose-50 text-rose-700' : 'border-gray-300 bg-white text-gray-700'
+				}`}
+				on:click={() => (onlySuspected = !onlySuspected)}
+			>
+				{$i18n.t('Only Suspected Imports')}
+			</button>
+			<button
+				class={`rounded-full border px-4 py-2 text-sm transition ${
+					onlyBursts ? 'border-amber-300 bg-amber-50 text-amber-700' : 'border-gray-300 bg-white text-gray-700'
+				}`}
+				on:click={() => (onlyBursts = !onlyBursts)}
+			>
+				{$i18n.t('Only Large Bursts')}
+			</button>
+		</div>
+
+		{#if loadError}
+			<div class="rounded-3xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">
+				{loadError}
 			</div>
-
-			<div class="mb-8 rounded-3xl border border-gray-200 bg-white p-5">
-				<div class="mb-4 text-sm font-semibold">Create Assignment</div>
-				<div class="grid gap-3">
-					<input
-						bind:value={title}
-						class="rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none"
-						placeholder="Assignment title"
-					/>
-					<textarea
-						bind:value={description}
-						class="min-h-24 rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none"
-						placeholder="Assignment description"
-					></textarea>
-					<div class="flex justify-end">
-						<button
-							class="rounded-full bg-black px-4 py-2 text-sm text-white disabled:opacity-60"
-							on:click={submitCreateAssignment}
-							disabled={creating}
-						>
-							{creating ? 'Creating...' : 'Create'}
-						</button>
-					</div>
-				</div>
+		{:else if loading}
+			<div class="rounded-3xl border border-gray-200 bg-white p-6 text-sm text-gray-500">
+				{$i18n.t('Loading assignments...')}
 			</div>
-
-			{#if loadError}
-				<div class="rounded-3xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">{loadError}</div>
-			{:else if loading}
-				<div class="rounded-3xl border border-gray-200 bg-white p-6 text-sm text-gray-500">Loading assignments...</div>
-			{:else if assignments.length === 0}
-				<div class="rounded-3xl border border-gray-200 bg-white p-6 text-sm text-gray-500">No assignments yet.</div>
-			{:else}
-				<div class="grid gap-4">
-					{#each assignments as item}
-						<div class="rounded-3xl border border-gray-200 bg-white p-5">
-							<div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-								<div>
-									<div class="text-lg font-semibold text-gray-900">{item.assignment.title}</div>
-									<div class="mt-1 text-sm text-gray-500">{item.assignment.description || 'No description'}</div>
-									<div class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500">
-										<div>Students: {item.student_count}</div>
-										<div>Submissions: {item.submission_count}</div>
-										<div>Assignment ID: {item.assignment.id}</div>
+		{:else if filteredAssignments.length === 0}
+			<div class="rounded-3xl border border-gray-200 bg-white p-6 text-sm text-gray-500">
+				{assignments.length === 0 ? $i18n.t('No assignments yet.') : $i18n.t('No assignments match the current filters.')}
+			</div>
+		{:else}
+			<div class="grid gap-4">
+				{#each filteredAssignments as item}
+					<div class="rounded-3xl border border-gray-200 bg-white p-5">
+						<div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+							<div>
+								<div class="text-lg font-semibold text-gray-900">{item.assignment.title}</div>
+								<div class="mt-1 text-sm text-gray-500">
+									{item.assignment.description || $i18n.t('No description')}
+								</div>
+								<div class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500">
+									<div>
+										{$i18n.t('Classroom')}:
+										{item.classroom ? getClassroomDisplayName(item.classroom.name) : t('Unknown')}
+									</div>
+									<div>{$i18n.t('Students')}: {item.student_count}</div>
+									<div>{$i18n.t('Submissions')}: {item.submission_count}</div>
+									<div>{$i18n.t('Status')}: {getAssignmentStatusLabel(item.assignment.status)}</div>
+									<div>
+										{$i18n.t('Latest Activity')}:
+										{item.latest_submission_at
+											? new Date(item.latest_submission_at * 1000).toLocaleString()
+											: t('No submissions yet.')}
 									</div>
 								</div>
-
-								<div class="flex flex-wrap gap-2">
-									<button
-										class="rounded-full border border-gray-300 px-3 py-2 text-sm"
-										on:click={() => goto(`/assignments/${item.assignment.id}/write`)}
-									>
-										Open Writer
-									</button>
-									<button
-										class="rounded-full border border-gray-300 px-3 py-2 text-sm"
-										on:click={() => copyWriteLink(item.assignment.id)}
-									>
-										Copy Link
-									</button>
-									<button
-										class="rounded-full border border-gray-300 px-3 py-2 text-sm"
-										on:click={() => goto(`/teacher/assignments/${item.assignment.id}/submissions`)}
-									>
-										Submissions
-									</button>
-									<button
-										class="rounded-full border border-gray-300 px-3 py-2 text-sm"
-										on:click={() => goto(`/teacher/assignments/${item.assignment.id}/dashboard`)}
-									>
-										Dashboard
-									</button>
-									<button
-										class="rounded-full bg-gray-100 px-3 py-2 text-sm"
-										on:click={() => toggleAssignment(item.assignment.id)}
-									>
-										{expandedAssignmentId === item.assignment.id ? 'Hide Students' : 'Manage Students'}
-									</button>
+								<div class="mt-3 flex flex-wrap gap-2 text-xs">
+									<div class="rounded-full border border-sky-200 bg-sky-50 px-3 py-1.5 text-sky-700">
+										{$i18n.t('AI pasted')}: {item.risk_summary?.ai_pasted_chars ?? 0}
+									</div>
+									<div class="rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5 text-gray-700">
+										{$i18n.t('AI inserted')}: {item.risk_summary?.ai_inserted_chars ?? 0}
+									</div>
+									<div class="rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 text-rose-700">
+										{$i18n.t('Suspected Unmarked Imports')}: {item.risk_summary?.suspected_unmarked_import_count ?? 0}
+									</div>
+									<div class="rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-amber-700">
+										{$i18n.t('Large Bursts')}: {item.risk_summary?.burst_count ?? 0}
+									</div>
 								</div>
 							</div>
 
-							{#if expandedAssignmentId === item.assignment.id}
-								<div class="mt-5 grid gap-5 border-t border-gray-100 pt-5 lg:grid-cols-[0.9fr_1.1fr]">
-									<div>
-										<div class="mb-2 text-sm font-semibold">Add Student</div>
-										<div class="flex gap-2">
-											<input
-												class="flex-1 rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none"
-												placeholder="Search by student name or email"
-												value={memberQueryByAssignment[item.assignment.id] ?? ''}
-												on:input={(event) => {
-													memberQueryByAssignment = {
-														...memberQueryByAssignment,
-														[item.assignment.id]: event.currentTarget.value
-													};
-												}}
-											/>
-											<button
-												class="rounded-full bg-black px-4 py-2 text-sm text-white"
-												on:click={() => searchStudents(item.assignment.id)}
-											>
-												Search
-											</button>
-										</div>
-
-										{#if (searchResultsByAssignment[item.assignment.id] ?? []).length > 0}
-											<div class="mt-3 space-y-2">
-												{#each searchResultsByAssignment[item.assignment.id] as candidate}
-													<div class="flex items-center justify-between rounded-2xl border border-gray-200 px-3 py-3 text-sm">
-														<div>
-															<div class="font-medium">{candidate.name}</div>
-															<div class="text-xs text-gray-500">{candidate.email}</div>
-														</div>
-														<button
-															class="rounded-full border border-gray-300 px-3 py-1.5 text-sm"
-															on:click={() => addStudent(item.assignment.id, candidate.id)}
-														>
-															Add
-														</button>
-													</div>
-												{/each}
-											</div>
-										{/if}
-									</div>
-
-									<div>
-										<div class="mb-2 text-sm font-semibold">Current Students</div>
-										{#if (membersByAssignment[item.assignment.id] ?? []).length === 0}
-											<div class="rounded-2xl border border-dashed border-gray-300 px-4 py-5 text-sm text-gray-500">
-												No students assigned yet.
-											</div>
-										{:else}
-											<div class="space-y-2">
-												{#each membersByAssignment[item.assignment.id] as member}
-													<div class="flex items-center justify-between rounded-2xl border border-gray-200 px-4 py-3 text-sm">
-														<div>
-															<div class="font-medium">{member.user_name}</div>
-															<div class="text-xs text-gray-500">{member.user_email}</div>
-														</div>
-														<button
-															class="rounded-full border border-red-300 px-3 py-1.5 text-sm text-red-600"
-															on:click={() => removeStudent(item.assignment.id, member.member.user_id)}
-														>
-															Remove
-														</button>
-													</div>
-												{/each}
-											</div>
-										{/if}
-									</div>
-								</div>
-							{/if}
+							<div class="flex flex-wrap gap-2">
+								<button
+									class="rounded-full border border-gray-300 px-3 py-2 text-sm"
+									on:click={() => goto(`/teacher/assignments/${item.assignment.id}`)}
+								>
+									{$i18n.t('Open')}
+								</button>
+								<button
+									class="rounded-full border border-gray-300 px-3 py-2 text-sm"
+									on:click={() => copyWriteLink(item.assignment.id)}
+								>
+									{$i18n.t('Copy Student Link')}
+								</button>
+								<button
+									class="rounded-full border border-gray-300 px-3 py-2 text-sm"
+									on:click={() => goto(`/teacher/assignments/${item.assignment.id}/submissions`)}
+								>
+									{$i18n.t('Submissions')}
+								</button>
+								<button
+									class="rounded-full border border-gray-300 px-3 py-2 text-sm"
+									on:click={() => goto(`/teacher/assignments/${item.assignment.id}/dashboard`)}
+								>
+									{$i18n.t('Dashboard')}
+								</button>
+							</div>
 						</div>
-					{/each}
-				</div>
-			{/if}
-		</div>
+					</div>
+				{/each}
+			</div>
+		{/if}
 	</div>
-</div>
+</TeacherPageShell>

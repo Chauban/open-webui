@@ -16,6 +16,7 @@ from open_webui.models.folders import (
     Folders,
 )
 from open_webui.models.chats import Chats
+from open_webui.models.education import Education
 from open_webui.models.files import Files
 from open_webui.models.knowledge import Knowledges
 
@@ -37,6 +38,19 @@ log = logging.getLogger(__name__)
 
 
 router = APIRouter()
+
+WRITING_PROJECT_MODES = {"personal_writing", "assignment_writing"}
+
+
+def _get_folder_mode(meta: Optional[dict]) -> Optional[str]:
+    if not meta:
+        return None
+    return meta.get("mode")
+
+
+def _allows_duplicate_folder_name(folder, incoming_meta: Optional[dict] = None) -> bool:
+    mode = _get_folder_mode(incoming_meta) or _get_folder_mode(getattr(folder, "meta", None))
+    return mode in WRITING_PROJECT_MODES
 
 
 ############################
@@ -78,6 +92,24 @@ async def get_folders(
             folder = Folders.update_folder_parent_id_by_id_and_user_id(
                 folder.id, user.id, None, db=db
             )
+
+        folder_meta = folder.meta or {}
+        if folder_meta.get("mode") == "personal_writing":
+            writing_session_id = folder_meta.get("writing_session_id")
+            session = (
+                Education.get_writing_session_by_id(writing_session_id, db=db)
+                if writing_session_id
+                else None
+            )
+            if (
+                session is None
+                or session.owner_user_id != user.id
+                or session.scope != "personal"
+                or session.folder_id != folder.id
+            ):
+                Chats.delete_chats_by_user_id_and_folder_id(user.id, folder.id, db=db)
+                Folders.delete_folder_by_id_and_user_id(folder.id, user.id, db=db)
+                continue
 
         if folder.data:
             if "files" in folder.data:
@@ -175,15 +207,15 @@ async def update_folder_name_by_id(
     if folder:
 
         if form_data.name is not None:
-            # Check if folder with same name exists
-            existing_folder = Folders.get_folder_by_parent_id_and_user_id_and_name(
-                folder.parent_id, user.id, form_data.name, db=db
-            )
-            if existing_folder and existing_folder.id != id:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=ERROR_MESSAGES.DEFAULT("Folder already exists"),
+            if not _allows_duplicate_folder_name(folder, form_data.meta):
+                existing_folder = Folders.get_folder_by_parent_id_and_user_id_and_name(
+                    folder.parent_id, user.id, form_data.name, db=db
                 )
+                if existing_folder and existing_folder.id != id:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=ERROR_MESSAGES.DEFAULT("Folder already exists"),
+                    )
 
         try:
             folder = Folders.update_folder_by_id_and_user_id(
@@ -222,15 +254,16 @@ async def update_folder_parent_id_by_id(
 ):
     folder = Folders.get_folder_by_id_and_user_id(id, user.id, db=db)
     if folder:
-        existing_folder = Folders.get_folder_by_parent_id_and_user_id_and_name(
-            form_data.parent_id, user.id, folder.name, db=db
-        )
-
-        if existing_folder:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=ERROR_MESSAGES.DEFAULT("Folder already exists"),
+        if not _allows_duplicate_folder_name(folder):
+            existing_folder = Folders.get_folder_by_parent_id_and_user_id_and_name(
+                form_data.parent_id, user.id, folder.name, db=db
             )
+
+            if existing_folder:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=ERROR_MESSAGES.DEFAULT("Folder already exists"),
+                )
 
         try:
             folder = Folders.update_folder_parent_id_by_id_and_user_id(
@@ -301,6 +334,16 @@ async def delete_folder_by_id(
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
+    folder = Folders.get_folder_by_id_and_user_id(id, user.id, db=db)
+    if folder and (
+        (folder.meta or {}).get("mode") == "assignment_writing"
+        or (folder.meta or {}).get("category") == "assignment_project"
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Assignment projects cannot be deleted.",
+        )
+
     if Chats.count_chats_by_folder_id_and_user_id(id, user.id, db=db):
         chat_delete_permission = has_permission(
             user.id, "chat.delete", request.app.state.config.USER_PERMISSIONS, db=db
@@ -312,7 +355,7 @@ async def delete_folder_by_id(
             )
 
     folders = []
-    folders.append(Folders.get_folder_by_id_and_user_id(id, user.id, db=db))
+    folders.append(folder)
     while folders:
         folder = folders.pop()
         if folder:

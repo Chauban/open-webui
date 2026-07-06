@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
 	import { getContext, createEventDispatcher, onMount, onDestroy, tick } from 'svelte';
 
 	const i18n = getContext('i18n');
@@ -42,6 +42,8 @@
 	import FolderModal from './Folders/FolderModal.svelte';
 	import Emoji from '$lib/components/common/Emoji.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
+	import EyeSlash from '$lib/components/icons/EyeSlash.svelte';
+	import { loadFolderChatList } from './folder-chat-list';
 
 	export let folderRegistry = {};
 	export let open = false;
@@ -49,6 +51,15 @@
 	export let folders;
 	export let folderId;
 	export let shiftKey = false;
+	export let lockFolders = false;
+	export let folderHrefBuilder: ((folder: any) => string) | null = null;
+	export let chatHrefBuilder: ((chat: any, folder: any) => string) | null = null;
+	export let clearSelectedProjectOnChatClick = true;
+	export let allowMenuWhenLocked = false;
+	export let closeFolderLabel = 'Close';
+	export let closeFolderLabelBuilder: ((folder: any) => string) | null = null;
+	export let onCloseFolder = async (folder) => {};
+	export let showVisibilityToggle = false;
 
 	export let className = '';
 
@@ -70,6 +81,8 @@
 	let clickTimer = null;
 
 	let name = '';
+	$: currentFolder = folders?.[folderId] ?? null;
+	$: folderHref = currentFolder && folderHrefBuilder ? folderHrefBuilder(currentFolder) : null;
 
 	const onDragOver = (e) => {
 		e.preventDefault();
@@ -218,6 +231,11 @@
 	let y;
 
 	const onDragStart = (event) => {
+		if (lockFolders) {
+			event.preventDefault();
+			return;
+		}
+
 		event.stopPropagation();
 		event.dataTransfer.setDragImage(dragImage, 0, 0);
 
@@ -298,14 +316,14 @@
 		);
 
 		if (res) {
-			toast.success($i18n.t('Folder deleted successfully'));
+			toast.success($i18n.t('Project deleted successfully'));
 			onDelete(folderId);
 		}
 	};
 
 	const updateHandler = async ({ name, meta, data }) => {
 		if (name === '') {
-			toast.error($i18n.t('Folder name cannot be empty.'));
+			toast.error($i18n.t('Project name cannot be empty.'));
 			return;
 		}
 
@@ -332,7 +350,7 @@
 			}
 
 			// toast.success($i18n.t('Folder name updated successfully'));
-			toast.success($i18n.t('Folder updated successfully'));
+			toast.success($i18n.t('Project updated successfully'));
 
 			if ($selectedFolder?.id === folderId) {
 				const folder = await getFolderById(localStorage.token, folderId).catch((error) => {
@@ -369,14 +387,21 @@
 	let chats = null;
 	export const setFolderItems = async () => {
 		await tick();
-		if (open) {
-			chats = await getChatListByFolderId(localStorage.token, folderId).catch((error) => {
-				toast.error(`${error}`);
-				return [];
-			});
-		} else {
-			chats = null;
-		}
+		chats = await loadFolderChatList({
+			open,
+			folderId,
+			loadChatsByFolderId: async (id) => {
+				return await getChatListByFolderId(localStorage.token, id).catch((error) => {
+					toast.error(`${error}`);
+					return [];
+				});
+			}
+		});
+	};
+
+	const handleChatChange = async (e) => {
+		await setFolderItems();
+		dispatch('change', e.detail);
 	};
 
 	$: if (open) {
@@ -384,6 +409,10 @@
 	}
 
 	const renameHandler = async () => {
+		if (lockFolders) {
+			return;
+		}
+
 		console.log('Edit');
 		await tick();
 		name = folders[folderId].name;
@@ -418,7 +447,7 @@
 
 <DeleteConfirmDialog
 	bind:show={showDeleteConfirm}
-	title={$i18n.t('Delete folder?')}
+	title={$i18n.t('Delete project?')}
 	on:confirm={() => {
 		deleteHandler();
 	}}
@@ -437,7 +466,7 @@
 		<input type="checkbox" bind:checked={deleteFolderContents} />
 
 		<div class="text-xs text-gray-500">
-			{$i18n.t('Delete all contents inside this folder')}
+			{$i18n.t('Delete all contents inside this project')}
 		</div>
 	</div>
 </DeleteConfirmDialog>
@@ -481,6 +510,9 @@
 					? 'bg-gray-100 dark:bg-gray-900 selected'
 					: ''}"
 				on:dblclick={(e) => {
+					if (lockFolders) {
+						return;
+					}
 					if (clickTimer) {
 						clearTimeout(clickTimer); // cancel the single-click action
 						clickTimer = null;
@@ -504,7 +536,7 @@
 							await selectedFolder.set(folder);
 						}
 
-						await goto('/');
+						await goto(folderHref ?? '/');
 
 						if ($mobile) {
 							showSidebar.set(!$showSidebar);
@@ -580,25 +612,50 @@
 					{/if}
 				</div>
 
-				<button
-					class="absolute z-10 right-2 invisible group-hover:visible self-center flex items-center dark:text-gray-300"
-				>
-					<FolderMenu
-						onEdit={() => {
-							showFolderModal = true;
+				{#if showVisibilityToggle}
+					<button
+						class="absolute z-10 right-2 invisible group-hover:visible self-center flex items-center rounded-full border border-gray-200 bg-white px-2 py-1 text-xs text-gray-600 dark:border-gray-700 dark:bg-gray-850 dark:text-gray-300"
+						on:click={async (e) => {
+							e.stopPropagation();
+							e.stopImmediatePropagation();
+							await onCloseFolder(currentFolder);
 						}}
-						onDelete={() => {
-							showDeleteConfirm = true;
-						}}
-						onExport={() => {
-							exportHandler();
-						}}
+						aria-label={$i18n.t('Close')}
 					>
-						<div class="p-1 dark:hover:bg-gray-850 rounded-lg touch-auto">
-							<EllipsisHorizontal className="size-4" strokeWidth="2.5" />
+						<div class="mr-1">
+							<EyeSlash className="size-3.5" />
 						</div>
-					</FolderMenu>
-				</button>
+						<div>{$i18n.t('Close')}</div>
+					</button>
+				{:else if !lockFolders || allowMenuWhenLocked}
+					<button
+						class="absolute z-10 right-2 invisible group-hover:visible self-center flex items-center dark:text-gray-300"
+					>
+						<FolderMenu
+							showEdit={!lockFolders}
+							showExport={!lockFolders}
+							showDelete={!lockFolders}
+							showClose={allowMenuWhenLocked}
+							closeLabel={closeFolderLabelBuilder ? closeFolderLabelBuilder(currentFolder) : closeFolderLabel}
+							onEdit={() => {
+								showFolderModal = true;
+							}}
+							onDelete={() => {
+								showDeleteConfirm = true;
+							}}
+							onExport={() => {
+								exportHandler();
+							}}
+							onClose={async () => {
+								await onCloseFolder(currentFolder);
+							}}
+						>
+							<div class="p-1 dark:hover:bg-gray-850 rounded-lg touch-auto">
+								<EllipsisHorizontal className="size-4" strokeWidth="2.5" />
+							</div>
+						</FolderMenu>
+					</button>
+				{/if}
 			</div>
 		</div>
 
@@ -623,6 +680,15 @@
 								{folders}
 								folderId={childFolder.id}
 								{shiftKey}
+								{lockFolders}
+								{folderHrefBuilder}
+								{chatHrefBuilder}
+								{clearSelectedProjectOnChatClick}
+								{allowMenuWhenLocked}
+								{closeFolderLabel}
+								{closeFolderLabelBuilder}
+								{onCloseFolder}
+								{showVisibilityToggle}
 								parentDragged={dragged}
 								{onItemMove}
 								{onDelete}
@@ -644,10 +710,11 @@
 							id={chat.id}
 							title={chat.title}
 							createdAt={chat.created_at}
+							folderId={folderId}
+							href={chatHrefBuilder ? chatHrefBuilder(chat, currentFolder) : null}
+							{clearSelectedProjectOnChatClick}
 							{shiftKey}
-							on:change={(e) => {
-								dispatch('change', e.detail);
-							}}
+							on:change={handleChatChange}
 						/>
 					{/each}
 				</div>

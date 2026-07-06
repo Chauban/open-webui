@@ -5,7 +5,7 @@
 
 	import { goto } from '$app/navigation';
 
-	import { updateUserById, getUserGroupsById } from '$lib/apis/users';
+	import { updateUserById, getUserGroupsById, getUserClassroomAssignment } from '$lib/apis/users';
 
 	import Modal from '$lib/components/common/Modal.svelte';
 	import localizedFormat from 'dayjs/plugin/localizedFormat';
@@ -31,9 +31,11 @@
 				...selectedUser,
 				education_role:
 					selectedUser?.role === 'admin' ? '' : selectedUser?.info?.education_role ?? 'student',
+				classroom_id: '',
 				password: ''
 			};
 			loadUserGroups();
+			loadUserClassroomAssignment();
 		}
 	};
 
@@ -41,12 +43,15 @@
 		profile_image_url: '',
 		role: 'pending',
 		education_role: 'student',
+		classroom_id: '',
 		name: '',
 		email: '',
 		password: ''
 	};
 
 	let userGroups: any[] | null = null;
+	let classroomOptions: any[] = [];
+	let classroomOptionsLoading = false;
 
 	const submitHandler = async () => {
 		if (_user.role !== 'admin' && !_user.education_role) {
@@ -74,10 +79,35 @@
 		});
 	};
 
+	const loadUserClassroomAssignment = async () => {
+		if (!selectedUser?.id) {
+			classroomOptions = [];
+			_user.classroom_id = '';
+			return;
+		}
+
+		classroomOptionsLoading = true;
+		const res = await getUserClassroomAssignment(localStorage.token, selectedUser.id).catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
+		classroomOptionsLoading = false;
+
+		if (!res) return;
+
+		classroomOptions = res.classrooms ?? [];
+		_user.classroom_id = res.classroom_id ?? '';
+	};
+
 	$: if (_user.role === 'admin') {
 		_user.education_role = '';
+		_user.classroom_id = '';
 	} else if (!_user.education_role) {
 		_user.education_role = 'student';
+	}
+
+	$: if (_user.education_role !== 'student') {
+		_user.classroom_id = '';
 	}
 </script>
 
@@ -183,6 +213,29 @@
 											</select>
 										</div>
 									</div>
+
+									{#if _user.role !== 'admin' && _user.education_role === 'student'}
+										<div class="flex flex-col w-full">
+											<div class=" mb-1 text-xs text-gray-500">Classroom</div>
+
+											<div class="flex-1">
+												<select
+													class="w-full text-sm bg-transparent outline-hidden"
+													bind:value={_user.classroom_id}
+													aria-label="Classroom"
+													disabled={classroomOptionsLoading}
+												>
+													<option value="">Unassigned</option>
+													{#each classroomOptions as item}
+														<option value={item.classroom.id}>
+															{item.classroom.name}
+															{item.teacher_name ? ` (${item.teacher_name})` : ''}
+														</option>
+													{/each}
+												</select>
+											</div>
+										</div>
+									{/if}
 
 									<div class="flex flex-col w-full">
 										<div class=" mb-1 text-xs text-gray-500">{$i18n.t('Name')}</div>

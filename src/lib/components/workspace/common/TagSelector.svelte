@@ -12,14 +12,14 @@
 	export let placeholder = $i18n.t('Tag');
 	export let onChange: (value: string) => void = () => {};
 
-	export let items = [];
+	export let items: Array<{ value: string; label: string }> = [];
 </script>
 
 <Select.Root
 	selected={value ? items.find((item) => item.value === value) : null}
 	{items}
 	onSelectedChange={(selectedItem) => {
-		value = selectedItem.value;
+		value = selectedItem?.value ?? '';
 		onChange(value);
 	}}
 >

@@ -50,6 +50,13 @@
 
 	export let chat;
 	export let onClose: Function = () => {};
+	$: currentFolder = chat?.folder_id ? $folders.find((folder) => folder?.id === chat.folder_id) : null;
+	$: removeFromLabel =
+		currentFolder?.meta?.mode === 'assignment_writing' ||
+		currentFolder?.meta?.category === 'assignment_project' ||
+		currentFolder?.meta?.assignment_id
+			? $i18n.t('Remove from Assignment')
+			: $i18n.t('Remove from Project');
 
 	let showFullMessages = false;
 
@@ -446,7 +453,21 @@
 			{#if !$temporaryChatEnabled && chat?.id}
 				<hr class="border-gray-50/30 dark:border-gray-800/30 my-1" />
 
-				{#if $folders.length > 0}
+				{#if chat?.folder_id}
+					<DropdownMenu.Item
+						draggable="false"
+						class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
+						on:click={() => {
+							moveChatHandler(chat.id, null);
+						}}
+					>
+						<Folder strokeWidth="1.5" />
+
+						<div class="flex items-center">{removeFromLabel}</div>
+					</DropdownMenu.Item>
+				{/if}
+
+				{#if chat?.id && ($folders.length > 0 || chat?.folder_id)}
 					<DropdownMenu.Sub>
 						<DropdownMenu.SubTrigger
 							draggable="false"
@@ -454,7 +475,7 @@
 						>
 							<Folder strokeWidth="1.5" />
 
-							<div class="flex items-center">{$i18n.t('Move')}</div>
+							<div class="flex items-center">{$i18n.t('Move to Project')}</div>
 						</DropdownMenu.SubTrigger>
 						<DropdownMenu.SubContent
 							class="select-none w-full rounded-2xl p-1 z-50 bg-white dark:bg-gray-850 dark:text-white border border-gray-100  dark:border-gray-800 shadow-lg max-h-52 overflow-y-auto scrollbar-hidden"
@@ -472,7 +493,7 @@
 									>
 										<Folder strokeWidth="1.5" />
 
-										<div class="flex items-center">{folder.name ?? 'Folder'}</div>
+										<div class="flex items-center">{folder.name ?? $i18n.t('Project')}</div>
 									</DropdownMenu.Item>
 								{/if}
 							{/each}

@@ -11,11 +11,18 @@
 	import Pencil from '$lib/components/icons/Pencil.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Download from '$lib/components/icons/Download.svelte';
+	import XMark from '$lib/components/icons/XMark.svelte';
 
 	export let align: 'start' | 'end' = 'start';
 	export let onEdit = () => {};
 	export let onExport = () => {};
 	export let onDelete = () => {};
+	export let onClose = () => {};
+	export let showEdit = true;
+	export let showExport = true;
+	export let showDelete = true;
+	export let showClose = false;
+	export let closeLabel = 'Close';
 
 	let show = false;
 </script>
@@ -47,36 +54,54 @@
 			{align}
 			transition={flyAndScale}
 		>
-			<DropdownMenu.Item
-				class="flex gap-2 items-center px-3 py-1.5 text-sm select-none cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
-				on:click={() => {
-					onEdit();
-				}}
-			>
-				<Pencil />
-				<div class="flex items-center">{$i18n.t('Edit')}</div>
-			</DropdownMenu.Item>
+			{#if showEdit}
+				<DropdownMenu.Item
+					class="flex gap-2 items-center px-3 py-1.5 text-sm select-none cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
+					on:click={() => {
+						onEdit();
+					}}
+				>
+					<Pencil />
+					<div class="flex items-center">{$i18n.t('Edit')}</div>
+				</DropdownMenu.Item>
+			{/if}
 
-			<DropdownMenu.Item
-				class="flex gap-2 items-center px-3 py-1.5 text-sm select-none cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
-				on:click={() => {
-					onExport();
-				}}
-			>
-				<Download />
+			{#if showExport}
+				<DropdownMenu.Item
+					class="flex gap-2 items-center px-3 py-1.5 text-sm select-none cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
+					on:click={() => {
+						onExport();
+					}}
+				>
+					<Download />
 
-				<div class="flex items-center">{$i18n.t('Export')}</div>
-			</DropdownMenu.Item>
+					<div class="flex items-center">{$i18n.t('Export')}</div>
+				</DropdownMenu.Item>
+			{/if}
 
-			<DropdownMenu.Item
-				class="flex gap-2 items-center px-3 py-1.5 text-sm select-none cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
-				on:click={() => {
-					onDelete();
-				}}
-			>
-				<GarbageBin />
-				<div class="flex items-center">{$i18n.t('Delete')}</div>
-			</DropdownMenu.Item>
+			{#if showClose}
+				<DropdownMenu.Item
+					class="flex gap-2 items-center px-3 py-1.5 text-sm select-none cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
+					on:click={() => {
+						onClose();
+					}}
+				>
+					<XMark />
+					<div class="flex items-center">{$i18n.t(closeLabel)}</div>
+				</DropdownMenu.Item>
+			{/if}
+
+			{#if showDelete}
+				<DropdownMenu.Item
+					class="flex gap-2 items-center px-3 py-1.5 text-sm select-none cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
+					on:click={() => {
+						onDelete();
+					}}
+				>
+					<GarbageBin />
+					<div class="flex items-center">{$i18n.t('Delete')}</div>
+				</DropdownMenu.Item>
+			{/if}
 		</DropdownMenu.Content>
 	</div>
 </Dropdown>

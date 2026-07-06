@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from open_webui.internal.db import Base, JSONField, get_db, get_db_context
 
 log = logging.getLogger(__name__)
+WRITING_FOLDER_MODES = {"personal_writing", "assignment_writing"}
 
 
 ####################
@@ -50,6 +51,11 @@ class FolderModel(BaseModel):
 
 class FolderMetadataResponse(BaseModel):
     icon: Optional[str] = None
+    mode: Optional[str] = None
+    category: Optional[str] = None
+    assignment_id: Optional[str] = None
+    writing_session_id: Optional[str] = None
+    hidden_from_sidebar: Optional[bool] = None
 
 
 class FolderNameIdResponse(BaseModel):
@@ -82,6 +88,20 @@ class FolderUpdateForm(BaseModel):
 
 
 class FolderTable:
+    @staticmethod
+    def _get_folder_mode(meta: Optional[dict]) -> Optional[str]:
+        if not meta:
+            return None
+        return meta.get("mode")
+
+    def _allows_duplicate_folder_name(
+        self, folder: Optional[Folder], incoming_meta: Optional[dict] = None
+    ) -> bool:
+        mode = self._get_folder_mode(incoming_meta) or self._get_folder_mode(
+            getattr(folder, "meta", None)
+        )
+        return mode in WRITING_FOLDER_MODES
+
     def insert_new_folder(
         self,
         user_id: str,
@@ -247,7 +267,13 @@ class FolderTable:
                     .first()
                 )
 
-                if existing_folder and existing_folder.id != id:
+                if (
+                    existing_folder
+                    and existing_folder.id != id
+                    and not self._allows_duplicate_folder_name(
+                        folder, form_data.get("meta")
+                    )
+                ):
                     return None
 
                 folder.name = form_data.get("name", folder.name)
@@ -296,6 +322,7 @@ class FolderTable:
     ) -> list[str]:
         try:
             folder_ids = []
+            should_commit = db is None
             with get_db_context(db) as db:
                 folder = db.query(Folder).filter_by(id=id, user_id=user_id).first()
                 if not folder:
@@ -315,11 +342,13 @@ class FolderTable:
 
                         folder = db.query(Folder).filter_by(id=folder_child.id).first()
                         db.delete(folder)
-                        db.commit()
+                        if should_commit:
+                            db.commit()
 
                 delete_children(folder)
                 db.delete(folder)
-                db.commit()
+                if should_commit:
+                    db.commit()
                 return folder_ids
         except Exception as e:
             log.error(f"delete_folder: {e}")

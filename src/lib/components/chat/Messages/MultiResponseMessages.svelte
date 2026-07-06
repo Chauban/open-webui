@@ -46,6 +46,9 @@
 	export let mergeResponses: Function;
 
 	export let addMessages: Function;
+	export let responseInsertHandler: Function | null = null;
+	export let responseCopyHandler: Function | null = null;
+	export let responseInsertLabel = 'Insert to Draft';
 
 	export let triggerScroll: Function;
 
@@ -311,6 +314,9 @@
 											groupedMessageIds[selectedModelIdx].messageIds.length - 1;
 									}}
 									{addMessages}
+									{responseInsertHandler}
+									{responseCopyHandler}
+									{responseInsertLabel}
 									{readOnly}
 									{topPadding}
 								/>
@@ -367,6 +373,9 @@
 												groupedMessageIds[modelIdx].messageIds.length - 1;
 										}}
 										{addMessages}
+										{responseInsertHandler}
+										{responseCopyHandler}
+										{responseInsertLabel}
 										{readOnly}
 										{editCodeBlock}
 										{topPadding}

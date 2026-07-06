@@ -173,8 +173,12 @@
 
 		const reader = new FileReader();
 		reader.onload = (event) => {
-			const json = event.target.result;
+			const json = event.target?.result;
 			console.log('importHandler', json);
+			if (typeof json !== 'string') {
+				toast.error($i18n.t('Please select a valid JSON file'));
+				return;
+			}
 
 			try {
 				let data = JSON.parse(json);
@@ -525,12 +529,12 @@
 								<div class="flex flex-col w-full">
 									<div class="flex justify-between items-center mb-0.5">
 										<div class="flex gap-2 items-center">
-											<div
+											<label
 												for="select-bearer-or-session"
 												class={`text-xs ${($settings?.highContrastMode ?? false) ? 'text-gray-800 dark:text-gray-100' : 'text-gray-500'}`}
 											>
 												{$i18n.t('OpenAPI Spec')}
-											</div>
+											</label>
 										</div>
 									</div>
 
@@ -574,7 +578,7 @@
 														autocomplete="off"
 														required
 														rows="5"
-													/>
+													></textarea>
 												</div>
 											{/if}
 										</div>
@@ -599,12 +603,12 @@
 							<div class="flex flex-col w-full">
 								<div class="flex justify-between items-center">
 									<div class="flex gap-2 items-center">
-										<div
+										<label
 											for="select-bearer-or-session"
 											class={`text-xs ${($settings?.highContrastMode ?? false) ? 'text-gray-800 dark:text-gray-100' : 'text-gray-500'}`}
 										>
 											{$i18n.t('Auth')}
-										</div>
+										</label>
 									</div>
 
 									{#if auth_type === 'oauth_2.1'}

@@ -489,6 +489,61 @@ type UserUpdateForm = {
 	name: string;
 	password: string;
 	education_role?: string;
+	classroom_id?: string;
+};
+
+export const getAdminClassrooms = async (token: string) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/users/education/classrooms`, {
+		method: 'GET',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		}
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.error(err);
+			error = err.detail;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const getUserClassroomAssignment = async (token: string, userId: string) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/users/${userId}/education/classroom`, {
+		method: 'GET',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		}
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.error(err);
+			error = err.detail;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
 };
 
 export const updateUserById = async (token: string, userId: string, user: UserUpdateForm) => {
@@ -506,7 +561,11 @@ export const updateUserById = async (token: string, userId: string, user: UserUp
 			email: user.email,
 			name: user.name,
 			password: user.password !== '' ? user.password : undefined,
-			education_role: user.role === 'admin' ? undefined : user.education_role || undefined
+			education_role: user.role === 'admin' ? undefined : user.education_role || undefined,
+			classroom_id:
+				user.role === 'admin' || user.education_role !== 'student'
+					? undefined
+					: user.classroom_id || null
 		})
 	})
 		.then(async (res) => {

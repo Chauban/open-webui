@@ -18,6 +18,7 @@
 	export let allChatsLoaded = false;
 
 	export let loadHandler: Function = null;
+	export let hrefBuilder: Function = (chat) => `/c/${chat.id}`;
 
 	let chatList = null;
 
@@ -150,7 +151,7 @@
 			<a
 				class=" w-full flex justify-between items-center rounded-lg text-sm py-2 px-3 hover:bg-gray-50 dark:hover:bg-gray-850"
 				draggable="false"
-				href={`/c/${chat.id}`}
+				href={hrefBuilder(chat)}
 				on:click={() => (show = false)}
 			>
 				<div class="text-ellipsis line-clamp-1 w-full sm:basis-3/5">

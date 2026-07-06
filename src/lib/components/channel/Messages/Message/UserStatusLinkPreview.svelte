@@ -9,8 +9,8 @@
 
 	export let id = null;
 
-	export let side = 'top';
-	export let align = 'start';
+	export let side: 'top' | 'right' | 'bottom' | 'left' = 'top';
+	export let align: 'start' | 'center' | 'end' = 'start';
 	export let sideOffset = 6;
 
 	let user = null;

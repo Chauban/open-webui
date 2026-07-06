@@ -16,6 +16,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     Column,
+    exists,
     ForeignKey,
     String,
     Text,
@@ -24,8 +25,8 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy import or_, func, select, and_, text
-from sqlalchemy.sql import exists
 from sqlalchemy.sql.expression import bindparam
+from open_webui.models.education import WritingSession
 
 ####################
 # Chat DB Schema
@@ -428,6 +429,25 @@ class ChatTable:
 
         return self.update_chat_by_id(id, chat)
 
+    def update_chat_meta_by_id(
+        self, id: str, meta: dict, db: Optional[Session] = None
+    ) -> Optional[ChatModel]:
+        try:
+            with get_db_context(db) as db:
+                chat_item = db.get(Chat, id)
+                if chat_item is None:
+                    return None
+
+                chat_item.meta = self._clean_null_bytes(meta or {})
+                chat_item.updated_at = int(time.time())
+
+                db.commit()
+                db.refresh(chat_item)
+
+                return ChatModel.model_validate(chat_item)
+        except Exception:
+            return None
+
     def update_chat_tags_by_id(
         self, id: str, tags: list[str], user
     ) -> Optional[ChatModel]:
@@ -479,44 +499,50 @@ class ChatTable:
         return chat.chat.get("history", {}).get("messages", {}).get(message_id, {})
 
     def upsert_message_to_chat_by_id_and_message_id(
-        self, id: str, message_id: str, message: dict
+        self,
+        id: str,
+        message_id: str,
+        message: dict,
+        db: Optional[Session] = None,
     ) -> Optional[ChatModel]:
-        chat = self.get_chat_by_id(id)
-        if chat is None:
-            return None
+        with get_db_context(db) as db:
+            chat = self.get_chat_by_id(id, db=db)
+            if chat is None:
+                return None
 
-        # Sanitize message content for null characters before upserting
-        if isinstance(message.get("content"), str):
-            message["content"] = sanitize_text_for_db(message["content"])
+            # Sanitize message content for null characters before upserting
+            if isinstance(message.get("content"), str):
+                message["content"] = sanitize_text_for_db(message["content"])
 
-        user_id = chat.user_id
-        chat = chat.chat
-        history = chat.get("history", {})
+            user_id = chat.user_id
+            chat = chat.chat
+            history = chat.get("history", {})
+            messages = history.setdefault("messages", {})
 
-        if message_id in history.get("messages", {}):
-            history["messages"][message_id] = {
-                **history["messages"][message_id],
-                **message,
-            }
-        else:
-            history["messages"][message_id] = message
+            if message_id in messages:
+                messages[message_id] = {
+                    **messages[message_id],
+                    **message,
+                }
+            else:
+                messages[message_id] = message
 
-        history["currentId"] = message_id
+            history["currentId"] = message_id
+            chat["history"] = history
 
-        chat["history"] = history
+            # Dual-write to chat_message table
+            try:
+                ChatMessages.upsert_message(
+                    message_id=message_id,
+                    chat_id=id,
+                    user_id=user_id,
+                    data=messages[message_id],
+                    db=db,
+                )
+            except Exception as e:
+                log.warning(f"Failed to write to chat_message table: {e}")
 
-        # Dual-write to chat_message table
-        try:
-            ChatMessages.upsert_message(
-                message_id=message_id,
-                chat_id=id,
-                user_id=user_id,
-                data=history["messages"][message_id],
-            )
-        except Exception as e:
-            log.warning(f"Failed to write to chat_message table: {e}")
-
-        return self.update_chat_by_id(id, chat)
+            return self.update_chat_by_id(id, chat, db=db)
 
     def add_message_status_to_chat_by_id_and_message_id(
         self, id: str, message_id: str, status: dict
@@ -1071,6 +1097,7 @@ class ChatTable:
             all_chats = (
                 db.query(Chat)
                 .filter_by(user_id=user_id, pinned=True, archived=False)
+                .filter(~exists().where(WritingSession.chat_id == Chat.id))
                 .order_by(Chat.updated_at.desc())
                 .with_entities(Chat.id, Chat.title, Chat.updated_at, Chat.created_at)
             )

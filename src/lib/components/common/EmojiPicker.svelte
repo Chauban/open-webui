@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { DropdownMenu } from 'bits-ui';
-	import VirtualList from '@sveltejs/svelte-virtual-list';
 
 	import { getContext } from 'svelte';
 
@@ -8,6 +7,7 @@
 	import { WEBUI_BASE_URL } from '$lib/constants';
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
+	import VirtualList from '$lib/components/common/VirtualList.svelte';
 
 	import emojiGroups from '$lib/emoji-groups.json';
 	import emojiShortCodes from '$lib/emoji-shortcodes.json';

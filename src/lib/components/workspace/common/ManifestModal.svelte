@@ -10,7 +10,7 @@
 	const dispatch = createEventDispatcher();
 
 	export let show = false;
-	export let manifest = {};
+	export let manifest: { funding_url?: string } = {};
 </script>
 
 <Modal size="sm" bind:show>
@@ -52,9 +52,10 @@
 						<div class="my-2">
 							{$i18n.t('Support this plugin:')}
 							<a
-								href={manifest.funding_url}
+								href={manifest.funding_url ?? '#'}
 								target="_blank"
-								class="underline text-blue-400 hover:text-blue-300">{manifest.funding_url}</a
+								class="underline text-blue-400 hover:text-blue-300"
+								>{manifest.funding_url ?? $i18n.t('Funding URL unavailable')}</a
 							>
 						</div>
 					</div>

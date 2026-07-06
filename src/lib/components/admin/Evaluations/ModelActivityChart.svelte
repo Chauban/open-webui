@@ -12,6 +12,7 @@
 	let chartCanvas: HTMLCanvasElement;
 	let chartInstance: any = null;
 	let Chart: any = null;
+	type WeeklyBucket = { date: string; won: number; lost: number };
 
 	const createChart = async () => {
 		if (!chartCanvas || !history.length) return;
@@ -32,7 +33,7 @@
 
 		if (aggregateWeekly && history.length > 7) {
 			// Aggregate daily data into weekly buckets
-			const weeklyData: { [key: string]: { won: number; lost: number; startDate: string } } = {};
+			const weeklyData: Record<string, WeeklyBucket> = {};
 			history.forEach((h) => {
 				const date = new Date(h.date);
 				// Get the Monday of this week as the bucket key
@@ -43,19 +44,19 @@
 				const weekKey = monday.toISOString().split('T')[0];
 
 				if (!weeklyData[weekKey]) {
-					weeklyData[weekKey] = { won: 0, lost: 0, startDate: weekKey };
+					weeklyData[weekKey] = { won: 0, lost: 0, date: weekKey };
 				}
 				weeklyData[weekKey].won += h.won;
 				weeklyData[weekKey].lost += h.lost;
 			});
 
 			chartData = Object.values(weeklyData).sort(
-				(a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime()
+				(a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
 			);
 		}
 
 		const labels = chartData.map((h) => {
-			const date = new Date('startDate' in h ? h.startDate : h.date);
+			const date = new Date(h.date);
 			if (aggregateWeekly) {
 				return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 			}

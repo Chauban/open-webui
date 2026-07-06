@@ -29,13 +29,15 @@
 	export let onUpdate: Function = (folderId) => {};
 	export let onDelete: Function = (folderId) => {};
 
-	let showFolderModal = false;
+	let showProjectModal = false;
 	let showDeleteConfirm = false;
-	let deleteFolderContents = true;
+	let deleteProjectContents = true;
+	$: isAssignmentProject =
+		folder?.meta?.mode === 'assignment_writing' || folder?.meta?.category === 'assignment_project';
 
 	const updateHandler = async ({ name, meta, data }) => {
 		if (name === '') {
-			toast.error($i18n.t('Folder name cannot be empty.'));
+			toast.error($i18n.t('Project name cannot be empty.'));
 			return;
 		}
 
@@ -61,15 +63,15 @@
 				folder.data = data;
 			}
 
-			toast.success($i18n.t('Folder updated successfully'));
+			toast.success($i18n.t('Project updated successfully'));
 
-			const _folder = await getFolderById(localStorage.token, folder.id).catch((error) => {
+			const project = await getFolderById(localStorage.token, folder.id).catch((error) => {
 				toast.error(`${error}`);
 				return null;
 			});
 
-			await selectedFolder.set(_folder);
-			onUpdate(_folder);
+			await selectedFolder.set(project);
+			onUpdate(project);
 		}
 	};
 
@@ -86,20 +88,20 @@
 		if (res) {
 			folder.meta = { ...folder.meta, icon: iconName };
 
-			toast.success($i18n.t('Folder updated successfully'));
+			toast.success($i18n.t('Project updated successfully'));
 
-			const _folder = await getFolderById(localStorage.token, folder.id).catch((error) => {
+			const project = await getFolderById(localStorage.token, folder.id).catch((error) => {
 				toast.error(`${error}`);
 				return null;
 			});
 
-			await selectedFolder.set(_folder);
-			onUpdate(_folder);
+			await selectedFolder.set(project);
+			onUpdate(project);
 		}
 	};
 
 	const deleteHandler = async () => {
-		const res = await deleteFolderById(localStorage.token, folder.id, deleteFolderContents).catch(
+		const res = await deleteFolderById(localStorage.token, folder.id, deleteProjectContents).catch(
 			(error) => {
 				toast.error(`${error}`);
 				return null;
@@ -107,7 +109,7 @@
 		);
 
 		if (res) {
-			toast.success($i18n.t('Folder deleted successfully'));
+			toast.success($i18n.t('Project deleted successfully'));
 			onDelete(folder);
 		}
 	};
@@ -131,7 +133,7 @@
 
 {#if folder}
 	<FolderModal
-		bind:show={showFolderModal}
+		bind:show={showProjectModal}
 		edit={true}
 		folderId={folder.id}
 		onSubmit={updateHandler}
@@ -139,7 +141,7 @@
 
 	<DeleteConfirmDialog
 		bind:show={showDeleteConfirm}
-		title={$i18n.t('Delete folder?')}
+		title={$i18n.t('Delete project?')}
 		on:confirm={() => {
 			deleteHandler();
 		}}
@@ -155,10 +157,10 @@
 		</div>
 
 		<div class="flex items-center gap-1.5">
-			<input type="checkbox" bind:checked={deleteFolderContents} />
+			<input type="checkbox" bind:checked={deleteProjectContents} />
 
 			<div class="text-xs text-gray-500">
-				{$i18n.t('Delete all contents inside this folder')}
+				{$i18n.t('Delete all contents inside this project')}
 			</div>
 		</div>
 	</DeleteConfirmDialog>
@@ -172,16 +174,22 @@
 					updateIconHandler(name);
 				}}
 			>
-				<button
-					aria-label={$i18n.t('Change folder icon')}
-					class=" rounded-full bg-gray-50 dark:bg-gray-800 size-11 flex justify-center items-center"
-				>
-					{#if folder?.meta?.icon}
-						<Emoji className="size-6" shortCode={folder.meta.icon} />
-					{:else}
+				{#if isAssignmentProject}
+					<div class=" rounded-full bg-gray-50 dark:bg-gray-800 size-11 flex justify-center items-center">
 						<Folder className="size-4.5" strokeWidth="2" />
-					{/if}
-				</button>
+					</div>
+				{:else}
+					<button
+						aria-label={$i18n.t('Change project icon')}
+						class=" rounded-full bg-gray-50 dark:bg-gray-800 size-11 flex justify-center items-center"
+					>
+						{#if folder?.meta?.icon}
+							<Emoji className="size-6" shortCode={folder.meta.icon} />
+						{:else}
+							<Folder className="size-4.5" strokeWidth="2" />
+						{/if}
+					</button>
+				{/if}
 			</EmojiPicker>
 
 			<div class="text-3xl line-clamp-1">
@@ -190,11 +198,12 @@
 		</div>
 
 		<div class="flex items-center translate-x-2.5">
-			<FolderMenu
-				align="end"
-				onEdit={() => {
-					showFolderModal = true;
-				}}
+			{#if !isAssignmentProject}
+					<FolderMenu
+						align="end"
+						onEdit={() => {
+							showProjectModal = true;
+						}}
 				onDelete={() => {
 					showDeleteConfirm = true;
 				}}
@@ -204,12 +213,13 @@
 			>
 				<button
 					class="p-1.5 dark:hover:bg-gray-850 rounded-full touch-auto"
-					aria-label={$i18n.t('Folder options')}
+					aria-label={$i18n.t('Project options')}
 					on:click={(e) => {}}
 				>
 					<EllipsisHorizontal className="size-4" strokeWidth="2.5" />
 				</button>
 			</FolderMenu>
+			{/if}
 		</div>
 	</div>
 {/if}

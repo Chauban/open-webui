@@ -42,12 +42,20 @@
 	export let onClose: Function;
 
 	export let chatId = '';
+	export let folderId = null;
 
 	let show = false;
 	let pinned = false;
 
 	let chat = null;
 	let showFullMessages = false;
+	$: currentFolder = folderId ? $folders.find((folder) => folder?.id === folderId) : null;
+	$: removeFromLabel =
+		currentFolder?.meta?.mode === 'assignment_writing' ||
+		currentFolder?.meta?.category === 'assignment_project' ||
+		currentFolder?.meta?.assignment_id
+			? $i18n.t('Remove from Assignment')
+			: $i18n.t('Remove from Project');
 
 	const pinHandler = async () => {
 		await toggleChatPinnedStatusById(localStorage.token, chatId);
@@ -401,7 +409,21 @@
 				<div class="flex items-center">{$i18n.t('Clone')}</div>
 			</DropdownMenu.Item>
 
-			{#if chatId && $folders.length > 0}
+			{#if folderId}
+				<DropdownMenu.Item
+					draggable="false"
+					class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
+					on:click={() => {
+						moveChatHandler(chatId, null);
+					}}
+				>
+					<Folder />
+
+					<div class="flex items-center">{removeFromLabel}</div>
+				</DropdownMenu.Item>
+			{/if}
+
+			{#if chatId && ($folders.length > 0 || folderId)}
 				<DropdownMenu.Sub>
 					<DropdownMenu.SubTrigger
 						draggable="false"
@@ -409,7 +431,7 @@
 					>
 						<Folder />
 
-						<div class="flex items-center">{$i18n.t('Move')}</div>
+						<div class="flex items-center">{$i18n.t('Move to Project')}</div>
 					</DropdownMenu.SubTrigger>
 					<DropdownMenu.SubContent
 						class="select-none w-full rounded-2xl p-1 z-50 bg-white dark:bg-gray-850 dark:text-white border border-gray-100  dark:border-gray-800 shadow-lg max-h-52 overflow-y-auto scrollbar-hidden"
@@ -426,7 +448,7 @@
 							>
 								<Folder />
 
-								<div class="flex items-center">{folder?.name ?? 'Folder'}</div>
+								<div class="flex items-center">{folder?.name ?? $i18n.t('Project')}</div>
 							</DropdownMenu.Item>
 						{/each}
 					</DropdownMenu.SubContent>

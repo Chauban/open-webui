@@ -83,7 +83,7 @@
 	import { uploadFile } from '$lib/apis/files';
 	import { createOpenAITextStream } from '$lib/apis/streaming';
 	import { getFunctions } from '$lib/apis/functions';
-	import { updateFolderById } from '$lib/apis/folders';
+	import { getFolderById, updateFolderById } from '$lib/apis/folders';
 
 	import Banner from '../common/Banner.svelte';
 	import MessageInput from '$lib/components/chat/MessageInput.svelte';
@@ -104,6 +104,11 @@
 	export let responseInsertLabel = 'Insert to Draft';
 	export let embedded = false;
 	export let initialChatData = null;
+	export let readOnly = false;
+	export let disableContextActions = false;
+	export let allowAssignmentWorkspaceChat = false;
+	export let showModelSelector = true;
+	export let projectBaseUrl = '';
 	export let showRightPanel = false;
 	export let rightPanelDefaultSize = 36;
 	export let rightPanelMinSize = 24;
@@ -133,6 +138,9 @@
 	let eventCallback = null;
 
 	let chatIdUnsubscriber: Unsubscriber | undefined;
+
+	const hasPersistedChatId = (value: unknown): value is string =>
+		typeof value === 'string' && value.trim().length > 0;
 
 	let selectedModels = [''];
 	let atSelectedModel: Model | undefined;
@@ -164,6 +172,37 @@
 
 	let taskIds = null;
 
+	const resolveSelectedModels = (modelIds: string[] | null | undefined) => {
+		const availableModels = $models
+			.filter((m) => !(m?.info?.meta?.hidden ?? false))
+			.map((m) => m.id);
+		const defaultModels = $config?.default_models ? $config.default_models.split(',') : [];
+
+		let resolved = (modelIds ?? []).filter((modelId) => availableModels.includes(modelId));
+
+		if (resolved.length === 0 && sessionStorage.selectedModels) {
+			try {
+				resolved = JSON.parse(sessionStorage.selectedModels).filter((modelId) =>
+					availableModels.includes(modelId)
+				);
+			} catch {}
+		}
+
+		if (resolved.length === 0 && $settings?.models) {
+			resolved = $settings.models.filter((modelId) => availableModels.includes(modelId));
+		}
+
+		if (resolved.length === 0 && defaultModels.length > 0) {
+			resolved = defaultModels.filter((modelId) => availableModels.includes(modelId));
+		}
+
+		if (resolved.length === 0 && availableModels.length > 0) {
+			resolved = [availableModels[0]];
+		}
+
+		return resolved.length > 0 ? resolved : [''];
+	};
+
 	// Chat Input
 	let prompt = '';
 	let chatFiles = [];
@@ -173,8 +212,18 @@
 	// Message queue for storing messages while generating
 	let messageQueue: { id: string; prompt: string; files: any[] }[] = [];
 
-	$: if (chatIdProp) {
-		navigateHandler();
+	let previousChatIdProp: string | undefined = undefined;
+	$: {
+		const nextChatIdProp = chatIdProp ?? '';
+		if (nextChatIdProp !== previousChatIdProp) {
+			if (nextChatIdProp) {
+				navigateHandler();
+			} else if (previousChatIdProp && (projectBaseUrl || embedded)) {
+				void initNewChat();
+			}
+
+			previousChatIdProp = nextChatIdProp;
+		}
 	}
 
 	const hydrateChatState = async (chatRecord) => {
@@ -182,6 +231,13 @@
 		tags = embedded
 			? []
 			: await getTagsById(localStorage.token, chatIdProp).catch(async (error) => []);
+
+		if (chatRecord?.folder_id) {
+			const folder = await getFolderById(localStorage.token, chatRecord.folder_id).catch(() => null);
+			selectedFolder.set(folder);
+		} else {
+			selectedFolder.set(null);
+		}
 
 		const chatContent = chatRecord?.chat;
 		if (!chatContent) {
@@ -192,6 +248,7 @@
 			(chatContent?.models ?? undefined) !== undefined
 				? chatContent.models
 				: [chatContent.models ?? ''];
+		selectedModels = resolveSelectedModels(selectedModels);
 
 		if (!($user?.role === 'admin' || ($user?.permissions?.chat?.multiple_models ?? true))) {
 			selectedModels = selectedModels.length > 0 ? [selectedModels[0]] : [''];
@@ -1225,6 +1282,25 @@
 		});
 
 		if (chat) {
+			const folder = chat?.folder_id
+				? await getFolderById(localStorage.token, chat.folder_id).catch(() => null)
+				: null;
+			if (
+				!allowAssignmentWorkspaceChat &&
+				(
+					(
+						(folder?.meta?.mode === 'assignment_writing' ||
+							folder?.meta?.category === 'assignment_project') &&
+						folder?.meta?.assignment_id
+					) ||
+					(chat?.meta?.category === 'assignment_workspace' && chat?.meta?.assignment_id)
+				)
+			) {
+				const assignmentId = folder?.meta?.assignment_id ?? chat?.meta?.assignment_id;
+				await goto(`/assignments/${assignmentId}/write?chat=${chat.id}`);
+				return false;
+			}
+
 			return await hydrateChatState(chat);
 		}
 	};
@@ -1860,7 +1936,15 @@
 		history = history;
 
 		// Create new chat if newChat is true and first user message
-		if (newChat && _history.messages[_history.currentId].parentId === null) {
+		// Persist the assistant placeholders with the initial chat record so route/query
+		// changes do not reload a user-only history before streaming starts.
+		_history = JSON.parse(JSON.stringify(history));
+		if (
+			newChat &&
+			!hasPersistedChatId(_chatId) &&
+			_history.messages[parentId] &&
+			_history.messages[parentId].parentId === null
+		) {
 			_chatId = await initChatHandler(_history);
 		}
 
@@ -2148,7 +2232,7 @@
 				model_item: $models.find((m) => m.id === model.id),
 
 				session_id: $socket?.id,
-				chat_id: $chatId,
+				chat_id: _chatId,
 
 				id: responseMessageId,
 				parent_id: userMessage?.id ?? null,
@@ -2466,17 +2550,28 @@
 				$selectedFolder?.id
 			);
 
+			if (!hasPersistedChatId(chat?.id)) {
+				throw new Error('Failed to initialize chat session');
+			}
+
 			_chatId = chat.id;
 			await chatId.set(_chatId);
 
-			window.history.replaceState(history.state, '', `/c/${_chatId}`);
+			if (projectBaseUrl && $selectedFolder) {
+				await goto(`${projectBaseUrl}?chat=${_chatId}`, {
+					replaceState: true,
+					noScroll: true,
+					keepFocus: true
+				});
+			} else {
+				window.history.replaceState(history.state, '', `/c/${_chatId}`);
+				selectedFolder.set(null);
+			}
 
 			await tick();
 
 			await chats.set(await getChatList(localStorage.token, $currentChatPage));
 			currentChatPage.set(1);
-
-			selectedFolder.set(null);
 		} else {
 			_chatId = `local:${$socket?.id}`; // Use socket id for temporary chat
 			await chatId.set(_chatId);
@@ -2487,19 +2582,19 @@
 	};
 
 	const saveChatHandler = async (_chatId, history) => {
-		if ($chatId == _chatId) {
-			if (!$temporaryChatEnabled) {
-				chat = await updateChatById(localStorage.token, _chatId, {
-					models: selectedModels,
-					history: history,
-					messages: createMessagesList(history, history.currentId),
-					params: params,
-					files: chatFiles
-				});
-				currentChatPage.set(1);
-				await chats.set(await getChatList(localStorage.token, $currentChatPage));
-			}
+		if ($temporaryChatEnabled || !hasPersistedChatId(_chatId) || $chatId !== _chatId) {
+			return;
 		}
+
+		chat = await updateChatById(localStorage.token, _chatId, {
+			models: selectedModels,
+			history: history,
+			messages: createMessagesList(history, history.currentId),
+			params: params,
+			files: chatFiles
+		});
+		currentChatPage.set(1);
+		await chats.set(await getChatList(localStorage.token, $currentChatPage));
 	};
 
 	const MAX_DRAFT_LENGTH = 5000;
@@ -2530,7 +2625,7 @@
 	};
 
 	const moveChatHandler = async (chatId, folderId) => {
-		if (chatId && folderId) {
+		if (chatId) {
 			const res = await updateChatFolderIdById(localStorage.token, chatId, folderId).catch(
 				(error) => {
 					toast.error(`${error}`);
@@ -2539,6 +2634,15 @@
 			);
 
 			if (res) {
+				chat.folder_id = folderId ?? null;
+
+				if (folderId) {
+					const folder = await getFolderById(localStorage.token, folderId).catch(() => null);
+					selectedFolder.set(folder);
+				} else {
+					selectedFolder.set(null);
+				}
+
 				currentChatPage.set(1);
 				await chats.set(await getChatList(localStorage.token, $currentChatPage));
 				await pinnedChats.set(await getPinnedChatList(localStorage.token));
@@ -2616,6 +2720,7 @@
 						bind:this={navbarElement}
 						chat={{
 							id: $chatId,
+							folder_id: $selectedFolder?.id ?? null,
 							chat: {
 								title: $chatTitle,
 								models: selectedModels,
@@ -2628,6 +2733,8 @@
 						{history}
 						title={$chatTitle}
 						bind:selectedModels
+						showModelSelector={showModelSelector && !readOnly}
+						{disableContextActions}
 						shareEnabled={!!history.currentId}
 						{initNewChat}
 						archiveChatHandler={() => {}}
@@ -2712,68 +2819,74 @@
 							</div>
 
 							<div class=" pb-2 z-10">
-								<MessageInput
-									bind:this={messageInput}
-									{history}
-									{taskIds}
-									{selectedModels}
-									bind:files
-									bind:prompt
-									bind:autoScroll
-									bind:selectedToolIds
-									bind:selectedFilterIds
-									bind:imageGenerationEnabled
-									bind:codeInterpreterEnabled
-									bind:webSearchEnabled
-									bind:atSelectedModel
-									bind:showCommands
-									toolServers={$toolServers}
-									{generating}
-									{stopResponse}
-									{createMessagePair}
-									{onUpload}
-									{messageQueue}
-									onQueueSendNow={async (id) => {
-										const item = messageQueue.find((m) => m.id === id);
-										if (item) {
-											// Remove from queue
+								{#if readOnly}
+									<div class="mx-3 rounded-2xl border border-gray-200 bg-white/90 px-4 py-3 text-sm text-gray-500">
+										{$i18n.t('This assignment conversation is read-only after submission.')}
+									</div>
+								{:else}
+									<MessageInput
+										bind:this={messageInput}
+										{history}
+										{taskIds}
+										{selectedModels}
+										bind:files
+										bind:prompt
+										bind:autoScroll
+										bind:selectedToolIds
+										bind:selectedFilterIds
+										bind:imageGenerationEnabled
+										bind:codeInterpreterEnabled
+										bind:webSearchEnabled
+										bind:atSelectedModel
+										bind:showCommands
+										toolServers={$toolServers}
+										{generating}
+										{stopResponse}
+										{createMessagePair}
+										{onUpload}
+										{messageQueue}
+										onQueueSendNow={async (id) => {
+											const item = messageQueue.find((m) => m.id === id);
+											if (item) {
+												// Remove from queue
+												messageQueue = messageQueue.filter((m) => m.id !== id);
+												// Stop current generation first
+												await stopResponse();
+												await tick();
+												// Set files and submit
+												files = item.files;
+												await tick();
+												await submitPrompt(item.prompt);
+											}
+										}}
+										onQueueEdit={(id) => {
+											const item = messageQueue.find((m) => m.id === id);
+											if (item) {
+												// Remove from queue
+												messageQueue = messageQueue.filter((m) => m.id !== id);
+												// Set files and restore prompt to input
+												files = item.files;
+												messageInput?.setText(item.prompt);
+											}
+										}}
+										onQueueDelete={(id) => {
 											messageQueue = messageQueue.filter((m) => m.id !== id);
-											// Stop current generation first
-											await stopResponse();
-											await tick();
-											// Set files and submit
-											files = item.files;
-											await tick();
-											await submitPrompt(item.prompt);
-										}
-									}}
-									onQueueEdit={(id) => {
-										const item = messageQueue.find((m) => m.id === id);
-										if (item) {
-											// Remove from queue
-											messageQueue = messageQueue.filter((m) => m.id !== id);
-											// Set files and restore prompt to input
-											files = item.files;
-											messageInput?.setText(item.prompt);
-										}
-									}}
-									onQueueDelete={(id) => {
-										messageQueue = messageQueue.filter((m) => m.id !== id);
-									}}
-									onChange={(data) => {
-										if (!$temporaryChatEnabled) {
-											saveDraft(data, $chatId);
-										}
-									}}
-									on:submit={async (e) => {
-										clearDraft();
-										if (e.detail || files.length > 0) {
-											await tick();
+										}}
+										onChange={(data) => {
+											if (!$temporaryChatEnabled) {
+												saveDraft(data, $chatId);
+											}
+										}}
+										on:submit={async (e) => {
+											clearDraft();
+											if (e.detail || files.length > 0) {
+												await tick();
 
-											submitPrompt(e.detail.replaceAll('\n\n', '\n'));
-										}
-									}}
-								/>
+												submitPrompt(e.detail.replaceAll('\n\n', '\n'));
+											}
+										}}
+									/>
+								{/if}
 
 								<div
 									class="absolute bottom-1 text-xs text-gray-500 text-center line-clamp-1 right-0 left-0"
@@ -2783,38 +2896,44 @@
 							</div>
 						{:else}
 							<div class="flex items-center h-full">
-								<Placeholder
-									{history}
-									{selectedModels}
-									bind:messageInput
-									bind:files
-									bind:prompt
-									bind:autoScroll
-									bind:selectedToolIds
-									bind:selectedFilterIds
-									bind:imageGenerationEnabled
-									bind:codeInterpreterEnabled
-									bind:webSearchEnabled
-									bind:atSelectedModel
-									bind:showCommands
-									toolServers={$toolServers}
-									{stopResponse}
-									{createMessagePair}
-									{onSelect}
-									{onUpload}
-									onChange={(data) => {
-										if (!$temporaryChatEnabled) {
-											saveDraft(data);
-										}
-									}}
-									on:submit={async (e) => {
-										clearDraft();
-										if (e.detail || files.length > 0) {
-											await tick();
-											submitPrompt(e.detail.replaceAll('\n\n', '\n'));
-										}
-									}}
-								/>
+								{#if readOnly}
+									<div class="mx-auto max-w-xl rounded-3xl border border-gray-200 bg-white px-6 py-5 text-center text-sm text-gray-500">
+										{$i18n.t('This assignment conversation is read-only after submission.')}
+									</div>
+								{:else}
+									<Placeholder
+										{history}
+										{selectedModels}
+										bind:messageInput
+										bind:files
+										bind:prompt
+										bind:autoScroll
+										bind:selectedToolIds
+										bind:selectedFilterIds
+										bind:imageGenerationEnabled
+										bind:codeInterpreterEnabled
+										bind:webSearchEnabled
+										bind:atSelectedModel
+										bind:showCommands
+										toolServers={$toolServers}
+										{stopResponse}
+										{createMessagePair}
+										{onSelect}
+										{onUpload}
+										onChange={(data) => {
+											if (!$temporaryChatEnabled) {
+												saveDraft(data);
+											}
+										}}
+										on:submit={async (e) => {
+											clearDraft();
+											if (e.detail || files.length > 0) {
+												await tick();
+												submitPrompt(e.detail.replaceAll('\n\n', '\n'));
+											}
+										}}
+									/>
+								{/if}
 							</div>
 						{/if}
 					</div>

@@ -24,6 +24,11 @@
 	const i18n = getContext<Writable<i18nType>>('i18n');
 
 	export let saveHandler: () => void;
+	type ExternalVoice = {
+		id?: string;
+		name: string;
+		voiceURI?: string;
+	};
 
 	// Audio
 	let TTS_OPENAI_API_BASE_URL = '';
@@ -57,17 +62,14 @@
 	let STT_WHISPER_MODEL_LOADING = false;
 
 	// eslint-disable-next-line no-undef
-	let voices: SpeechSynthesisVoice[] = [];
+	let voices: ExternalVoice[] = [];
 	let models: Awaited<ReturnType<typeof _getModels>>['models'] = [];
 
 	const getModels = async () => {
 		if (TTS_ENGINE === '') {
 			models = [];
 		} else {
-			const res = await _getModels(
-				localStorage.token,
-				$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-			).catch((e) => {
+			const res = await _getModels(localStorage.token).catch((e) => {
 				toast.error(`${e}`);
 			});
 
@@ -86,7 +88,7 @@
 				// do your loop
 				if (voices.length > 0) {
 					clearInterval(getVoicesLoop);
-					voices.sort((a, b) => a.name.localeCompare(b.name, $i18n.resolvedLanguage));
+					voices.sort((a, b) => a.name.localeCompare(b.name));
 				}
 			}, 100);
 		} else {
@@ -97,7 +99,7 @@
 			if (res) {
 				console.log(res);
 				voices = res.voices;
-				voices.sort((a, b) => a.name.localeCompare(b.name, $i18n.resolvedLanguage));
+				voices.sort((a, b) => a.name.localeCompare(b.name));
 			}
 		}
 	};
@@ -514,7 +516,7 @@
 								await getVoices();
 								await getModels();
 
-								if (e.target?.value === 'openai') {
+								if ((e.currentTarget as HTMLSelectElement).value === 'openai') {
 									TTS_VOICE = 'alloy';
 									TTS_MODEL = 'tts-1';
 								} else {
@@ -622,7 +624,7 @@
 									/>
 
 									<datalist id="model-list">
-										<option value="tts-1" />
+										<option value="tts-1"></option>
 									</datalist>
 								</div>
 							</div>
@@ -665,7 +667,7 @@
 
 										<datalist id="voice-list">
 											{#each voices as voice}
-												<option value={voice.id}>{voice.name}</option>
+												<option value={voice.id ?? voice.voiceURI ?? voice.name}>{voice.name}</option>
 											{/each}
 										</datalist>
 									</div>
@@ -684,7 +686,7 @@
 
 										<datalist id="tts-model-list">
 											{#each models as model}
-												<option value={model.id} class="bg-gray-50 dark:bg-gray-700" />
+												<option value={model.id} class="bg-gray-50 dark:bg-gray-700"></option>
 											{/each}
 										</datalist>
 									</div>
@@ -722,7 +724,7 @@
 
 										<datalist id="voice-list">
 											{#each voices as voice}
-												<option value={voice.id}>{voice.name}</option>
+												<option value={voice.id ?? voice.voiceURI ?? voice.name}>{voice.name}</option>
 											{/each}
 										</datalist>
 									</div>
@@ -741,7 +743,7 @@
 
 										<datalist id="tts-model-list">
 											{#each models as model}
-												<option value={model.id} class="bg-gray-50 dark:bg-gray-700" />
+												<option value={model.id} class="bg-gray-50 dark:bg-gray-700"></option>
 											{/each}
 										</datalist>
 									</div>
@@ -763,7 +765,7 @@
 
 										<datalist id="voice-list">
 											{#each voices as voice}
-												<option value={voice.id}>{voice.name}</option>
+												<option value={voice.id ?? voice.voiceURI ?? voice.name}>{voice.name}</option>
 											{/each}
 										</datalist>
 									</div>

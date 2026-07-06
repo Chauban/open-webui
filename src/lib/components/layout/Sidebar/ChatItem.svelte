@@ -2,6 +2,7 @@
 	import { toast } from 'svelte-sonner';
 	import { goto, invalidate, invalidateAll } from '$app/navigation';
 	import { onMount, getContext, createEventDispatcher, tick, onDestroy } from 'svelte';
+	import { get } from 'svelte/store';
 	const i18n = getContext('i18n');
 
 	const dispatch = createEventDispatcher();
@@ -18,6 +19,7 @@
 		updateChatById,
 		updateChatFolderIdById
 	} from '$lib/apis/chats';
+	import { getFolderById } from '$lib/apis/folders';
 	import {
 		chatId,
 		chatTitle as _chatTitle,
@@ -27,7 +29,7 @@
 		showSidebar,
 		currentChatPage,
 		tags,
-		selectedFolder,
+		selectedFolder as selectedProject,
 		activeChatIds
 	} from '$lib/stores';
 
@@ -53,6 +55,9 @@
 
 	export let selected = false;
 	export let shiftKey = false;
+	export let folderId = null;
+	export let href = null;
+	export let clearSelectedProjectOnChatClick = true;
 
 	export let onDragEnd = () => {};
 
@@ -139,7 +144,7 @@
 
 	const deleteChatHandler = async (id) => {
 		const res = await deleteChatById(localStorage.token, id).catch((error) => {
-			toast.error(`${error}`);
+			toast.error(error?.detail?.detail ?? error?.detail ?? `${error}`);
 			return null;
 		});
 
@@ -161,9 +166,9 @@
 		dispatch('change');
 	};
 
-	const moveChatHandler = async (chatId, folderId) => {
-		if (chatId && folderId) {
-			const res = await updateChatFolderIdById(localStorage.token, chatId, folderId).catch(
+	const moveChatHandler = async (targetChatId, projectId) => {
+		if (targetChatId) {
+			const res = await updateChatFolderIdById(localStorage.token, targetChatId, projectId).catch(
 				(error) => {
 					toast.error(`${error}`);
 					return null;
@@ -171,6 +176,15 @@
 			);
 
 			if (res) {
+				if (targetChatId === get(chatId)) {
+					if (projectId) {
+						const project = await getFolderById(localStorage.token, projectId).catch(() => null);
+						selectedProject.set(project);
+					} else {
+						selectedProject.set(null);
+					}
+				}
+
 				currentChatPage.set(1);
 				await chats.set(await getChatList(localStorage.token, $currentChatPage));
 				await pinnedChats.set(await getPinnedChatList(localStorage.token));
@@ -417,12 +431,12 @@
 				: selected
 					? 'bg-gray-100 dark:bg-gray-950 selected'
 					: ' group-hover:bg-gray-100 dark:group-hover:bg-gray-950'}  whitespace-nowrap text-ellipsis"
-			href="/c/{id}"
+			href={href ?? `/c/${id}`}
 			on:click={() => {
 				dispatch('select');
 
-				if ($selectedFolder) {
-					selectedFolder.set(null);
+				if (clearSelectedProjectOnChatClick && $selectedProject) {
+					selectedProject.set(null);
 				}
 
 				if ($mobile) {
@@ -535,6 +549,7 @@
 			<div class="flex self-center z-10 items-end">
 				<ChatMenu
 					chatId={id}
+					{folderId}
 					cloneChatHandler={() => {
 						cloneChatHandler(id);
 					}}

@@ -1,7 +1,10 @@
 import { browser, dev } from '$app/environment';
 // import { version } from '../../package.json';
 
-export const APP_NAME = 'Open WebUI';
+declare const APP_VERSION: string;
+declare const APP_BUILD_HASH: string;
+
+export const APP_NAME = 'RightWrite';
 
 // 在开发模式下使用空字符串，让请求通过 Vite 代理转发到后端
 export const WEBUI_HOSTNAME = browser ? (dev ? `` : ``) : '';

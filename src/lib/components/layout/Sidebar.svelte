@@ -10,7 +10,7 @@
 		showSettings,
 		chatId,
 		tags,
-		folders as _folders,
+		folders as projectStore,
 		showSidebar,
 		showSearch,
 		mobile,
@@ -24,7 +24,7 @@
 		config,
 		isApp,
 		models,
-		selectedFolder,
+		selectedFolder as selectedProject,
 		WEBUI_NAME,
 		sidebarWidth,
 		activeChatIds
@@ -42,7 +42,12 @@
 		updateChatFolderIdById,
 		importChats
 	} from '$lib/apis/chats';
-	import { createNewFolder, getFolders, updateFolderParentIdById } from '$lib/apis/folders';
+	import {
+		createNewFolder,
+		getFolders,
+		updateFolderById,
+		updateFolderParentIdById
+	} from '$lib/apis/folders';
 	import { checkActiveChats } from '$lib/apis/tasks';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 
@@ -66,7 +71,6 @@
 	import Note from '../icons/Note.svelte';
 	import { slide } from 'svelte/transition';
 	import HotkeyHint from '../common/HotkeyHint.svelte';
-
 	const BREAKPOINT = 768;
 
 	let scrollTop = 0;
@@ -81,24 +85,128 @@
 	let chatListLoading = false;
 	let allChatsLoaded = false;
 
-	let showCreateFolderModal = false;
+	let showCreateProjectModal = false;
 
 	let pinnedModels = [];
 
 	let showPinnedModels = false;
 	let showChannels = false;
-	let showFolders = false;
+	let showProjects = false;
+	let showWriting = true;
 
-	let folders = {};
-	let folderRegistry = {};
+	let projects = {};
+	let writingProjects = {};
+	let projectRegistry = {};
+	let writingProjectRegistry = {};
 
-	let newFolderId = null;
+	let newProjectId = null;
 
-	$: if ($selectedFolder) {
-		initFolders();
+	const getProjectMode = (folder) => {
+		const explicitMode = folder?.meta?.mode;
+		if (explicitMode) {
+			return explicitMode;
+		}
+
+		if (folder?.meta?.category === 'assignment_project' || folder?.meta?.assignment_id) {
+			return 'assignment_writing';
+		}
+
+		if (folder?.meta?.category === 'personal_writing') {
+			return 'personal_writing';
+		}
+
+		return 'general';
+	};
+
+	const isAssignmentProject = (folder) => getProjectMode(folder) === 'assignment_writing';
+
+	const isPersonalWritingProject = (folder) => getProjectMode(folder) === 'personal_writing';
+
+	const isWritingProject = (folder) => isAssignmentProject(folder) || isPersonalWritingProject(folder);
+	const isSidebarClosedWriting = (folder) => Boolean(folder?.meta?.hidden_from_sidebar);
+
+	const dedupeAssignmentProjects = (folders) => {
+		const deduped = new Map();
+
+		for (const folder of folders) {
+			const assignmentId = folder?.meta?.assignment_id;
+			const key = assignmentId || folder.id;
+			const existing = deduped.get(key);
+
+			if (!existing || (folder.updated_at ?? 0) > (existing.updated_at ?? 0)) {
+				deduped.set(key, folder);
+			}
+		}
+
+		return Array.from(deduped.values());
+	};
+
+	const rebuildProjectMaps = (folderList) => {
+		const visibleFolderList = folderList.filter((folder) => !isWritingProject(folder));
+		const dedupedAssignmentFolderList = dedupeAssignmentProjects(
+			folderList.filter((folder) => isAssignmentProject(folder))
+		);
+		const personalWritingFolderList = folderList.filter((folder) => isPersonalWritingProject(folder));
+		const allWritingFolderList = [...dedupedAssignmentFolderList, ...personalWritingFolderList];
+		const writingFolderList = allWritingFolderList.filter((folder) => !isSidebarClosedWriting(folder));
+
+		projects = {};
+		writingProjects = {};
+
+		for (const folder of visibleFolderList) {
+			projects[folder.id] = { ...(projects[folder.id] || {}), ...folder };
+
+			if (newProjectId && folder.id === newProjectId) {
+				projects[folder.id].new = true;
+				newProjectId = null;
+			}
+		}
+
+		for (const folder of writingFolderList) {
+			writingProjects[folder.id] = { ...(writingProjects[folder.id] || {}), ...folder };
+		}
+
+		for (const folder of visibleFolderList) {
+			if (folder.parent_id) {
+				if (!projects[folder.parent_id]) {
+					projects[folder.parent_id] = {};
+				}
+
+				projects[folder.parent_id].childrenIds = projects[folder.parent_id].childrenIds
+					? [...projects[folder.parent_id].childrenIds, folder.id]
+					: [folder.id];
+
+				projects[folder.parent_id].childrenIds.sort((a, b) => {
+					return projects[b].updated_at - projects[a].updated_at;
+				});
+			}
+		}
+
+		for (const folder of writingFolderList) {
+			if (folder.parent_id) {
+				if (!writingProjects[folder.parent_id]) {
+					writingProjects[folder.parent_id] = {};
+				}
+
+				writingProjects[folder.parent_id].childrenIds = writingProjects[folder.parent_id]
+					.childrenIds
+					? [...writingProjects[folder.parent_id].childrenIds, folder.id]
+					: [folder.id];
+
+				writingProjects[folder.parent_id].childrenIds.sort((a, b) => {
+					return writingProjects[b].updated_at - writingProjects[a].updated_at;
+				});
+			}
+		}
+	};
+
+	$: rebuildProjectMaps($projectStore ?? []);
+
+	$: if ($selectedProject) {
+		initProjects();
 	}
 
-	const initFolders = async () => {
+	const initProjects = async () => {
 		if ($config?.features?.enable_folders === false) {
 			return;
 		}
@@ -106,55 +214,46 @@
 		const folderList = await getFolders(localStorage.token).catch((error) => {
 			return [];
 		});
-		_folders.set(folderList.sort((a, b) => b.updated_at - a.updated_at));
-
-		folders = {};
-
-		// First pass: Initialize all folder entries
-		for (const folder of folderList) {
-			// Ensure folder is added to folders with its data
-			folders[folder.id] = { ...(folders[folder.id] || {}), ...folder };
-
-			if (newFolderId && folder.id === newFolderId) {
-				folders[folder.id].new = true;
-				newFolderId = null;
-			}
-		}
-
-		// Second pass: Tie child folders to their parents
-		for (const folder of folderList) {
-			if (folder.parent_id) {
-				// Ensure the parent folder is initialized if it doesn't exist
-				if (!folders[folder.parent_id]) {
-					folders[folder.parent_id] = {}; // Create a placeholder if not already present
-				}
-
-				// Initialize childrenIds array if it doesn't exist and add the current folder id
-				folders[folder.parent_id].childrenIds = folders[folder.parent_id].childrenIds
-					? [...folders[folder.parent_id].childrenIds, folder.id]
-					: [folder.id];
-
-				// Sort the children by updated_at field
-				folders[folder.parent_id].childrenIds.sort((a, b) => {
-					return folders[b].updated_at - folders[a].updated_at;
-				});
-			}
-		}
+		projectStore.set(folderList.sort((a, b) => b.updated_at - a.updated_at));
+		rebuildProjectMaps(folderList);
 	};
 
-	const createFolder = async ({ name, data }) => {
+	const toggleWritingFolderVisibility = async (folder) => {
+		if (!folder?.id) return;
+		const isClosed = Boolean(folder?.meta?.hidden_from_sidebar);
+		const nextMeta = { ...(folder.meta || {}), hidden_from_sidebar: !isClosed };
+		const updated = await updateFolderById(localStorage.token, folder.id, {
+			name: folder.name,
+			meta: nextMeta,
+			data: folder.data || {}
+		}).catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
+
+		if (!updated) return;
+
+		if ($selectedProject?.id === folder.id) {
+			selectedProject.set(null);
+		}
+
+		await initProjects();
+		toast.success($i18n.t(isClosed ? 'Show in Sidebar' : 'Hide from Sidebar'));
+	};
+
+	const createProject = async ({ name, data }) => {
 		name = name?.trim();
 		if (!name) {
-			toast.error($i18n.t('Folder name cannot be empty.'));
+			toast.error($i18n.t('Project name cannot be empty.'));
 			return;
 		}
 
-		const rootFolders = Object.values(folders).filter((folder) => folder.parent_id === null);
-		if (rootFolders.find((folder) => folder.name.toLowerCase() === name.toLowerCase())) {
+		const rootProjects = Object.values(projects).filter((project) => project.parent_id === null);
+		if (rootProjects.find((project) => project.name.toLowerCase() === name.toLowerCase())) {
 			// If a folder with the same name already exists, append a number to the name
 			let i = 1;
 			while (
-				rootFolders.find((folder) => folder.name.toLowerCase() === `${name} ${i}`.toLowerCase())
+				rootProjects.find((project) => project.name.toLowerCase() === `${name} ${i}`.toLowerCase())
 			) {
 				i++;
 			}
@@ -164,8 +263,8 @@
 
 		// Add a dummy folder to the list to show the user that the folder is being created
 		const tempId = uuidv4();
-		folders = {
-			...folders,
+		projects = {
+			...projects,
 			tempId: {
 				id: tempId,
 				name: name,
@@ -183,9 +282,9 @@
 		});
 
 		if (res) {
-			// newFolderId = res.id;
-			await initFolders();
-			showFolders = true;
+			// newProjectId = res.id;
+			await initProjects();
+			showProjects = true;
 		}
 	};
 
@@ -212,27 +311,32 @@
 		allChatsLoaded = false;
 		scrollPaginationEnabled.set(false);
 
-		initFolders();
-		await Promise.all([
-			await (async () => {
-				console.log('Init tags');
-				const _tags = await getAllTags(localStorage.token);
-				tags.set(_tags);
-			})(),
-			await (async () => {
-				console.log('Init pinned chats');
-				const _pinnedChats = await getPinnedChatList(localStorage.token);
-				pinnedChats.set(_pinnedChats);
-			})(),
-			await (async () => {
-				console.log('Init chat list');
-				const _chats = await getChatList(localStorage.token, $currentChatPage);
-				await chats.set(_chats);
-			})()
-		]);
+		initProjects();
+		try {
+			console.log('Init tags');
+			const _tags = await getAllTags(localStorage.token).catch((error) => {
+				console.error('Failed to load tags', error);
+				return [];
+			});
+			tags.set(_tags ?? []);
 
-		// Enable pagination
-		scrollPaginationEnabled.set(true);
+			console.log('Init pinned chats');
+			const _pinnedChats = await getPinnedChatList(localStorage.token).catch((error) => {
+				console.error('Failed to load pinned chats', error);
+				return [];
+			});
+			pinnedChats.set(_pinnedChats ?? []);
+
+			console.log('Init chat list');
+			const _chats = await getChatList(localStorage.token, $currentChatPage).catch((error) => {
+				console.error('Failed to load chat list', error);
+				return [];
+			});
+			await chats.set(_chats ?? []);
+		} finally {
+			// Enable pagination
+			scrollPaginationEnabled.set(true);
+		}
 	};
 
 	const loadMoreChats = async () => {
@@ -242,7 +346,10 @@
 
 		let newChatList = [];
 
-		newChatList = await getChatList(localStorage.token, $currentChatPage);
+		newChatList = await getChatList(localStorage.token, $currentChatPage).catch((error) => {
+			console.error('Failed to load more chats', error);
+			return [];
+		});
 
 		// once the bottom of the list has been reached (no results) there is no need to continue querying
 		allChatsLoaded = newChatList.length === 0;
@@ -562,7 +669,7 @@
 
 	const newChatHandler = async () => {
 		selectedChatId = null;
-		selectedFolder.set(null);
+		selectedProject.set(null);
 
 		if ($user?.role !== 'admin' && $user?.permissions?.chat?.temporary_enforced) {
 			await temporaryChatEnabled.set(true);
@@ -639,10 +746,10 @@
 />
 
 <FolderModal
-	bind:show={showCreateFolderModal}
+	bind:show={showCreateProjectModal}
 	onSubmit={async (folder) => {
-		await createFolder(folder);
-		showCreateFolderModal = false;
+		await createProject(folder);
+		showCreateProjectModal = false;
 	}}
 />
 
@@ -711,8 +818,8 @@
 					>
 						<div class=" self-center flex items-center justify-center size-9">
 							<img
-								src="{WEBUI_BASE_URL}/static/favicon.png"
-								class="sidebar-new-chat-icon size-6 rounded-full group-hover:hidden"
+								src="{WEBUI_BASE_URL}/static/logo.png"
+								class="sidebar-new-chat-icon size-6 rounded-md group-hover:hidden"
 								alt=""
 							/>
 
@@ -906,8 +1013,8 @@
 				>
 					<img
 						crossorigin="anonymous"
-						src="{WEBUI_BASE_URL}/static/favicon.png"
-						class="sidebar-new-chat-icon size-6 rounded-full"
+						src="{WEBUI_BASE_URL}/static/logo.png"
+						class="sidebar-new-chat-icon size-6 rounded-md"
 						alt=""
 					/>
 				</a>
@@ -1027,7 +1134,7 @@
 								href="/me/writing"
 								on:click={itemClickHandler}
 								draggable="false"
-								aria-label="My Writing"
+								aria-label={$i18n.t('Writing')}
 							>
 								<div class="self-center">
 									<svg
@@ -1047,7 +1154,7 @@
 								</div>
 
 								<div class="flex self-center translate-y-[0.5px]">
-									<div class=" self-center text-sm font-primary">My Writing</div>
+									<div class=" self-center text-sm font-primary">{$i18n.t('Writing')}</div>
 								</div>
 							</a>
 						</div>
@@ -1057,10 +1164,10 @@
 						<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
 							<a
 								class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
-								href="/teacher/assignments"
+								href="/teacher"
 								on:click={itemClickHandler}
 								draggable="false"
-								aria-label="Teaching"
+								aria-label={$i18n.t('Teaching')}
 							>
 								<div class="self-center">
 									<svg
@@ -1080,7 +1187,7 @@
 								</div>
 
 								<div class="flex self-center translate-y-[0.5px]">
-									<div class=" self-center text-sm font-primary">Teaching</div>
+									<div class=" self-center text-sm font-primary">{$i18n.t('Teaching')}</div>
 								</div>
 							</a>
 						</div>
@@ -1172,19 +1279,19 @@
 				{#if $config?.features?.enable_folders && ($user?.role === 'admin' || ($user?.permissions?.features?.folders ?? true))}
 					<Folder
 						id="sidebar-folders"
-						bind:open={showFolders}
+						bind:open={showProjects}
 						className="px-2 mt-0.5"
-						name={$i18n.t('Folders')}
+						name={$i18n.t('Projects')}
 						chevron={false}
 						onAdd={() => {
-							showCreateFolderModal = true;
+							showCreateProjectModal = true;
 						}}
-						onAddLabel={$i18n.t('New Folder')}
+						onAddLabel={$i18n.t('New Project')}
 						on:drop={async (e) => {
 							const { type, id, item } = e.detail;
 
 							if (type === 'folder') {
-								if (folders[id].parent_id === null) {
+								if (projects[id].parent_id === null) {
 									return;
 								}
 
@@ -1196,17 +1303,17 @@
 								);
 
 								if (res) {
-									await initFolders();
+									await initProjects();
 								}
 							}
 						}}
 					>
 						<Folders
-							bind:folderRegistry
-							{folders}
+							bind:folderRegistry={projectRegistry}
+							folders={projects}
 							{shiftKey}
 							onDelete={(folderId) => {
-								selectedFolder.set(null);
+								selectedProject.set(null);
 								initChatList();
 							}}
 							on:update={() => {
@@ -1223,13 +1330,57 @@
 					</Folder>
 				{/if}
 
+				{#if $user?.education_role === 'student' || $user?.education_role === 'teacher' || $user?.role === 'admin'}
+					<Folder
+						id="sidebar-writing-projects"
+						bind:open={showWriting}
+						className="px-2 mt-0.5"
+						name={$i18n.t('Writing')}
+						chevron={false}
+					>
+						<Folders
+							bind:folderRegistry={writingProjectRegistry}
+							folders={writingProjects}
+							{shiftKey}
+							lockFolders={true}
+							showVisibilityToggle={true}
+							onCloseFolder={toggleWritingFolderVisibility}
+							folderHrefBuilder={(folder) =>
+								getProjectMode(folder) === 'assignment_writing' && folder?.meta?.assignment_id
+									? `/assignments/${folder.meta.assignment_id}/write`
+									: folder?.meta?.writing_session_id
+										? `/writing/${folder.meta.writing_session_id}`
+									: '/'
+							}
+							chatHrefBuilder={(chat, folder) =>
+								getProjectMode(folder) === 'assignment_writing' && folder?.meta?.assignment_id
+									? `/assignments/${folder.meta.assignment_id}/write?chat=${chat.id}`
+									: folder?.meta?.writing_session_id
+										? `/writing/${folder.meta.writing_session_id}?chat=${chat.id}`
+									: `/c/${chat.id}`
+							}
+							clearSelectedProjectOnChatClick={false}
+							onDelete={() => {
+								initChatList();
+							}}
+							on:update={() => {
+								initChatList();
+							}}
+							on:change={async () => {
+								initChatList();
+							}}
+						/>
+
+					</Folder>
+				{/if}
+
 				<Folder
 					id="sidebar-chats"
 					className="px-2 mt-0.5"
 					name={$i18n.t('Chats')}
 					chevron={false}
 					on:change={async (e) => {
-						selectedFolder.set(null);
+						selectedProject.set(null);
 					}}
 					on:import={(e) => {
 						importChatHandler(e.detail);
@@ -1264,7 +1415,7 @@
 										}
 									);
 
-									folderRegistry[chat.folder_id]?.setFolderItems();
+									projectRegistry[chat.folder_id]?.setFolderItems();
 								}
 
 								if (chat.pinned) {
@@ -1274,7 +1425,7 @@
 								initChatList();
 							}
 						} else if (type === 'folder') {
-							if (folders[id].parent_id === null) {
+							if (projects[id].parent_id === null) {
 								return;
 							}
 
@@ -1286,7 +1437,7 @@
 							);
 
 							if (res) {
-								await initFolders();
+								await initProjects();
 							}
 						}
 					}}

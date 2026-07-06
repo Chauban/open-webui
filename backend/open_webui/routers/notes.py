@@ -37,6 +37,11 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _is_writing_managed_note(note: Optional[NoteModel]) -> bool:
+    meta = (note.meta or {}) if note else {}
+    return meta.get("scope") == "personal" or bool(meta.get("assignment_id"))
+
+
 def _truncate_note_data(data: Optional[dict], max_length: int = 1000) -> Optional[dict]:
     if not data:
         return data
@@ -95,7 +100,7 @@ async def get_notes(
             }
         )
         for note in notes
-        if note.user_id in users
+        if note.user_id in users and not _is_writing_managed_note(note)
     ]
 
 
@@ -145,6 +150,8 @@ async def search_notes(
         filter["user_id"] = user.id
 
     result = Notes.search_notes(user.id, filter, skip=skip, limit=limit, db=db)
+    result.items = [note for note in result.items if not _is_writing_managed_note(note)]
+    result.total = len(result.items)
     for note in result.items:
         note.data = _truncate_note_data(note.data)
     return result
@@ -205,7 +212,7 @@ async def get_note_by_id(
         )
 
     note = Notes.get_note_by_id(id, db=db)
-    if not note:
+    if not note or _is_writing_managed_note(note):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND
         )
@@ -264,7 +271,7 @@ async def update_note_by_id(
         )
 
     note = Notes.get_note_by_id(id, db=db)
-    if not note:
+    if not note or _is_writing_managed_note(note):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND
         )
@@ -338,7 +345,7 @@ async def update_note_access_by_id(
         )
 
     note = Notes.get_note_by_id(id, db=db)
-    if not note:
+    if not note or _is_writing_managed_note(note):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND
         )
@@ -402,7 +409,7 @@ async def delete_note_by_id(
         )
 
     note = Notes.get_note_by_id(id, db=db)
-    if not note:
+    if not note or _is_writing_managed_note(note):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND
         )

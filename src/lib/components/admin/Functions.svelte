@@ -206,23 +206,14 @@
 		}
 	};
 
-	onMount(async () => {
-		viewOption = localStorage?.workspaceViewOption || '';
-		functions = await getFunctionList(localStorage.token).catch((error) => {
-			toast.error(`${error}`);
-			return [];
-		});
-
-		await tick();
-		loaded = true;
-
-		const onKeyDown = (event) => {
+	onMount(() => {
+		const onKeyDown = (event: KeyboardEvent) => {
 			if (event.key === 'Shift') {
 				shiftKey = true;
 			}
 		};
 
-		const onKeyUp = (event) => {
+		const onKeyUp = (event: KeyboardEvent) => {
 			if (event.key === 'Shift') {
 				shiftKey = false;
 			}
@@ -231,6 +222,17 @@
 		const onBlur = () => {
 			shiftKey = false;
 		};
+
+		void (async () => {
+			viewOption = localStorage?.workspaceViewOption || '';
+			functions = await getFunctionList(localStorage.token).catch((error) => {
+				toast.error(`${error}`);
+				return [];
+			});
+
+			await tick();
+			loaded = true;
+		})();
 
 		window.addEventListener('keydown', onKeyDown);
 		window.addEventListener('keyup', onKeyUp);
@@ -664,8 +666,12 @@
 		bind:show={showConfirm}
 		on:confirm={() => {
 			const reader = new FileReader();
-			reader.onload = async (event) => {
-				const _functions = JSON.parse(event.target.result);
+			reader.onload = async () => {
+				if (typeof reader.result !== 'string') {
+					toast.error($i18n.t('Please select a valid JSON file'));
+					return;
+				}
+				const _functions = JSON.parse(reader.result);
 				console.log(_functions);
 
 				for (let func of _functions) {

@@ -13,7 +13,7 @@
 	export let onImport = (e) => {};
 	export let onClose = () => {};
 
-	export let loadUrlHandler: Function = () => {};
+	export let loadUrlHandler: (url: string) => Promise<any> = async () => null;
 	export let successMessage: string = '';
 
 	let loading = false;

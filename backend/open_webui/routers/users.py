@@ -7,7 +7,7 @@ import io
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import Response, StreamingResponse, FileResponse
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 from open_webui.models.auths import Auths
@@ -15,6 +15,7 @@ from open_webui.models.oauth_sessions import OAuthSessions
 
 from open_webui.models.groups import Groups
 from open_webui.models.chats import Chats
+from open_webui.models.education import AdminClassroomListItem, Education
 from open_webui.models.users import (
     UserModel,
     UserGroupIdsModel,
@@ -447,6 +448,54 @@ class UserActiveResponse(UserStatus):
     model_config = ConfigDict(extra="allow")
 
 
+class UserClassroomAssignmentResponse(BaseModel):
+    classroom_id: Optional[str] = None
+    classrooms: list[AdminClassroomListItem] = Field(default_factory=list)
+
+
+def _get_admin_classroom_items(db: Session) -> list[AdminClassroomListItem]:
+    items = []
+    for classroom in Education.get_all_classrooms(db=db):
+        teacher = Users.get_user_by_id(classroom.teacher_id, db=db)
+        items.append(
+            AdminClassroomListItem(
+                classroom=classroom,
+                teacher_name=teacher.name if teacher else None,
+            )
+        )
+    return items
+
+
+@router.get("/education/classrooms", response_model=list[AdminClassroomListItem])
+async def get_admin_classrooms(
+    user=Depends(get_admin_user), db: Session = Depends(get_session)
+):
+    Education._ensure_classroom_tables(db)
+    return _get_admin_classroom_items(db)
+
+
+@router.get(
+    "/{user_id}/education/classroom",
+    response_model=UserClassroomAssignmentResponse,
+)
+async def get_user_classroom_assignment(
+    user_id: str, user=Depends(get_admin_user), db: Session = Depends(get_session)
+):
+    Education._ensure_classroom_tables(db)
+    target_user = Users.get_user_by_id(user_id, db=db)
+    if target_user is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.USER_NOT_FOUND,
+        )
+
+    membership = Education.get_classroom_member_by_user_id(user_id, db=db)
+    return UserClassroomAssignmentResponse(
+        classroom_id=membership.classroom_id if membership and membership.member_role == "student" else None,
+        classrooms=_get_admin_classroom_items(db),
+    )
+
+
 @router.get("/{user_id}", response_model=UserActiveResponse)
 async def get_user_by_id(
     user_id: str, user=Depends(get_admin_user), db: Session = Depends(get_session)
@@ -580,6 +629,7 @@ async def update_user_by_id(
     session_user=Depends(get_admin_user),
     db: Session = Depends(get_session),
 ):
+    Education._ensure_classroom_tables(db)
     # Prevent modification of the primary admin user by other admins
     try:
         first_user = Users.get_first_user(db=db)
@@ -631,6 +681,10 @@ async def update_user_by_id(
         if form_data.role != "admin" and effective_education_role not in {"student", "teacher"}:
             effective_education_role = "student"
 
+        existing_membership = Education.get_classroom_member_by_user_id(user_id, db=db)
+        if form_data.classroom_id is not None:
+            form_data.classroom_id = form_data.classroom_id.strip() or None
+
         if effective_education_role in {"student", "teacher"}:
             user_info["education_role"] = effective_education_role
         else:
@@ -648,6 +702,33 @@ async def update_user_by_id(
             },
             db=db,
         )
+
+        if existing_membership and existing_membership.member_role == "student":
+            should_clear_existing_classroom = effective_education_role != "student"
+            should_switch_classroom = (
+                effective_education_role == "student"
+                and form_data.classroom_id != existing_membership.classroom_id
+            )
+            if should_clear_existing_classroom or should_switch_classroom:
+                Education.delete_classroom_member(
+                    existing_membership.classroom_id,
+                    user_id,
+                    db=db,
+                )
+
+        if effective_education_role == "student" and form_data.classroom_id:
+            classroom = Education.get_classroom_by_id(form_data.classroom_id, db=db)
+            if classroom is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Classroom not found",
+                )
+            Education.ensure_classroom_member(
+                classroom.id,
+                user_id,
+                "student",
+                db=db,
+            )
 
         if updated_user:
             return updated_user

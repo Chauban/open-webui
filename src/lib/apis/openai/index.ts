@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { OPENAI_API_BASE_URL, WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 
 export const getOpenAIConfig = async (token: string = '') => {
@@ -376,8 +377,24 @@ export const generateOpenAIChatCompletion = async (
 		body: JSON.stringify(body)
 	})
 		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
+			if (!res.ok) {
+				const contentType = res.headers.get('content-type') ?? '';
+				if (contentType.includes('application/json')) {
+					throw await res.json();
+				}
+				throw await res.text();
+			}
+
+			const contentType = res.headers.get('content-type') ?? '';
+			if (contentType.includes('text/event-stream')) {
+				return res;
+			}
+
+			if (contentType.includes('application/json')) {
+				return res.json();
+			}
+
+			return res;
 		})
 		.catch((err) => {
 			error = err?.detail ?? err;

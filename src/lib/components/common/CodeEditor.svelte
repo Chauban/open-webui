@@ -25,8 +25,8 @@
 	export let boilerplate = '';
 	export let value = '';
 
-	export let onSave = () => {};
-	export let onChange = () => {};
+	export let onSave: () => void = () => {};
+	export let onChange: (value: string) => void = () => {};
 
 	let _value = '';
 
@@ -107,7 +107,15 @@
 	// Add 'matlab' alias to Octave language (MATLAB-compatible syntax)
 	const octaveLang = languages.find((l) => l.name === 'Octave');
 	if (octaveLang && !octaveLang.alias.includes('matlab')) {
-		octaveLang.alias.push('matlab');
+		languages.push(
+			LanguageDescription.of({
+			name: octaveLang.name,
+			alias: [...octaveLang.alias, 'matlab'],
+			extensions: octaveLang.extensions,
+			filename: octaveLang.filename,
+			load: octaveLang.load
+			})
+		);
 	}
 
 	const getLang = async () => {
@@ -115,7 +123,7 @@
 		return await language?.load();
 	};
 
-	let pyodideWorkerInstance = null;
+	let pyodideWorkerInstance: Worker | null = null;
 
 	const getPyodideWorker = () => {
 		if (!pyodideWorkerInstance) {
@@ -127,10 +135,10 @@
 	// Generate unique IDs for requests
 	let _formatReqId = 0;
 
-	const formatPythonCodePyodide = (code) => {
+	const formatPythonCodePyodide = (code: string): Promise<{ code: string | null }> => {
 		return new Promise((resolve, reject) => {
 			const id = `format-${++_formatReqId}`;
-			let timeout;
+			let timeout: ReturnType<typeof setTimeout>;
 			const worker = getPyodideWorker();
 
 			const startTag = `--||CODE-START-${id}||--`;
@@ -155,7 +163,7 @@ print("${endTag}")
 				if (stderr) {
 					reject(stderr);
 				} else {
-					function extractBetweenDelimiters(stdout, start, end) {
+					function extractBetweenDelimiters(stdout: string, start: string, end: string) {
 						console.log('stdout', stdout);
 						const startIdx = stdout.indexOf(start);
 						const endIdx = stdout.indexOf(end, startIdx + start.length);
@@ -247,7 +255,7 @@ print("${endTag}")
 	}
 
 	const setLanguage = async () => {
-		const language = await getLang();
+			const language = await getLang();
 		if (language && codeEditor) {
 			codeEditor.dispatch({
 				effects: editorLanguage.reconfigure(language)
@@ -294,7 +302,7 @@ print("${endTag}")
 							});
 						} else {
 							codeEditor.dispatch({
-								effects: editorTheme.reconfigure()
+								effects: editorTheme.reconfigure([])
 							});
 						}
 					}
@@ -307,7 +315,7 @@ print("${endTag}")
 			attributeFilter: ['class']
 		});
 
-		const keydownHandler = async (e) => {
+		const keydownHandler = async (e: KeyboardEvent) => {
 			if ((e.ctrlKey || e.metaKey) && e.key === 's') {
 				e.preventDefault();
 
@@ -336,4 +344,4 @@ print("${endTag}")
 	});
 </script>
 
-<div id="code-textarea-{id}" class="h-full w-full text-sm" />
+<div id="code-textarea-{id}" class="h-full w-full text-sm"></div>

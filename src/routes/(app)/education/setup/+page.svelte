@@ -31,11 +31,17 @@
 			syncEducationRole(educationRole);
 
 			if (educationRole === 'teacher') {
+				const trimmedName = classroomName.trim();
+				if (!trimmedName) {
+					toast.error('Classroom name is required.');
+					return;
+				}
+
 				await createClassroom(localStorage.token, {
-					name: classroomName.trim() || 'Default Classroom'
+					name: trimmedName
 				});
-				toast.success('Teacher identity saved. Your classroom is ready.');
-				await goto('/teacher/assignments');
+				toast.success('Teacher identity saved. Your first classroom is ready.');
+				await goto('/teacher');
 				return;
 			}
 
@@ -107,7 +113,7 @@
 					placeholder="Example: Grade 8 Writing"
 				/>
 				<div class="mt-2 text-sm text-gray-500">
-					If left empty, the system will create a default classroom for this teacher account.
+					Create your first classroom now. You can add more classrooms later from Teaching.
 				</div>
 			</div>
 		{:else}
@@ -119,7 +125,7 @@
 					placeholder="Enter invite code now, or leave blank and join later"
 				/>
 				<div class="mt-2 text-sm text-gray-500">
-					You can skip this now. The invite code can also be entered later in My Writing.
+					You can skip this now. The invite code can also be entered later in Writing.
 				</div>
 			</div>
 		{/if}

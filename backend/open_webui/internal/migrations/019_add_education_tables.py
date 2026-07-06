@@ -38,7 +38,7 @@ def migrate(migrator: Migrator, database: pw.Database, *, fake=False):
         assignment_id = pw.TextField()
         student_id = pw.TextField()
         note_id = pw.TextField()
-        chat_id = pw.TextField()
+        chat_id = pw.TextField(null=True)
         status = pw.TextField(default="draft")
         submitted_submission_id = pw.TextField(null=True)
         created_at = pw.BigIntegerField()
@@ -80,7 +80,7 @@ def migrate(migrator: Migrator, database: pw.Database, *, fake=False):
         assignment_id = pw.TextField()
         student_id = pw.TextField()
         writing_session_id = pw.TextField()
-        ai_help_type = pw.TextField()
+        ai_help_types = pw.TextField()
         reflection_text = pw.TextField()
         created_at = pw.BigIntegerField()
 
@@ -137,7 +137,7 @@ def migrate(migrator: Migrator, database: pw.Database, *, fake=False):
         "assignment_id TEXT NOT NULL, "
         "student_id TEXT NOT NULL, "
         "note_id TEXT NOT NULL, "
-        "chat_id TEXT NOT NULL, "
+        "chat_id TEXT NULL, "
         "status TEXT NOT NULL DEFAULT 'draft', "
         "submitted_submission_id TEXT NULL, "
         "created_at BIGINT NOT NULL, "
@@ -173,7 +173,7 @@ def migrate(migrator: Migrator, database: pw.Database, *, fake=False):
         "assignment_id TEXT NOT NULL, "
         "student_id TEXT NOT NULL, "
         "writing_session_id TEXT NOT NULL, "
-        "ai_help_type TEXT NOT NULL, "
+        "ai_help_types TEXT NOT NULL, "
         "reflection_text TEXT NOT NULL, "
         "created_at BIGINT NOT NULL)"
     )

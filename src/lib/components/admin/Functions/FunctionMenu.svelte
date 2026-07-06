@@ -16,14 +16,14 @@
 
 	export let func;
 
-	export let editHandler: Function;
-	export let shareHandler: Function;
-	export let cloneHandler: Function;
-	export let exportHandler: Function;
-	export let deleteHandler: Function;
-	export let toggleGlobalHandler: Function;
+	export let editHandler: () => void = () => {};
+	export let shareHandler: () => void = () => {};
+	export let cloneHandler: () => void = () => {};
+	export let exportHandler: () => void = () => {};
+	export let deleteHandler: () => void = () => {};
+	export let toggleGlobalHandler: (e: CustomEvent<boolean>) => void = () => {};
 
-	export let onClose: Function;
+	export let onClose: () => void = () => {};
 
 	let show = false;
 </script>

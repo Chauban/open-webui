@@ -1,5 +1,6 @@
 import CRC32 from 'crc-32';
 
+// @ts-nocheck
 export const parseFile = async (file) => {
 	if (file.type === 'application/json') {
 		return await parseJsonFile(file);

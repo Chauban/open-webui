@@ -95,6 +95,7 @@
 	let syncStatsEventData = null;
 
 	let heartbeatInterval = null;
+	let socketFallbackApplied = false;
 
 	const BREAKPOINT = 768;
 
@@ -110,12 +111,35 @@
 		});
 		await socket.set(_socket);
 
+		const fallbackToPolling = async (reason) => {
+			if (!enableWebsocket || socketFallbackApplied) {
+				return;
+			}
+
+			socketFallbackApplied = true;
+			console.log(`Falling back to polling socket transport due to ${reason}`);
+
+			if (heartbeatInterval) {
+				clearInterval(heartbeatInterval);
+				heartbeatInterval = null;
+			}
+
+			_socket.removeAllListeners();
+			_socket.close();
+
+			await setupSocket(false);
+		};
+
 		_socket.on('connect_error', (err) => {
 			console.log('connect_error', err);
+			fallbackToPolling('connect_error');
 		});
 
 		_socket.on('connect', async () => {
 			console.log('connected', _socket.id);
+			if (!enableWebsocket) {
+				socketFallbackApplied = true;
+			}
 			const res = await getVersion(localStorage.token);
 
 			const deploymentId = res?.deployment_id ?? null;
@@ -176,6 +200,10 @@
 
 			if (details) {
 				console.log('Additional details:', details);
+			}
+
+			if (reason === 'transport close') {
+				fallbackToPolling(reason);
 			}
 		});
 	};
@@ -369,9 +397,9 @@
 
 					if ($isLastActiveTab) {
 						if ($settings?.notificationEnabled ?? false) {
-							new Notification(`${displayTitle} • Open WebUI`, {
+							new Notification(`${displayTitle} • ${$WEBUI_NAME}`, {
 								body: content,
-								icon: `${WEBUI_BASE_URL}/static/favicon.png`
+								icon: `${WEBUI_BASE_URL}/static/logo.png`
 							});
 						}
 					}
@@ -572,7 +600,7 @@
 
 				if ($isLastActiveTab) {
 					if ($settings?.notificationEnabled ?? false) {
-						new Notification(`${title} • Open WebUI`, {
+						new Notification(`${title} • ${$WEBUI_NAME}`, {
 							body: data?.content,
 							icon: `${WEBUI_API_BASE_URL}/users/${data?.user?.id}/profile/image`
 						});

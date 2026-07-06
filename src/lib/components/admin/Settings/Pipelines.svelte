@@ -172,10 +172,12 @@
 		}
 
 		pipelineFiles = null;
-		const pipelineUploadInputElement = document.getElementById('pipelines-upload-input');
+		const pipelineUploadInputElement = document.getElementById(
+			'pipelines-upload-input'
+		) as HTMLInputElement | null;
 
 		if (pipelineUploadInputElement) {
-			pipelineUploadInputElement.value = null;
+			pipelineUploadInputElement.value = '';
 		}
 
 		uploading = false;

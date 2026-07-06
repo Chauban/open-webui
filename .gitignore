@@ -314,3 +314,6 @@ cypress/screenshots
 # Custom scripts
 start_backend.bat
 start_frontend.bat
+
+# Local dev logs and temp scripts
+.tmp/

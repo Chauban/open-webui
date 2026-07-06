@@ -23,6 +23,17 @@ export default defineConfig({
 	build: {
 		sourcemap: true
 	},
+	test: {
+		exclude: [
+			'**/node_modules/**',
+			'**/.git/**',
+			'**/.tmp/**',
+			'**/.pytest_cache/**',
+			'**/.tmppytest-cache/**',
+			'**/*pytest-cache/**',
+			'pytest-cache-files*/**'
+		]
+	},
 	worker: {
 		format: 'es'
 	},
@@ -30,6 +41,9 @@ export default defineConfig({
 		pure: process.env.ENV === 'dev' ? [] : ['console.log', 'console.debug', 'console.error']
 	},
 	server: {
+		watch: {
+			ignored: ['**/.tmp/**']
+		},
 		proxy: {
 			'/api': {
 				target: 'http://localhost:8080',

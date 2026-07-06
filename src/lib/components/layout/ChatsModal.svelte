@@ -66,7 +66,7 @@
 
 	const deleteHandler = async (chatId) => {
 		const res = await deleteChatById(localStorage.token, chatId).catch((error) => {
-			toast.error(`${error}`);
+			toast.error(error?.detail?.detail ?? error?.detail ?? `${error}`);
 		});
 
 		onUpdate();

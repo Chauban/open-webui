@@ -158,15 +158,19 @@
 
 			if (isDarkMode) {
 				const darkImage = new Image();
-				darkImage.src = `${WEBUI_BASE_URL}/static/favicon-dark.png`;
+				const darkLogoSrc =
+					logo.dataset.logoVariant === 'lockup'
+						? `${WEBUI_BASE_URL}/static/splash-dark.png`
+						: `${WEBUI_BASE_URL}/static/logo.png`;
+				darkImage.src = darkLogoSrc;
 
 				darkImage.onload = () => {
-					logo.src = `${WEBUI_BASE_URL}/static/favicon-dark.png`;
-					logo.style.filter = ''; // Ensure no inversion is applied if favicon-dark.png exists
+					logo.src = darkLogoSrc;
+					logo.style.filter = '';
 				};
 
 				darkImage.onerror = () => {
-					logo.style.filter = 'invert(1)'; // Invert image if favicon-dark.png is missing
+					logo.style.filter = logo.dataset.logoVariant === 'lockup' ? '' : 'invert(1)';
 				};
 			}
 		}
@@ -248,8 +252,9 @@
 									<img
 										id="logo"
 										crossorigin="anonymous"
-										src="{WEBUI_BASE_URL}/static/favicon.png"
-										class="size-24 rounded-full"
+										src="{WEBUI_BASE_URL}/static/splash.png"
+										class="h-20 max-w-72 w-auto"
+										data-logo-variant="lockup"
 										alt="{$WEBUI_NAME} logo"
 									/>
 								</div>
@@ -615,8 +620,8 @@
 						<img
 							id="logo"
 							crossorigin="anonymous"
-							src="{WEBUI_BASE_URL}/static/favicon.png"
-							class=" w-6 rounded-full"
+							src="{WEBUI_BASE_URL}/static/logo.png"
+							class=" w-6 rounded-md"
 							alt=""
 						/>
 					</div>

@@ -1,8 +1,23 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
+const parseErrorResponse = async (res: Response) => {
+	const contentType = res.headers.get('content-type') || '';
+	if (contentType.includes('application/json')) {
+		try {
+			return await res.json();
+		} catch {}
+	}
+
+	const text = await res.text();
+	return {
+		detail: text || res.statusText || 'Request failed',
+		status: res.status
+	};
+};
+
 const handleJson = async (res: Response) => {
 	if (!res.ok) {
-		throw await res.json();
+		throw await parseErrorResponse(res);
 	}
 	return res.json();
 };
@@ -53,14 +68,17 @@ export const regenerateClassroomInviteCode = async (token: string, classroomId: 
 	}).then(handleJson);
 };
 
-export const createAssignment = async (
-	token: string,
-	payload: { title: string; description?: string; classroom_id?: string }
-) => {
-	return fetch(`${WEBUI_API_BASE_URL}/assignments`, {
-		method: 'POST',
-		headers: withAuth(token),
-		body: JSON.stringify(payload)
+export const getTeacherClassrooms = async (token: string) => {
+	return fetch(`${WEBUI_API_BASE_URL}/teacher/classrooms`, {
+		method: 'GET',
+		headers: withAuth(token)
+	}).then(handleJson);
+};
+
+export const getTeacherOverview = async (token: string) => {
+	return fetch(`${WEBUI_API_BASE_URL}/teacher/overview`, {
+		method: 'GET',
+		headers: withAuth(token)
 	}).then(handleJson);
 };
 
@@ -71,32 +89,82 @@ export const getTeacherAssignments = async (token: string) => {
 	}).then(handleJson);
 };
 
-export const getAssignmentMembers = async (token: string, assignmentId: string) => {
-	return fetch(`${WEBUI_API_BASE_URL}/teacher/assignments/${assignmentId}/members`, {
+export const getTeacherReview = async (token: string) => {
+	return fetch(`${WEBUI_API_BASE_URL}/teacher/review`, {
 		method: 'GET',
 		headers: withAuth(token)
 	}).then(handleJson);
 };
 
-export const addAssignmentMember = async (
+export const getClassroomMembers = async (token: string, classroomId: string) => {
+	return fetch(`${WEBUI_API_BASE_URL}/teacher/classrooms/${classroomId}/members`, {
+		method: 'GET',
+		headers: withAuth(token)
+	}).then(handleJson);
+};
+
+export const addClassroomMember = async (
 	token: string,
-	assignmentId: string,
+	classroomId: string,
 	payload: { user_id: string; member_role?: string }
 ) => {
-	return fetch(`${WEBUI_API_BASE_URL}/teacher/assignments/${assignmentId}/members`, {
+	return fetch(`${WEBUI_API_BASE_URL}/teacher/classrooms/${classroomId}/members`, {
 		method: 'POST',
 		headers: withAuth(token),
 		body: JSON.stringify(payload)
 	}).then(handleJson);
 };
 
-export const removeAssignmentMember = async (
+export const removeClassroomMember = async (
 	token: string,
-	assignmentId: string,
+	classroomId: string,
 	memberUserId: string
 ) => {
-	return fetch(`${WEBUI_API_BASE_URL}/teacher/assignments/${assignmentId}/members/${memberUserId}`, {
+	return fetch(`${WEBUI_API_BASE_URL}/teacher/classrooms/${classroomId}/members/${memberUserId}`, {
 		method: 'DELETE',
+		headers: withAuth(token)
+	}).then(handleJson);
+};
+
+export const getTeacherClassroomAssignments = async (token: string, classroomId: string) => {
+	return fetch(`${WEBUI_API_BASE_URL}/teacher/classrooms/${classroomId}/assignments`, {
+		method: 'GET',
+		headers: withAuth(token)
+	}).then(handleJson);
+};
+
+export const createAssignment = async (
+	token: string,
+	payload: { title: string; description?: string; classroom_id: string; due_at: number }
+) => {
+	return fetch(`${WEBUI_API_BASE_URL}/assignments`, {
+		method: 'POST',
+		headers: withAuth(token),
+		body: JSON.stringify(payload)
+	}).then(handleJson);
+};
+
+export const updateAssignment = async (
+	token: string,
+	assignmentId: string,
+	payload: {
+		title?: string;
+		description?: string;
+		classroom_id?: string;
+		status?: string;
+		due_at?: number;
+	}
+) => {
+	return fetch(`${WEBUI_API_BASE_URL}/assignments/${assignmentId}`, {
+		method: 'PATCH',
+		headers: withAuth(token),
+		body: JSON.stringify(payload)
+	}).then(handleJson);
+};
+
+export const archiveAssignment = async (token: string, assignmentId: string) => {
+	return fetch(`${WEBUI_API_BASE_URL}/assignments/${assignmentId}/archive`, {
+		method: 'POST',
 		headers: withAuth(token)
 	}).then(handleJson);
 };
@@ -104,6 +172,40 @@ export const removeAssignmentMember = async (
 export const getAssignmentWorkspace = async (token: string, assignmentId: string) => {
 	return fetch(`${WEBUI_API_BASE_URL}/assignments/${assignmentId}/workspace`, {
 		method: 'GET',
+		headers: withAuth(token)
+	}).then(handleJson);
+};
+
+export const getWritingHome = async (token: string) => {
+	return fetch(`${WEBUI_API_BASE_URL}/me/writing/home`, {
+		method: 'GET',
+		headers: withAuth(token)
+	}).then(handleJson);
+};
+
+export const createPersonalWriting = async (
+	token: string,
+	payload: {
+		title?: string;
+	}
+) => {
+	return fetch(`${WEBUI_API_BASE_URL}/me/writing/personal`, {
+		method: 'POST',
+		headers: withAuth(token),
+		body: JSON.stringify(payload)
+	}).then(handleJson);
+};
+
+export const getWritingWorkspace = async (token: string, sessionId: string) => {
+	return fetch(`${WEBUI_API_BASE_URL}/writing/${sessionId}/workspace`, {
+		method: 'GET',
+		headers: withAuth(token)
+	}).then(handleJson);
+};
+
+export const deletePersonalWriting = async (token: string, sessionId: string) => {
+	return fetch(`${WEBUI_API_BASE_URL}/me/writing/personal/${sessionId}`, {
+		method: 'DELETE',
 		headers: withAuth(token)
 	}).then(handleJson);
 };
@@ -155,12 +257,50 @@ export const createProvenanceSegments = async (
 			end_offset?: number | null;
 			metadata_json?: Record<string, unknown> | null;
 		}>;
+		replace_existing?: boolean;
 	}
 ) => {
 	return fetch(`${WEBUI_API_BASE_URL}/writing-sessions/${sessionId}/provenance`, {
 		method: 'POST',
 		headers: withAuth(token),
 		body: JSON.stringify(payload)
+	}).then(handleJson);
+};
+
+export const createEditorOperations = async (
+	token: string,
+	sessionId: string,
+	payload: {
+		operations: Array<{
+			op_type: string;
+			source_type: string;
+			start_offset?: number | null;
+			end_offset?: number | null;
+			inserted_text?: string | null;
+			deleted_text?: string | null;
+			batch_id: string;
+			metadata_json?: Record<string, unknown> | null;
+		}>;
+	}
+) => {
+	return fetch(`${WEBUI_API_BASE_URL}/writing-sessions/${sessionId}/operations`, {
+		method: 'POST',
+		headers: withAuth(token),
+		body: JSON.stringify(payload)
+	}).then(handleJson);
+};
+
+export const setWritingSessionActiveChat = async (
+	token: string,
+	sessionId: string,
+	chatId: string | null
+) => {
+	return fetch(`${WEBUI_API_BASE_URL}/writing-sessions/${sessionId}/active-chat`, {
+		method: 'POST',
+		headers: withAuth(token),
+		body: JSON.stringify({
+			chat_id: chatId
+		})
 	}).then(handleJson);
 };
 
@@ -187,7 +327,7 @@ export const submitAssignment = async (
 		final_content_json: object | null;
 		final_content_html?: string;
 		final_content_text: string;
-		ai_help_type: string;
+		ai_help_types: string[];
 		reflection_text: string;
 	}
 ) => {
@@ -205,6 +345,31 @@ export const getTeacherSubmissions = async (token: string, assignmentId: string)
 	}).then(handleJson);
 };
 
+export const getSubmissionReview = async (token: string, submissionId: string) => {
+	return fetch(`${WEBUI_API_BASE_URL}/teacher/submissions/${submissionId}/review`, {
+		method: 'GET',
+		headers: withAuth(token)
+	}).then(handleJson);
+};
+
+export const saveSubmissionReview = async (
+	token: string,
+	submissionId: string,
+	payload: {
+		review_status: string;
+		score?: number | null;
+		overall_comment?: string;
+		rubric_json?: Record<string, unknown> | null;
+		returned_comment?: string;
+	}
+) => {
+	return fetch(`${WEBUI_API_BASE_URL}/teacher/submissions/${submissionId}/review`, {
+		method: 'POST',
+		headers: withAuth(token),
+		body: JSON.stringify(payload)
+	}).then(handleJson);
+};
+
 export const getTeacherSubmissionDetail = async (token: string, submissionId: string) => {
 	return fetch(`${WEBUI_API_BASE_URL}/teacher/submissions/${submissionId}`, {
 		method: 'GET',
@@ -219,6 +384,56 @@ export const getTeacherDashboard = async (token: string, assignmentId: string) =
 	}).then(handleJson);
 };
 
+export const getSubmissionAnalysisSegmentDetail = async (
+	token: string,
+	submissionId: string,
+	segmentId: string
+) => {
+	return fetch(
+		`${WEBUI_API_BASE_URL}/teacher/submissions/${submissionId}/analysis/segments/${segmentId}`,
+		{
+			method: 'GET',
+			headers: withAuth(token)
+		}
+	).then(handleJson);
+};
+
+export const getClassroomProgress = async (token: string, classroomId: string) => {
+	return fetch(`${WEBUI_API_BASE_URL}/teacher/classrooms/${classroomId}/progress`, {
+		method: 'GET',
+		headers: withAuth(token)
+	}).then(handleJson);
+};
+
+export const bulkImportClassroomMembers = async (
+	token: string,
+	classroomId: string,
+	payload: {
+		user_ids?: string[];
+		emails?: string[];
+	}
+) => {
+	return fetch(`${WEBUI_API_BASE_URL}/teacher/classrooms/${classroomId}/bulk-import`, {
+		method: 'POST',
+		headers: withAuth(token),
+		body: JSON.stringify(payload)
+	}).then(handleJson);
+};
+
+export const exportClassroomProgress = async (token: string, classroomId: string) => {
+	const res = await fetch(`${WEBUI_API_BASE_URL}/teacher/classrooms/${classroomId}/export`, {
+		method: 'GET',
+		headers: {
+			Accept: 'text/csv',
+			authorization: `Bearer ${token}`
+		}
+	});
+	if (!res.ok) {
+		throw await parseErrorResponse(res);
+	}
+	return res.text();
+};
+
 export const getStudentDashboard = async (token: string) => {
 	return fetch(`${WEBUI_API_BASE_URL}/me/writing/dashboard`, {
 		method: 'GET',
@@ -228,6 +443,13 @@ export const getStudentDashboard = async (token: string) => {
 
 export const getStudentAssignments = async (token: string) => {
 	return fetch(`${WEBUI_API_BASE_URL}/me/writing/assignments`, {
+		method: 'GET',
+		headers: withAuth(token)
+	}).then(handleJson);
+};
+
+export const getStudentAssignmentWorkspaces = async (token: string) => {
+	return fetch(`${WEBUI_API_BASE_URL}/me/writing/workspaces`, {
 		method: 'GET',
 		headers: withAuth(token)
 	}).then(handleJson);

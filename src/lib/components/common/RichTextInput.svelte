@@ -841,6 +841,7 @@
 				onChange({
 					html: htmlValue,
 					json: jsonValue,
+					text: editor.getText({ blockSeparator: '\n' }),
 					md: mdValue
 				});
 
@@ -1083,6 +1084,7 @@
 									event.preventDefault();
 									return true;
 								}
+								eventDispatch('paste', { event });
 								// Let ProseMirror handle normal text paste in non-problematic environments.
 								return false;
 							}

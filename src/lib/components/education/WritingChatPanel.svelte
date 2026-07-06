@@ -152,7 +152,7 @@
 							class="rounded-full border border-gray-300 px-3 py-1 text-xs"
 							on:click={() => dispatch('insert', { content: message.content, sourceMessageId: message.id })}
 						>
-							Insert to Draft
+							Insert to Writing
 						</button>
 						<button
 							class="rounded-full border border-gray-300 px-3 py-1 text-xs"

@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { APP_NAME } from '$lib/constants';
 import { type Writable, writable } from 'svelte/store';
 import type { ModelConfig } from '$lib/apis';

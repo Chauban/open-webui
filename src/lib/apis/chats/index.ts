@@ -1,5 +1,21 @@
+// @ts-nocheck
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 import { getTimeRange } from '$lib/utils';
+
+const parseErrorResponse = async (res: Response) => {
+	const contentType = res.headers.get('content-type') || '';
+	if (contentType.includes('application/json')) {
+		try {
+			return await res.json();
+		} catch {}
+	}
+
+	const text = await res.text();
+	return {
+		detail: text || res.statusText || 'Request failed',
+		status: res.status
+	};
+};
 
 export const createNewChat = async (token: string, chat: object, folderId: string | null) => {
 	let error = null;
@@ -17,7 +33,7 @@ export const createNewChat = async (token: string, chat: object, folderId: strin
 		})
 	})
 		.then(async (res) => {
-			if (!res.ok) throw await res.json();
+			if (!res.ok) throw await parseErrorResponse(res);
 			return res.json();
 		})
 		.catch((err) => {
@@ -45,7 +61,7 @@ export const unarchiveAllChats = async (token: string) => {
 		}
 	})
 		.then(async (res) => {
-			if (!res.ok) throw await res.json();
+			if (!res.ok) throw await parseErrorResponse(res);
 			return res.json();
 		})
 		.then((json) => {
@@ -80,7 +96,7 @@ export const importChats = async (token: string, chats: object[]) => {
 		})
 	})
 		.then(async (res) => {
-			if (!res.ok) throw await res.json();
+			if (!res.ok) throw await parseErrorResponse(res);
 			return res.json();
 		})
 		.catch((err) => {
@@ -126,7 +142,7 @@ export const getChatList = async (
 		}
 	})
 		.then(async (res) => {
-			if (!res.ok) throw await res.json();
+			if (!res.ok) throw await parseErrorResponse(res);
 			return res.json();
 		})
 		.then((json) => {
@@ -233,7 +249,7 @@ export const getArchivedChatList = async (
 		}
 	})
 		.then(async (res) => {
-			if (!res.ok) throw await res.json();
+			if (!res.ok) throw await parseErrorResponse(res);
 			return res.json();
 		})
 		.then((json) => {
@@ -278,7 +294,7 @@ export const getSharedChatList = async (token: string = '', page: number = 1, fi
 		}
 	})
 		.then(async (res) => {
-			if (!res.ok) throw await res.json();
+			if (!res.ok) throw await parseErrorResponse(res);
 			return res.json();
 		})
 		.then((json) => {
@@ -312,7 +328,7 @@ export const getAllChats = async (token: string) => {
 		}
 	})
 		.then(async (res) => {
-			if (!res.ok) throw await res.json();
+			if (!res.ok) throw await parseErrorResponse(res);
 			return res.json();
 		})
 		.then((json) => {
@@ -347,7 +363,7 @@ export const getChatListBySearchText = async (token: string, text: string, page:
 		}
 	})
 		.then(async (res) => {
-			if (!res.ok) throw await res.json();
+			if (!res.ok) throw await parseErrorResponse(res);
 			return res.json();
 		})
 		.then((json) => {
@@ -381,7 +397,7 @@ export const getChatsByFolderId = async (token: string, folderId: string) => {
 		}
 	})
 		.then(async (res) => {
-			if (!res.ok) throw await res.json();
+			if (!res.ok) throw await parseErrorResponse(res);
 			return res.json();
 		})
 		.then((json) => {
@@ -420,7 +436,7 @@ export const getChatListByFolderId = async (token: string, folderId: string, pag
 		}
 	)
 		.then(async (res) => {
-			if (!res.ok) throw await res.json();
+			if (!res.ok) throw await parseErrorResponse(res);
 			return res.json();
 		})
 		.then((json) => {
@@ -451,7 +467,7 @@ export const getAllArchivedChats = async (token: string) => {
 		}
 	})
 		.then(async (res) => {
-			if (!res.ok) throw await res.json();
+			if (!res.ok) throw await parseErrorResponse(res);
 			return res.json();
 		})
 		.then((json) => {
@@ -482,7 +498,7 @@ export const getAllUserChats = async (token: string) => {
 		}
 	})
 		.then(async (res) => {
-			if (!res.ok) throw await res.json();
+			if (!res.ok) throw await parseErrorResponse(res);
 			return res.json();
 		})
 		.then((json) => {
@@ -513,7 +529,7 @@ export const getAllTags = async (token: string) => {
 		}
 	})
 		.then(async (res) => {
-			if (!res.ok) throw await res.json();
+			if (!res.ok) throw await parseErrorResponse(res);
 			return res.json();
 		})
 		.then((json) => {
@@ -544,7 +560,7 @@ export const getPinnedChatList = async (token: string = '') => {
 		}
 	})
 		.then(async (res) => {
-			if (!res.ok) throw await res.json();
+			if (!res.ok) throw await parseErrorResponse(res);
 			return res.json();
 		})
 		.then((json) => {
@@ -968,7 +984,7 @@ export const updateChatById = async (token: string, id: string, chat: object) =>
 		})
 	})
 		.then(async (res) => {
-			if (!res.ok) throw await res.json();
+			if (!res.ok) throw await parseErrorResponse(res);
 			return res.json();
 		})
 		.then((json) => {
@@ -1000,14 +1016,14 @@ export const deleteChatById = async (token: string, id: string) => {
 		}
 	})
 		.then(async (res) => {
-			if (!res.ok) throw await res.json();
+			if (!res.ok) throw await parseErrorResponse(res);
 			return res.json();
 		})
 		.then((json) => {
 			return json;
 		})
 		.catch((err) => {
-			error = err.detail;
+			error = err;
 
 			console.error(err);
 			return null;

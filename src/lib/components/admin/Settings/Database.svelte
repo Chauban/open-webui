@@ -57,11 +57,19 @@
 			type="file"
 			accept=".json"
 			on:change={(e) => {
-				const file = e.target.files[0];
+				const input = e.currentTarget as HTMLInputElement;
+				const file = input.files?.[0];
+				if (!file) {
+					return;
+				}
 				const reader = new FileReader();
 
-				reader.onload = async (e) => {
-					const res = await importConfig(localStorage.token, JSON.parse(e.target.result)).catch(
+				reader.onload = async () => {
+					if (typeof reader.result !== 'string') {
+						toast.error($i18n.t('Please select a valid JSON file'));
+						return;
+					}
+					const res = await importConfig(localStorage.token, JSON.parse(reader.result)).catch(
 						(error) => {
 							toast.error(`${error}`);
 						}
@@ -70,7 +78,7 @@
 					if (res) {
 						toast.success($i18n.t('Config imported successfully'));
 					}
-					e.target.value = null;
+					input.value = '';
 				};
 
 				reader.readAsText(file);
