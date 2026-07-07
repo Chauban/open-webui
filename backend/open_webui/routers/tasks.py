@@ -1,40 +1,36 @@
-from fastapi import APIRouter, Depends, HTTPException, Response, status, Request
-from fastapi.responses import JSONResponse, RedirectResponse
-
-from pydantic import BaseModel
-from typing import Optional
 import logging
 import re
+from typing import Optional
 
-from open_webui.utils.chat import generate_chat_completion
-from open_webui.utils.task import (
-    title_generation_template,
-    follow_up_generation_template,
-    query_generation_template,
-    image_prompt_generation_template,
-    autocomplete_generation_template,
-    tags_generation_template,
-    emoji_generation_template,
-    moa_response_generation_template,
-)
-from open_webui.utils.auth import get_admin_user, get_verified_user
-from open_webui.constants import ERROR_MESSAGES, TASKS
-
-from open_webui.routers.pipelines import process_pipeline_inlet_filter
-
-from open_webui.utils.task import get_task_model_id
-
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.responses import JSONResponse, RedirectResponse
 from open_webui.config import (
-    DEFAULT_TITLE_GENERATION_PROMPT_TEMPLATE,
-    DEFAULT_FOLLOW_UP_GENERATION_PROMPT_TEMPLATE,
-    DEFAULT_TAGS_GENERATION_PROMPT_TEMPLATE,
-    DEFAULT_IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE,
-    DEFAULT_QUERY_GENERATION_PROMPT_TEMPLATE,
     DEFAULT_AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE,
     DEFAULT_EMOJI_GENERATION_PROMPT_TEMPLATE,
+    DEFAULT_FOLLOW_UP_GENERATION_PROMPT_TEMPLATE,
+    DEFAULT_IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE,
     DEFAULT_MOA_GENERATION_PROMPT_TEMPLATE,
+    DEFAULT_QUERY_GENERATION_PROMPT_TEMPLATE,
+    DEFAULT_TAGS_GENERATION_PROMPT_TEMPLATE,
+    DEFAULT_TITLE_GENERATION_PROMPT_TEMPLATE,
     DEFAULT_VOICE_MODE_PROMPT_TEMPLATE,
 )
+from open_webui.constants import ERROR_MESSAGES, TASKS
+from open_webui.routers.pipelines import process_pipeline_inlet_filter
+from open_webui.utils.auth import get_admin_user, get_verified_user
+from open_webui.utils.chat import generate_chat_completion
+from open_webui.utils.task import (
+    autocomplete_generation_template,
+    emoji_generation_template,
+    follow_up_generation_template,
+    get_task_model_id,
+    image_prompt_generation_template,
+    moa_response_generation_template,
+    query_generation_template,
+    tags_generation_template,
+    title_generation_template,
+)
+from pydantic import BaseModel
 
 log = logging.getLogger(__name__)
 
@@ -79,6 +75,7 @@ async def get_task_config(request: Request, user=Depends(get_verified_user)):
         'ENABLE_RETRIEVAL_QUERY_GENERATION': request.app.state.config.ENABLE_RETRIEVAL_QUERY_GENERATION,
         'QUERY_GENERATION_PROMPT_TEMPLATE': request.app.state.config.QUERY_GENERATION_PROMPT_TEMPLATE,
         'TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE': request.app.state.config.TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE,
+        'ENABLE_VOICE_MODE_PROMPT': request.app.state.config.ENABLE_VOICE_MODE_PROMPT,
         'VOICE_MODE_PROMPT_TEMPLATE': request.app.state.config.VOICE_MODE_PROMPT_TEMPLATE,
     }
 
@@ -99,6 +96,7 @@ class TaskConfigForm(BaseModel):
     ENABLE_RETRIEVAL_QUERY_GENERATION: bool
     QUERY_GENERATION_PROMPT_TEMPLATE: str
     TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE: str
+    ENABLE_VOICE_MODE_PROMPT: bool
     VOICE_MODE_PROMPT_TEMPLATE: Optional[str]
 
 
@@ -127,6 +125,7 @@ async def update_task_config(request: Request, form_data: TaskConfigForm, user=D
     request.app.state.config.QUERY_GENERATION_PROMPT_TEMPLATE = form_data.QUERY_GENERATION_PROMPT_TEMPLATE
     request.app.state.config.TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE = form_data.TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE
 
+    request.app.state.config.ENABLE_VOICE_MODE_PROMPT = form_data.ENABLE_VOICE_MODE_PROMPT
     request.app.state.config.VOICE_MODE_PROMPT_TEMPLATE = form_data.VOICE_MODE_PROMPT_TEMPLATE
 
     return {
@@ -145,6 +144,7 @@ async def update_task_config(request: Request, form_data: TaskConfigForm, user=D
         'ENABLE_RETRIEVAL_QUERY_GENERATION': request.app.state.config.ENABLE_RETRIEVAL_QUERY_GENERATION,
         'QUERY_GENERATION_PROMPT_TEMPLATE': request.app.state.config.QUERY_GENERATION_PROMPT_TEMPLATE,
         'TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE': request.app.state.config.TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE,
+        'ENABLE_VOICE_MODE_PROMPT': request.app.state.config.ENABLE_VOICE_MODE_PROMPT,
         'VOICE_MODE_PROMPT_TEMPLATE': request.app.state.config.VOICE_MODE_PROMPT_TEMPLATE,
     }
 
@@ -159,12 +159,18 @@ async def generate_title(request: Request, form_data: dict, user=Depends(get_ver
 
     if getattr(request.state, 'direct', False) and hasattr(request.state, 'model'):
         models = {
+            **request.app.state.MODELS,
             request.state.model['id']: request.state.model,
         }
     else:
         models = request.app.state.MODELS
 
     model_id = form_data['model']
+    if not model_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='No model specified for title generation. Please ensure a model is selected for this chat.',
+        )
     if model_id not in models:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -187,7 +193,7 @@ async def generate_title(request: Request, form_data: dict, user=Depends(get_ver
     else:
         template = DEFAULT_TITLE_GENERATION_PROMPT_TEMPLATE
 
-    content = title_generation_template(template, form_data['messages'], user)
+    content = await title_generation_template(template, form_data['messages'], user)
 
     max_tokens = models[task_model_id].get('info', {}).get('params', {}).get('max_tokens', 1000)
 
@@ -230,6 +236,7 @@ async def generate_follow_ups(request: Request, form_data: dict, user=Depends(ge
 
     if getattr(request.state, 'direct', False) and hasattr(request.state, 'model'):
         models = {
+            **request.app.state.MODELS,
             request.state.model['id']: request.state.model,
         }
     else:
@@ -258,7 +265,7 @@ async def generate_follow_ups(request: Request, form_data: dict, user=Depends(ge
     else:
         template = DEFAULT_FOLLOW_UP_GENERATION_PROMPT_TEMPLATE
 
-    content = follow_up_generation_template(template, form_data['messages'], user)
+    content = await follow_up_generation_template(template, form_data['messages'], user)
 
     payload = {
         'model': task_model_id,
@@ -298,6 +305,7 @@ async def generate_chat_tags(request: Request, form_data: dict, user=Depends(get
 
     if getattr(request.state, 'direct', False) and hasattr(request.state, 'model'):
         models = {
+            **request.app.state.MODELS,
             request.state.model['id']: request.state.model,
         }
     else:
@@ -326,7 +334,7 @@ async def generate_chat_tags(request: Request, form_data: dict, user=Depends(get
     else:
         template = DEFAULT_TAGS_GENERATION_PROMPT_TEMPLATE
 
-    content = tags_generation_template(template, form_data['messages'], user)
+    content = await tags_generation_template(template, form_data['messages'], user)
 
     payload = {
         'model': task_model_id,
@@ -360,6 +368,7 @@ async def generate_chat_tags(request: Request, form_data: dict, user=Depends(get
 async def generate_image_prompt(request: Request, form_data: dict, user=Depends(get_verified_user)):
     if getattr(request.state, 'direct', False) and hasattr(request.state, 'model'):
         models = {
+            **request.app.state.MODELS,
             request.state.model['id']: request.state.model,
         }
     else:
@@ -388,7 +397,7 @@ async def generate_image_prompt(request: Request, form_data: dict, user=Depends(
     else:
         template = DEFAULT_IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE
 
-    content = image_prompt_generation_template(template, form_data['messages'], user)
+    content = await image_prompt_generation_template(template, form_data['messages'], user)
 
     payload = {
         'model': task_model_id,
@@ -440,6 +449,7 @@ async def generate_queries(request: Request, form_data: dict, user=Depends(get_v
 
     if getattr(request.state, 'direct', False) and hasattr(request.state, 'model'):
         models = {
+            **request.app.state.MODELS,
             request.state.model['id']: request.state.model,
         }
     else:
@@ -468,7 +478,7 @@ async def generate_queries(request: Request, form_data: dict, user=Depends(get_v
     else:
         template = DEFAULT_QUERY_GENERATION_PROMPT_TEMPLATE
 
-    content = query_generation_template(template, form_data['messages'], user)
+    content = await query_generation_template(template, form_data['messages'], user)
 
     payload = {
         'model': task_model_id,
@@ -518,6 +528,7 @@ async def generate_autocompletion(request: Request, form_data: dict, user=Depend
 
     if getattr(request.state, 'direct', False) and hasattr(request.state, 'model'):
         models = {
+            **request.app.state.MODELS,
             request.state.model['id']: request.state.model,
         }
     else:
@@ -546,7 +557,7 @@ async def generate_autocompletion(request: Request, form_data: dict, user=Depend
     else:
         template = DEFAULT_AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE
 
-    content = autocomplete_generation_template(template, prompt, messages, type, user)
+    content = await autocomplete_generation_template(template, prompt, messages, type, user)
 
     payload = {
         'model': task_model_id,
@@ -580,6 +591,7 @@ async def generate_autocompletion(request: Request, form_data: dict, user=Depend
 async def generate_emoji(request: Request, form_data: dict, user=Depends(get_verified_user)):
     if getattr(request.state, 'direct', False) and hasattr(request.state, 'model'):
         models = {
+            **request.app.state.MODELS,
             request.state.model['id']: request.state.model,
         }
     else:
@@ -605,7 +617,7 @@ async def generate_emoji(request: Request, form_data: dict, user=Depends(get_ver
 
     template = DEFAULT_EMOJI_GENERATION_PROMPT_TEMPLATE
 
-    content = emoji_generation_template(template, form_data['prompt'], user)
+    content = await emoji_generation_template(template, form_data['prompt'], user)
 
     payload = {
         "model": task_model_id,
@@ -639,6 +651,7 @@ async def generate_emoji(request: Request, form_data: dict, user=Depends(get_ver
 async def generate_moa_response(request: Request, form_data: dict, user=Depends(get_verified_user)):
     if getattr(request.state, 'direct', False) and hasattr(request.state, 'model'):
         models = {
+            **request.app.state.MODELS,
             request.state.model['id']: request.state.model,
         }
     else:

@@ -14,6 +14,7 @@
 	export let showButtonClassName = 'pl-1.5  transition bg-transparent';
 	export let screenReader = true;
 	export let autocomplete = 'off';
+	export let name: string | undefined = undefined;
 
 	let show = false;
 </script>
@@ -28,6 +29,7 @@
 		{placeholder}
 		type={type === 'password' && !show ? 'password' : 'text'}
 		bind:value
+		{name}
 		required={required && !readOnly}
 		disabled={readOnly}
 		on:change={(e) => {

@@ -527,7 +527,7 @@
 									TTS_MODEL = 'tts-1';
 								} else if (e.target?.value === 'mistral') {
 									TTS_VOICE = '';
-									TTS_MODEL = 'mistral-tts-latest';
+									TTS_MODEL = 'voxtral-mini-tts-2603';
 								} else {
 									TTS_VOICE = '';
 									TTS_MODEL = '';

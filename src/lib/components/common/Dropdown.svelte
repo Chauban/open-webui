@@ -39,10 +39,18 @@
 			e.preventDefault();
 			toggleOpen();
 		}
+		function handleKeydown(e) {
+			if (e.key === 'Enter' || e.key === ' ') {
+				e.preventDefault();
+				toggleOpen();
+			}
+		}
 		node.addEventListener('click', handleClick);
+		node.addEventListener('keydown', handleKeydown);
 		return {
 			destroy() {
 				node.removeEventListener('click', handleClick);
+				node.removeEventListener('keydown', handleKeydown);
 			}
 		};
 	}
@@ -155,9 +163,13 @@
 	on:resize={positionContent}
 />
 
-<!-- svelte-ignore a11y-click-events-have-key-events -->
-<!-- svelte-ignore a11y-no-static-element-interactions -->
-<span use:trigger style="display: contents; cursor: pointer;">
+<span
+	use:trigger
+	style="display: contents; cursor: pointer;"
+	role="button"
+	aria-haspopup="true"
+	aria-expanded={show}
+>
 	<slot />
 </span>
 
@@ -168,6 +180,7 @@
 		use:portal
 		bind:this={contentEl}
 		class={contentClass}
+		role="menu"
 		transition:flyAndScale
 		on:click={(e) => e.stopPropagation()}
 		on:pointerdown={(e) => e.stopPropagation()}

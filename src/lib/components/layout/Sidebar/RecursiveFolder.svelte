@@ -684,7 +684,7 @@
 								await onCloseFolder(currentFolder);
 							}}
 							showCreateSub={!lockFolders}
-							onCreateSub={() => {
+							onCreateSubFolder={() => {
 								createSubFolderParentId = folderId;
 								showCreateSubFolderModal = true;
 							}}

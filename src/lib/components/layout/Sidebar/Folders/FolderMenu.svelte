@@ -22,7 +22,7 @@
 	export let showDelete = true;
 	export let showClose = false;
 	export let closeLabel = 'Close';
-	export let onCreateSub = () => {};
+	export let onCreateSubFolder = () => {};
 	export let showCreateSub = true;
 
 	let show = false;
@@ -56,7 +56,7 @@
 				<button
 					class="flex gap-2 items-center px-3 py-1.5 text-sm select-none cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
 					on:click={() => {
-						onCreateSub();
+						onCreateSubFolder();
 					}}
 				>
 					<Folder />

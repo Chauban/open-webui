@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { mergeAttributes, Node, nodeInputRule } from '@tiptap/core';
+import { safeImageUrl } from '$lib/utils/safeImageUrl';
 
 export interface ImageOptions {
 	/**
@@ -138,12 +139,12 @@ export const Image = Node.create<ImageOptions>({
 			if (editorFiles && node.attrs.src.startsWith('data://')) {
 				const file = editorFiles.find((f) => f.id === fileId);
 				if (file) {
-					img.setAttribute('src', file.url || '');
+					img.setAttribute('src', safeImageUrl(file.url || ''));
 				} else {
 					img.setAttribute('src', '/image-placeholder.png');
 				}
 			} else {
-				img.setAttribute('src', node.attrs.src || '');
+				img.setAttribute('src', safeImageUrl(node.attrs.src || ''));
 			}
 
 			img.setAttribute('alt', node.attrs.alt || '');
@@ -154,7 +155,7 @@ export const Image = Node.create<ImageOptions>({
 				if (files && node.attrs.src.startsWith('data://')) {
 					const file = editorFiles.find((f) => f.id === fileId);
 					if (file) {
-						img.setAttribute('src', file.url || '');
+						img.setAttribute('src', safeImageUrl(file.url || ''));
 					} else {
 						img.setAttribute('src', '/image-placeholder.png');
 					}
