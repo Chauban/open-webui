@@ -8,6 +8,7 @@
 	export let state = true;
 	export let id = '';
 	export let ariaLabelledbyId = '';
+	export let ariaLabel = '';
 	export let tooltip = false;
 	export let disabled = false;
 
@@ -28,7 +29,8 @@
 	<Switch.Root
 		bind:checked={state}
 		{id}
-		aria-labelledby={ariaLabelledbyId}
+		aria-labelledby={ariaLabelledbyId || undefined}
+		aria-label={ariaLabel || undefined}
 		{disabled}
 		class="flex h-[1.125rem] min-h-[1.125rem] w-8 shrink-0 cursor-pointer items-center rounded-full px-1 mx-[1px] transition  {($settings?.highContrastMode ??
 		false)

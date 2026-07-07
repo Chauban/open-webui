@@ -10,9 +10,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from open_webui.constants import ERROR_MESSAGES
+from open_webui.events import EVENTS, publish_event
 from open_webui.env import ENABLE_PROFILE_IMAGE_URL_FORWARDING, PROFILE_IMAGE_ALLOWED_MIME_TYPES, STATIC_DIR
 from open_webui.internal.db import get_async_session
 from open_webui.models.auths import Auths
+from open_webui.models.config import Config
 from open_webui.models.groups import Groups
 from open_webui.models.chats import Chats
 from open_webui.models.education import AdminClassroomListItem, Education
@@ -41,7 +43,7 @@ from open_webui.utils.auth import (
     get_verified_user,
     validate_password,
 )
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
@@ -160,7 +162,7 @@ async def get_user_permissisions(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    user_permissions = await get_permissions(user.id, request.app.state.config.USER_PERMISSIONS, db=db)
+    user_permissions = await get_permissions(user.id, await Config.get('user.permissions'), db=db)
 
     return user_permissions
 
@@ -180,6 +182,8 @@ class WorkspacePermissions(BaseModel):
     prompts_export: bool = False
     tools_import: bool = False
     tools_export: bool = False
+    skills_import: bool = False
+    skills_export: bool = False
 
 
 class SharingPermissions(BaseModel):
@@ -204,6 +208,8 @@ class AccessGrantsPermissions(BaseModel):
 
 
 class ChatPermissions(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     controls: bool = True
     valves: bool = True
     system_prompt: bool = True
@@ -218,6 +224,7 @@ class ChatPermissions(BaseModel):
     edit: bool = True
     share: bool = True
     export: bool = True
+    import_: bool = Field(default=True, alias='import')
     stt: bool = True
     tts: bool = True
     call: bool = True
@@ -239,6 +246,7 @@ class FeaturesPermissions(BaseModel):
     memories: bool = True
     automations: bool = False
     calendar: bool = True
+    webhooks: bool = False
 
 
 class SettingsPermissions(BaseModel):
@@ -256,20 +264,43 @@ class UserPermissions(BaseModel):
 
 @router.get('/default/permissions', response_model=UserPermissions)
 async def get_default_user_permissions(request: Request, user=Depends(get_admin_user)):
+    user_permissions = await Config.get('user.permissions')
     return {
-        'workspace': WorkspacePermissions(**request.app.state.config.USER_PERMISSIONS.get('workspace', {})),
-        'sharing': SharingPermissions(**request.app.state.config.USER_PERMISSIONS.get('sharing', {})),
-        'access_grants': AccessGrantsPermissions(**request.app.state.config.USER_PERMISSIONS.get('access_grants', {})),
-        'chat': ChatPermissions(**request.app.state.config.USER_PERMISSIONS.get('chat', {})),
-        'features': FeaturesPermissions(**request.app.state.config.USER_PERMISSIONS.get('features', {})),
-        'settings': SettingsPermissions(**request.app.state.config.USER_PERMISSIONS.get('settings', {})),
+        'workspace': WorkspacePermissions(**user_permissions.get('workspace', {})),
+        'sharing': SharingPermissions(**user_permissions.get('sharing', {})),
+        'access_grants': AccessGrantsPermissions(**user_permissions.get('access_grants', {})),
+        'chat': ChatPermissions(**user_permissions.get('chat', {})),
+        'features': FeaturesPermissions(**user_permissions.get('features', {})),
+        'settings': SettingsPermissions(**user_permissions.get('settings', {})),
     }
 
 
 @router.post('/default/permissions')
 async def update_default_user_permissions(request: Request, form_data: UserPermissions, user=Depends(get_admin_user)):
-    request.app.state.config.USER_PERMISSIONS = form_data.model_dump()
-    return request.app.state.config.USER_PERMISSIONS
+    user_permissions = form_data.model_dump(by_alias=True)
+    await Config.upsert({'user.permissions': user_permissions})
+    await publish_event(
+        request,
+        EVENTS.USER_PERMISSIONS_UPDATED,
+        actor=user,
+        subject_id='user.permissions',
+        subject_type='config',
+    )
+    return user_permissions
+
+
+@router.get('/default/permissions/defaults', response_model=UserPermissions)
+async def get_default_user_permissions_defaults(user=Depends(get_admin_user)):
+    from open_webui.config import DEFAULT_USER_PERMISSIONS
+
+    return {
+        'workspace': WorkspacePermissions(**DEFAULT_USER_PERMISSIONS.get('workspace', {})),
+        'sharing': SharingPermissions(**DEFAULT_USER_PERMISSIONS.get('sharing', {})),
+        'access_grants': AccessGrantsPermissions(**DEFAULT_USER_PERMISSIONS.get('access_grants', {})),
+        'chat': ChatPermissions(**DEFAULT_USER_PERMISSIONS.get('chat', {})),
+        'features': FeaturesPermissions(**DEFAULT_USER_PERMISSIONS.get('features', {})),
+        'settings': SettingsPermissions(**DEFAULT_USER_PERMISSIONS.get('settings', {})),
+    }
 
 
 ############################
@@ -297,6 +328,14 @@ async def update_user_settings_by_session_user(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    if user.role != 'admin' and not await has_permission(
+        user.id, 'settings.interface', await Config.get('user.permissions')
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+        )
+
     updated_user_settings = form_data.model_dump()
     ui_settings = updated_user_settings.get('ui')
     if (
@@ -306,7 +345,7 @@ async def update_user_settings_by_session_user(
         and not await has_permission(
             user.id,
             'features.direct_tool_servers',
-            request.app.state.config.USER_PERMISSIONS,
+            await Config.get('user.permissions'),
         )
     ):
         # If the user is not an admin and does not have permission to use tool servers, remove the key
@@ -314,6 +353,12 @@ async def update_user_settings_by_session_user(
 
     user = await Users.update_user_settings_by_id(user.id, updated_user_settings, db=db)
     if user:
+        await publish_event(
+            request,
+            EVENTS.USER_SETTINGS_UPDATED,
+            actor=user,
+            subject_id=user.id,
+        )
         return user.settings
     else:
         raise HTTPException(
@@ -333,7 +378,7 @@ async def get_user_status_by_session_user(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if not request.app.state.config.ENABLE_USER_STATUS:
+    if not await Config.get('users.enable_status'):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=ERROR_MESSAGES.ACTION_PROHIBITED,
@@ -354,7 +399,7 @@ async def update_user_status_by_session_user(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if not request.app.state.config.ENABLE_USER_STATUS:
+    if not await Config.get('users.enable_status'):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=ERROR_MESSAGES.ACTION_PROHIBITED,
@@ -362,6 +407,12 @@ async def update_user_status_by_session_user(
     # user already fetched by get_verified_user — no need to refetch
     updated = await Users.update_user_status_by_id(user.id, form_data, db=db)
     if updated:
+        await publish_event(
+            request,
+            EVENTS.USER_STATUS_UPDATED,
+            actor=user,
+            subject_id=user.id,
+        )
         return updated
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
@@ -604,6 +655,7 @@ async def get_user_active_status_by_id(
 
 @router.post('/{user_id}/update', response_model=UserModel | None)
 async def update_user_by_id(
+    request: Request,
     user_id: str,
     form_data: UserUpdateForm,
     session_user: UserModel = Depends(get_admin_user),
@@ -655,7 +707,7 @@ async def update_user_by_id(
             except Exception as e:
                 raise HTTPException(400, detail=str(e))
 
-            hashed = get_password_hash(form_data.password)
+            hashed = await get_password_hash(form_data.password)
             await Auths.update_user_password_by_id(user_id, hashed, db=db)
 
         user_info = {**(user.info or {})}
@@ -722,6 +774,30 @@ async def update_user_by_id(
             # privileges cached in SESSION_POOL are invalidated.
             if updated_user.role != user.role:
                 await disconnect_user_sessions(user_id)
+                await publish_event(
+                    request,
+                    EVENTS.USER_ROLE_UPDATED,
+                    actor=session_user,
+                    subject_id=user_id,
+                    data={'role': updated_user.role},
+                )
+            else:
+                await publish_event(
+                    request,
+                    EVENTS.USER_UPDATED,
+                    actor=session_user,
+                    subject_id=user_id,
+                    data={'updated_fields': list(update_data.keys())},
+                )
+            if form_data.password:
+                await publish_event(
+                    request,
+                    EVENTS.AUTH_PASSWORD_CHANGED,
+                    actor=session_user,
+                    subject_id=user_id,
+                    subject_type='user',
+                    source='admin',
+                )
             return updated_user
 
         raise HTTPException(
@@ -741,7 +817,9 @@ async def update_user_by_id(
 
 
 @router.delete('/{user_id}', response_model=bool)
-async def delete_user_by_id(user_id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)):
+async def delete_user_by_id(
+    request: Request, user_id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)
+):
     # Prevent deletion of the primary admin user
     try:
         first_user = await Users.get_first_user(db=db)
@@ -764,6 +842,12 @@ async def delete_user_by_id(user_id: str, user=Depends(get_admin_user), db: Asyn
 
         if result:
             await disconnect_user_sessions(user_id)
+            await publish_event(
+                request,
+                EVENTS.USER_DELETED,
+                actor=user,
+                subject_id=user_id,
+            )
             return True
 
         raise HTTPException(

@@ -15,6 +15,7 @@
 	export let align: 'start' | 'end' = 'start';
 	export let onEdit = () => {};
 	export let onExport = () => {};
+	export let onShare = () => {};
 	export let onDelete = () => {};
 	export let onClose = () => {};
 	export let showEdit = true;

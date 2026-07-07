@@ -20,6 +20,7 @@
 	import { getChatsByFolderId } from '$lib/apis/chats';
 
 	import FolderModal from '$lib/components/layout/Sidebar/Folders/FolderModal.svelte';
+	import FolderShareModal from '$lib/components/layout/Sidebar/Folders/FolderShareModal.svelte';
 
 	import Folder from '$lib/components/icons/Folder.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
@@ -30,12 +31,14 @@
 	import EmojiPicker from '$lib/components/common/EmojiPicker.svelte';
 
 	export let folder = null;
+	export let readOnly: boolean = false;
 
 	export let onUpdate: Function = (folderId) => {};
 	export let onDelete: Function = (folderId) => {};
 
 	let showProjectModal = false;
 	let showCreateSubFolderModal = false;
+	let showShareModal = false;
 	let showDeleteConfirm = false;
 	let deleteProjectContents = true;
 	$: isAssignmentProject =
@@ -175,6 +178,8 @@
 		onSubmit={createSubFolderHandler}
 	/>
 
+	<FolderShareModal bind:show={showShareModal} {folder} />
+
 	<DeleteConfirmDialog
 		bind:show={showDeleteConfirm}
 		title={$i18n.t('Delete project?')}
@@ -203,19 +208,25 @@
 
 	<div class="mb-3 px-6 @md:max-w-3xl justify-between w-full flex relative group items-center">
 		<div class="text-center flex gap-3.5 items-center">
-			<EmojiPicker
-				onClose={() => {}}
-				selected={folder?.meta?.icon ?? null}
-				onSubmit={(name) => {
-					console.log(name);
-					updateIconHandler(name);
-				}}
-			>
-				{#if isAssignmentProject}
-					<div class=" rounded-full bg-gray-50 dark:bg-gray-800 size-11 flex justify-center items-center">
+			{#if readOnly || isAssignmentProject}
+				<div
+					class="rounded-full bg-gray-50 dark:bg-gray-800 size-11 flex justify-center items-center"
+				>
+					{#if folder?.meta?.icon}
+						<Emoji className="size-6" shortCode={folder.meta.icon} />
+					{:else}
 						<Folder className="size-4.5" strokeWidth="2" />
-					</div>
-				{:else}
+					{/if}
+				</div>
+			{:else}
+				<EmojiPicker
+					onClose={() => {}}
+					selected={folder?.meta?.icon ?? null}
+					onSubmit={(name) => {
+						console.log(name);
+						updateIconHandler(name);
+					}}
+				>
 					<button
 						aria-label={$i18n.t('Change project icon')}
 						class=" rounded-full bg-gray-50 dark:bg-gray-800 size-11 flex justify-center items-center"
@@ -226,40 +237,43 @@
 							<Folder className="size-4.5" strokeWidth="2" />
 						{/if}
 					</button>
-				{/if}
-			</EmojiPicker>
+				</EmojiPicker>
+			{/if}
 
 			<div class="text-3xl line-clamp-1">
 				{folder.name}
 			</div>
 		</div>
 
-		<div class="flex items-center translate-x-2.5">
-			{#if !isAssignmentProject}
-					<FolderMenu
-						align="end"
-						onEdit={() => {
-							showProjectModal = true;
-						}}
-				onDelete={() => {
-					showDeleteConfirm = true;
-				}}
-				onExport={() => {
-					exportHandler();
-				}}
-				onCreateSubFolder={() => {
-					showCreateSubFolderModal = true;
-				}}
-			>
-				<button
-					class="p-1.5 dark:hover:bg-gray-850 rounded-full touch-auto"
-					aria-label={$i18n.t('Project options')}
-					on:click={(e) => {}}
+		{#if !readOnly && !isAssignmentProject}
+			<div class="flex items-center translate-x-2.5">
+				<FolderMenu
+					align="end"
+					onEdit={() => {
+						showProjectModal = true;
+					}}
+					onShare={() => {
+						showShareModal = true;
+					}}
+					onDelete={() => {
+						showDeleteConfirm = true;
+					}}
+					onExport={() => {
+						exportHandler();
+					}}
+					onCreateSubFolder={() => {
+						showCreateSubFolderModal = true;
+					}}
 				>
-					<EllipsisHorizontal className="size-4" strokeWidth="2.5" />
-				</button>
-			</FolderMenu>
-			{/if}
-		</div>
+					<button
+						class="p-1.5 dark:hover:bg-gray-850 rounded-full touch-auto"
+						aria-label={$i18n.t('Project options')}
+						on:click={(e) => {}}
+					>
+						<EllipsisHorizontal className="size-4" strokeWidth="2.5" />
+					</button>
+				</FolderMenu>
+			</div>
+		{/if}
 	</div>
 {/if}
