@@ -731,6 +731,10 @@ class EducationTable:
     def _sqlite_add_missing_columns(
         self, db: Session, table_name: str, columns: dict[str, str]
     ) -> None:
+        # PRAGMA table_info 是 SQLite 专有语法;非 SQLite(如 PostgreSQL)
+        # 部署的列补齐由 Alembic 迁移负责,这里直接跳过。
+        if db.get_bind().dialect.name != "sqlite":
+            return
         try:
             rows = db.execute(text(f'PRAGMA table_info("{table_name}")')).fetchall()
         except OperationalError:
