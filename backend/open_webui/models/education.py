@@ -169,6 +169,8 @@ class Submission(Base):
     stats_json = Column(JSONField, nullable=False, default={})
     micro_reflection_id = Column(Text, nullable=False)
     submitted_at = Column(BigInteger, nullable=False)
+    round_no = Column(BigInteger, nullable=False, default=1)
+    is_current = Column(BigInteger, nullable=False, default=1)
 
 
 class SubmissionReview(Base):
@@ -183,9 +185,21 @@ class SubmissionReview(Base):
     overall_comment = Column(Text, nullable=True)
     rubric_json = Column(JSONField, nullable=True)
     returned_comment = Column(Text, nullable=True)
+    resubmit_due_at = Column(BigInteger, nullable=True)
     reviewed_at = Column(BigInteger, nullable=True)
     created_at = Column(BigInteger, nullable=False)
     updated_at = Column(BigInteger, nullable=False)
+
+
+class EducationNotification(Base):
+    __tablename__ = "education_notification"
+
+    id = Column(Text, primary_key=True, unique=True)
+    user_id = Column(Text, nullable=False)
+    type = Column(Text, nullable=False)
+    payload_json = Column(JSONField, nullable=False, default={})
+    created_at = Column(BigInteger, nullable=False)
+    read_at = Column(BigInteger, nullable=True)
 
 
 class AssignmentModel(BaseModel):
@@ -356,6 +370,8 @@ class SubmissionModel(BaseModel):
     stats_json: dict
     micro_reflection_id: str
     submitted_at: int
+    round_no: int = 1
+    is_current: int = 1
 
 
 class SubmissionReviewModel(BaseModel):
@@ -370,9 +386,21 @@ class SubmissionReviewModel(BaseModel):
     overall_comment: Optional[str] = None
     rubric_json: Optional[dict] = None
     returned_comment: Optional[str] = None
+    resubmit_due_at: Optional[int] = None
     reviewed_at: Optional[int] = None
     created_at: int
     updated_at: int
+
+
+class EducationNotificationModel(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    user_id: str
+    type: str
+    payload_json: dict
+    created_at: int
+    read_at: Optional[int] = None
 
 
 class AssignmentCreateForm(BaseModel):
@@ -700,8 +728,25 @@ class EducationTable:
                 )
             )
 
-    @staticmethod
-    def _ensure_writing_tables(db: Session = None):
+    def _sqlite_add_missing_columns(
+        self, db: Session, table_name: str, columns: dict[str, str]
+    ) -> None:
+        try:
+            rows = db.execute(text(f'PRAGMA table_info("{table_name}")')).fetchall()
+        except OperationalError:
+            return
+        if not rows:
+            return
+        existing = {row[1] for row in rows}
+        changed = False
+        for name, ddl in columns.items():
+            if name not in existing:
+                db.execute(text(f'ALTER TABLE "{table_name}" ADD COLUMN {name} {ddl}'))
+                changed = True
+        if changed:
+            db.commit()
+
+    def _ensure_writing_tables(self, db: Session = None):
         if not isinstance(db, Session):
             with get_db_context() as _sync_db:
                 Education._ensure_writing_tables(_sync_db)
@@ -709,6 +754,17 @@ class EducationTable:
         bind = db.get_bind()
         inspector = inspect(bind)
         existing_tables = set(inspector.get_table_names())
+        self._sqlite_add_missing_columns(
+            db,
+            "submission",
+            {
+                "round_no": "BIGINT NOT NULL DEFAULT 1",
+                "is_current": "BIGINT NOT NULL DEFAULT 1",
+            },
+        )
+        self._sqlite_add_missing_columns(
+            db, "submission_review", {"resubmit_due_at": "BIGINT"}
+        )
         if "writing_session" in existing_tables:
             columns = {
                 column["name"] for column in inspector.get_columns("writing_session")
@@ -748,6 +804,7 @@ class EducationTable:
             MicroReflection.__table__,
             Submission.__table__,
             SubmissionReview.__table__,
+            EducationNotification.__table__,
         ]:
             table.create(bind=bind, checkfirst=True)
 

@@ -22,6 +22,7 @@ from open_webui.models.education import (
     Assignment,
     Classroom,
     ClassroomMember,
+    EducationNotification,
     MicroReflection,
     ProvenanceSegment,
     Submission,
@@ -404,6 +405,7 @@ def education_client():
             MicroReflection.__table__,
             Submission.__table__,
             SubmissionReview.__table__,
+            EducationNotification.__table__,
         ]:
             table.create(bind=engine, checkfirst=True)
 
