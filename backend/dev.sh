@@ -1,4 +1,4 @@
-export CORS_ALLOW_ORIGIN="http://localhost:5173;http://localhost:8080"
+export CORS_ALLOW_ORIGIN="http://localhost:5050;http://localhost:5051;http://localhost:5173;http://localhost:8080;http://127.0.0.1:5050;http://127.0.0.1:5051;http://127.0.0.1:5173;http://127.0.0.1:8080"
 PORT="${PORT:-8080}"
 
 # WEBUI_SECRET_KEY 自 v0.9.6 起为硬性要求;首次运行自动生成并持久化到 .webui_secret_key
