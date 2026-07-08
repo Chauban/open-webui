@@ -9,6 +9,7 @@
 
 	import RichTextInput from '$lib/components/common/RichTextInput.svelte';
 	import Chat from '$lib/components/chat/Chat.svelte';
+	import ReviewResultCard from '$lib/components/education/ReviewResultCard.svelte';
 	import { prepareAssistantContentForWriting } from '$lib/utils/writing-content';
 	import { createSerializedSaveRunner } from '$lib/utils/save-coordinator';
 	import {
@@ -37,6 +38,8 @@
 	let loaded = false;
 	let loadError = '';
 	let assignment = null;
+	let review = null;
+	let effectiveDueAt = null;
 	let writingSession = null;
 	let workspaceProject = null;
 	let workspaceNote = null;
@@ -82,8 +85,8 @@
 	];
 
 	const isAssignment = scope === 'assignment';
-	$: isPastDue =
-		isAssignment && assignment?.due_at ? assignment.due_at <= Math.floor(Date.now() / 1000) : false;
+	$: activeDueAt = isAssignment ? (effectiveDueAt ?? assignment?.due_at ?? null) : null;
+	$: isPastDue = activeDueAt ? activeDueAt <= Math.floor(Date.now() / 1000) : false;
 	$: isReadOnly = isAssignment ? isPastDue : false;
 	$: canSubmitAssignment = isAssignment && !isPastDue;
 	const getDefaultPersonalTitle = () => get(i18n).t('Untitled Writing');
@@ -411,6 +414,7 @@
 				ai_help_types: aiHelpTypes,
 				reflection_text: submitReflectionText
 			});
+			await load();
 			toast.success($i18n.t('Assignment submitted'));
 			await goto('/me/writing');
 		} catch (error) {
@@ -422,6 +426,8 @@
 		try {
 			const workspace = await loadWorkspace();
 			assignment = workspace.assignment ?? null;
+			review = workspace.review ?? null;
+			effectiveDueAt = workspace.effective_due_at ?? null;
 			writingSession = workspace.writing_session;
 			workspaceProject = workspace.project;
 			workspaceNote = workspace.note;
@@ -545,6 +551,9 @@
 				</div>
 			</div>
 			<div class="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+				{#if isAssignment && review}
+					<ReviewResultCard {review} onRevise={null} />
+				{/if}
 				<RichTextInput
 					bind:editor
 					bind:value={noteJson}
@@ -642,6 +651,9 @@
 					</div>
 				</div>
 				<div class="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+					{#if isAssignment && review}
+						<ReviewResultCard {review} onRevise={null} />
+					{/if}
 					<RichTextInput
 						bind:editor
 						bind:value={noteJson}

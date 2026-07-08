@@ -361,12 +361,20 @@ export const saveSubmissionReview = async (
 		overall_comment?: string;
 		rubric_json?: Record<string, unknown> | null;
 		returned_comment?: string;
+		resubmit_due_at?: number | null;
 	}
 ) => {
 	return fetch(`${WEBUI_API_BASE_URL}/teacher/submissions/${submissionId}/review`, {
 		method: 'POST',
 		headers: withAuth(token),
 		body: JSON.stringify(payload)
+	}).then(handleJson);
+};
+
+export const getSubmissionRoundDiff = async (token: string, submissionId: string) => {
+	return fetch(`${WEBUI_API_BASE_URL}/teacher/submissions/${submissionId}/diff`, {
+		method: 'GET',
+		headers: withAuth(token)
 	}).then(handleJson);
 };
 
@@ -452,5 +460,26 @@ export const getStudentAssignmentWorkspaces = async (token: string) => {
 	return fetch(`${WEBUI_API_BASE_URL}/me/writing/workspaces`, {
 		method: 'GET',
 		headers: withAuth(token)
+	}).then(handleJson);
+};
+
+export const getEducationNotificationSummary = async (token: string) => {
+	return fetch(`${WEBUI_API_BASE_URL}/me/notifications/summary`, {
+		method: 'GET',
+		headers: withAuth(token)
+	}).then(handleJson);
+};
+
+export const markEducationNotificationsRead = async (
+	token: string,
+	payload: {
+		types?: string[];
+		assignment_id?: string;
+	}
+) => {
+	return fetch(`${WEBUI_API_BASE_URL}/me/notifications/mark-read`, {
+		method: 'POST',
+		headers: withAuth(token),
+		body: JSON.stringify(payload)
 	}).then(handleJson);
 };

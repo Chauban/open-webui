@@ -338,13 +338,39 @@
 										<div class="rounded-3xl border border-gray-200 bg-white p-5">
 											<div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
 												<div>
-													<div class="text-lg font-semibold">{item.assignment.title}</div>
+													<div class="flex flex-wrap items-center gap-2">
+														<div class="text-lg font-semibold">{item.assignment.title}</div>
+														{#if item.review_status === 'returned'}
+															<span
+																class="rounded-full bg-rose-100 px-2 py-0.5 text-xs text-rose-700"
+															>
+																{$i18n.t('Returned')}
+															</span>
+														{:else if item.review_status === 'reviewed'}
+															<span
+																class="rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-700"
+															>
+																{$i18n.t('Reviewed')} {item.score ?? ''}
+															</span>
+														{:else if item.review_status === 'pending'}
+															<span
+																class="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600"
+															>
+																{$i18n.t('Awaiting review')}
+															</span>
+														{/if}
+													</div>
 													<div class="mt-1 text-sm text-gray-500">
 														{item.assignment.description || $i18n.t('No description')}
 													</div>
 													<div class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500">
 														<div>{$i18n.t('Status')}: {getAssignmentStatusLabel(item.status)}</div>
 														<div>{$i18n.t('Updated')}: {formatTimestamp(item.updated_at)}</div>
+														{#if item.review_status === 'returned'}
+															<div class="font-medium text-rose-600">
+																{$i18n.t('Resubmit before')}: {formatTimestamp(item.effective_due_at)}
+															</div>
+														{/if}
 													</div>
 												</div>
 
