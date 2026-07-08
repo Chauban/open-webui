@@ -37,9 +37,11 @@
 		showFileNavPath,
 		showFileNavDir,
 		pyodideWorker,
-		desktopEvent
+		desktopEvent,
+		educationNotificationSummary
 	} from '$lib/stores';
 	import { getFileContentById } from '$lib/apis/files';
+	import { getEducationNotificationSummary } from '$lib/apis/education';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { beforeNavigate } from '$app/navigation';
@@ -796,6 +798,27 @@
 		}
 	};
 
+	const educationNotificationHandler = async (data) => {
+		const payload = data?.payload ?? {};
+		const title = payload.assignment_title ?? '';
+
+		if (data?.type === 'assignment_published') {
+			toast.info($i18n.t('New assignment: {{title}}', { title }));
+		} else if (data?.type === 'submission_created') {
+			toast.info(
+				$i18n.t('{{name}} submitted {{title}}', { name: payload.student_name ?? '', title })
+			);
+		} else if (data?.type === 'review_completed') {
+			toast.success($i18n.t('Your submission for {{title}} has been reviewed', { title }));
+		} else if (data?.type === 'submission_returned') {
+			toast.warning($i18n.t('Your submission for {{title}} was returned', { title }));
+		}
+
+		educationNotificationSummary.set(
+			await getEducationNotificationSummary(localStorage.token).catch(() => null)
+		);
+	};
+
 	const TOKEN_EXPIRY_BUFFER = 60; // seconds
 	const resolveFetchUrl = (input) => {
 		if (input instanceof Request) {
@@ -1104,9 +1127,11 @@
 			if (value) {
 				$socket?.off('events', chatEventHandler);
 				$socket?.off('events:channel', channelEventHandler);
+				$socket?.off('education:notification', educationNotificationHandler);
 
 				$socket?.on('events', chatEventHandler);
 				$socket?.on('events:channel', channelEventHandler);
+				$socket?.on('education:notification', educationNotificationHandler);
 
 				// Set up the token expiry check
 				if (tokenTimer) {
@@ -1116,6 +1141,7 @@
 			} else {
 				$socket?.off('events', chatEventHandler);
 				$socket?.off('events:channel', channelEventHandler);
+				$socket?.off('education:notification', educationNotificationHandler);
 			}
 		});
 

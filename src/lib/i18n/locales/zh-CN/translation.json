@@ -2683,6 +2683,8 @@
  "My Classroom": "我的班级",
  "My Writing": "我的写作",
  "My Writing is only available for student accounts.": "“我的写作”仅对学生账号开放。",
+ "{{name}} submitted {{title}}": "{{name}} 提交了《{{title}}》",
+ "New assignment: {{title}}": "新作业：{{title}}",
  "New Project": "创建项目",
  "New Writing": "新建写作",
  "No analysis timeline available yet.": "暂无分析时间线数据。",
@@ -2834,5 +2836,7 @@
  "You are connected to {{name}}.": "你当前加入的班级是 {{name}}。",
  "You can still open the original write link directly if your teacher sends it.": "如果老师单独发送写作链接，你也可以直接打开。",
  "You have not joined a classroom yet. Enter your teacher's invite code to unlock assignments.": "你还没有加入班级，请输入老师提供的邀请码来查看作业。",
- "Your personal drafts live here.": "你的个人作品都在这里。"
+ "Your personal drafts live here.": "你的个人作品都在这里。",
+ "Your submission for {{title}} has been reviewed": "你的《{{title}}》已批改",
+ "Your submission for {{title}} was returned": "你的《{{title}}》被退回重写"
 }

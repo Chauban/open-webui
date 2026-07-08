@@ -27,7 +27,8 @@
 		selectedFolder as selectedProject,
 		WEBUI_NAME,
 		sidebarWidth,
-		activeChatIds
+		activeChatIds,
+		educationNotificationSummary
 	} from '$lib/stores';
 	import { onMount, getContext, tick, onDestroy } from 'svelte';
 
@@ -100,6 +101,13 @@
 	let writingProjectRegistry = {};
 
 	let newProjectId = null;
+
+	$: educationByType = $educationNotificationSummary?.by_type ?? {};
+	$: studentUnread =
+		(educationByType['assignment_published'] ?? 0) +
+		(educationByType['review_completed'] ?? 0) +
+		(educationByType['submission_returned'] ?? 0);
+	$: teacherUnread = educationByType['submission_created'] ?? 0;
 
 	const getProjectMode = (folder) => {
 		const explicitMode = folder?.meta?.mode;
@@ -1155,9 +1163,17 @@
 									</svg>
 								</div>
 
-								<div class="flex self-center translate-y-[0.5px]">
+								<div class="flex flex-1 self-center translate-y-[0.5px]">
 									<div class=" self-center text-sm font-primary">{$i18n.t('Writing')}</div>
 								</div>
+
+								{#if studentUnread > 0}
+									<span
+										class="ml-auto min-w-[1.25rem] h-5 px-1 rounded-full bg-rose-500 text-white text-[11px] flex items-center justify-center"
+									>
+										{studentUnread > 99 ? '99+' : studentUnread}
+									</span>
+								{/if}
 							</a>
 						</div>
 					{/if}
@@ -1188,9 +1204,17 @@
 									</svg>
 								</div>
 
-								<div class="flex self-center translate-y-[0.5px]">
+								<div class="flex flex-1 self-center translate-y-[0.5px]">
 									<div class=" self-center text-sm font-primary">{$i18n.t('Teaching')}</div>
 								</div>
+
+								{#if teacherUnread > 0}
+									<span
+										class="ml-auto min-w-[1.25rem] h-5 px-1 rounded-full bg-rose-500 text-white text-[11px] flex items-center justify-center"
+									>
+										{teacherUnread > 99 ? '99+' : teacherUnread}
+									</span>
+								{/if}
 							</a>
 						</div>
 					{/if}

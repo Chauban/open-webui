@@ -15,6 +15,7 @@
 	import { getTerminalServers } from '$lib/apis/terminal';
 	import { getUserSettings } from '$lib/apis/users';
 	import { setTextScale } from '$lib/utils/text-scale';
+	import { getEducationNotificationSummary } from '$lib/apis/education';
 
 	import { WEBUI_VERSION, WEBUI_API_BASE_URL } from '$lib/constants';
 	import { compareVersion } from '$lib/utils';
@@ -39,7 +40,8 @@
 		showSearch,
 		showSidebar,
 		showControls,
-		mobile
+		mobile,
+		educationNotificationSummary
 	} from '$lib/stores';
 
 	import Sidebar from '$lib/components/layout/Sidebar.svelte';
@@ -211,7 +213,10 @@
 			setTools().catch((e) => console.error('Failed to load tools:', e)),
 			setUserSettings(async () => {
 				await setModels().catch((e) => console.error('Failed to load models:', e));
-			}).catch((e) => console.error('Failed to load user settings:', e))
+			}).catch((e) => console.error('Failed to load user settings:', e)),
+			getEducationNotificationSummary(localStorage.token)
+				.catch(() => null)
+				.then((summary) => educationNotificationSummary.set(summary))
 		]);
 
 		// Tool servers can be slow or unreachable; they are not needed to initialize chat.

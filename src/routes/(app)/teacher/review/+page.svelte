@@ -5,7 +5,12 @@
 	import { get } from 'svelte/store';
 	import { toast } from 'svelte-sonner';
 
-	import { getTeacherReview } from '$lib/apis/education';
+	import {
+		getTeacherReview,
+		getEducationNotificationSummary,
+		markEducationNotificationsRead
+	} from '$lib/apis/education';
+	import { educationNotificationSummary } from '$lib/stores';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
 
@@ -93,6 +98,17 @@
 			toast.error(loadError);
 		} finally {
 			loading = false;
+		}
+
+		try {
+			await markEducationNotificationsRead(localStorage.token, {
+				types: ['submission_created']
+			});
+			educationNotificationSummary.set(
+				await getEducationNotificationSummary(localStorage.token).catch(() => null)
+			);
+		} catch (error) {
+			console.error('Failed to mark education notifications as read:', error);
 		}
 	});
 </script>
