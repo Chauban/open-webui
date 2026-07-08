@@ -1728,6 +1728,70 @@ def _setup_submitted_assignment(client, teacher, student, title="Round Essay"):
     return assignment, session_id, submit_res.json()["submission_id"]
 
 
+def test_student_workspace_exposes_review_after_grading(education_client):
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id, submission_id = _setup_submitted_assignment(
+        client, teacher, student, "Student View"
+    )
+
+    # 批改前:pending,不泄露评分字段
+    UserContext.current_user = student
+    workspace = client.get(f"/api/v1/assignments/{assignment['id']}/workspace").json()
+    assert workspace["review"]["review_status"] == "pending"
+    assert "score" not in workspace["review"]
+    assert workspace["effective_due_at"] == 2000000000
+
+    UserContext.current_user = teacher
+    client.post(
+        f"/api/v1/teacher/submissions/{submission_id}/review",
+        json={
+            "review_status": "reviewed",
+            "score": 88,
+            "overall_comment": "Strong structure",
+            "rubric_json": {"ideas": 30, "structure": 29, "evidence": 29},
+        },
+    )
+
+    UserContext.current_user = student
+    workspace = client.get(f"/api/v1/assignments/{assignment['id']}/workspace").json()
+    assert workspace["review"]["review_status"] == "reviewed"
+    assert workspace["review"]["score"] == 88
+    assert workspace["review"]["overall_comment"] == "Strong structure"
+    assert workspace["review"]["rubric"]["ideas"] == 30
+
+    home = client.get("/api/v1/me/writing/home").json()
+    item = next(
+        i for i in home["assignment_items"] if i["assignment"]["id"] == assignment["id"]
+    )
+    assert item["review_status"] == "reviewed"
+    assert item["score"] == 88
+
+
+def test_student_workspace_exposes_returned_state(education_client):
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id, submission_id = _setup_submitted_assignment(
+        client, teacher, student, "Returned View"
+    )
+
+    UserContext.current_user = teacher
+    client.post(
+        f"/api/v1/teacher/submissions/{submission_id}/review",
+        json={
+            "review_status": "returned",
+            "returned_comment": "Add evidence in paragraph two",
+            "resubmit_due_at": 2100000000,
+        },
+    )
+
+    UserContext.current_user = student
+    workspace = client.get(f"/api/v1/assignments/{assignment['id']}/workspace").json()
+    assert workspace["review"]["review_status"] == "returned"
+    assert workspace["review"]["returned_comment"] == "Add evidence in paragraph two"
+    assert workspace["review"]["resubmit_due_at"] == 2100000000
+    assert workspace["effective_due_at"] == 2100000000
+    assert workspace["writing_session"]["status"] == "draft"
+
+
 def test_resubmit_before_review_overwrites_same_round(education_client):
     client, teacher, _, student, _, _ = education_client
     assignment, session_id, submission_id = _setup_submitted_assignment(

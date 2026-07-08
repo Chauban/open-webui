@@ -271,6 +271,39 @@ def _get_effective_due_at(
     return assignment.due_at
 
 
+def _build_student_review_view(
+    assignment, student_id: str, db: Session
+) -> tuple[Optional[dict], Optional[int]]:
+    effective_due_at = _get_effective_due_at(assignment, student_id, db)
+    submission = Education.get_current_submission(assignment.id, student_id, db=db)
+    if submission is None:
+        return None, effective_due_at
+    review = Education.get_submission_review_by_submission_id(submission.id, db=db)
+    view = {
+        "round_no": submission.round_no,
+        "submitted_at": submission.submitted_at,
+        "review_status": review.review_status if review else "pending",
+    }
+    if review and review.review_status == "reviewed":
+        view.update(
+            {
+                "score": review.score,
+                "overall_comment": review.overall_comment,
+                "rubric": review.rubric_json,
+                "reviewed_at": review.reviewed_at,
+            }
+        )
+    elif review and review.review_status == "returned":
+        view.update(
+            {
+                "returned_comment": review.returned_comment,
+                "resubmit_due_at": review.resubmit_due_at,
+                "reviewed_at": review.reviewed_at,
+            }
+        )
+    return view, effective_due_at
+
+
 def _get_workspace_session_or_404(session_id: str, db: Session):
     session = Education.get_writing_session_by_id(session_id, db=db)
     if session is None:
@@ -2260,6 +2293,9 @@ async def get_assignment_workspace(
             assignment, session, db=db
         )
         session = Education.get_writing_session_by_id(session.id, db=db)
+        review_view, effective_due_at = _build_student_review_view(
+            assignment, user.id, db
+        )
         return AssignmentWorkspaceResponse(
             assignment=assignment,
             membership_role="student",
@@ -2268,8 +2304,11 @@ async def get_assignment_workspace(
             project=project.model_dump(),
             active_chat_id=active_chat_id,
             source_map=Education.get_provenance_segments(session.id, db=db),
+            review=review_view,
+            effective_due_at=effective_due_at,
         )
 
+    review_view, effective_due_at = _build_student_review_view(assignment, user.id, db)
     return AssignmentWorkspaceResponse(
         assignment=assignment,
         membership_role="student",
@@ -2278,6 +2317,8 @@ async def get_assignment_workspace(
         project=project.model_dump(),
         active_chat_id=None,
         source_map=[],
+        review=review_view,
+        effective_due_at=effective_due_at,
     )
 
 
@@ -2327,6 +2368,7 @@ async def get_writing_home(
                         writing_session_id=None,
                         status="not_started",
                         updated_at=assignment.updated_at,
+                        effective_due_at=assignment.due_at,
                     )
                 )
                 continue
@@ -2338,6 +2380,10 @@ async def get_writing_home(
                 )
                 submitted_at = submission.submitted_at if submission else None
 
+            review_view, effective_due_at = _build_student_review_view(
+                assignment, user.id, db
+            )
+
             assignment_items.append(
                 AssignmentWorkspaceListItem(
                     project_mode=PROJECT_MODE_ASSIGNMENT_WRITING,
@@ -2347,6 +2393,10 @@ async def get_writing_home(
                     status=session.status,
                     updated_at=max(assignment.updated_at, session.updated_at),
                     submitted_at=submitted_at,
+                    review_status=review_view["review_status"] if review_view else None,
+                    score=(review_view or {}).get("score"),
+                    round_no=(review_view or {}).get("round_no"),
+                    effective_due_at=effective_due_at,
                 )
             )
 

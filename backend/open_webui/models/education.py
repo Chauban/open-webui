@@ -439,6 +439,8 @@ class AssignmentWorkspaceResponse(BaseModel):
     project: dict
     active_chat_id: Optional[str] = None
     source_map: list[ProvenanceSegmentModel] = Field(default_factory=list)
+    review: Optional[dict] = None
+    effective_due_at: Optional[int] = None
 
 
 class PersonalWritingCreateForm(BaseModel):
@@ -532,6 +534,10 @@ class AssignmentWorkspaceListItem(BaseModel):
     status: str
     updated_at: int
     submitted_at: Optional[int] = None
+    review_status: Optional[str] = None
+    score: Optional[int] = None
+    effective_due_at: Optional[int] = None
+    round_no: Optional[int] = None
 
 
 class AutosaveForm(BaseModel):
