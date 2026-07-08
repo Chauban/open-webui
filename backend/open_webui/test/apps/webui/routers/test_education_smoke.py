@@ -1,4 +1,6 @@
+import asyncio
 import tempfile
+import time
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -7,6 +9,7 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 BACKEND_ROOT = Path(__file__).resolve().parents[5]
@@ -16,8 +19,10 @@ if str(BACKEND_ROOT) not in sys.path:
 import open_webui.internal.db as internal_db
 from open_webui.internal.db import get_session
 from open_webui.models.access_grants import AccessGrant
+from open_webui.models.automations import AutomationRun
 from open_webui.models.chats import Chat
 from open_webui.models.chat_messages import ChatMessage
+from open_webui.models.shared_chats import SharedChat
 from open_webui.models.education import (
     Assignment,
     Classroom,
@@ -30,10 +35,11 @@ from open_webui.models.education import (
     WritingSession,
     WritingVersion,
 )
+from open_webui.models.config import Config
 from open_webui.models.folders import Folder, FolderForm, FolderUpdateForm, Folders
 from open_webui.models.groups import Group, GroupMember
-from open_webui.models.notes import Note
-from open_webui.models.users import User, Users
+from open_webui.models.notes import Note, PinnedNote
+from open_webui.models.users import User, UserModel
 import open_webui.routers.education as education_router_module
 from open_webui.routers.education import router as education_router
 from open_webui.routers.chats import router as chats_router
@@ -239,26 +245,30 @@ class UserContext:
 
 
 def _seed_user(session, user_id: str, name: str, email: str, education_role: str):
-    Users.insert_new_user(
+    # NOTE: Users.insert_new_user / get_user_by_id / update_user_by_id are async
+    # (they take an AsyncSession bound to the app's global async engine) since the
+    # v0.10.2 merge. This fixture's `session` is a plain sync Session bound to a
+    # throwaway per-test sqlite file, so we seed the User row directly via the ORM
+    # instead of going through the (now async, and differently-sessioned) Users
+    # table API. See education_client() below for how async model calls (Folders/
+    # Chats/Notes/Users) made *by the router* are redirected to this same sqlite
+    # file for the duration of the test.
+    now = int(time.time())
+    user_row = User(
         id=user_id,
-        name=name,
         email=email,
+        name=name,
         role="user",
         profile_image_url="/user.png",
-        db=session,
+        info={"education_role": education_role},
+        last_active_at=now,
+        created_at=now,
+        updated_at=now,
     )
-    db_user = Users.get_user_by_id(user_id, db=session)
-    Users.update_user_by_id(
-        user_id,
-        {
-            "info": {
-                **(db_user.info or {}),
-                "education_role": education_role,
-            }
-        },
-        db=session,
-    )
-    return Users.get_user_by_id(user_id, db=session)
+    session.add(user_row)
+    session.commit()
+    session.refresh(user_row)
+    return UserModel.model_validate(user_row)
 
 
 def _prepare_assignment_flow(client, teacher, student):
@@ -376,8 +386,9 @@ def education_client():
 
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "education_smoke.db"
+        sync_url = f"sqlite:///{db_path}"
         engine = create_engine(
-            f"sqlite:///{db_path}",
+            sync_url,
             connect_args={"check_same_thread": False},
         )
         SessionLocal = sessionmaker(
@@ -389,13 +400,17 @@ def education_client():
 
         for table in [
             User.__table__,
+            Config.__table__,
             AccessGrant.__table__,
             Note.__table__,
+            PinnedNote.__table__,
             Group.__table__,
             GroupMember.__table__,
             Folder.__table__,
             Chat.__table__,
             ChatMessage.__table__,
+            AutomationRun.__table__,
+            SharedChat.__table__,
             Classroom.__table__,
             ClassroomMember.__table__,
             Assignment.__table__,
@@ -411,6 +426,32 @@ def education_client():
 
         with engine.begin() as connection:
             connection.exec_driver_sql("DROP INDEX IF EXISTS classroom_member_user_idx")
+
+        # The education router (open_webui/routers/education.py) still takes a
+        # sync `db: Session = Depends(get_session)`, but forwards it as `db=db`
+        # into Users/Folders/Chats/Notes table methods that became async (and
+        # AsyncSession-typed) in the v0.10.2 merge. Passing a sync Session fails
+        # `isinstance(db, AsyncSession)` inside get_async_db_context(), so those
+        # calls silently fall back to the app's *global* async engine/session
+        # (open_webui.internal.db.AsyncSessionLocal) -- which, unless redirected,
+        # points at the real dev DATABASE_URL (webui.db). To keep this test fully
+        # isolated (and to make the router's Folder/Chat/Note/User records land in
+        # the same sqlite file the test's own sync session and assertions use), we
+        # point the process-wide AsyncSessionLocal at an async engine bound to the
+        # exact same sqlite file for the lifetime of this fixture, then restore it.
+        async_engine = create_async_engine(
+            internal_db._make_async_url(sync_url),
+            connect_args={"check_same_thread": False},
+        )
+        TestAsyncSessionLocal = async_sessionmaker(
+            bind=async_engine,
+            class_=AsyncSession,
+            autocommit=False,
+            autoflush=False,
+            expire_on_commit=False,
+        )
+        original_async_session_local = internal_db.AsyncSessionLocal
+        internal_db.AsyncSessionLocal = TestAsyncSessionLocal
 
         with SessionLocal() as session:
             teacher = _seed_user(
@@ -434,6 +475,10 @@ def education_client():
             USER_PERMISSIONS={"chat": {"delete": True}, "features": {"notes": True}},
             ENABLE_COMMUNITY_SHARING=True,
         )
+        # chats_router's delete endpoint calls stop_item_tasks(request.app.state.redis, ...);
+        # the task-tracking helpers in open_webui/tasks.py already handle a falsy `redis`
+        # by falling back to no-op/in-memory behavior, so None is a safe stub here.
+        app.state.redis = None
 
         def override_session():
             db = SessionLocal()
@@ -456,6 +501,8 @@ def education_client():
         finally:
             client.close()
             engine.dispose()
+            asyncio.run(async_engine.dispose())
+            internal_db.AsyncSessionLocal = original_async_session_local
             UserContext.current_user = None
 
 
@@ -1466,10 +1513,13 @@ def test_workspace_project_creation_failure_returns_409(education_client, monkey
     )
     assert join_res.status_code == 200, join_res.text
 
+    async def _broken_insert_new_folder(*args, **kwargs):
+        return None
+
     monkeypatch.setattr(
         education_router_module.Folders,
         "insert_new_folder",
-        lambda *args, **kwargs: None,
+        _broken_insert_new_folder,
     )
 
     broken_workspace_res = client.get(
@@ -1569,17 +1619,22 @@ def test_personal_writing_reopens_sidebar_and_can_be_deleted(education_client):
     assert reopened["project"]["meta"]["mode"] == "personal_writing"
     assert reopened["project"]["meta"]["hidden_from_sidebar"] is False
 
-    orphan_project = Folders.insert_new_folder(
-        teacher.id,
-        FolderForm(
-            name="Ghost Hidden Draft",
-            meta={
-                "mode": "personal_writing",
-                "writing_session_id": session_id,
-                "hidden_from_sidebar": False,
-            },
-            data={},
-        ),
+    # Folders.insert_new_folder is async (post v0.10.2); with AsyncSessionLocal
+    # redirected to this fixture's sqlite file (see education_client()), db=None
+    # here correctly lands in the same isolated database.
+    orphan_project = asyncio.run(
+        Folders.insert_new_folder(
+            teacher.id,
+            FolderForm(
+                name="Ghost Hidden Draft",
+                meta={
+                    "mode": "personal_writing",
+                    "writing_session_id": session_id,
+                    "hidden_from_sidebar": False,
+                },
+                data={},
+            ),
+        )
     )
     assert orphan_project is not None
 
@@ -1612,13 +1667,19 @@ def test_personal_writing_folder_rename_allows_duplicate_titles(education_client
     assert second_res.status_code == 200, second_res.text
     second_workspace = second_res.json()
 
-    with session_local() as session:
-        second_folder = Folders.get_folder_by_id_and_user_id(
-            second_workspace["project"]["id"], teacher.id, db=session
+    # Folders.get_folder_by_id_and_user_id / update_folder_by_id_and_user_id are
+    # async (post v0.10.2); AsyncSessionLocal is redirected to this fixture's
+    # sqlite file (see education_client()), so db=None lands in the same
+    # isolated database as `session_local`.
+    second_folder = asyncio.run(
+        Folders.get_folder_by_id_and_user_id(
+            second_workspace["project"]["id"], teacher.id
         )
-        assert second_folder is not None
+    )
+    assert second_folder is not None
 
-        renamed = Folders.update_folder_by_id_and_user_id(
+    renamed = asyncio.run(
+        Folders.update_folder_by_id_and_user_id(
             second_workspace["project"]["id"],
             teacher.id,
             FolderUpdateForm(
@@ -1626,8 +1687,8 @@ def test_personal_writing_folder_rename_allows_duplicate_titles(education_client
                 meta=second_workspace["project"].get("meta") or {},
                 data=second_workspace["project"].get("data") or {},
             ),
-            db=session,
         )
+    )
 
     assert renamed is not None
     assert renamed.name == "茶叶001"
