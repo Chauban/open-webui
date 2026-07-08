@@ -1,12 +1,13 @@
 <script lang="ts">
 	// @ts-nocheck
-	import { getContext, onMount } from 'svelte';
+	import { getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import { page } from '$app/stores';
 	import { get } from 'svelte/store';
 
 	import {
 		getSubmissionAnalysisSegmentDetail,
+		getSubmissionRoundDiff,
 		getTeacherSubmissionDetail,
 		saveSubmissionReview
 	} from '$lib/apis/education';
@@ -80,6 +81,14 @@
 	let expandedSegmentId = '';
 	let lastSavedAt: Date | null = null;
 	let expandedTimelineIds: Set<number> = new Set();
+	let resubmitDueLocal = '';
+	let diffData: any = null;
+	let diffLoading = false;
+
+	const toEpoch = (v: string) => (v ? Math.floor(new Date(v).getTime() / 1000) : null);
+
+	$: submissionId = $page.params.submissionId;
+	$: isHistoricalRound = detail ? !detail.submission.is_current : false;
 
 	$: sortedVersions = [...(detail?.versions ?? [])].sort((a, b) => b.version_no - a.version_no);
 	$: hiddenVersionCount = Math.max(sortedVersions.length - DEFAULT_VISIBLE_VERSIONS, 0);
@@ -161,13 +170,27 @@
 		rubricEvidence =
 			review?.rubric_json?.evidence != null ? String(review.rubric_json.evidence) : '';
 		returnedComment = review?.returned_comment || '';
+		resubmitDueLocal = review?.resubmit_due_at
+			? new Date(review.resubmit_due_at * 1000).toISOString().slice(0, 16)
+			: '';
 	};
 
 	const saveReview = async (statusOverride?: string) => {
+		if (isHistoricalRound) return;
+		const effectiveStatus = statusOverride || reviewStatus;
+		let resubmitDueAt: number | null = null;
+		if (effectiveStatus === 'returned') {
+			resubmitDueAt = toEpoch(resubmitDueLocal);
+			if (!resubmitDueAt || resubmitDueAt <= Math.floor(Date.now() / 1000)) {
+				toast.error(t('A future resubmit due time is required'));
+				return;
+			}
+		}
+
 		saving = true;
 		try {
 			const response = await saveSubmissionReview(localStorage.token, $page.params.submissionId, {
-				review_status: statusOverride || reviewStatus,
+				review_status: effectiveStatus,
 				score: score ? Number(score) : null,
 				overall_comment: overallComment.trim(),
 				rubric_json: {
@@ -175,7 +198,8 @@
 					structure: rubricStructure ? Number(rubricStructure) : null,
 					evidence: rubricEvidence ? Number(rubricEvidence) : null
 				},
-				returned_comment: returnedComment.trim()
+				returned_comment: returnedComment.trim(),
+				resubmit_due_at: resubmitDueAt
 			});
 			detail.review = response;
 			syncReview();
@@ -185,6 +209,18 @@
 			toast.error(`${error?.detail ?? error}`);
 		} finally {
 			saving = false;
+		}
+	};
+
+	const loadDiff = async () => {
+		if (diffLoading) return;
+		diffLoading = true;
+		try {
+			diffData = await getSubmissionRoundDiff(localStorage.token, detail.submission.id);
+		} catch (error) {
+			toast.error(`${error?.detail ?? error}`);
+		} finally {
+			diffLoading = false;
 		}
 	};
 
@@ -223,9 +259,15 @@
 		});
 	};
 
-	onMount(async () => {
+	const loadDetail = async (id: string) => {
+		loaded = false;
+		loadError = '';
+		diffData = null;
+		expandedSegmentId = '';
+		activeSegmentId = '';
+		activeSegmentDetail = null;
 		try {
-			detail = await getTeacherSubmissionDetail(localStorage.token, $page.params.submissionId);
+			detail = await getTeacherSubmissionDetail(localStorage.token, id);
 			showAllVersions = false;
 			syncReview();
 		} catch (error) {
@@ -234,7 +276,11 @@
 		} finally {
 			loaded = true;
 		}
-	});
+	};
+
+	$: if (submissionId) {
+		loadDetail(submissionId);
+	}
 </script>
 
 <TeacherPageShell title={$i18n.t('Review')}>
@@ -273,6 +319,22 @@
 								)}
 							</span>
 						</div>
+						{#if detail?.rounds?.length > 1}
+							<div class="mt-2 flex flex-wrap gap-1.5 items-center">
+								{#each detail.rounds as round}
+									<a
+										href={`/teacher/submissions/${round.submission_id}`}
+										class="px-2.5 py-1 rounded-lg text-sm border
+											{round.submission_id === detail.submission.id
+											? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
+											: 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'}"
+									>
+										{$i18n.t('Round {{round}}', { round: round.round_no })}
+										{#if !round.is_current}<span class="opacity-60"> · {$i18n.t('History')}</span>{/if}
+									</a>
+								{/each}
+							</div>
+						{/if}
 					</div>
 					<div class="shrink-0 rounded-2xl border border-cyan-100 bg-cyan-50 px-4 py-3 lg:min-w-60">
 						<div class="text-[10px] uppercase tracking-[0.14em] text-cyan-600">过程关注点</div>
@@ -424,6 +486,12 @@
 						{#if activeTab === 'review'}
 							<div class="space-y-4 p-5">
 
+								{#if isHistoricalRound}
+									<div class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-700">
+										{$i18n.t('Historical round, read-only')}
+									</div>
+								{/if}
+
 								<!-- Status: button group -->
 								<div>
 									<div class="mb-1.5 text-xs font-medium uppercase tracking-[0.12em] text-gray-400">
@@ -432,9 +500,10 @@
 									<div class="flex gap-1 rounded-2xl border border-gray-200 p-1">
 										{#each reviewStatusOptions as option}
 											<button
-												class="flex-1 rounded-xl py-2 text-xs font-medium transition-colors {reviewStatus === option.value
+												class="flex-1 rounded-xl py-2 text-xs font-medium transition-colors disabled:opacity-50 {reviewStatus === option.value
 													? 'bg-black text-white'
 													: 'text-gray-500 hover:bg-gray-50'}"
+												disabled={isHistoricalRound}
 												on:click={() => (reviewStatus = option.value)}
 											>
 												{$i18n.t(option.label)}
@@ -451,7 +520,8 @@
 									<input
 										bind:value={score}
 										type="number"
-										class="w-full rounded-2xl border border-gray-200 px-4 py-3 text-sm outline-none focus:border-gray-400 transition-colors"
+										disabled={isHistoricalRound}
+										class="w-full rounded-2xl border border-gray-200 px-4 py-3 text-sm outline-none focus:border-gray-400 transition-colors disabled:opacity-50"
 										placeholder="0"
 									/>
 								</div>
@@ -463,7 +533,8 @@
 									</label>
 									<textarea
 										bind:value={overallComment}
-										class="min-h-24 w-full resize-none rounded-2xl border border-gray-200 px-4 py-3 text-sm outline-none focus:border-gray-400 transition-colors"
+										disabled={isHistoricalRound}
+										class="min-h-24 w-full resize-none rounded-2xl border border-gray-200 px-4 py-3 text-sm outline-none focus:border-gray-400 transition-colors disabled:opacity-50"
 										placeholder={$i18n.t('Overall Comment')}
 									></textarea>
 								</div>
@@ -480,7 +551,8 @@
 												bind:value={rubricIdeas}
 												type="number"
 												min="0"
-												class="w-20 rounded-xl border border-gray-200 px-3 py-1.5 text-right text-sm outline-none focus:border-gray-400 transition-colors"
+												disabled={isHistoricalRound}
+												class="w-20 rounded-xl border border-gray-200 px-3 py-1.5 text-right text-sm outline-none focus:border-gray-400 transition-colors disabled:opacity-50"
 												placeholder="—"
 											/>
 										</div>
@@ -490,7 +562,8 @@
 												bind:value={rubricStructure}
 												type="number"
 												min="0"
-												class="w-20 rounded-xl border border-gray-200 px-3 py-1.5 text-right text-sm outline-none focus:border-gray-400 transition-colors"
+												disabled={isHistoricalRound}
+												class="w-20 rounded-xl border border-gray-200 px-3 py-1.5 text-right text-sm outline-none focus:border-gray-400 transition-colors disabled:opacity-50"
 												placeholder="—"
 											/>
 										</div>
@@ -500,7 +573,8 @@
 												bind:value={rubricEvidence}
 												type="number"
 												min="0"
-												class="w-20 rounded-xl border border-gray-200 px-3 py-1.5 text-right text-sm outline-none focus:border-gray-400 transition-colors"
+												disabled={isHistoricalRound}
+												class="w-20 rounded-xl border border-gray-200 px-3 py-1.5 text-right text-sm outline-none focus:border-gray-400 transition-colors disabled:opacity-50"
 												placeholder="—"
 											/>
 										</div>
@@ -514,9 +588,23 @@
 									</label>
 									<textarea
 										bind:value={returnedComment}
-										class="min-h-20 w-full resize-none rounded-2xl border border-gray-200 px-4 py-3 text-sm outline-none focus:border-gray-400 transition-colors"
+										disabled={isHistoricalRound}
+										class="min-h-20 w-full resize-none rounded-2xl border border-gray-200 px-4 py-3 text-sm outline-none focus:border-gray-400 transition-colors disabled:opacity-50"
 										placeholder={$i18n.t('Returned Comment')}
 									></textarea>
+								</div>
+
+								<!-- Resubmit due at (required when returning for revision) -->
+								<div>
+									<label class="mb-1.5 block text-xs font-medium uppercase tracking-[0.12em] text-gray-400">
+										{$i18n.t('Resubmit before')}
+									</label>
+									<input
+										type="datetime-local"
+										bind:value={resubmitDueLocal}
+										disabled={isHistoricalRound}
+										class="w-full rounded-2xl border border-gray-200 px-4 py-3 text-sm outline-none focus:border-gray-400 transition-colors disabled:opacity-50"
+									/>
 								</div>
 
 								<!-- Actions + persistent save status -->
@@ -524,14 +612,14 @@
 									<div class="flex flex-wrap gap-2">
 										<button
 											class="rounded-full border border-gray-300 px-4 py-2 text-sm hover:bg-gray-50 disabled:opacity-50 transition-colors"
-											disabled={saving}
+											disabled={saving || isHistoricalRound}
 											on:click={() => saveReview('returned')}
 										>
 											{$i18n.t('Return for Revision')}
 										</button>
 										<button
 											class="rounded-full bg-black px-4 py-2 text-sm text-white hover:bg-gray-800 disabled:opacity-60 transition-colors"
-											disabled={saving}
+											disabled={saving || isHistoricalRound}
 											on:click={() => saveReview()}
 										>
 											{saving ? $i18n.t('Saving...') : $i18n.t('Save Review')}
@@ -700,6 +788,33 @@
 										</div>
 									{/if}
 								</div>
+
+								<!-- Previous-round diff -->
+								{#if detail?.submission?.round_no > 1}
+									<div class="mt-4">
+										<button
+											class="text-sm font-medium underline disabled:opacity-50"
+											disabled={diffLoading}
+											on:click={loadDiff}
+										>
+											{diffLoading ? $i18n.t('Loading...') : $i18n.t('Compare with previous round')}
+										</button>
+										{#if diffData}
+											{#if diffData.has_previous}
+												<div class="mt-2 p-3 rounded-lg border border-gray-200 dark:border-gray-800 text-sm leading-7 whitespace-pre-wrap">
+													{#each diffData.blocks as block}
+														{#if block.op === 'equal'}<span>{block.new_text}</span>
+														{:else if block.op === 'insert'}<span class="bg-emerald-100 dark:bg-emerald-900/50">{block.new_text}</span>
+														{:else if block.op === 'delete'}<span class="bg-rose-100 dark:bg-rose-900/50 line-through">{block.old_text}</span>
+														{:else}<span class="bg-rose-100 dark:bg-rose-900/50 line-through">{block.old_text}</span><span class="bg-emerald-100 dark:bg-emerald-900/50">{block.new_text}</span>{/if}
+													{/each}
+												</div>
+											{:else}
+												<div class="mt-2 text-sm text-gray-400">{$i18n.t('No previous round to compare.')}</div>
+											{/if}
+										{/if}
+									</div>
+								{/if}
 							</div>
 
 						<!-- ── 反思 & 版本 tab ── -->
