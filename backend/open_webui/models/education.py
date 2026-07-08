@@ -1987,5 +1987,77 @@ class EducationTable:
                 SubmissionModel.model_validate(submission) for submission in submissions
             ]
 
+    def insert_notifications(
+        self,
+        user_ids: list[str],
+        type: str,
+        payload: dict,
+        db: Optional[Session] = None,
+    ) -> int:
+        if not user_ids:
+            return 0
+        with get_db_context(db) as db:
+            self._ensure_writing_tables(db)
+            now = int(time.time())
+            for user_id in user_ids:
+                db.add(
+                    EducationNotification(
+                        id=str(uuid.uuid4()),
+                        user_id=user_id,
+                        type=type,
+                        payload_json=payload,
+                        created_at=now,
+                        read_at=None,
+                    )
+                )
+            db.commit()
+            return len(user_ids)
+
+    def get_unread_notification_summary(
+        self, user_id: str, db: Optional[Session] = None
+    ) -> dict:
+        with get_db_context(db) as db:
+            self._ensure_writing_tables(db)
+            rows = (
+                db.query(EducationNotification)
+                .filter(
+                    EducationNotification.user_id == user_id,
+                    EducationNotification.read_at.is_(None),
+                )
+                .all()
+            )
+            by_type: dict[str, int] = {}
+            for row in rows:
+                by_type[row.type] = by_type.get(row.type, 0) + 1
+            return {"total": len(rows), "by_type": by_type}
+
+    def mark_notifications_read(
+        self,
+        user_id: str,
+        types: Optional[list[str]] = None,
+        assignment_id: Optional[str] = None,
+        db: Optional[Session] = None,
+    ) -> int:
+        with get_db_context(db) as db:
+            self._ensure_writing_tables(db)
+            query = db.query(EducationNotification).filter(
+                EducationNotification.user_id == user_id,
+                EducationNotification.read_at.is_(None),
+            )
+            if types:
+                query = query.filter(EducationNotification.type.in_(types))
+            rows = query.all()
+            now = int(time.time())
+            marked = 0
+            for row in rows:
+                if assignment_id is not None:
+                    payload = row.payload_json or {}
+                    if payload.get("assignment_id") != assignment_id:
+                        continue
+                row.read_at = now
+                marked += 1
+            db.commit()
+            return marked
+
 
 Education = EducationTable()

@@ -55,6 +55,7 @@ from open_webui.models.education import (
 )
 from open_webui.models.notes import NoteForm, Notes
 from open_webui.models.users import Users
+from open_webui.socket.main import emit_to_users
 from open_webui.utils.auth import get_verified_user
 
 router = APIRouter()
@@ -72,6 +73,24 @@ class ChatMessageUpsertForm(BaseModel):
 
 class ActiveChatUpdateForm(BaseModel):
     chat_id: Optional[str] = None
+
+
+class NotificationMarkReadForm(BaseModel):
+    types: Optional[list[str]] = None
+    assignment_id: Optional[str] = None
+
+
+async def _send_education_notifications(
+    user_ids: list[str], notification_type: str, payload: dict, db: Session
+) -> None:
+    if not user_ids:
+        return
+    Education.insert_notifications(user_ids, notification_type, payload, db=db)
+    await emit_to_users(
+        "education:notification",
+        {"type": notification_type, "payload": payload},
+        user_ids,
+    )
 
 
 def _get_education_role(user):
@@ -1485,7 +1504,25 @@ async def create_assignment(
             detail="Classroom not found",
         )
     _ensure_classroom_access(user, classroom, db, require_teacher=True)
-    return Education.insert_assignment(user.id, form_data, db=db)
+    assignment = Education.insert_assignment(user.id, form_data, db=db)
+
+    student_ids = [
+        member.user_id
+        for member in Education.get_classroom_members(
+            assignment.classroom_id, member_role="student", db=db
+        )
+    ]
+    await _send_education_notifications(
+        student_ids,
+        "assignment_published",
+        {
+            "assignment_id": assignment.id,
+            "assignment_title": assignment.title,
+            "due_at": assignment.due_at,
+        },
+        db,
+    )
+    return assignment
 
 
 @router.patch("/assignments/{assignment_id}", response_model=AssignmentModel)
@@ -2873,6 +2910,19 @@ async def submit_assignment(
         submission_id=submission.id,
         db=db,
     )
+    await _send_education_notifications(
+        [assignment.teacher_id],
+        "submission_created",
+        {
+            "assignment_id": assignment.id,
+            "assignment_title": assignment.title,
+            "submission_id": submission.id,
+            "student_id": user.id,
+            "student_name": user.name,
+            "round_no": submission.round_no,
+        },
+        db,
+    )
     return {"submission_id": submission.id, "final_version_id": final_version.id}
 
 
@@ -3202,6 +3252,30 @@ async def save_submission_review(
         Education.set_writing_session_status(
             submission.writing_session_id, "draft", db=db
         )
+
+    if form_data.review_status == "reviewed":
+        await _send_education_notifications(
+            [submission.student_id],
+            "review_completed",
+            {
+                "assignment_id": assignment.id,
+                "assignment_title": assignment.title,
+                "score": form_data.score,
+            },
+            db,
+        )
+    elif form_data.review_status == "returned":
+        await _send_education_notifications(
+            [submission.student_id],
+            "submission_returned",
+            {
+                "assignment_id": assignment.id,
+                "assignment_title": assignment.title,
+                "returned_comment": form_data.returned_comment,
+                "resubmit_due_at": form_data.resubmit_due_at,
+            },
+            db,
+        )
     return review
 
 
@@ -3395,3 +3469,26 @@ async def update_writing_session_active_chat(
         "writing_session": updated.model_dump(),
         "active_chat_id": updated.active_chat_id,
     }
+
+
+@router.get("/me/notifications/summary")
+async def get_my_notification_summary(
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+):
+    return Education.get_unread_notification_summary(user.id, db=db)
+
+
+@router.post("/me/notifications/mark-read")
+async def mark_my_notifications_read(
+    form_data: NotificationMarkReadForm,
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+):
+    marked = Education.mark_notifications_read(
+        user.id,
+        types=form_data.types,
+        assignment_id=form_data.assignment_id,
+        db=db,
+    )
+    return {"marked": marked}

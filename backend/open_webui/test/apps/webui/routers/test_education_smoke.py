@@ -1712,12 +1712,16 @@ def _setup_submitted_assignment(client, teacher, student, title="Round Essay"):
     classroom = client.post("/api/v1/classrooms", json={"name": f"CR {title}"}).json()[
         "classroom"
     ]
+    UserContext.current_user = student
+    client.post("/api/v1/classrooms/join", json={"invite_code": classroom["invite_code"]})
+
+    UserContext.current_user = teacher
     assignment = client.post(
         "/api/v1/assignments",
         json={"title": title, "classroom_id": classroom["id"], "due_at": 2000000000},
     ).json()
+
     UserContext.current_user = student
-    client.post("/api/v1/classrooms/join", json={"invite_code": classroom["invite_code"]})
     workspace = client.get(f"/api/v1/assignments/{assignment['id']}/workspace").json()
     session_id = workspace["writing_session"]["id"]
     submit_res = client.post(
@@ -1955,3 +1959,60 @@ def test_teacher_sees_rounds_and_diff(education_client):
         f"/api/v1/teacher/submissions/{first_submission_id}/diff"
     ).json()
     assert first_diff["has_previous"] is False
+
+
+def test_notifications_flow(education_client):
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id, submission_id = _setup_submitted_assignment(
+        client, teacher, student, "Notify Round"
+    )
+
+    # 学生:布置作业时收到 assignment_published
+    UserContext.current_user = student
+    summary = client.get("/api/v1/me/notifications/summary").json()
+    assert summary["by_type"].get("assignment_published") == 1
+
+    # 老师:学生提交后收到 submission_created
+    UserContext.current_user = teacher
+    summary = client.get("/api/v1/me/notifications/summary").json()
+    assert summary["by_type"].get("submission_created") == 1
+
+    client.post(
+        f"/api/v1/teacher/submissions/{submission_id}/review",
+        json={"review_status": "reviewed", "score": 90},
+    )
+
+    # 学生:批改完成收到 review_completed
+    UserContext.current_user = student
+    summary = client.get("/api/v1/me/notifications/summary").json()
+    assert summary["by_type"].get("review_completed") == 1
+
+    # 按作业上下文标已读
+    marked = client.post(
+        "/api/v1/me/notifications/mark-read",
+        json={"assignment_id": assignment["id"]},
+    ).json()
+    assert marked["marked"] >= 2  # assignment_published + review_completed
+    summary = client.get("/api/v1/me/notifications/summary").json()
+    assert summary["total"] == 0
+
+
+def test_returned_review_sends_return_notification(education_client):
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id, submission_id = _setup_submitted_assignment(
+        client, teacher, student, "Notify Return"
+    )
+
+    UserContext.current_user = teacher
+    client.post(
+        f"/api/v1/teacher/submissions/{submission_id}/review",
+        json={
+            "review_status": "returned",
+            "returned_comment": "Needs another pass",
+            "resubmit_due_at": 2100000000,
+        },
+    )
+
+    UserContext.current_user = student
+    summary = client.get("/api/v1/me/notifications/summary").json()
+    assert summary["by_type"].get("submission_returned") == 1
