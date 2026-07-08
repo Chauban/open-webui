@@ -2642,6 +2642,7 @@ async def upsert_writing_chat_message(
             :50
         ].strip() or "New Chat"
         chat = await Chats.insert_new_chat(
+            str(uuid.uuid4()),
             user.id,
             ChatForm(
                 chat={
@@ -2663,11 +2664,11 @@ async def upsert_writing_chat_message(
         )
         active_chat_id = chat.id
 
+    # Current signature is (id, message_id, message) — no db kwarg.
     chat = await Chats.upsert_message_to_chat_by_id_and_message_id(
         active_chat_id,
         message_id,
         form_data.message,
-        db=db,
     )
     if chat is None:
         raise HTTPException(
@@ -3125,10 +3126,14 @@ async def get_student_dashboard(
             has_reflection=True,
             submitted_at=row.submitted_at,
             risk_summary=(
-                await _get_or_build_submission_analysis(
-                    row,
-                    Education.get_writing_session_by_id(row.writing_session_id, db=db),
-                    db,
+                (
+                    await _get_or_build_submission_analysis(
+                        row,
+                        Education.get_writing_session_by_id(
+                            row.writing_session_id, db=db
+                        ),
+                        db,
+                    )
                 ).get("summary", {})
             ),
         )

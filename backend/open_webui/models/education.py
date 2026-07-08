@@ -1334,10 +1334,18 @@ class EducationTable:
     async def delete_personal_writing_session(
         self, session_id: str, owner_user_id: str, db: Optional[Session] = None
     ) -> Optional[dict]:
-        with get_db_context(db) as db:
-            self._ensure_writing_tables(db)
+        # Phase 1 (sync session): look up the writing session, collect the ids
+        # the async cleanup needs, delete the rows owned by this table, and
+        # COMMIT before any async table call. The async Chats/Folders/Notes
+        # methods cannot reuse this sync Session (they require an AsyncSession),
+        # so they open their own connection to the same database; holding this
+        # sync write transaction open across those calls self-deadlocks sqlite
+        # ("database is locked") and their deletes silently do nothing.
+        related_folder_ids: list[str] = []
+        with get_db_context(db) as sync_db:
+            self._ensure_writing_tables(sync_db)
             session = (
-                db.query(WritingSession)
+                sync_db.query(WritingSession)
                 .filter(
                     WritingSession.id == session_id,
                     WritingSession.owner_user_id == owner_user_id,
@@ -1348,72 +1356,84 @@ class EducationTable:
             if session is None:
                 return None
 
-            deleted_chat_ids: list[str] = []
-            deleted_folder_ids: list[str] = []
+            folder_id = session.folder_id
+            chat_id = session.chat_id
+            note_id = session.note_id
 
-            db.query(WritingVersion).filter(
-                WritingVersion.writing_session_id == session.id
-            ).delete(synchronize_session=False)
-            db.query(ProvenanceSegment).filter(
-                ProvenanceSegment.writing_session_id == session.id
-            ).delete(synchronize_session=False)
+            if folder_id:
+                from open_webui.models.folders import Folder
 
-            if session.folder_id:
-                from open_webui.models.chats import Chats
-                from open_webui.models.folders import Folder, Folders
-
-                related_folder_ids = {
-                    folder.id
-                    for folder in db.query(Folder)
-                    .filter_by(user_id=owner_user_id)
-                    .all()
-                    if ((folder.meta or {}).get("writing_session_id") == session.id)
-                }
-                related_folder_ids.add(session.folder_id)
-
-                for folder_id in related_folder_ids:
-                    deleted_chat_ids.extend(
-                        chat.id
-                        for chat in await Chats.get_chats_by_folder_id_and_user_id(
-                            folder_id,
-                            owner_user_id,
-                            skip=0,
-                            limit=None,
-                            db=db,
+                related_folder_ids = list(
+                    {
+                        folder.id
+                        for folder in sync_db.query(Folder)
+                        .filter_by(user_id=owner_user_id)
+                        .all()
+                        if (
+                            (folder.meta or {}).get("writing_session_id")
+                            == session.id
                         )
-                    )
-                    await Chats.delete_chats_by_user_id_and_folder_id(
-                        owner_user_id, folder_id, db=db
-                    )
-                    deleted_folder_ids.extend(
-                        await Folders.delete_folder_by_id_and_user_id(
-                            folder_id, owner_user_id, db=db
-                        )
-                    )
-
-                deleted_folder_ids = list(dict.fromkeys(deleted_folder_ids))
-                deleted_chat_ids = list(dict.fromkeys(deleted_chat_ids))
-            elif session.chat_id:
-                from open_webui.models.chats import Chats
-
-                deleted_chat_ids = [session.chat_id]
-                await Chats.delete_chat_by_id_and_user_id(
-                    session.chat_id, owner_user_id, db=db
+                    }
+                    | {folder_id}
                 )
 
-            if session.note_id:
-                from open_webui.models.notes import Notes
+            sync_db.query(WritingVersion).filter(
+                WritingVersion.writing_session_id == session.id
+            ).delete(synchronize_session=False)
+            sync_db.query(ProvenanceSegment).filter(
+                ProvenanceSegment.writing_session_id == session.id
+            ).delete(synchronize_session=False)
+            sync_db.delete(session)
+            sync_db.commit()
 
-                await Notes.delete_note_by_id(session.note_id, db=db)
+        # Phase 2 (async sessions): clean up related chats, folders, and the
+        # note through the async table APIs now that no sync write lock is
+        # held on the database.
+        deleted_chat_ids: list[str] = []
+        deleted_folder_ids: list[str] = []
 
-            db.delete(session)
-            db.commit()
-            return {
-                "session_id": session.id,
-                "project_id": session.folder_id,
-                "deleted_folder_ids": deleted_folder_ids,
-                "deleted_chat_ids": deleted_chat_ids,
-            }
+        if related_folder_ids:
+            from open_webui.models.chats import Chats
+            from open_webui.models.folders import Folders
+
+            for related_folder_id in related_folder_ids:
+                deleted_chat_ids.extend(
+                    chat.id
+                    for chat in await Chats.get_chats_by_folder_id_and_user_id(
+                        related_folder_id,
+                        owner_user_id,
+                        skip=0,
+                        limit=None,
+                    )
+                )
+                await Chats.delete_chats_by_user_id_and_folder_id(
+                    owner_user_id, related_folder_id
+                )
+                deleted_folder_ids.extend(
+                    await Folders.delete_folder_by_id_and_user_id(
+                        related_folder_id, owner_user_id
+                    )
+                )
+
+            deleted_folder_ids = list(dict.fromkeys(deleted_folder_ids))
+            deleted_chat_ids = list(dict.fromkeys(deleted_chat_ids))
+        elif chat_id:
+            from open_webui.models.chats import Chats
+
+            deleted_chat_ids = [chat_id]
+            await Chats.delete_chat_by_id_and_user_id(chat_id, owner_user_id)
+
+        if note_id:
+            from open_webui.models.notes import Notes
+
+            await Notes.delete_note_by_id(note_id)
+
+        return {
+            "session_id": session_id,
+            "project_id": folder_id,
+            "deleted_folder_ids": deleted_folder_ids,
+            "deleted_chat_ids": deleted_chat_ids,
+        }
 
     def insert_version(
         self,
