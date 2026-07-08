@@ -632,6 +632,7 @@ class SubmissionDetailResponse(BaseModel):
     note: dict
     student_name: Optional[str] = None
     analysis: Optional[dict] = None
+    rounds: list[dict] = Field(default_factory=list)
 
 
 class DashboardItem(BaseModel):
@@ -1483,6 +1484,14 @@ class EducationTable:
                 .all()
             )
             return [WritingVersionModel.model_validate(version) for version in versions]
+
+    def get_version_by_id(
+        self, version_id: str, db: Optional[Session] = None
+    ) -> Optional[WritingVersionModel]:
+        with get_db_context(db) as db:
+            self._ensure_writing_tables(db)
+            version = db.get(WritingVersion, version_id)
+            return WritingVersionModel.model_validate(version) if version else None
 
     def insert_provenance_segments(
         self,

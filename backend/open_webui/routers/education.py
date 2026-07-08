@@ -2931,6 +2931,24 @@ async def get_submission_detail(
         version for version in versions if version.id == submission.final_version_id
     )
 
+    rounds = []
+    for item in Education.get_submission_rounds(
+        submission.assignment_id, submission.student_id, db=db
+    ):
+        item_review = Education.get_submission_review_by_submission_id(item.id, db=db)
+        rounds.append(
+            {
+                "submission_id": item.id,
+                "round_no": item.round_no,
+                "submitted_at": item.submitted_at,
+                "is_current": item.is_current,
+                "review_status": (
+                    item_review.review_status if item_review else "pending"
+                ),
+                "score": item_review.score if item_review else None,
+            }
+        )
+
     return SubmissionDetailResponse(
         submission=submission,
         assignment=assignment,
@@ -2946,7 +2964,56 @@ async def get_submission_detail(
         note=note.model_dump(),
         student_name=student.name if student else submission.student_id,
         analysis=analysis,
+        rounds=rounds,
     )
+
+
+@router.get("/teacher/submissions/{submission_id}/diff")
+async def get_submission_round_diff(
+    submission_id: str,
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+):
+    _ensure_teacher_identity(user)
+    submission = Education.get_submission_by_id(submission_id, db=db)
+    if submission is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found"
+        )
+    assignment = _get_assignment_or_404(submission.assignment_id, db)
+    _ensure_assignment_access(user, assignment, db, require_teacher=True)
+
+    previous = next(
+        (
+            item
+            for item in Education.get_submission_rounds(
+                submission.assignment_id, submission.student_id, db=db
+            )
+            if item.round_no == submission.round_no - 1
+        ),
+        None,
+    )
+    if previous is None:
+        return {"has_previous": False, "previous_round_no": None, "blocks": []}
+
+    current_version = Education.get_version_by_id(submission.final_version_id, db=db)
+    previous_version = Education.get_version_by_id(previous.final_version_id, db=db)
+    old_text = (previous_version.note_snapshot_text or "") if previous_version else ""
+    new_text = (current_version.note_snapshot_text or "") if current_version else ""
+    matcher = difflib.SequenceMatcher(None, old_text, new_text)
+    blocks = [
+        {
+            "op": op,
+            "old_text": old_text[i1:i2],
+            "new_text": new_text[j1:j2],
+        }
+        for op, i1, i2, j1, j2 in matcher.get_opcodes()
+    ]
+    return {
+        "has_previous": True,
+        "previous_round_no": previous.round_no,
+        "blocks": blocks,
+    }
 
 
 @router.post("/teacher/submissions/{submission_id}/analysis")

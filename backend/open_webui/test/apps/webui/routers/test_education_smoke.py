@@ -1910,3 +1910,48 @@ def test_effective_due_uses_resubmit_due_after_return(education_client):
     )
     assert allowed.status_code == 200, allowed.text
     assert allowed.json()["submission_id"] != submission_id
+
+
+def test_teacher_sees_rounds_and_diff(education_client):
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id, first_submission_id = _setup_submitted_assignment(
+        client, teacher, student, "Rounds Diff"
+    )
+
+    UserContext.current_user = teacher
+    client.post(
+        f"/api/v1/teacher/submissions/{first_submission_id}/review",
+        json={
+            "review_status": "returned",
+            "returned_comment": "Rewrite the ending",
+            "resubmit_due_at": 2100000000,
+        },
+    )
+
+    UserContext.current_user = student
+    resubmit = client.post(
+        f"/api/v1/assignments/{assignment['id']}/submit",
+        json=_submit_body(session_id, "first draft text for the round essay with a new ending"),
+    )
+    second_submission_id = resubmit.json()["submission_id"]
+
+    UserContext.current_user = teacher
+    detail = client.get(f"/api/v1/teacher/submissions/{second_submission_id}").json()
+    rounds = detail["rounds"]
+    assert [r["round_no"] for r in rounds] == [2, 1]
+    assert rounds[0]["is_current"] == 1
+    assert rounds[1]["review_status"] == "returned"
+
+    diff = client.get(
+        f"/api/v1/teacher/submissions/{second_submission_id}/diff"
+    ).json()
+    assert diff["has_previous"] is True
+    assert diff["previous_round_no"] == 1
+    ops = {block["op"] for block in diff["blocks"]}
+    assert "equal" in ops
+    assert ("insert" in ops) or ("replace" in ops)
+
+    first_diff = client.get(
+        f"/api/v1/teacher/submissions/{first_submission_id}/diff"
+    ).json()
+    assert first_diff["has_previous"] is False
