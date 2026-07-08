@@ -84,8 +84,16 @@
 	let resubmitDueLocal = '';
 	let diffData: any = null;
 	let diffLoading = false;
+	let loadSeq = 0;
+	let diffSeq = 0;
 
 	const toEpoch = (v: string) => (v ? Math.floor(new Date(v).getTime() / 1000) : null);
+	// datetime-local expects a LOCAL "YYYY-MM-DDTHH:mm" string; toISOString() would shift to UTC.
+	const toLocalDateTimeInput = (epoch: number) => {
+		const d = new Date(epoch * 1000);
+		const pad = (n: number) => String(n).padStart(2, '0');
+		return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+	};
 
 	$: submissionId = $page.params.submissionId;
 	$: isHistoricalRound = detail ? !detail.submission.is_current : false;
@@ -170,9 +178,7 @@
 		rubricEvidence =
 			review?.rubric_json?.evidence != null ? String(review.rubric_json.evidence) : '';
 		returnedComment = review?.returned_comment || '';
-		resubmitDueLocal = review?.resubmit_due_at
-			? new Date(review.resubmit_due_at * 1000).toISOString().slice(0, 16)
-			: '';
+		resubmitDueLocal = review?.resubmit_due_at ? toLocalDateTimeInput(review.resubmit_due_at) : '';
 	};
 
 	const saveReview = async (statusOverride?: string) => {
@@ -214,10 +220,14 @@
 
 	const loadDiff = async () => {
 		if (diffLoading) return;
+		const seq = ++diffSeq;
 		diffLoading = true;
 		try {
-			diffData = await getSubmissionRoundDiff(localStorage.token, detail.submission.id);
+			const response = await getSubmissionRoundDiff(localStorage.token, detail.submission.id);
+			if (seq !== diffSeq) return;
+			diffData = response;
 		} catch (error) {
+			if (seq !== diffSeq) return;
 			toast.error(`${error?.detail ?? error}`);
 		} finally {
 			diffLoading = false;
@@ -260,21 +270,29 @@
 	};
 
 	const loadDetail = async (id: string) => {
+		const seq = ++loadSeq;
+		++diffSeq; // invalidate any in-flight diff response for the previous round
 		loaded = false;
 		loadError = '';
 		diffData = null;
 		expandedSegmentId = '';
 		activeSegmentId = '';
 		activeSegmentDetail = null;
+		expandedTimelineIds = new Set();
 		try {
-			detail = await getTeacherSubmissionDetail(localStorage.token, id);
+			const response = await getTeacherSubmissionDetail(localStorage.token, id);
+			if (seq !== loadSeq) return;
+			detail = response;
 			showAllVersions = false;
 			syncReview();
 		} catch (error) {
+			if (seq !== loadSeq) return;
 			loadError = `${error?.detail ?? error}`;
 			toast.error(loadError);
 		} finally {
-			loaded = true;
+			if (seq === loadSeq) {
+				loaded = true;
+			}
 		}
 	};
 
