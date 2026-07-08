@@ -254,6 +254,23 @@ def _get_assignment_or_404(assignment_id: str, db: Session) -> AssignmentModel:
     return assignment
 
 
+def _get_effective_due_at(
+    assignment, student_id: str, db: Session
+) -> Optional[int]:
+    for submission in Education.get_submission_rounds(
+        assignment.id, student_id, db=db
+    ):
+        review = Education.get_submission_review_by_submission_id(
+            submission.id, db=db
+        )
+        if review is None or review.review_status == "pending":
+            continue
+        if review.review_status == "returned" and review.resubmit_due_at:
+            return review.resubmit_due_at
+        break  # reviewed:本作业反馈循环已关闭,回落到原始截止
+    return assignment.due_at
+
+
 def _get_workspace_session_or_404(session_id: str, db: Session):
     session = Education.get_writing_session_by_id(session_id, db=db)
     if session is None:
@@ -1224,7 +1241,9 @@ def _build_submission_analysis(
 
 
 async def _get_or_build_submission_analysis(submission, session, db: Session) -> dict:
-    cached = Education.get_analysis_result(session.id, "submission_analysis", db=db)
+    cached = Education.get_analysis_result(
+        session.id, "submission_analysis", submission_id=submission.id, db=db
+    )
     if (
         cached is not None
         and cached.payload_json
@@ -2692,7 +2711,8 @@ async def submit_assignment(
         )
 
     assignment = _get_assignment_or_404(assignment_id, db)
-    if assignment.due_at is not None and assignment.due_at <= int(time.time()):
+    effective_due_at = _get_effective_due_at(assignment, user.id, db)
+    if effective_due_at is not None and effective_due_at <= int(time.time()):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Assignment due time has passed",
@@ -3039,6 +3059,20 @@ async def save_submission_review(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid review status",
         )
+    if not submission.is_current:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Historical submission rounds are read-only",
+        )
+    if form_data.review_status == "returned":
+        if (
+            form_data.resubmit_due_at is None
+            or form_data.resubmit_due_at <= int(time.time())
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A future resubmit due time is required when returning",
+            )
 
     review = Education.upsert_submission_review(
         submission.id,
@@ -3047,6 +3081,10 @@ async def save_submission_review(
         form_data,
         db=db,
     )
+    if form_data.review_status == "returned":
+        Education.set_writing_session_status(
+            submission.writing_session_id, "draft", db=db
+        )
     return review
 
 
@@ -3111,7 +3149,7 @@ async def get_student_dashboard(
 ):
     rows = (
         db.query(Submission)
-        .filter(Submission.student_id == user.id)
+        .filter(Submission.student_id == user.id, Submission.is_current == 1)
         .order_by(Submission.submitted_at.desc())
         .limit(MAX_DASHBOARD_ITEMS)
         .all()

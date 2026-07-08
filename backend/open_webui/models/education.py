@@ -593,6 +593,7 @@ class SubmissionReviewForm(BaseModel):
     overall_comment: Optional[str] = None
     rubric_json: Optional[dict] = None
     returned_comment: Optional[str] = None
+    resubmit_due_at: Optional[int] = None
 
 
 class ClassroomBulkImportForm(BaseModel):
@@ -1661,14 +1662,13 @@ class EducationTable:
     ) -> AnalysisResultModel:
         with get_db_context(db) as db:
             self._ensure_writing_tables(db)
-            result = (
-                db.query(AnalysisResult)
-                .filter(
-                    AnalysisResult.writing_session_id == session_id,
-                    AnalysisResult.result_type == result_type,
-                )
-                .first()
+            query = db.query(AnalysisResult).filter(
+                AnalysisResult.writing_session_id == session_id,
+                AnalysisResult.result_type == result_type,
             )
+            if submission_id is not None:
+                query = query.filter(AnalysisResult.submission_id == submission_id)
+            result = query.first()
             now = int(time.time())
             if result is None:
                 result = AnalysisResult(
@@ -1694,18 +1694,18 @@ class EducationTable:
         self,
         session_id: str,
         result_type: str,
+        submission_id: Optional[str] = None,
         db: Optional[Session] = None,
     ) -> Optional[AnalysisResultModel]:
         with get_db_context(db) as db:
             self._ensure_writing_tables(db)
-            result = (
-                db.query(AnalysisResult)
-                .filter(
-                    AnalysisResult.writing_session_id == session_id,
-                    AnalysisResult.result_type == result_type,
-                )
-                .first()
+            query = db.query(AnalysisResult).filter(
+                AnalysisResult.writing_session_id == session_id,
+                AnalysisResult.result_type == result_type,
             )
+            if submission_id is not None:
+                query = query.filter(AnalysisResult.submission_id == submission_id)
+            result = query.first()
             return AnalysisResultModel.model_validate(result) if result else None
 
     def insert_micro_reflection(
@@ -1755,18 +1755,31 @@ class EducationTable:
     ) -> SubmissionModel:
         with get_db_context(db) as db:
             self._ensure_writing_tables(db)
-            submission = (
+            now = int(time.time())
+            current = (
                 db.query(Submission)
                 .filter(
                     Submission.assignment_id == assignment_id,
                     Submission.student_id == student_id,
+                    Submission.is_current == 1,
                 )
+                .order_by(Submission.round_no.desc())
                 .first()
             )
+            review = (
+                db.query(SubmissionReview)
+                .filter(SubmissionReview.submission_id == current.id)
+                .first()
+                if current is not None
+                else None
+            )
 
-            now = int(time.time())
-            previous_reflection_id = None
-            if submission is None:
+            if current is None or (
+                review is not None and review.review_status in ("reviewed", "returned")
+            ):
+                # 首轮,或已批改/退回后的重交:开新轮,旧轮完整保留
+                if current is not None:
+                    current.is_current = 0
                 submission = Submission(
                     id=str(uuid.uuid4()),
                     assignment_id=assignment_id,
@@ -1776,23 +1789,28 @@ class EducationTable:
                     stats_json=stats_json,
                     micro_reflection_id=micro_reflection_id,
                     submitted_at=now,
+                    round_no=1 if current is None else current.round_no + 1,
+                    is_current=1,
                 )
                 db.add(submission)
             else:
-                previous_reflection_id = submission.micro_reflection_id
-                submission.writing_session_id = writing_session_id
-                submission.final_version_id = final_version_id
-                submission.stats_json = stats_json
-                submission.micro_reflection_id = micro_reflection_id
-                submission.submitted_at = now
-                db.query(SubmissionReview).filter(
-                    SubmissionReview.submission_id == submission.id
-                ).delete(synchronize_session=False)
-
-            if previous_reflection_id and previous_reflection_id != micro_reflection_id:
-                db.query(MicroReflection).filter(
-                    MicroReflection.id == previous_reflection_id
-                ).delete(synchronize_session=False)
+                # 未批改(无 review 或 pending):覆盖当前轮
+                previous_reflection_id = current.micro_reflection_id
+                current.writing_session_id = writing_session_id
+                current.final_version_id = final_version_id
+                current.stats_json = stats_json
+                current.micro_reflection_id = micro_reflection_id
+                current.submitted_at = now
+                if review is not None:
+                    db.delete(review)
+                if (
+                    previous_reflection_id
+                    and previous_reflection_id != micro_reflection_id
+                ):
+                    db.query(MicroReflection).filter(
+                        MicroReflection.id == previous_reflection_id
+                    ).delete(synchronize_session=False)
+                submission = current
 
             db.commit()
             db.refresh(submission)
@@ -1813,6 +1831,50 @@ class EducationTable:
             self._ensure_writing_tables(db)
             submission = db.get(Submission, submission_id)
             return SubmissionModel.model_validate(submission) if submission else None
+
+    def get_current_submission(
+        self, assignment_id: str, student_id: str, db: Optional[Session] = None
+    ) -> Optional[SubmissionModel]:
+        with get_db_context(db) as db:
+            self._ensure_writing_tables(db)
+            submission = (
+                db.query(Submission)
+                .filter(
+                    Submission.assignment_id == assignment_id,
+                    Submission.student_id == student_id,
+                    Submission.is_current == 1,
+                )
+                .order_by(Submission.round_no.desc())
+                .first()
+            )
+            return SubmissionModel.model_validate(submission) if submission else None
+
+    def get_submission_rounds(
+        self, assignment_id: str, student_id: str, db: Optional[Session] = None
+    ) -> list[SubmissionModel]:
+        with get_db_context(db) as db:
+            self._ensure_writing_tables(db)
+            submissions = (
+                db.query(Submission)
+                .filter(
+                    Submission.assignment_id == assignment_id,
+                    Submission.student_id == student_id,
+                )
+                .order_by(Submission.round_no.desc())
+                .all()
+            )
+            return [SubmissionModel.model_validate(s) for s in submissions]
+
+    def set_writing_session_status(
+        self, session_id: str, status: str, db: Optional[Session] = None
+    ) -> None:
+        with get_db_context(db) as db:
+            self._ensure_writing_tables(db)
+            session = db.get(WritingSession, session_id)
+            if session is not None:
+                session.status = status
+                session.updated_at = int(time.time())
+                db.commit()
 
     def get_submission_review_by_submission_id(
         self, submission_id: str, db: Optional[Session] = None
@@ -1869,6 +1931,7 @@ class EducationTable:
                     overall_comment=form_data.overall_comment,
                     rubric_json=form_data.rubric_json,
                     returned_comment=form_data.returned_comment,
+                    resubmit_due_at=form_data.resubmit_due_at,
                     reviewed_at=now if form_data.review_status != "pending" else None,
                     created_at=now,
                     updated_at=now,
@@ -1881,6 +1944,7 @@ class EducationTable:
                 review.overall_comment = form_data.overall_comment
                 review.rubric_json = form_data.rubric_json
                 review.returned_comment = form_data.returned_comment
+                review.resubmit_due_at = form_data.resubmit_due_at
                 review.reviewed_at = (
                     now if form_data.review_status != "pending" else None
                 )
@@ -1897,7 +1961,10 @@ class EducationTable:
             self._ensure_writing_tables(db)
             submissions = (
                 db.query(Submission)
-                .filter(Submission.assignment_id == assignment_id)
+                .filter(
+                    Submission.assignment_id == assignment_id,
+                    Submission.is_current == 1,
+                )
                 .order_by(Submission.submitted_at.desc())
                 .all()
             )

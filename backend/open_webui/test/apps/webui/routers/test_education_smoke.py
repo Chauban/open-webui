@@ -1694,3 +1694,155 @@ def test_personal_writing_folder_rename_allows_duplicate_titles(education_client
     assert renamed.name == "茶叶001"
     assert renamed.meta["mode"] == "personal_writing"
     assert first_workspace["project"]["id"] != second_workspace["project"]["id"]
+
+
+def _submit_body(session_id: str, text: str):
+    return {
+        "writing_session_id": session_id,
+        "final_content_json": None,
+        "final_content_html": f"<p>{text}</p>",
+        "final_content_text": text,
+        "ai_help_types": ["Outline"],
+        "reflection_text": "I used AI for outlining then rewrote every paragraph in my own words.",
+    }
+
+
+def _setup_submitted_assignment(client, teacher, student, title="Round Essay"):
+    UserContext.current_user = teacher
+    classroom = client.post("/api/v1/classrooms", json={"name": f"CR {title}"}).json()[
+        "classroom"
+    ]
+    assignment = client.post(
+        "/api/v1/assignments",
+        json={"title": title, "classroom_id": classroom["id"], "due_at": 2000000000},
+    ).json()
+    UserContext.current_user = student
+    client.post("/api/v1/classrooms/join", json={"invite_code": classroom["invite_code"]})
+    workspace = client.get(f"/api/v1/assignments/{assignment['id']}/workspace").json()
+    session_id = workspace["writing_session"]["id"]
+    submit_res = client.post(
+        f"/api/v1/assignments/{assignment['id']}/submit",
+        json=_submit_body(session_id, "first draft text for the round essay"),
+    )
+    assert submit_res.status_code == 200, submit_res.text
+    return assignment, session_id, submit_res.json()["submission_id"]
+
+
+def test_resubmit_before_review_overwrites_same_round(education_client):
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id, submission_id = _setup_submitted_assignment(
+        client, teacher, student, "Overwrite Round"
+    )
+
+    resubmit_res = client.post(
+        f"/api/v1/assignments/{assignment['id']}/submit",
+        json=_submit_body(session_id, "second draft replacing the first one entirely"),
+    )
+    assert resubmit_res.status_code == 200, resubmit_res.text
+    assert resubmit_res.json()["submission_id"] == submission_id
+
+    UserContext.current_user = teacher
+    submissions = client.get(
+        f"/api/v1/teacher/assignments/{assignment['id']}/submissions"
+    ).json()
+    assert len(submissions) == 1
+    assert submissions[0]["submission"]["round_no"] == 1
+
+
+def test_returned_submission_opens_new_round_and_keeps_history(education_client):
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id, submission_id = _setup_submitted_assignment(
+        client, teacher, student, "Return Round"
+    )
+
+    UserContext.current_user = teacher
+    # 退回必须带未来的 resubmit_due_at
+    missing_due = client.post(
+        f"/api/v1/teacher/submissions/{submission_id}/review",
+        json={"review_status": "returned", "returned_comment": "Please revise"},
+    )
+    assert missing_due.status_code == 400, missing_due.text
+
+    returned = client.post(
+        f"/api/v1/teacher/submissions/{submission_id}/review",
+        json={
+            "review_status": "returned",
+            "returned_comment": "Please revise the argument",
+            "resubmit_due_at": 2100000000,
+        },
+    )
+    assert returned.status_code == 200, returned.text
+    assert returned.json()["resubmit_due_at"] == 2100000000
+
+    # 退回后学生会话解锁为 draft
+    UserContext.current_user = student
+    workspace = client.get(f"/api/v1/assignments/{assignment['id']}/workspace").json()
+    assert workspace["writing_session"]["status"] == "draft"
+
+    # 重交 → 新轮,旧轮与旧评语保留
+    resubmit = client.post(
+        f"/api/v1/assignments/{assignment['id']}/submit",
+        json=_submit_body(session_id, "revised draft after teacher returned it"),
+    )
+    assert resubmit.status_code == 200, resubmit.text
+    new_submission_id = resubmit.json()["submission_id"]
+    assert new_submission_id != submission_id
+
+    UserContext.current_user = teacher
+    submissions = client.get(
+        f"/api/v1/teacher/assignments/{assignment['id']}/submissions"
+    ).json()
+    assert len(submissions) == 1  # 列表只显示当前轮
+    assert submissions[0]["submission"]["id"] == new_submission_id
+    assert submissions[0]["submission"]["round_no"] == 2
+
+    old_review = client.get(
+        f"/api/v1/teacher/submissions/{submission_id}/review"
+    ).json()
+    assert old_review["review_status"] == "returned"
+    assert old_review["returned_comment"] == "Please revise the argument"
+
+    # 历史轮禁止再保存评语
+    historic_save = client.post(
+        f"/api/v1/teacher/submissions/{submission_id}/review",
+        json={"review_status": "reviewed", "score": 80},
+    )
+    assert historic_save.status_code == 400, historic_save.text
+
+
+def test_effective_due_uses_resubmit_due_after_return(education_client):
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id, submission_id = _setup_submitted_assignment(
+        client, teacher, student, "Due Round"
+    )
+
+    UserContext.current_user = teacher
+    past_due = int(time.time()) - 3600
+    # 先把作业原截止改到过去(PATCH /assignments/{id})
+    client.patch(f"/api/v1/assignments/{assignment['id']}", json={"due_at": past_due})
+
+    UserContext.current_user = student
+    blocked = client.post(
+        f"/api/v1/assignments/{assignment['id']}/submit",
+        json=_submit_body(session_id, "late resubmit should be blocked now"),
+    )
+    assert blocked.status_code == 400, blocked.text
+
+    UserContext.current_user = teacher
+    future_due = int(time.time()) + 3600
+    client.post(
+        f"/api/v1/teacher/submissions/{submission_id}/review",
+        json={
+            "review_status": "returned",
+            "returned_comment": "Late but returned for revision",
+            "resubmit_due_at": future_due,
+        },
+    )
+
+    UserContext.current_user = student
+    allowed = client.post(
+        f"/api/v1/assignments/{assignment['id']}/submit",
+        json=_submit_body(session_id, "resubmit within the new resubmit window"),
+    )
+    assert allowed.status_code == 200, allowed.text
+    assert allowed.json()["submission_id"] != submission_id
