@@ -6,7 +6,7 @@
 	import { get } from 'svelte/store';
 	import { toast } from 'svelte-sonner';
 
-	import { createAssignment, getTeacherClassrooms } from '$lib/apis/education';
+	import { createAssignment, getTeacherAssignment, getTeacherClassrooms } from '$lib/apis/education';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
 
@@ -16,7 +16,7 @@
 		name?.trim() === 'Default Classroom' ? t('Default Classroom') : name;
 
 	let classrooms = [];
-	let classroomId = '';
+	let selectedClassroomIds = new Set();
 	let title = '';
 	let description = '';
 	let dueAt = '';
@@ -24,10 +24,42 @@
 	let saving = false;
 	let loadError = '';
 
+	const toggleClassroom = (id: string) => {
+		const next = new Set(selectedClassroomIds);
+		if (next.has(id)) {
+			next.delete(id);
+		} else {
+			next.add(id);
+		}
+		selectedClassroomIds = next;
+	};
+
 	onMount(async () => {
 		try {
 			classrooms = await getTeacherClassrooms(localStorage.token);
-			classroomId = get(page).url.searchParams.get('classroomId') || classrooms[0]?.classroom?.id || '';
+			const params = get(page).url.searchParams;
+			const presetClassroomId = params.get('classroomId');
+			const duplicateFromId = params.get('from');
+
+			if (duplicateFromId) {
+				try {
+					const source = await getTeacherAssignment(localStorage.token, duplicateFromId);
+					title = source.assignment.title ?? '';
+					description = source.assignment.description ?? '';
+					if (source.assignment.classroom_id) {
+						selectedClassroomIds = new Set([source.assignment.classroom_id]);
+					}
+				} catch (error) {
+					toast.error(`${error?.detail ?? error}`);
+				}
+			}
+
+			if (selectedClassroomIds.size === 0) {
+				const initial = presetClassroomId || classrooms[0]?.classroom?.id;
+				if (initial) {
+					selectedClassroomIds = new Set([initial]);
+				}
+			}
 		} catch (error) {
 			loadError = `${error?.detail ?? error}`;
 			toast.error(loadError);
@@ -41,7 +73,7 @@
 			toast.error(t('Assignment title is required.'));
 			return;
 		}
-		if (!classroomId) {
+		if (selectedClassroomIds.size === 0) {
 			toast.error(t('Classroom is required.'));
 			return;
 		}
@@ -52,14 +84,22 @@
 
 		saving = true;
 		try {
-			const assignment = await createAssignment(localStorage.token, {
+			const assignments = await createAssignment(localStorage.token, {
 				title: title.trim(),
 				description: description.trim() || undefined,
-				classroom_id: classroomId,
+				classroom_ids: [...selectedClassroomIds],
 				due_at: Math.floor(new Date(dueAt).getTime() / 1000)
 			});
-			toast.success(t('Assignment created.'));
-			goto(`/teacher/assignments/${assignment.id}`);
+			toast.success(
+				assignments.length > 1
+					? t('Assignment published to {{count}} classrooms.', { count: assignments.length })
+					: t('Assignment created.')
+			);
+			if (assignments.length === 1) {
+				goto(`/teacher/assignments/${assignments[0].id}`);
+			} else {
+				goto('/teacher/assignments');
+			}
 		} catch (error) {
 			toast.error(`${error?.detail ?? error}`);
 		} finally {
@@ -97,15 +137,30 @@
 		<div class="rounded-3xl border border-gray-200 bg-white p-6">
 			<div class="grid gap-4">
 				<div>
-					<div class="mb-2 text-sm font-semibold">{$i18n.t('Classroom')}</div>
-					<select
-						class="w-full rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none"
-						bind:value={classroomId}
-					>
+					<div class="mb-2 flex items-center justify-between">
+						<div class="text-sm font-semibold">{$i18n.t('Classrooms')}</div>
+						<div class="text-xs text-gray-400">
+							{$i18n.t('{{count}} selected', { count: selectedClassroomIds.size })}
+						</div>
+					</div>
+					<div class="flex flex-wrap gap-2">
 						{#each classrooms as item}
-							<option value={item.classroom.id}>{getClassroomDisplayName(item.classroom.name)}</option>
+							<button
+								type="button"
+								class={`rounded-full border px-4 py-2 text-sm transition ${
+									selectedClassroomIds.has(item.classroom.id)
+										? 'border-black bg-black text-white'
+										: 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
+								}`}
+								on:click={() => toggleClassroom(item.classroom.id)}
+							>
+								{getClassroomDisplayName(item.classroom.name)}
+							</button>
 						{/each}
-					</select>
+					</div>
+					<div class="mt-2 text-xs text-gray-400">
+						{$i18n.t('Select one or more classrooms; the assignment is published to each.')}
+					</div>
 				</div>
 				<div>
 					<div class="mb-2 text-sm font-semibold">{$i18n.t('Assignment title')}</div>

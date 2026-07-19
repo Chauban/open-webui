@@ -18,6 +18,10 @@
 			active: t('Active'),
 			archived: t('Archived')
 		})[value] || value;
+	const isPastDue = (item) =>
+		item.assignment.status === 'active' &&
+		item.assignment.due_at &&
+		item.assignment.due_at * 1000 < Date.now();
 
 	let assignments = [];
 	let loading = true;
@@ -50,8 +54,10 @@
 			item.classroom?.name?.toLowerCase().includes(normalizedKeyword);
 		const matchesStatus =
 			selectedStatus === 'all' ||
-			item.assignment.status === selectedStatus ||
-			(selectedStatus === 'needs_review' && item.submission_count > 0);
+			(selectedStatus === 'past_due'
+				? isPastDue(item)
+				: item.assignment.status === selectedStatus ||
+					(selectedStatus === 'needs_review' && item.submission_count > 0));
 		const matchesSuspected = !onlySuspected || (item.risk_summary?.suspected_unmarked_import_count ?? 0) > 0;
 		const matchesBursts = !onlyBursts || (item.risk_summary?.burst_count ?? 0) > 0;
 
@@ -99,8 +105,16 @@
 
 <TeacherPageShell title="Assignments">
 	<div class="mx-auto max-w-6xl px-4 py-8">
-		<div class="mb-8 text-sm text-gray-500">
-			{$i18n.t('View every assignment across classrooms, then jump into submissions or analytics.')}
+		<div class="mb-8 flex flex-wrap items-center justify-between gap-3">
+			<div class="text-sm text-gray-500">
+				{$i18n.t('View every assignment across classrooms, then jump into submissions or analytics.')}
+			</div>
+			<button
+				class="rounded-full bg-black px-4 py-2 text-sm text-white"
+				on:click={() => goto('/teacher/assignments/new')}
+			>
+				{$i18n.t('New Assignment')}
+			</button>
 		</div>
 
 		<TeacherSectionNav />
@@ -114,6 +128,7 @@
 			<select class="rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none" bind:value={selectedStatus}>
 				<option value="all">{$i18n.t('All')}</option>
 				<option value="active">{$i18n.t('Active')}</option>
+				<option value="past_due">{$i18n.t('Past Due')}</option>
 				<option value="archived">{$i18n.t('Archived')}</option>
 				<option value="needs_review">{$i18n.t('Has submissions')}</option>
 			</select>
@@ -177,7 +192,20 @@
 									</div>
 									<div>{$i18n.t('Students')}: {item.student_count}</div>
 									<div>{$i18n.t('Submissions')}: {item.submission_count}</div>
-									<div>{$i18n.t('Status')}: {getAssignmentStatusLabel(item.assignment.status)}</div>
+									<div>
+										{$i18n.t('Status')}:
+										{#if isPastDue(item)}
+											<span class="text-rose-600">{$i18n.t('Past Due')}</span>
+										{:else}
+											{getAssignmentStatusLabel(item.assignment.status)}
+										{/if}
+									</div>
+									{#if item.assignment.due_at}
+										<div>
+											{$i18n.t('Due At')}:
+											{new Date(item.assignment.due_at * 1000).toLocaleString()}
+										</div>
+									{/if}
 									<div>
 										{$i18n.t('Latest Activity')}:
 										{item.latest_submission_at
@@ -213,6 +241,12 @@
 									on:click={() => copyWriteLink(item.assignment.id)}
 								>
 									{$i18n.t('Copy Student Link')}
+								</button>
+								<button
+									class="rounded-full border border-gray-300 px-3 py-2 text-sm"
+									on:click={() => goto(`/teacher/assignments/new?from=${item.assignment.id}`)}
+								>
+									{$i18n.t('Duplicate')}
 								</button>
 								<button
 									class="rounded-full border border-gray-300 px-3 py-2 text-sm"

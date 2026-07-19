@@ -1,12 +1,13 @@
 <script lang="ts">
 	// @ts-nocheck
-	import { getContext, onMount } from 'svelte';
+	import { getContext, onDestroy, onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { get } from 'svelte/store';
 	import { toast } from 'svelte-sonner';
 
 	import { getTeacherDashboard } from '$lib/apis/education';
+	import { educationNotificationSummary } from '$lib/stores';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
 
@@ -15,6 +16,9 @@
 
 	let dashboard = null;
 	let loadError = '';
+	let refreshing = false;
+	let unsubscribeNotifications;
+	let notificationsInitialized = false;
 	const rewriteLevelLabels = {
 		unchanged: 'unchanged',
 		lightly_edited: 'lightly_edited',
@@ -22,13 +26,33 @@
 		deeply_rewritten: 'deeply_rewritten'
 	};
 
-	onMount(async () => {
+	const loadDashboard = async () => {
+		refreshing = true;
 		try {
 			dashboard = await getTeacherDashboard(localStorage.token, $page.params.assignmentId);
+			loadError = '';
 		} catch (error) {
 			loadError = `${error?.detail ?? error}`;
 			toast.error(loadError);
+		} finally {
+			refreshing = false;
 		}
+	};
+
+	onMount(async () => {
+		await loadDashboard();
+		// 收到教学通知(如新提交)时后台刷新看板
+		unsubscribeNotifications = educationNotificationSummary.subscribe(() => {
+			if (!notificationsInitialized) {
+				notificationsInitialized = true;
+				return;
+			}
+			loadDashboard();
+		});
+	});
+
+	onDestroy(() => {
+		unsubscribeNotifications?.();
 	});
 </script>
 
@@ -42,12 +66,21 @@
 				<div class="text-xs uppercase tracking-[0.2em] text-gray-500">{$i18n.t('Teacher Dashboard')}</div>
 				<h1 class="text-2xl font-semibold">{$i18n.t('Class Overview')}</h1>
 			</div>
-			<button
-				class="rounded-full border border-gray-300 px-4 py-2 text-sm"
-				on:click={() => goto(`/teacher/assignments/${$page.params.assignmentId}`)}
-			>
-				{$i18n.t('Back')}
-			</button>
+			<div class="flex gap-2">
+				<button
+					class="rounded-full border border-gray-300 px-4 py-2 text-sm disabled:opacity-60"
+					disabled={refreshing}
+					on:click={loadDashboard}
+				>
+					{refreshing ? $i18n.t('Refreshing...') : $i18n.t('Refresh')}
+				</button>
+				<button
+					class="rounded-full border border-gray-300 px-4 py-2 text-sm"
+					on:click={() => goto(`/teacher/assignments/${$page.params.assignmentId}`)}
+				>
+					{$i18n.t('Back')}
+				</button>
+			</div>
 		</div>
 
 		<div class="mb-6 grid gap-4 md:grid-cols-4">
@@ -124,7 +157,10 @@
 
 		<div class="grid gap-4 md:grid-cols-2">
 			{#each dashboard.items as item}
-				<div class="rounded-3xl border border-gray-200 bg-white p-5">
+				<button
+					class="rounded-3xl border border-gray-200 bg-white p-5 text-left transition hover:border-gray-400"
+					on:click={() => goto(`/teacher/submissions/${item.submission_id}`)}
+				>
 					<div class="text-lg font-semibold">{item.student_name}</div>
 					<div class="mt-3 space-y-1 text-sm text-gray-600">
 						<div>{$i18n.t('Typed')}: {item.source_stats.user_typed_chars ?? 0}</div>
@@ -144,7 +180,7 @@
 							{$i18n.t('Average Rewrite Ratio')}: {item.risk_summary?.average_rewrite_ratio ?? 0}%
 						</div>
 					</div>
-				</div>
+				</button>
 			{/each}
 		</div>
 		</div>

@@ -8,12 +8,14 @@
 
 	import {
 		archiveAssignment,
-		getTeacherAssignments,
+		deleteAssignment,
+		getTeacherAssignment,
 		getTeacherClassrooms,
 		updateAssignment
 	} from '$lib/apis/education';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
+	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 
 	const i18n = getContext('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
@@ -35,8 +37,22 @@
 	let classroomId = '';
 	let status = 'active';
 	let dueAt = '';
+	let showArchiveConfirm = false;
+	let showDeleteConfirm = false;
 
 	const assignmentId = () => $page.params.assignmentId;
+
+	$: isPastDue =
+		item?.assignment?.status === 'active' &&
+		item?.assignment?.due_at &&
+		item.assignment.due_at * 1000 < Date.now();
+
+	// datetime-local expects a LOCAL "YYYY-MM-DDTHH:mm" string; toISOString() would shift to UTC.
+	const toLocalDateTimeInput = (epoch: number) => {
+		const d = new Date(epoch * 1000);
+		const pad = (n: number) => String(n).padStart(2, '0');
+		return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+	};
 
 	const copyWriteLink = async () => {
 		const link = `${window.location.origin}/assignments/${assignmentId()}/write`;
@@ -54,19 +70,16 @@
 		description = item.assignment.description || '';
 		classroomId = item.assignment.classroom_id || '';
 		status = item.assignment.status || 'active';
-		dueAt = item.assignment.due_at ? new Date(item.assignment.due_at * 1000).toISOString().slice(0, 16) : '';
+		dueAt = item.assignment.due_at ? toLocalDateTimeInput(item.assignment.due_at) : '';
 	};
 
 	const loadData = async () => {
-		const [assignments, teacherClassrooms] = await Promise.all([
-			getTeacherAssignments(localStorage.token),
+		const [assignmentItem, teacherClassrooms] = await Promise.all([
+			getTeacherAssignment(localStorage.token, assignmentId()),
 			getTeacherClassrooms(localStorage.token)
 		]);
 		classrooms = teacherClassrooms;
-		item = assignments.find((entry) => entry.assignment.id === assignmentId()) ?? null;
-		if (!item) {
-			throw new Error('Assignment not found');
-		}
+		item = assignmentItem;
 		syncForm();
 	};
 
@@ -107,6 +120,16 @@
 			await archiveAssignment(localStorage.token, assignmentId());
 			await loadData();
 			toast.success(t('Assignment archived.'));
+		} catch (error) {
+			toast.error(`${error?.detail ?? error}`);
+		}
+	};
+
+	const deleteCurrentAssignment = async () => {
+		try {
+			await deleteAssignment(localStorage.token, assignmentId());
+			toast.success(t('Assignment deleted.'));
+			goto('/teacher/assignments');
 		} catch (error) {
 			toast.error(`${error?.detail ?? error}`);
 		}
@@ -155,6 +178,12 @@
 					<button class="rounded-full border border-gray-300 px-4 py-2 text-sm" on:click={copyWriteLink}>
 						{$i18n.t('Copy Student Link')}
 					</button>
+					<button
+						class="rounded-full border border-gray-300 px-4 py-2 text-sm"
+						on:click={() => goto(`/teacher/assignments/new?from=${item.assignment.id}`)}
+					>
+						{$i18n.t('Duplicate')}
+					</button>
 				</div>
 			</div>
 
@@ -169,7 +198,9 @@
 				</div>
 				<div class="rounded-3xl border border-gray-200 bg-white p-5">
 					<div class="text-xs uppercase tracking-[0.16em] text-gray-500">{$i18n.t('Status')}</div>
-					<div class="mt-2 text-sm font-medium text-gray-900">{getAssignmentStatusLabel(item.assignment.status)}</div>
+					<div class="mt-2 text-sm font-medium {isPastDue ? 'text-rose-600' : 'text-gray-900'}">
+						{isPastDue ? $i18n.t('Past Due') : getAssignmentStatusLabel(item.assignment.status)}
+					</div>
 				</div>
 				<div class="rounded-3xl border border-gray-200 bg-white p-5">
 					<div class="text-xs uppercase tracking-[0.16em] text-gray-500">{$i18n.t('Due At')}</div>
@@ -213,9 +244,20 @@
 							</div>
 						</div>
 						<div class="flex flex-wrap justify-between gap-2">
-							<button class="rounded-full border border-red-300 px-4 py-2 text-sm text-red-600" on:click={archiveCurrentAssignment}>
-								{$i18n.t('Archive')}
-							</button>
+							<div class="flex flex-wrap gap-2">
+								<button
+									class="rounded-full border border-red-300 px-4 py-2 text-sm text-red-600"
+									on:click={() => (showArchiveConfirm = true)}
+								>
+									{$i18n.t('Archive')}
+								</button>
+								<button
+									class="rounded-full border border-red-300 px-4 py-2 text-sm text-red-600"
+									on:click={() => (showDeleteConfirm = true)}
+								>
+									{$i18n.t('Delete')}
+								</button>
+							</div>
 							<button class="rounded-full bg-black px-4 py-2 text-sm text-white disabled:opacity-60" disabled={saving} on:click={saveAssignment}>
 								{saving ? $i18n.t('Saving...') : $i18n.t('Save Changes')}
 							</button>
@@ -255,4 +297,22 @@
 			</div>
 		</div>
 	{/if}
+
+	<ConfirmDialog
+		bind:show={showArchiveConfirm}
+		title={$i18n.t('Archive Assignment')}
+		message={$i18n.t(
+			'Archiving is one-way and cannot be undone. Students will no longer see this assignment as active. Continue?'
+		)}
+		on:confirm={archiveCurrentAssignment}
+	/>
+
+	<ConfirmDialog
+		bind:show={showDeleteConfirm}
+		title={$i18n.t('Delete Assignment')}
+		message={$i18n.t(
+			'Only assignments without any student activity can be deleted. This cannot be undone. Continue?'
+		)}
+		on:confirm={deleteCurrentAssignment}
+	/>
 </TeacherPageShell>

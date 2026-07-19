@@ -1,11 +1,15 @@
 <script lang="ts">
 	// @ts-nocheck
-	import { getContext, onMount } from 'svelte';
+	import { getContext, onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { get } from 'svelte/store';
 	import { toast } from 'svelte-sonner';
+	import dayjs from 'dayjs';
+	import relativeTime from 'dayjs/plugin/relativeTime';
 
 	import {
+		getTeacherAssignments,
+		getTeacherClassrooms,
 		getTeacherReview,
 		getEducationNotificationSummary,
 		markEducationNotificationsRead
@@ -13,6 +17,8 @@
 	import { educationNotificationSummary } from '$lib/stores';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
+
+	dayjs.extend(relativeTime);
 
 	const i18n = getContext('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
@@ -30,76 +36,99 @@
 		return 'gray';
 	};
 
+	const PAGE_SIZE = 50;
+
 	let items = [];
+	let total = 0;
 	let loading = true;
+	let loadingMore = false;
 	let loadError = '';
 	let selectedStatus = 'pending';
 	let selectedClassroom = 'all';
 	let selectedAssignment = 'all';
 	let onlySuspected = false;
 	let onlyBursts = false;
-	let sortBy = 'submitted_at';
+	let sortBy = 'latest';
+	let classrooms = [];
+	let assignments = [];
+	let unsubscribeNotifications;
+	let notificationsInitialized = false;
+	let loadSeq = 0;
 
 	$: classroomOptions = [
 		{ value: 'all', label: t('All Classrooms') },
-		...items
-			.filter(
-				(item, index, list) =>
-					item.classroom &&
-					list.findIndex((entry) => entry.classroom?.id === item.classroom.id) === index
-			)
-			.map((item) => ({
-				value: item.classroom.id,
-				label: getClassroomDisplayName(item.classroom.name)
-			}))
+		...classrooms.map((item) => ({
+			value: item.classroom.id,
+			label: getClassroomDisplayName(item.classroom.name)
+		}))
 	];
 
 	$: assignmentOptions = [
 		{ value: 'all', label: t('All Assignments') },
-		...items
-			.filter(
-				(item, index, list) =>
-					item.assignment &&
-					list.findIndex((entry) => entry.assignment.id === item.assignment.id) === index
-			)
-			.map((item) => ({
-				value: item.assignment.id,
-				label: item.assignment.title
-			}))
+		...assignments.map((item) => ({
+			value: item.assignment.id,
+			label: item.assignment.title
+		}))
 	];
 
-	$: filteredItems = items.filter((item) => {
-		const matchesStatus = selectedStatus === 'all' ? true : item.review_status === selectedStatus;
-		const matchesClassroom =
-			selectedClassroom === 'all' ? true : item.classroom?.id === selectedClassroom;
-		const matchesAssignment =
-			selectedAssignment === 'all' ? true : item.assignment.id === selectedAssignment;
-		const matchesSuspected = !onlySuspected || (item.analysis_summary?.suspected_unmarked_import_count ?? 0) > 0;
+	$: displayedItems = items.filter((item) => {
+		const matchesSuspected =
+			!onlySuspected || (item.analysis_summary?.suspected_unmarked_import_count ?? 0) > 0;
 		const matchesBursts = !onlyBursts || (item.analysis_summary?.burst_count ?? 0) > 0;
-		return matchesStatus && matchesClassroom && matchesAssignment && matchesSuspected && matchesBursts;
-	}).sort((a, b) => {
-		if (sortBy === 'suspected') {
-			return (b.analysis_summary?.suspected_unmarked_import_count ?? 0) - (a.analysis_summary?.suspected_unmarked_import_count ?? 0);
-		}
-		if (sortBy === 'burst') {
-			return (b.analysis_summary?.burst_count ?? 0) - (a.analysis_summary?.burst_count ?? 0);
-		}
-		if (sortBy === 'rewrite') {
-			return (b.analysis_summary?.average_rewrite_ratio ?? 0) - (a.analysis_summary?.average_rewrite_ratio ?? 0);
-		}
-		return (b.submission?.submitted_at ?? 0) - (a.submission?.submitted_at ?? 0);
+		return matchesSuspected && matchesBursts;
 	});
 
-	onMount(async () => {
+	const buildQueryParams = (offset: number) => ({
+		review_status: selectedStatus === 'all' ? undefined : selectedStatus,
+		classroom_id: selectedClassroom === 'all' ? undefined : selectedClassroom,
+		assignment_id: selectedAssignment === 'all' ? undefined : selectedAssignment,
+		sort: sortBy,
+		limit: PAGE_SIZE,
+		offset
+	});
+
+	const loadQueue = async () => {
+		const seq = ++loadSeq;
+		loading = true;
 		try {
-			items = await getTeacherReview(localStorage.token);
+			const res = await getTeacherReview(localStorage.token, buildQueryParams(0));
+			if (seq !== loadSeq) return;
+			items = res.items ?? [];
+			total = res.total ?? items.length;
+			loadError = '';
 		} catch (error) {
+			if (seq !== loadSeq) return;
 			loadError = `${error?.detail ?? error}`;
 			toast.error(loadError);
 		} finally {
-			loading = false;
+			if (seq === loadSeq) {
+				loading = false;
+			}
 		}
+	};
 
+	const loadMore = async () => {
+		const seq = loadSeq;
+		loadingMore = true;
+		try {
+			const res = await getTeacherReview(localStorage.token, buildQueryParams(items.length));
+			if (seq !== loadSeq) return;
+			items = [...items, ...(res.items ?? [])];
+			total = res.total ?? total;
+		} catch (error) {
+			toast.error(`${error?.detail ?? error}`);
+		} finally {
+			loadingMore = false;
+		}
+	};
+
+	const selectStatus = (value: string) => {
+		if (selectedStatus === value) return;
+		selectedStatus = value;
+		loadQueue();
+	};
+
+	const clearSubmissionNotifications = async () => {
 		try {
 			await markEducationNotificationsRead(localStorage.token, {
 				types: ['submission_created']
@@ -110,6 +139,36 @@
 		} catch (error) {
 			console.error('Failed to mark education notifications as read:', error);
 		}
+	};
+
+	onMount(async () => {
+		await loadQueue();
+
+		getTeacherClassrooms(localStorage.token)
+			.then((res) => (classrooms = res ?? []))
+			.catch(() => {});
+		getTeacherAssignments(localStorage.token)
+			.then((res) => (assignments = res ?? []))
+			.catch(() => {});
+
+		await clearSubmissionNotifications();
+
+		// 新提交通知到达时自动刷新队列;summary 无未读提交时跳过,避免 mark-read 回写触发循环
+		unsubscribeNotifications = educationNotificationSummary.subscribe((summary) => {
+			if (!notificationsInitialized) {
+				notificationsInitialized = true;
+				return;
+			}
+			if ((summary?.by_type?.submission_created ?? 0) === 0) {
+				return;
+			}
+			loadQueue();
+			clearSubmissionNotifications();
+		});
+	});
+
+	onDestroy(() => {
+		unsubscribeNotifications?.();
 	});
 </script>
 
@@ -128,7 +187,7 @@
 						? 'border-black bg-black text-white'
 						: 'border-gray-300 bg-white text-gray-700'
 				}`}
-				on:click={() => (selectedStatus = 'pending')}
+				on:click={() => selectStatus('pending')}
 			>
 				{$i18n.t('To Review')}
 			</button>
@@ -138,7 +197,7 @@
 						? 'border-black bg-black text-white'
 						: 'border-gray-300 bg-white text-gray-700'
 				}`}
-				on:click={() => (selectedStatus = 'reviewed')}
+				on:click={() => selectStatus('reviewed')}
 			>
 				{$i18n.t('Reviewed')}
 			</button>
@@ -148,7 +207,7 @@
 						? 'border-black bg-black text-white'
 						: 'border-gray-300 bg-white text-gray-700'
 				}`}
-				on:click={() => (selectedStatus = 'returned')}
+				on:click={() => selectStatus('returned')}
 			>
 				{$i18n.t('Returned')}
 			</button>
@@ -158,28 +217,28 @@
 						? 'border-black bg-black text-white'
 						: 'border-gray-300 bg-white text-gray-700'
 				}`}
-				on:click={() => (selectedStatus = 'all')}
+				on:click={() => selectStatus('all')}
 			>
 				{$i18n.t('All')}
 			</button>
 		</div>
 
 		<div class="mb-8 grid gap-3 rounded-3xl border border-gray-200 bg-white p-5 md:grid-cols-4">
-			<select class="rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none" bind:value={selectedClassroom}>
+			<select class="rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none" bind:value={selectedClassroom} on:change={() => loadQueue()}>
 				{#each classroomOptions as option}
 					<option value={option.value}>{option.label}</option>
 				{/each}
 			</select>
-			<select class="rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none" bind:value={selectedAssignment}>
+			<select class="rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none" bind:value={selectedAssignment} on:change={() => loadQueue()}>
 				{#each assignmentOptions as option}
 					<option value={option.value}>{option.label}</option>
 				{/each}
 			</select>
 			<div class="flex items-center rounded-2xl border border-gray-200 px-4 py-3 text-sm text-gray-600">
-				{$i18n.t('Results')}: {filteredItems.length}
+				{$i18n.t('Results')}: {displayedItems.length} / {total}
 			</div>
-			<select class="rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none" bind:value={sortBy}>
-				<option value="submitted_at">{$i18n.t('Sort by Latest')}</option>
+			<select class="rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none" bind:value={sortBy} on:change={() => loadQueue()}>
+				<option value="latest">{$i18n.t('Sort by Latest')}</option>
 				<option value="suspected">{$i18n.t('Sort by Suspected Imports')}</option>
 				<option value="burst">{$i18n.t('Sort by Large Bursts')}</option>
 				<option value="rewrite">{$i18n.t('Sort by Rewrite Ratio')}</option>
@@ -212,13 +271,13 @@
 			<div class="rounded-3xl border border-gray-200 bg-white p-6 text-sm text-gray-500">
 				{$i18n.t('Loading review queue...')}
 			</div>
-		{:else if filteredItems.length === 0}
+		{:else if displayedItems.length === 0}
 			<div class="rounded-3xl border border-gray-200 bg-white p-6 text-sm text-gray-500">
 				{$i18n.t('No submissions match the current filters.')}
 			</div>
 		{:else}
 			<div class="grid gap-4">
-				{#each filteredItems as item}
+				{#each displayedItems as item}
 					<div class="rounded-3xl border border-gray-200 bg-white p-5">
 						<div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
 							<div>
@@ -230,7 +289,9 @@
 										{item.classroom ? getClassroomDisplayName(item.classroom.name) : t('Unknown')}
 									</div>
 									<div>{$i18n.t('Status')}: {getReviewStatusLabel(item.review_status)}</div>
-									<div>{new Date(item.submission.submitted_at * 1000).toLocaleString()}</div>
+									<div title={new Date(item.submission.submitted_at * 1000).toLocaleString()}>
+										{dayjs(item.submission.submitted_at * 1000).fromNow()}
+									</div>
 								</div>
 								<div class="mt-3 flex flex-wrap gap-2 text-xs">
 									<div class="rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5 text-gray-700">
@@ -277,6 +338,19 @@
 					</div>
 				{/each}
 			</div>
+
+			{#if items.length < total}
+				<div class="mt-6 flex justify-center">
+					<button
+						class="rounded-full border border-gray-300 bg-white px-6 py-2.5 text-sm text-gray-700 transition hover:border-gray-400 disabled:opacity-60"
+						disabled={loadingMore}
+						on:click={loadMore}
+					>
+						{loadingMore ? $i18n.t('Loading...') : $i18n.t('Load More')}
+						({items.length}/{total})
+					</button>
+				</div>
+			{/if}
 		{/if}
 	</div>
 </TeacherPageShell>

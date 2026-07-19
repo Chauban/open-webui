@@ -1,14 +1,18 @@
 <script lang="ts">
 	// @ts-nocheck
-	import { getContext } from 'svelte';
+	import { getContext, onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import { page } from '$app/stores';
+	import { goto } from '$app/navigation';
 	import { get } from 'svelte/store';
 
 	import {
 		getSubmissionAnalysisSegmentDetail,
 		getSubmissionRoundDiff,
+		getSubmissionVersions,
+		getTeacherReview,
 		getTeacherSubmissionDetail,
+		recomputeSubmissionAnalysis,
 		saveSubmissionReview
 	} from '$lib/apis/education';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
@@ -45,9 +49,9 @@
 	const getTimelineRoleLabel = (value: string) =>
 		(
 			({
-				user: 'User',
-				assistant: 'AI',
-				system: 'System'
+				user: t('User'),
+				assistant: t('AI'),
+				system: t('System')
 			}) as Record<string, string>
 		)[value] || value;
 	const reviewStatusOptions = [
@@ -87,6 +91,12 @@
 	let loadSeq = 0;
 	let diffSeq = 0;
 
+	// Pending-queue navigation (prev / next / save-and-next)
+	let queueIds: string[] = [];
+	let fullVersions = null;
+	let loadingVersions = false;
+	let recomputing = false;
+
 	const toEpoch = (v: string) => (v ? Math.floor(new Date(v).getTime() / 1000) : null);
 	// datetime-local expects a LOCAL "YYYY-MM-DDTHH:mm" string; toISOString() would shift to UTC.
 	const toLocalDateTimeInput = (epoch: number) => {
@@ -98,11 +108,22 @@
 	$: submissionId = $page.params.submissionId;
 	$: isHistoricalRound = detail ? !detail.submission.is_current : false;
 
-	$: sortedVersions = [...(detail?.versions ?? [])].sort((a, b) => b.version_no - a.version_no);
-	$: hiddenVersionCount = Math.max(sortedVersions.length - DEFAULT_VISIBLE_VERSIONS, 0);
+	$: queueIndex = queueIds.indexOf(submissionId);
+	$: prevPendingId = queueIndex > 0 ? queueIds[queueIndex - 1] : null;
+	$: nextPendingId =
+		queueIds.length === 0
+			? null
+			: queueIndex === -1
+				? queueIds[0]
+				: (queueIds[queueIndex + 1] ?? null);
+
+	$: totalVersionCount = detail?.version_count ?? detail?.versions?.length ?? 0;
+	$: baseVersions = showAllVersions && fullVersions ? fullVersions : (detail?.versions ?? []);
+	$: sortedVersions = [...baseVersions].sort((a, b) => b.version_no - a.version_no);
 	$: visibleVersions = showAllVersions
 		? sortedVersions
 		: sortedVersions.slice(0, DEFAULT_VISIBLE_VERSIONS);
+	$: hiddenVersionCount = Math.max(totalVersionCount - visibleVersions.length, 0);
 	$: analysisSummary = detail?.analysis?.summary ?? {};
 	$: analysisSegments = detail?.analysis?.segments ?? [];
 	$: analysisTimeline = detail?.analysis?.timeline ?? [];
@@ -182,14 +203,14 @@
 	};
 
 	const saveReview = async (statusOverride?: string) => {
-		if (isHistoricalRound) return;
+		if (isHistoricalRound) return false;
 		const effectiveStatus = statusOverride || reviewStatus;
 		let resubmitDueAt: number | null = null;
 		if (effectiveStatus === 'returned') {
 			resubmitDueAt = toEpoch(resubmitDueLocal);
 			if (!resubmitDueAt || resubmitDueAt <= Math.floor(Date.now() / 1000)) {
 				toast.error(t('A future resubmit due time is required'));
-				return;
+				return false;
 			}
 		}
 
@@ -211,11 +232,73 @@
 			syncReview();
 			lastSavedAt = new Date();
 			toast.success(t('Review saved.'));
+			return true;
 		} catch (error) {
 			toast.error(`${error?.detail ?? error}`);
+			return false;
 		} finally {
 			saving = false;
 		}
+	};
+
+	const saveReviewAndNext = async () => {
+		const currentId = submissionId;
+		const target = nextPendingId === currentId ? (queueIds[queueIndex + 1] ?? null) : nextPendingId;
+		const saved = await saveReview();
+		if (!saved) return;
+		queueIds = queueIds.filter((id) => id !== currentId);
+		if (target) {
+			goto(`/teacher/submissions/${target}`);
+		} else {
+			toast.success(t('Review queue is clear.'));
+			goto('/teacher/review');
+		}
+	};
+
+	const loadQueueContext = async () => {
+		try {
+			const res = await getTeacherReview(localStorage.token, {
+				review_status: 'pending',
+				sort: 'latest',
+				limit: 200
+			});
+			queueIds = (res.items ?? []).map((item) => item.submission.id);
+		} catch {
+			queueIds = [];
+		}
+	};
+
+	const recomputeAnalysis = async () => {
+		if (recomputing || !detail) return;
+		recomputing = true;
+		try {
+			await recomputeSubmissionAnalysis(localStorage.token, detail.submission.id);
+			await loadDetail(detail.submission.id);
+			toast.success(t('Analysis recomputed.'));
+		} catch (error) {
+			toast.error(`${error?.detail ?? error}`);
+		} finally {
+			recomputing = false;
+		}
+	};
+
+	const toggleAllVersions = async () => {
+		if (showAllVersions) {
+			showAllVersions = false;
+			return;
+		}
+		if (!fullVersions && totalVersionCount > (detail?.versions?.length ?? 0)) {
+			loadingVersions = true;
+			try {
+				fullVersions = await getSubmissionVersions(localStorage.token, detail.submission.id);
+			} catch (error) {
+				toast.error(`${error?.detail ?? error}`);
+				loadingVersions = false;
+				return;
+			}
+			loadingVersions = false;
+		}
+		showAllVersions = true;
 	};
 
 	const loadDiff = async () => {
@@ -279,6 +362,7 @@
 		activeSegmentId = '';
 		activeSegmentDetail = null;
 		expandedTimelineIds = new Set();
+		fullVersions = null;
 		try {
 			const response = await getTeacherSubmissionDetail(localStorage.token, id);
 			if (seq !== loadSeq) return;
@@ -299,6 +383,10 @@
 	$: if (submissionId) {
 		loadDetail(submissionId);
 	}
+
+	onMount(() => {
+		loadQueueContext();
+	});
 </script>
 
 <TeacherPageShell title={$i18n.t('Review')}>
@@ -309,6 +397,31 @@
 			<!-- ── Compact fixed header ── -->
 			<div class="shrink-0 border-b border-gray-100 bg-white px-6 py-3 space-y-3">
 				<TeacherSectionNav />
+
+				<div class="flex flex-wrap items-center justify-between gap-2">
+					<button
+						class="inline-flex items-center gap-1 text-sm text-gray-500 transition-colors hover:text-gray-800"
+						on:click={() => goto('/teacher/review')}
+					>
+						&larr; {$i18n.t('Back to review queue')}
+					</button>
+					<div class="flex items-center gap-1.5">
+						<button
+							class="rounded-full border border-gray-300 px-3 py-1.5 text-xs text-gray-600 transition-colors hover:bg-gray-50 disabled:opacity-40"
+							disabled={!prevPendingId}
+							on:click={() => prevPendingId && goto(`/teacher/submissions/${prevPendingId}`)}
+						>
+							&larr; {$i18n.t('Previous pending')}
+						</button>
+						<button
+							class="rounded-full border border-gray-300 px-3 py-1.5 text-xs text-gray-600 transition-colors hover:bg-gray-50 disabled:opacity-40"
+							disabled={!nextPendingId}
+							on:click={() => nextPendingId && goto(`/teacher/submissions/${nextPendingId}`)}
+						>
+							{$i18n.t('Next pending')} &rarr;
+						</button>
+					</div>
+				</div>
 
 				<!-- Title row + 过程关注点 -->
 				<div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -355,11 +468,11 @@
 						{/if}
 					</div>
 					<div class="shrink-0 rounded-2xl border border-cyan-100 bg-cyan-50 px-4 py-3 lg:min-w-60">
-						<div class="text-[10px] uppercase tracking-[0.14em] text-cyan-600">过程关注点</div>
-						<div class="mt-0.5 text-base font-semibold text-cyan-950">{reviewOverview.focusLabel}</div>
+						<div class="text-[10px] uppercase tracking-[0.14em] text-cyan-600">{$i18n.t('Process Focus')}</div>
+						<div class="mt-0.5 text-base font-semibold text-cyan-950">{$i18n.t(reviewOverview.focusLabel)}</div>
 						<div class="mt-1.5 flex flex-wrap gap-1.5">
 							{#each reviewOverview.focusReasons as reason}
-								<span class="rounded-full bg-white px-2.5 py-0.5 text-xs text-cyan-800">{reason}</span>
+								<span class="rounded-full bg-white px-2.5 py-0.5 text-xs text-cyan-800">{$i18n.t(reason)}</span>
 							{/each}
 						</div>
 					</div>
@@ -479,9 +592,9 @@
 					<!-- Tab bar -->
 					<div class="shrink-0 flex items-end gap-0.5 border-b border-gray-100 px-5 pt-4">
 						{#each [
-							{ key: 'review', label: '评分' },
-							{ key: 'analysis', label: '分析' },
-							{ key: 'reflection', label: '反思 & 版本' }
+							{ key: 'review', label: t('Grading') },
+							{ key: 'analysis', label: t('Analysis') },
+							{ key: 'reflection', label: t('Reflection & Versions') }
 						] as tab}
 							<button
 								class="relative px-4 pb-3 text-sm font-medium transition-colors {activeTab === tab.key
@@ -642,9 +755,18 @@
 										>
 											{saving ? $i18n.t('Saving...') : $i18n.t('Save Review')}
 										</button>
+										<button
+											class="rounded-full bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-700 disabled:opacity-60 transition-colors"
+											disabled={saving || isHistoricalRound}
+											on:click={saveReviewAndNext}
+										>
+											{$i18n.t('Save & Next')}
+										</button>
 									</div>
 									{#if lastSavedStr}
-										<div class="text-xs text-gray-400">上次保存 {lastSavedStr}</div>
+										<div class="text-xs text-gray-400">
+											{$i18n.t('Last saved at {{time}}', { time: lastSavedStr })}
+										</div>
 									{/if}
 								</div>
 							</div>
@@ -655,7 +777,16 @@
 
 								<!-- Segments -->
 								<div>
-									<div class="mb-3 text-sm font-semibold text-gray-950">{$i18n.t('Segment Details')}</div>
+									<div class="mb-3 flex items-center justify-between">
+										<div class="text-sm font-semibold text-gray-950">{$i18n.t('Segment Details')}</div>
+										<button
+											class="rounded-full border border-gray-300 px-3 py-1.5 text-xs text-gray-600 transition-colors hover:bg-gray-50 disabled:opacity-50"
+											disabled={recomputing}
+											on:click={recomputeAnalysis}
+										>
+											{recomputing ? $i18n.t('Recomputing...') : $i18n.t('Recompute Analysis')}
+										</button>
+									</div>
 									{#if analysisSegments.length === 0}
 										<div class="rounded-2xl bg-gray-50 px-4 py-4 text-sm text-gray-400">
 											{$i18n.t('No tracked import segments yet.')}
@@ -741,25 +872,25 @@
 								<div>
 									<div class="mb-3 flex items-center justify-between">
 										<div>
-											<div class="text-sm font-semibold text-gray-950">写作过程时间线</div>
-											<div class="mt-0.5 text-xs text-gray-400">Prompts、文本变化与分析事件合并展示</div>
+											<div class="text-sm font-semibold text-gray-950">{$i18n.t('Writing Process Timeline')}</div>
+											<div class="mt-0.5 text-xs text-gray-400">{$i18n.t('Prompts, text changes and analysis events combined')}</div>
 										</div>
 										<div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
 											<label class="inline-flex cursor-pointer items-center gap-1.5">
 												<input type="checkbox" bind:checked={showUserTimeline} class="accent-blue-500" />
-												<span class="text-blue-600">User</span>
+												<span class="text-blue-600">{$i18n.t('User')}</span>
 											</label>
 											<label class="inline-flex cursor-pointer items-center gap-1.5">
 												<input type="checkbox" bind:checked={showAssistantTimeline} class="accent-purple-500" />
-												<span class="text-purple-600">AI</span>
+												<span class="text-purple-600">{$i18n.t('AI')}</span>
 											</label>
 											<label class="inline-flex cursor-pointer items-center gap-1.5">
 												<input type="checkbox" bind:checked={showAnalysisTimeline} class="accent-gray-500" />
-												<span>写作事件</span>
+												<span>{$i18n.t('Writing Events')}</span>
 											</label>
 											<label class="inline-flex cursor-pointer items-center gap-1.5 opacity-60">
 												<input type="checkbox" bind:checked={showAutosaveTimeline} class="accent-gray-400" />
-												<span>自动保存</span>
+												<span>{$i18n.t('Autosave')}</span>
 											</label>
 										</div>
 									</div>
@@ -798,7 +929,7 @@
 															class="mt-1.5 text-xs text-gray-400 hover:text-gray-600 transition-colors"
 															on:click={() => toggleTimelineItem(i)}
 														>
-															{isExpanded ? '收起' : '展开全文'}
+															{isExpanded ? $i18n.t('Collapse') : $i18n.t('Expand full text')}
 														</button>
 													{/if}
 												</div>
@@ -869,9 +1000,12 @@
 										<div class="text-sm font-semibold text-gray-950">{$i18n.t('Versions')}</div>
 										<div class="text-xs text-gray-400">
 											{#if hiddenVersionCount > 0 && !showAllVersions}
-												最新 {visibleVersions.length} / {sortedVersions.length}
+												{$i18n.t('Latest {{visible}} / {{total}}', {
+													visible: visibleVersions.length,
+													total: totalVersionCount
+												})}
 											{:else}
-												{sortedVersions.length} {$i18n.t('total')}
+												{totalVersionCount} {$i18n.t('total')}
 											{/if}
 										</div>
 									</div>
@@ -899,14 +1033,17 @@
 											</div>
 										{/each}
 									</div>
-									{#if hiddenVersionCount > 0}
+									{#if hiddenVersionCount > 0 || showAllVersions}
 										<button
-											class="mt-3 rounded-full border border-gray-300 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 transition-colors"
-											on:click={() => (showAllVersions = !showAllVersions)}
+											class="mt-3 rounded-full border border-gray-300 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50"
+											disabled={loadingVersions}
+											on:click={toggleAllVersions}
 										>
-											{showAllVersions
-												? $i18n.t('Show Less')
-												: `${$i18n.t('Show All')} (${hiddenVersionCount} ${$i18n.t('more')})`}
+											{loadingVersions
+												? $i18n.t('Loading...')
+												: showAllVersions
+													? $i18n.t('Show Less')
+													: `${$i18n.t('Show All')} (${hiddenVersionCount} ${$i18n.t('more')})`}
 										</button>
 									{/if}
 								</div>

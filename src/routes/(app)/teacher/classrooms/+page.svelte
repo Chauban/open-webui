@@ -14,6 +14,15 @@
 	const getClassroomDisplayName = (name: string) =>
 		name?.trim() === 'Default Classroom' ? t('Default Classroom') : name;
 
+	const copyInviteCode = async (inviteCode: string) => {
+		try {
+			await navigator.clipboard.writeText(inviteCode);
+			toast.success(t('Invite code copied.'));
+		} catch {
+			toast.error(t('Failed to copy.'));
+		}
+	};
+
 	let classrooms = [];
 	let loading = true;
 	let loadError = '';
@@ -108,8 +117,14 @@
 							<div class="text-lg font-semibold text-gray-900">
 								{getClassroomDisplayName(item.classroom.name)}
 							</div>
-							<div class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500">
+							<div class="mt-3 flex flex-wrap items-center gap-3 text-xs text-gray-500">
 								<div>{$i18n.t('Invite Code')}: {item.classroom.invite_code}</div>
+								<button
+									class="rounded-full border border-gray-300 px-2.5 py-1 text-xs"
+									on:click={() => copyInviteCode(item.classroom.invite_code)}
+								>
+									{$i18n.t('Copy Code')}
+								</button>
 								<div>{$i18n.t('Students')}: {item.student_count}</div>
 								<div>{$i18n.t('Assignments')}: {item.assignment_count}</div>
 							</div>

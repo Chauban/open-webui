@@ -69,37 +69,37 @@ export const buildSubmissionReviewOverview = ({
 	const focusReasons: string[] = [];
 
 	if (totalChars <= 0) {
-		focusReasons.push('暂无可用于判断写作过程的数据');
+		focusReasons.push('No process data available yet');
 	} else {
 		if (aiParticipationPercent >= 50) {
-			focusReasons.push('AI参与比例较高');
+			focusReasons.push('High AI participation');
 		}
 		if (suspectedUnmarkedImportCount > 0) {
-			focusReasons.push('存在未标注导入片段');
+			focusReasons.push('Unmarked imported segments present');
 		}
 		if (burstCount > 0) {
-			focusReasons.push('存在大段新增记录');
+			focusReasons.push('Large text bursts present');
 		}
 		if (averageRewriteRatio > 0 && averageRewriteRatio < 25) {
-			focusReasons.push('平均改写比例偏低');
+			focusReasons.push('Low average rewrite ratio');
 		}
 		if (promptCount >= 8) {
-			focusReasons.push('Prompt互动次数较多');
+			focusReasons.push('Many prompt interactions');
 		}
 	}
 
-	let focusLabel = '暂无明显关注点';
+	let focusLabel = 'No notable focus points';
 
 	if (totalChars <= 0) {
-		focusLabel = '信息不足';
+		focusLabel = 'Insufficient data';
 	} else if (
 		suspectedUnmarkedImportCount > 0 ||
 		aiParticipationPercent >= 60 ||
 		(averageRewriteRatio > 0 && averageRewriteRatio < 20)
 	) {
-		focusLabel = '建议重点查看';
+		focusLabel = 'Needs close review';
 	} else if (focusReasons.length > 0) {
-		focusLabel = '建议查看';
+		focusLabel = 'Worth reviewing';
 	}
 
 	return {

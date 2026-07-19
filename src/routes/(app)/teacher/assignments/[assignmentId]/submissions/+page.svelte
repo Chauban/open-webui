@@ -1,15 +1,17 @@
 <script lang="ts">
 	// @ts-nocheck
-	import { getContext, onMount } from 'svelte';
+	import { getContext, onDestroy, onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { get } from 'svelte/store';
 	import { toast } from 'svelte-sonner';
 
 	import {
+		getAssignmentUnsubmittedStudents,
 		getTeacherSubmissions,
 		getEducationNotificationSummary,
-		markEducationNotificationsRead
+		markEducationNotificationsRead,
+		remindUnsubmittedStudents
 	} from '$lib/apis/education';
 	import { educationNotificationSummary } from '$lib/stores';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
@@ -40,23 +42,67 @@
 		)[value] || value;
 
 	let items = [];
+	let unsubmitted = [];
 	let loaded = false;
 	let loadError = '';
 	let selectedStatus = 'all';
+	let remindingAll = false;
+	let remindingIds = new Set();
+	let unsubscribeNotifications;
+	let notificationsInitialized = false;
 
 	$: filteredItems = items.filter((item) =>
 		selectedStatus === 'all' ? true : item.review_status === selectedStatus
 	);
 
-	onMount(async () => {
+	const loadData = async () => {
 		try {
-			items = await getTeacherSubmissions(localStorage.token, $page.params.assignmentId);
+			[items, unsubmitted] = await Promise.all([
+				getTeacherSubmissions(localStorage.token, $page.params.assignmentId),
+				getAssignmentUnsubmittedStudents(localStorage.token, $page.params.assignmentId).catch(
+					() => []
+				)
+			]);
+			loadError = '';
 		} catch (error) {
 			loadError = `${error?.detail ?? error}`;
 			toast.error(loadError);
 		} finally {
 			loaded = true;
 		}
+	};
+
+	const remindAll = async () => {
+		remindingAll = true;
+		try {
+			const result = await remindUnsubmittedStudents(
+				localStorage.token,
+				$page.params.assignmentId
+			);
+			toast.success(t('Reminder sent to {{count}} students.', { count: result.reminded_count }));
+		} catch (error) {
+			toast.error(`${error?.detail ?? error}`);
+		} finally {
+			remindingAll = false;
+		}
+	};
+
+	const remindOne = async (userId: string) => {
+		remindingIds = new Set([...remindingIds, userId]);
+		try {
+			await remindUnsubmittedStudents(localStorage.token, $page.params.assignmentId, {
+				user_ids: [userId]
+			});
+			toast.success(t('Reminder sent.'));
+		} catch (error) {
+			toast.error(`${error?.detail ?? error}`);
+		} finally {
+			remindingIds = new Set([...remindingIds].filter((id) => id !== userId));
+		}
+	};
+
+	onMount(async () => {
+		await loadData();
 
 		try {
 			await markEducationNotificationsRead(localStorage.token, {
@@ -69,6 +115,32 @@
 		} catch (error) {
 			console.error('Failed to mark education notifications as read:', error);
 		}
+
+		// 新提交到达时自动刷新列表;仅在存在未读提交通知时触发,避免 mark-read 回写循环
+		unsubscribeNotifications = educationNotificationSummary.subscribe((summary) => {
+			if (!notificationsInitialized) {
+				notificationsInitialized = true;
+				return;
+			}
+			if ((summary?.by_type?.submission_created ?? 0) === 0) {
+				return;
+			}
+			loadData();
+			markEducationNotificationsRead(localStorage.token, {
+				assignment_id: $page.params.assignmentId,
+				types: ['submission_created']
+			})
+				.then(async () => {
+					educationNotificationSummary.set(
+						await getEducationNotificationSummary(localStorage.token).catch(() => null)
+					);
+				})
+				.catch(() => {});
+		});
+	});
+
+	onDestroy(() => {
+		unsubscribeNotifications?.();
 	});
 </script>
 
@@ -128,10 +200,71 @@
 		>
 			{$i18n.t('Reviewed')}
 		</button>
+		<button
+			class={`rounded-full border px-4 py-2 text-sm transition ${
+				selectedStatus === 'unsubmitted'
+					? 'border-black bg-black text-white'
+					: 'border-gray-300 bg-white text-gray-700'
+			}`}
+			on:click={() => (selectedStatus = 'unsubmitted')}
+		>
+			{$i18n.t('Unsubmitted')} ({unsubmitted.length})
+		</button>
 	</div>
 
 	{#if loaded && !loadError}
-		{#if filteredItems.length === 0}
+		{#if selectedStatus === 'unsubmitted'}
+			<div class="overflow-hidden rounded-3xl border border-gray-200 bg-white">
+				<div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-4 py-3">
+					<div class="text-sm text-gray-600">
+						{$i18n.t('{{count}} students have not submitted yet.', { count: unsubmitted.length })}
+					</div>
+					{#if unsubmitted.length > 0}
+						<button
+							class="rounded-full bg-black px-4 py-2 text-sm text-white disabled:opacity-60"
+							disabled={remindingAll}
+							on:click={remindAll}
+						>
+							{remindingAll ? $i18n.t('Sending...') : $i18n.t('Remind All')}
+						</button>
+					{/if}
+				</div>
+				{#if unsubmitted.length === 0}
+					<div class="px-4 py-6 text-sm text-gray-500">
+						{$i18n.t('Everyone has submitted. Nice!')}
+					</div>
+				{:else}
+					<table class="w-full table-fixed">
+						<thead class="bg-gray-50 text-left text-sm text-gray-600">
+							<tr>
+								<th class="px-4 py-3">{$i18n.t('Student')}</th>
+								<th class="px-4 py-3">{$i18n.t('Email')}</th>
+								<th class="px-4 py-3">{$i18n.t('Actions')}</th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each unsubmitted as student}
+								<tr class="border-t border-gray-100 text-sm">
+									<td class="px-4 py-4">{student.user_name}</td>
+									<td class="truncate px-4 py-4 text-gray-500">{student.user_email ?? '-'}</td>
+									<td class="px-4 py-4">
+										<button
+											class="rounded-full border border-gray-300 px-3 py-1.5 text-sm disabled:opacity-60"
+											disabled={remindingIds.has(student.user_id)}
+											on:click={() => remindOne(student.user_id)}
+										>
+											{remindingIds.has(student.user_id)
+												? $i18n.t('Sending...')
+												: $i18n.t('Remind')}
+										</button>
+									</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				{/if}
+			</div>
+		{:else if filteredItems.length === 0}
 			<div class="rounded-3xl border border-gray-200 bg-white p-6 text-sm text-gray-500">
 				{$i18n.t('No submissions match the current filters.')}
 			</div>

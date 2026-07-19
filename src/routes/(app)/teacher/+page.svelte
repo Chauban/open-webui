@@ -1,33 +1,62 @@
 <script lang="ts">
 	// @ts-nocheck
-	import { getContext, onMount } from 'svelte';
+	import { getContext, onDestroy, onMount } from 'svelte';
 	import { get } from 'svelte/store';
 	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
+	import dayjs from 'dayjs';
+	import relativeTime from 'dayjs/plugin/relativeTime';
 
 	import { getTeacherOverview } from '$lib/apis/education';
+	import { educationNotificationSummary } from '$lib/stores';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
+
+	dayjs.extend(relativeTime);
 
 	const i18n = getContext('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
 
+	const DAY_MS = 24 * 60 * 60 * 1000;
+
 	let overview = null;
 	let loading = true;
 	let loadError = '';
+	let unsubscribeNotifications;
+	let notificationsInitialized = false;
 
 	const getClassroomDisplayName = (name: string) =>
 		name?.trim() === 'Default Classroom' ? t('Default Classroom') : name;
 
-	onMount(async () => {
+	const formatRelative = (timestamp: number) => dayjs(timestamp * 1000).fromNow();
+	const formatAbsolute = (timestamp: number) => new Date(timestamp * 1000).toLocaleString();
+
+	const loadOverview = async () => {
 		try {
 			overview = await getTeacherOverview(localStorage.token);
+			loadError = '';
 		} catch (error) {
 			loadError = `${error?.detail ?? error}`;
 			toast.error(loadError);
 		} finally {
 			loading = false;
 		}
+	};
+
+	onMount(async () => {
+		await loadOverview();
+		// 与学生端首页同一模式:收到教学通知(store 刷新)时后台重拉;跳过订阅触发的初始值
+		unsubscribeNotifications = educationNotificationSummary.subscribe(() => {
+			if (!notificationsInitialized) {
+				notificationsInitialized = true;
+				return;
+			}
+			loadOverview();
+		});
+	});
+
+	onDestroy(() => {
+		unsubscribeNotifications?.();
 	});
 </script>
 
@@ -92,7 +121,9 @@
 									<div class="mt-1 text-gray-500">{item.assignment.title}</div>
 									<div class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500">
 										<div>{item.classroom ? getClassroomDisplayName(item.classroom.name) : t('Unknown')}</div>
-										<div>{new Date(item.submission.submitted_at * 1000).toLocaleString()}</div>
+										<div title={formatAbsolute(item.submission.submitted_at)}>
+											{formatRelative(item.submission.submitted_at)}
+										</div>
 									</div>
 									<div class="mt-3 flex flex-wrap gap-2 text-xs">
 										<div class="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-rose-700">
@@ -130,8 +161,8 @@
 								>
 									<div class="font-medium text-gray-900">{item.student_name}</div>
 									<div class="mt-1 text-gray-500">{item.assignment.title}</div>
-									<div class="mt-3 text-xs text-gray-500">
-										{new Date(item.submission.submitted_at * 1000).toLocaleString()}
+									<div class="mt-3 text-xs text-gray-500" title={formatAbsolute(item.submission.submitted_at)}>
+										{formatRelative(item.submission.submitted_at)}
 									</div>
 									<div class="mt-3 flex flex-wrap gap-2 text-xs">
 										<div class="rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-sky-700">
@@ -146,6 +177,49 @@
 						</div>
 					{/if}
 				</div>
+			</div>
+
+			<div class="mb-8 rounded-3xl border border-gray-200 bg-white p-5">
+				<div class="mb-4 flex items-center justify-between">
+					<div class="text-sm font-semibold">{$i18n.t('Upcoming Due')}</div>
+					<button class="text-sm text-gray-500" on:click={() => goto('/teacher/assignments')}>
+						{$i18n.t('View all')}
+					</button>
+				</div>
+				{#if (overview.upcoming_due_assignments ?? []).length === 0}
+					<div class="rounded-2xl border border-dashed border-gray-300 px-4 py-5 text-sm text-gray-500">
+						{$i18n.t('No upcoming due assignments.')}
+					</div>
+				{:else}
+					<div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+						{#each overview.upcoming_due_assignments as item}
+							<button
+								class="rounded-2xl border border-gray-200 px-4 py-4 text-left text-sm transition hover:border-gray-300"
+								on:click={() => goto(`/teacher/assignments/${item.assignment.id}`)}
+							>
+								<div class="font-medium text-gray-900">{item.assignment.title}</div>
+								<div class="mt-1 text-gray-500">
+									{item.classroom ? getClassroomDisplayName(item.classroom.name) : t('Unassigned classroom')}
+								</div>
+								<div class="mt-3 flex flex-wrap items-center gap-2 text-xs">
+									<div
+										class={`rounded-full border px-3 py-1 ${
+											item.assignment.due_at * 1000 - Date.now() < DAY_MS
+												? 'border-amber-200 bg-amber-50 text-amber-700'
+												: 'border-gray-200 bg-gray-50 text-gray-600'
+										}`}
+										title={formatAbsolute(item.assignment.due_at)}
+									>
+										{$i18n.t('Due')} {formatRelative(item.assignment.due_at)}
+									</div>
+									<div class="text-gray-500">
+										{$i18n.t('Submissions')}: {item.submission_count}/{item.student_count}
+									</div>
+								</div>
+							</button>
+						{/each}
+					</div>
+				{/if}
 			</div>
 
 			<div class="mb-8 rounded-3xl border border-gray-200 bg-white p-5">

@@ -28,12 +28,12 @@ describe('buildSubmissionReviewOverview', () => {
 		expect(overview.externalPasteChars).toBe(80);
 		expect(overview.externalPastePercent).toBe(8);
 		expect(overview.unknownChars).toBe(0);
-		expect(overview.focusLabel).toBe('建议重点查看');
+		expect(overview.focusLabel).toBe('Needs close review');
 		expect(overview.focusReasons).toEqual([
-			'AI参与比例较高',
-			'存在未标注导入片段',
-			'存在大段新增记录',
-			'平均改写比例偏低'
+			'High AI participation',
+			'Unmarked imported segments present',
+			'Large text bursts present',
+			'Low average rewrite ratio'
 		]);
 	});
 
@@ -44,7 +44,7 @@ describe('buildSubmissionReviewOverview', () => {
 		});
 
 		expect(overview.totalChars).toBe(0);
-		expect(overview.focusLabel).toBe('信息不足');
-		expect(overview.focusReasons).toEqual(['暂无可用于判断写作过程的数据']);
+		expect(overview.focusLabel).toBe('Insufficient data');
+		expect(overview.focusReasons).toEqual(['No process data available yet']);
 	});
 });

@@ -11,11 +11,11 @@
 		getClassroomMembers,
 		getClassroomProgress,
 		getTeacherClassroomAssignments,
-		getTeacherClassrooms,
 		regenerateClassroomInviteCode
 	} from '$lib/apis/education';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
+	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 
 	const i18n = getContext('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
@@ -28,8 +28,35 @@
 	let progress = null;
 	let loading = true;
 	let loadError = '';
+	let showRegenerateConfirm = false;
 
 	const classroomId = () => $page.params.classroomId;
+
+	const copyText = async (text: string, successMessage: string) => {
+		try {
+			await navigator.clipboard.writeText(text);
+			toast.success(successMessage);
+		} catch {
+			toast.error(t('Failed to copy.'));
+		}
+	};
+
+	const copyInviteCode = () => copyText(classroom.invite_code, t('Invite code copied.'));
+	const copyInviteLink = () =>
+		copyText(
+			`${window.location.origin}/join?code=${encodeURIComponent(classroom.invite_code)}`,
+			t('Invite link copied.')
+		);
+
+	const regenerateCode = async () => {
+		try {
+			const response = await regenerateClassroomInviteCode(localStorage.token, classroomId());
+			classroom = response.classroom;
+			toast.success(t('Invite code regenerated.'));
+		} catch (error) {
+			toast.error(`${error?.detail ?? error}`);
+		}
+	};
 
 	const downloadProgress = async () => {
 		try {
@@ -47,16 +74,15 @@
 	};
 
 	const loadData = async () => {
-		const classrooms = await getTeacherClassrooms(localStorage.token);
-		classroom = classrooms.find((item) => item.classroom.id === classroomId())?.classroom ?? null;
-		if (!classroom) {
-			throw new Error('Classroom not found');
-		}
 		[members, assignments, progress] = await Promise.all([
 			getClassroomMembers(localStorage.token, classroomId()),
 			getTeacherClassroomAssignments(localStorage.token, classroomId()),
 			getClassroomProgress(localStorage.token, classroomId())
 		]);
+		classroom = progress?.classroom ?? null;
+		if (!classroom) {
+			throw new Error('Classroom not found');
+		}
 	};
 
 	onMount(async () => {
@@ -95,15 +121,7 @@
 				</button>
 				<button
 					class="rounded-full border border-gray-300 px-4 py-2 text-sm"
-					on:click={async () => {
-						try {
-							const response = await regenerateClassroomInviteCode(localStorage.token, classroomId());
-							classroom = response.classroom;
-							toast.success(t('Invite code regenerated.'));
-						} catch (error) {
-							toast.error(`${error?.detail ?? error}`);
-						}
-					}}
+					on:click={() => (showRegenerateConfirm = true)}
 				>
 					{$i18n.t('Regenerate Code')}
 				</button>
@@ -116,7 +134,17 @@
 		<div class="mb-8 grid gap-4 md:grid-cols-4">
 			<div class="rounded-3xl border border-gray-200 bg-white p-5 md:col-span-2">
 				<div class="text-xs uppercase tracking-[0.16em] text-gray-500">{$i18n.t('Invite Code')}</div>
-				<div class="mt-2 font-mono text-3xl font-semibold">{classroom.invite_code}</div>
+				<div class="mt-2 flex flex-wrap items-center gap-3">
+					<div class="font-mono text-3xl font-semibold">{classroom.invite_code}</div>
+					<div class="flex gap-2">
+						<button class="rounded-full border border-gray-300 px-3 py-1.5 text-xs" on:click={copyInviteCode}>
+							{$i18n.t('Copy Code')}
+						</button>
+						<button class="rounded-full border border-gray-300 px-3 py-1.5 text-xs" on:click={copyInviteLink}>
+							{$i18n.t('Copy Invite Link')}
+						</button>
+					</div>
+				</div>
 			</div>
 			<div class="rounded-3xl border border-gray-200 bg-white p-5">
 				<div class="text-xs uppercase tracking-[0.16em] text-gray-500">{$i18n.t('Students')}</div>
@@ -261,4 +289,13 @@
 		</div>
 		</div>
 	{/if}
+
+	<ConfirmDialog
+		bind:show={showRegenerateConfirm}
+		title={$i18n.t('Regenerate Invite Code')}
+		message={$i18n.t(
+			'The current invite code stops working immediately and any shared invite links become invalid. Continue?'
+		)}
+		on:confirm={regenerateCode}
+	/>
 </TeacherPageShell>

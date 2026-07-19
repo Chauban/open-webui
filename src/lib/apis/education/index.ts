@@ -89,8 +89,32 @@ export const getTeacherAssignments = async (token: string) => {
 	}).then(handleJson);
 };
 
-export const getTeacherReview = async (token: string) => {
-	return fetch(`${WEBUI_API_BASE_URL}/teacher/review`, {
+export const getTeacherReview = async (
+	token: string,
+	params: {
+		review_status?: string;
+		classroom_id?: string;
+		assignment_id?: string;
+		sort?: string;
+		limit?: number;
+		offset?: number;
+	} = {}
+) => {
+	const query = new URLSearchParams();
+	for (const [key, value] of Object.entries(params)) {
+		if (value !== undefined && value !== null && `${value}` !== '') {
+			query.set(key, `${value}`);
+		}
+	}
+	const suffix = query.toString() ? `?${query.toString()}` : '';
+	return fetch(`${WEBUI_API_BASE_URL}/teacher/review${suffix}`, {
+		method: 'GET',
+		headers: withAuth(token)
+	}).then(handleJson);
+};
+
+export const getTeacherClassroom = async (token: string, classroomId: string) => {
+	return fetch(`${WEBUI_API_BASE_URL}/teacher/classrooms/${classroomId}`, {
 		method: 'GET',
 		headers: withAuth(token)
 	}).then(handleJson);
@@ -135,9 +159,42 @@ export const getTeacherClassroomAssignments = async (token: string, classroomId:
 
 export const createAssignment = async (
 	token: string,
-	payload: { title: string; description?: string; classroom_id: string; due_at: number }
+	payload: { title: string; description?: string; classroom_ids: string[]; due_at: number }
 ) => {
 	return fetch(`${WEBUI_API_BASE_URL}/assignments`, {
+		method: 'POST',
+		headers: withAuth(token),
+		body: JSON.stringify(payload)
+	}).then(handleJson);
+};
+
+export const getTeacherAssignment = async (token: string, assignmentId: string) => {
+	return fetch(`${WEBUI_API_BASE_URL}/teacher/assignments/${assignmentId}`, {
+		method: 'GET',
+		headers: withAuth(token)
+	}).then(handleJson);
+};
+
+export const deleteAssignment = async (token: string, assignmentId: string) => {
+	return fetch(`${WEBUI_API_BASE_URL}/assignments/${assignmentId}`, {
+		method: 'DELETE',
+		headers: withAuth(token)
+	}).then(handleJson);
+};
+
+export const getAssignmentUnsubmittedStudents = async (token: string, assignmentId: string) => {
+	return fetch(`${WEBUI_API_BASE_URL}/teacher/assignments/${assignmentId}/unsubmitted`, {
+		method: 'GET',
+		headers: withAuth(token)
+	}).then(handleJson);
+};
+
+export const remindUnsubmittedStudents = async (
+	token: string,
+	assignmentId: string,
+	payload: { user_ids?: string[] } = {}
+) => {
+	return fetch(`${WEBUI_API_BASE_URL}/teacher/assignments/${assignmentId}/remind`, {
 		method: 'POST',
 		headers: withAuth(token),
 		body: JSON.stringify(payload)
@@ -378,6 +435,20 @@ export const saveSubmissionReview = async (
 	}).then(handleJson);
 };
 
+export const getSubmissionVersions = async (token: string, submissionId: string) => {
+	return fetch(`${WEBUI_API_BASE_URL}/teacher/submissions/${submissionId}/versions`, {
+		method: 'GET',
+		headers: withAuth(token)
+	}).then(handleJson);
+};
+
+export const recomputeSubmissionAnalysis = async (token: string, submissionId: string) => {
+	return fetch(`${WEBUI_API_BASE_URL}/teacher/submissions/${submissionId}/analysis`, {
+		method: 'POST',
+		headers: withAuth(token)
+	}).then(handleJson);
+};
+
 export const getSubmissionRoundDiff = async (token: string, submissionId: string) => {
 	return fetch(`${WEBUI_API_BASE_URL}/teacher/submissions/${submissionId}/diff`, {
 		method: 'GET',
@@ -429,6 +500,44 @@ export const bulkImportClassroomMembers = async (
 	}
 ) => {
 	return fetch(`${WEBUI_API_BASE_URL}/teacher/classrooms/${classroomId}/bulk-import`, {
+		method: 'POST',
+		headers: withAuth(token),
+		body: JSON.stringify(payload)
+	}).then(handleJson);
+};
+
+export const getStudentPerformance = async (
+	token: string,
+	classroomId: string,
+	studentUserId: string
+) => {
+	return fetch(
+		`${WEBUI_API_BASE_URL}/teacher/classrooms/${classroomId}/students/${studentUserId}/performance`,
+		{
+			method: 'GET',
+			headers: withAuth(token)
+		}
+	).then(handleJson);
+};
+
+export const bulkRemoveClassroomMembers = async (
+	token: string,
+	classroomId: string,
+	payload: { user_ids: string[] }
+) => {
+	return fetch(`${WEBUI_API_BASE_URL}/teacher/classrooms/${classroomId}/members/bulk-remove`, {
+		method: 'POST',
+		headers: withAuth(token),
+		body: JSON.stringify(payload)
+	}).then(handleJson);
+};
+
+export const transferClassroomMembers = async (
+	token: string,
+	classroomId: string,
+	payload: { user_ids: string[]; target_classroom_id: string }
+) => {
+	return fetch(`${WEBUI_API_BASE_URL}/teacher/classrooms/${classroomId}/members/transfer`, {
 		method: 'POST',
 		headers: withAuth(token),
 		body: JSON.stringify(payload)
