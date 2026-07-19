@@ -3,9 +3,12 @@ import { spawnSync } from 'node:child_process';
 const focusPrefixes = [
 	'src/lib/apis/education/',
 	'src/lib/components/education/',
+	'src/lib/utils/submission-review',
 	'src/routes/(app)/teacher/',
 	'src/routes/(app)/me/writing/',
 	'src/routes/(app)/assignments/',
+	'src/routes/(app)/education/',
+	'src/routes/(app)/join/',
 	'src/lib/components/common/Modal.svelte',
 	'src/lib/components/common/SensitiveInput.svelte',
 	'src/lib/components/common/Textarea.svelte',

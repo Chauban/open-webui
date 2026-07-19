@@ -19,8 +19,7 @@
 		"format:backend": "ruff format . --exclude .venv --exclude venv",
 		"i18n:parse": "i18next --config i18next-parser.config.ts && prettier --write \"src/lib/i18n/**/*.{js,json}\"",
 		"cy:open": "cypress open",
-		"test:education": "npm run test:education:smoke && npm run test:education:pytest",
-		"test:education:smoke": "node scripts/run-backend-python.js scripts/education-smoke.py",
+		"test:education": "npm run test:education:pytest",
 		"test:education:pytest": "node scripts/run-backend-python.js -m pytest backend/open_webui/test/apps/webui/routers/test_education_smoke.py -q",
 		"test:frontend": "vitest --passWithNoTests",
 		"pyodide:fetch": "node scripts/prepare-pyodide.js"
