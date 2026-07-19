@@ -406,7 +406,7 @@ class EducationNotificationModel(BaseModel):
 class AssignmentCreateForm(BaseModel):
     title: str
     description: Optional[str] = None
-    classroom_id: str
+    classroom_ids: list[str] = Field(default_factory=list)
     due_at: Optional[int] = None
 
 
@@ -607,6 +607,35 @@ class ClassroomBulkImportForm(BaseModel):
     emails: list[str] = Field(default_factory=list)
 
 
+class ClassroomMembersActionForm(BaseModel):
+    user_ids: list[str] = Field(default_factory=list)
+
+
+class ClassroomMemberTransferForm(BaseModel):
+    user_ids: list[str] = Field(default_factory=list)
+    target_classroom_id: str
+
+
+class ClassroomMembersActionResult(BaseModel):
+    affected_count: int = 0
+    skipped_users: list[str] = Field(default_factory=list)
+
+
+class UnsubmittedStudentItem(BaseModel):
+    user_id: str
+    user_name: Optional[str] = None
+    user_email: Optional[str] = None
+
+
+class AssignmentRemindForm(BaseModel):
+    user_ids: Optional[list[str]] = None
+
+
+class AssignmentRemindResult(BaseModel):
+    reminded_count: int = 0
+    user_ids: list[str] = Field(default_factory=list)
+
+
 class SubmissionListItem(BaseModel):
     submission: SubmissionModel
     session: WritingSessionModel
@@ -625,6 +654,7 @@ class SubmissionDetailResponse(BaseModel):
     writing_session: WritingSessionModel
     final_version: WritingVersionModel
     versions: list[WritingVersionSummaryModel]
+    version_count: int = 0
     provenance_segments: list[ProvenanceSegmentModel]
     prompt_timeline: list[dict]
     micro_reflection: MicroReflectionModel
@@ -695,6 +725,37 @@ class TeacherOverviewResponse(BaseModel):
     upcoming_due_assignments: list[TeacherAssignmentListItem] = Field(
         default_factory=list
     )
+
+
+class TeacherReviewResponse(BaseModel):
+    items: list[SubmissionListItem] = Field(default_factory=list)
+    total: int = 0
+
+
+class StudentPerformanceItem(BaseModel):
+    assignment: AssignmentModel
+    submission_id: Optional[str] = None
+    submitted_at: Optional[int] = None
+    round_no: Optional[int] = None
+    review_status: str = "unsubmitted"
+    score: Optional[int] = None
+    prompt_count: int = 0
+    source_stats: Optional[dict] = None
+    has_reflection: bool = False
+
+
+class StudentPerformanceResponse(BaseModel):
+    classroom: ClassroomModel
+    student_id: str
+    student_name: Optional[str] = None
+    student_email: Optional[str] = None
+    assignment_count: int = 0
+    submitted_count: int = 0
+    unsubmitted_count: int = 0
+    reviewed_count: int = 0
+    returned_count: int = 0
+    average_score: Optional[float] = None
+    items: list[StudentPerformanceItem] = Field(default_factory=list)
 
 
 class ClassroomBulkImportResult(BaseModel):
@@ -1125,13 +1186,14 @@ class EducationTable:
     def insert_assignment(
         self,
         teacher_id: str,
+        classroom_id: str,
         form_data: AssignmentCreateForm,
         db: Optional[Session] = None,
     ) -> AssignmentModel:
         with get_db_context(db) as db:
             now = int(time.time())
             assignment_title = form_data.title.strip()
-            classroom_id = form_data.classroom_id.strip()
+            classroom_id = classroom_id.strip()
             if not classroom_id:
                 raise ValueError("classroom_id is required")
             if not assignment_title:
@@ -1161,6 +1223,56 @@ class EducationTable:
         with get_db_context(db) as db:
             assignment = db.get(Assignment, assignment_id)
             return AssignmentModel.model_validate(assignment) if assignment else None
+
+    def get_writing_sessions_by_assignment(
+        self, assignment_id: str, db: Optional[Session] = None
+    ) -> list[WritingSessionModel]:
+        with get_db_context(db) as db:
+            self._ensure_writing_tables(db)
+            sessions = (
+                db.query(WritingSession)
+                .filter(WritingSession.assignment_id == assignment_id)
+                .all()
+            )
+            return [WritingSessionModel.model_validate(session) for session in sessions]
+
+    def delete_assignment(
+        self, assignment_id: str, db: Optional[Session] = None
+    ) -> bool:
+        with get_db_context(db) as db:
+            assignment = db.get(Assignment, assignment_id)
+            if assignment is None:
+                return False
+            db.delete(assignment)
+            db.commit()
+            return True
+
+    def delete_assignment_notifications(
+        self, assignment_id: str, db: Optional[Session] = None
+    ) -> int:
+        with get_db_context(db) as db:
+            self._ensure_writing_tables(db)
+            rows = (
+                db.query(EducationNotification)
+                .filter(
+                    EducationNotification.type.in_(
+                        [
+                            "assignment_published",
+                            "assignment_updated",
+                            "assignment_reminder",
+                        ]
+                    )
+                )
+                .all()
+            )
+            deleted = 0
+            for row in rows:
+                payload = row.payload_json or {}
+                if payload.get("assignment_id") == assignment_id:
+                    db.delete(row)
+                    deleted += 1
+            db.commit()
+            return deleted
 
     def get_assignments_by_classroom(
         self, classroom_id: str, db: Optional[Session] = None

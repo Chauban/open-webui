@@ -448,6 +448,13 @@ async def update_user_info_by_session_user(  # PATCH-style merge
     NOT eliminate lost-update races on concurrent same-user writes; real safety
     would need row locking or an optimistic-concurrency version column.
     """
+    if user.role != 'admin' and 'education_role' in form_data:
+        if form_data.get('education_role') != (user.info or {}).get('education_role'):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail='Education role can only be changed by an administrator',
+            )
+        form_data = {k: v for k, v in form_data.items() if k != 'education_role'}
     merged_info = {**(user.info or {}), **form_data}
     updated = await Users.update_user_by_id(user.id, {'info': merged_info}, db=db)
     if not updated:

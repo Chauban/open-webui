@@ -284,12 +284,12 @@ def _prepare_assignment_flow(client, teacher, student):
         json={
             "title": "Argument Essay 1",
             "description": "Write a short argument essay.",
-            "classroom_id": classroom["id"],
+            "classroom_ids": [classroom["id"]],
             "due_at": 2000000000,
         },
     )
     assert create_assignment_res.status_code == 200, create_assignment_res.text
-    assignment = create_assignment_res.json()
+    assignment = create_assignment_res.json()[0]
 
     UserContext.current_user = student
     join_res = client.post(
@@ -612,12 +612,12 @@ def test_submission_accepts_multiple_ai_help_types(education_client):
         json={
             "title": "Reflective Essay",
             "description": "Write and reflect on AI help.",
-            "classroom_id": classroom["id"],
+            "classroom_ids": [classroom["id"]],
             "due_at": 2000000000,
         },
     )
     assert create_assignment_res.status_code == 200, create_assignment_res.text
-    assignment = create_assignment_res.json()
+    assignment = create_assignment_res.json()[0]
 
     UserContext.current_user = student
     join_res = client.post(
@@ -723,12 +723,12 @@ def test_student_cannot_submit_after_assignment_due_time(education_client):
         json={
             "title": "Past Due Essay",
             "description": "This assignment is closed.",
-            "classroom_id": classroom["id"],
+            "classroom_ids": [classroom["id"]],
             "due_at": 1,
         },
     )
     assert create_assignment_res.status_code == 200, create_assignment_res.text
-    assignment = create_assignment_res.json()
+    assignment = create_assignment_res.json()[0]
 
     UserContext.current_user = student
     join_res = client.post(
@@ -798,7 +798,7 @@ def test_assignment_requires_due_time_on_create_and_update(education_client):
         json={
             "title": "Argument Essay 1",
             "description": "Write a short argument essay.",
-            "classroom_id": classroom["id"],
+            "classroom_ids": [classroom["id"]],
         },
     )
     assert missing_due_res.status_code == 400, missing_due_res.text
@@ -840,7 +840,9 @@ def test_teacher_overview_and_assignment_listing(education_client):
 
     review_res = client.get("/api/v1/teacher/review")
     assert review_res.status_code == 200, review_res.text
-    review_items = review_res.json()
+    review_payload = review_res.json()
+    assert review_payload["total"] == 1
+    review_items = review_payload["items"]
     assert len(review_items) == 1
     assert review_items[0]["submission"]["id"] == submission_id
     assert review_items[0]["review_status"] == "pending"
@@ -880,8 +882,9 @@ def test_teacher_review_lifecycle_assignment_update_and_classroom_progress(
         "/api/v1/teacher/review", params={"review_status": "reviewed"}
     )
     assert review_queue_res.status_code == 200, review_queue_res.text
-    assert len(review_queue_res.json()) == 1
-    assert review_queue_res.json()[0]["review_status"] == "reviewed"
+    review_queue = review_queue_res.json()
+    assert review_queue["total"] == 1
+    assert review_queue["items"][0]["review_status"] == "reviewed"
 
     assignment_update_res = client.patch(
         f"/api/v1/assignments/{assignment['id']}",
@@ -1040,7 +1043,7 @@ def test_teacher_classroom_listing_and_member_management(education_client):
         json={
             "title": "Narrative Essay",
             "description": "Write a short narrative essay.",
-            "classroom_id": first_classroom["id"],
+            "classroom_ids": [first_classroom["id"]],
             "due_at": 2000000000,
         },
     )
@@ -1089,7 +1092,7 @@ def test_teacher_classroom_listing_and_member_management(education_client):
     assert len(classroom_assignments) == 1
     assert (
         classroom_assignments[0]["assignment"]["id"]
-        == create_assignment_res.json()["id"]
+        == create_assignment_res.json()[0]["id"]
     )
     assert classroom_assignments[0]["student_count"] == 1
     assert classroom_assignments[0]["submission_count"] == 0
@@ -1126,7 +1129,7 @@ def test_teacher_classroom_listing_and_member_management(education_client):
 
     UserContext.current_user = student
     foreign_workspace_res = client.get(
-        f"/api/v1/assignments/{create_assignment_res.json()['id']}/workspace"
+        f"/api/v1/assignments/{create_assignment_res.json()[0]['id']}/workspace"
     )
     assert foreign_workspace_res.status_code == 403, foreign_workspace_res.text
 
@@ -1267,7 +1270,7 @@ def test_invite_regeneration_and_assignment_errors(education_client):
 
     blank_assignment_res = client.post(
         "/api/v1/assignments",
-        json={"title": "   ", "description": "x", "classroom_id": classroom["id"]},
+        json={"title": "   ", "description": "x", "classroom_ids": [classroom["id"]]},
     )
     assert blank_assignment_res.status_code == 400, blank_assignment_res.text
 
@@ -1303,7 +1306,7 @@ def test_invite_regeneration_and_assignment_errors(education_client):
         json={
             "title": "Should Fail",
             "description": "No teacher access",
-            "classroom_id": classroom["id"],
+            "classroom_ids": [classroom["id"]],
         },
     )
     assert (
@@ -1326,12 +1329,12 @@ def test_assignment_workspace_returns_assignment_project(education_client):
         json={
             "title": "Argument Essay 1",
             "description": "Write a short argument essay.",
-            "classroom_id": classroom["id"],
+            "classroom_ids": [classroom["id"]],
             "due_at": 2000000000,
         },
     )
     assert create_assignment_res.status_code == 200, create_assignment_res.text
-    assignment = create_assignment_res.json()
+    assignment = create_assignment_res.json()[0]
 
     UserContext.current_user = student
     join_res = client.post(
@@ -1363,12 +1366,12 @@ def test_assignment_workspace_clears_missing_active_chat(education_client):
         json={
             "title": "Argument Essay 1",
             "description": "Write a short argument essay.",
-            "classroom_id": classroom["id"],
+            "classroom_ids": [classroom["id"]],
             "due_at": 2000000000,
         },
     )
     assert create_assignment_res.status_code == 200, create_assignment_res.text
-    assignment = create_assignment_res.json()
+    assignment = create_assignment_res.json()[0]
 
     UserContext.current_user = student
     join_res = client.post(
@@ -1499,12 +1502,12 @@ def test_workspace_project_creation_failure_returns_409(education_client, monkey
         json={
             "title": "Argument Essay 1",
             "description": "Write a short argument essay.",
-            "classroom_id": classroom["id"],
+            "classroom_ids": [classroom["id"]],
             "due_at": 2000000000,
         },
     )
     assert create_assignment_res.status_code == 200, create_assignment_res.text
-    assignment = create_assignment_res.json()
+    assignment = create_assignment_res.json()[0]
 
     UserContext.current_user = student
     join_res = client.post(
@@ -1718,8 +1721,8 @@ def _setup_submitted_assignment(client, teacher, student, title="Round Essay"):
     UserContext.current_user = teacher
     assignment = client.post(
         "/api/v1/assignments",
-        json={"title": title, "classroom_id": classroom["id"], "due_at": 2000000000},
-    ).json()
+        json={"title": title, "classroom_ids": [classroom["id"]], "due_at": 2000000000},
+    ).json()[0]
 
     UserContext.current_user = student
     workspace = client.get(f"/api/v1/assignments/{assignment['id']}/workspace").json()

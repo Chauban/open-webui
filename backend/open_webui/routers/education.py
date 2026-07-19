@@ -4,6 +4,7 @@ import io
 import re
 import time
 import uuid
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -18,6 +19,8 @@ from open_webui.models.folders import FolderForm, Folders
 from open_webui.models.education import (
     AssignmentModel,
     AssignmentCreateForm,
+    AssignmentRemindForm,
+    AssignmentRemindResult,
     AssignmentUpdateForm,
     AssignmentWorkspaceListItem,
     AssignmentWorkspaceResponse,
@@ -28,6 +31,9 @@ from open_webui.models.education import (
     ClassroomJoinForm,
     ClassroomMemberCreateForm,
     ClassroomMemberDetail,
+    ClassroomMembersActionForm,
+    ClassroomMembersActionResult,
+    ClassroomMemberTransferForm,
     ClassroomProgressAssignmentItem,
     ClassroomProgressResponse,
     ClassroomResponse,
@@ -48,10 +54,14 @@ from open_webui.models.education import (
     SubmissionListItem,
     SubmissionReviewForm,
     StudentAssignmentListItem,
+    StudentPerformanceItem,
+    StudentPerformanceResponse,
     TeacherAssignmentListItem,
     TeacherClassroomListItem,
     TeacherOverviewResponse,
+    TeacherReviewResponse,
     UnifiedWritingWorkspaceResponse,
+    UnsubmittedStudentItem,
     VersionCreateForm,
     WritingHomeResponse,
     WritingRecentItem,
@@ -66,6 +76,7 @@ router = APIRouter()
 
 MAX_STUDENT_ASSIGNMENTS = 100
 MAX_DASHBOARD_ITEMS = 50
+SUBMISSION_DETAIL_VERSION_LIMIT = 20
 PROJECT_MODE_GENERAL = "general"
 PROJECT_MODE_PERSONAL_WRITING = "personal_writing"
 PROJECT_MODE_ASSIGNMENT_WRITING = "assignment_writing"
@@ -118,6 +129,12 @@ def _ensure_teacher_identity(user):
 
 def _is_valid_due_at(due_at: Optional[int]) -> bool:
     return due_at is not None and due_at > 0
+
+
+def _format_export_timestamp(timestamp: Optional[int]) -> str:
+    if not timestamp:
+        return ""
+    return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M")
 
 
 async def _build_classroom_member_detail(member, db: Session):
@@ -1479,17 +1496,24 @@ async def _get_prompt_timeline(session, db: Session) -> list[dict]:
     return prompt_timeline
 
 
-@router.post("/assignments", response_model=AssignmentModel)
+@router.post("/assignments", response_model=list[AssignmentModel])
 async def create_assignment(
     form_data: AssignmentCreateForm,
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
     _ensure_teacher_identity(user)
-    if not form_data.classroom_id.strip():
+    classroom_ids = list(
+        dict.fromkeys(
+            classroom_id.strip()
+            for classroom_id in form_data.classroom_ids
+            if classroom_id and classroom_id.strip()
+        )
+    )
+    if not classroom_ids:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="classroom_id is required",
+            detail="At least one classroom is required",
         )
     if not form_data.title.strip():
         raise HTTPException(
@@ -1501,32 +1525,40 @@ async def create_assignment(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Assignment due time is required",
         )
-    classroom = Education.get_classroom_by_id(form_data.classroom_id.strip(), db=db)
-    if classroom is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Classroom not found",
-        )
-    _ensure_classroom_access(user, classroom, db, require_teacher=True)
-    assignment = Education.insert_assignment(user.id, form_data, db=db)
+    classrooms = []
+    for classroom_id in classroom_ids:
+        classroom = Education.get_classroom_by_id(classroom_id, db=db)
+        if classroom is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Classroom not found",
+            )
+        _ensure_classroom_access(user, classroom, db, require_teacher=True)
+        classrooms.append(classroom)
 
-    student_ids = [
-        member.user_id
-        for member in Education.get_classroom_members(
-            assignment.classroom_id, member_role="student", db=db
+    assignments = []
+    for classroom in classrooms:
+        assignment = Education.insert_assignment(
+            user.id, classroom.id, form_data, db=db
         )
-    ]
-    await _send_education_notifications(
-        student_ids,
-        "assignment_published",
-        {
-            "assignment_id": assignment.id,
-            "assignment_title": assignment.title,
-            "due_at": assignment.due_at,
-        },
-        db,
-    )
-    return assignment
+        student_ids = [
+            member.user_id
+            for member in Education.get_classroom_members(
+                assignment.classroom_id, member_role="student", db=db
+            )
+        ]
+        await _send_education_notifications(
+            student_ids,
+            "assignment_published",
+            {
+                "assignment_id": assignment.id,
+                "assignment_title": assignment.title,
+                "due_at": assignment.due_at,
+            },
+            db,
+        )
+        assignments.append(assignment)
+    return assignments
 
 
 @router.patch("/assignments/{assignment_id}", response_model=AssignmentModel)
@@ -1564,7 +1596,15 @@ async def update_assignment(
                 detail="Classroom not found",
             )
         _ensure_classroom_access(user, classroom, db, require_teacher=True)
+        if form_data.classroom_id != assignment.classroom_id and Education.get_submissions_by_assignment(
+            assignment.id, db=db
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Classroom cannot be changed after submissions exist",
+            )
 
+    previous_due_at = assignment.due_at
     try:
         updated_assignment = Education.update_assignment(
             assignment_id, form_data, db=db
@@ -1578,6 +1618,28 @@ async def update_assignment(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Assignment not found",
+        )
+
+    if (
+        "due_at" in form_data.model_fields_set
+        and updated_assignment.due_at != previous_due_at
+        and updated_assignment.classroom_id
+    ):
+        student_ids = [
+            member.user_id
+            for member in Education.get_classroom_members(
+                updated_assignment.classroom_id, member_role="student", db=db
+            )
+        ]
+        await _send_education_notifications(
+            student_ids,
+            "assignment_updated",
+            {
+                "assignment_id": updated_assignment.id,
+                "assignment_title": updated_assignment.title,
+                "due_at": updated_assignment.due_at,
+            },
+            db,
         )
     return updated_assignment
 
@@ -1598,6 +1660,107 @@ async def archive_assignment(
             detail="Assignment not found",
         )
     return archived_assignment
+
+
+@router.delete("/assignments/{assignment_id}")
+async def delete_assignment(
+    assignment_id: str,
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+):
+    _ensure_teacher_identity(user)
+    assignment = _get_assignment_or_404(assignment_id, db)
+    _ensure_assignment_access(user, assignment, db, require_teacher=True)
+    if Education.get_submissions_by_assignment(assignment_id, db=db):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Assignments with submissions cannot be deleted; archive instead",
+        )
+    if Education.get_writing_sessions_by_assignment(assignment_id, db=db):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Assignments with student writing activity cannot be deleted; archive instead",
+        )
+    Education.delete_assignment_notifications(assignment_id, db=db)
+    Education.delete_assignment(assignment_id, db=db)
+    return {"ok": True}
+
+
+def _get_unsubmitted_members(assignment, db: Session):
+    if not assignment.classroom_id:
+        return []
+    members = Education.get_classroom_members(
+        assignment.classroom_id, member_role="student", db=db
+    )
+    submitted_ids = {
+        submission.student_id
+        for submission in Education.get_submissions_by_assignment(assignment.id, db=db)
+    }
+    return [member for member in members if member.user_id not in submitted_ids]
+
+
+@router.get(
+    "/teacher/assignments/{assignment_id}/unsubmitted",
+    response_model=list[UnsubmittedStudentItem],
+)
+async def get_assignment_unsubmitted_students(
+    assignment_id: str,
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+):
+    _ensure_teacher_identity(user)
+    assignment = _get_assignment_or_404(assignment_id, db)
+    _ensure_assignment_access(user, assignment, db, require_teacher=True)
+
+    items = []
+    for member in _get_unsubmitted_members(assignment, db):
+        member_user = await Users.get_user_by_id(member.user_id, db=db)
+        items.append(
+            UnsubmittedStudentItem(
+                user_id=member.user_id,
+                user_name=member_user.name if member_user else member.user_id,
+                user_email=member_user.email if member_user else None,
+            )
+        )
+    return items
+
+
+@router.post(
+    "/teacher/assignments/{assignment_id}/remind",
+    response_model=AssignmentRemindResult,
+)
+async def remind_unsubmitted_students(
+    assignment_id: str,
+    form_data: AssignmentRemindForm,
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+):
+    _ensure_teacher_identity(user)
+    assignment = _get_assignment_or_404(assignment_id, db)
+    _ensure_assignment_access(user, assignment, db, require_teacher=True)
+
+    unsubmitted_ids = [
+        member.user_id for member in _get_unsubmitted_members(assignment, db)
+    ]
+    if form_data.user_ids is not None:
+        requested_ids = set(form_data.user_ids)
+        target_ids = [
+            user_id for user_id in unsubmitted_ids if user_id in requested_ids
+        ]
+    else:
+        target_ids = unsubmitted_ids
+
+    await _send_education_notifications(
+        target_ids,
+        "assignment_reminder",
+        {
+            "assignment_id": assignment.id,
+            "assignment_title": assignment.title,
+            "due_at": assignment.due_at,
+        },
+        db,
+    )
+    return AssignmentRemindResult(reminded_count=len(target_ids), user_ids=target_ids)
 
 
 @router.get("/me/classroom", response_model=ClassroomResponse)
@@ -1761,6 +1924,20 @@ async def get_teacher_assignments(
     ]
 
 
+@router.get(
+    "/teacher/assignments/{assignment_id}", response_model=TeacherAssignmentListItem
+)
+async def get_teacher_assignment(
+    assignment_id: str,
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+):
+    _ensure_teacher_identity(user)
+    assignment = _get_assignment_or_404(assignment_id, db)
+    _ensure_assignment_access(user, assignment, db, require_teacher=True)
+    return await _build_teacher_assignment_list_item(assignment, db)
+
+
 @router.get("/teacher/overview", response_model=TeacherOverviewResponse)
 async def get_teacher_overview(
     user=Depends(get_verified_user),
@@ -1821,8 +1998,15 @@ async def get_teacher_overview(
     pending_review_items.sort(
         key=lambda item: item.submission.submitted_at, reverse=True
     )
+    now_ts = int(time.time())
     due_assignments = sorted(
-        [item for item in assignment_items if item.assignment.due_at is not None],
+        [
+            item
+            for item in assignment_items
+            if item.assignment.due_at is not None
+            and item.assignment.status == "active"
+            and item.assignment.due_at >= now_ts
+        ],
         key=lambda item: item.assignment.due_at or 0,
     )
 
@@ -1841,26 +2025,80 @@ async def get_teacher_overview(
     )
 
 
-@router.get("/teacher/review", response_model=list[SubmissionListItem])
+REVIEW_QUEUE_MAX_LIMIT = 200
+
+
+def _review_sort_key(item: SubmissionListItem, sort: str):
+    summary = item.analysis_summary or {}
+    if sort == "suspected":
+        return summary.get("suspected_unmarked_import_count", 0) or 0
+    if sort == "burst":
+        return summary.get("burst_count", 0) or 0
+    if sort == "rewrite":
+        return summary.get("average_rewrite_ratio", 0) or 0
+    return item.submission.submitted_at
+
+
+@router.get("/teacher/review", response_model=TeacherReviewResponse)
 async def get_teacher_review(
     review_status: Optional[str] = None,
+    classroom_id: Optional[str] = None,
+    assignment_id: Optional[str] = None,
+    sort: str = "latest",
+    limit: int = 50,
+    offset: int = 0,
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
     _ensure_teacher_identity(user)
     assignments = Education.get_assignments_by_teacher(user.id, db=db)
-    items = []
+    if assignment_id:
+        assignments = [
+            assignment for assignment in assignments if assignment.id == assignment_id
+        ]
+    if classroom_id:
+        assignments = [
+            assignment
+            for assignment in assignments
+            if assignment.classroom_id == classroom_id
+        ]
 
+    items = []
     for assignment in assignments:
         submissions = Education.get_submissions_by_assignment(assignment.id, db=db)
         for submission in submissions:
-            item = await _build_submission_list_item(submission, assignment, db)
-            if review_status and item.review_status != review_status:
-                continue
-            items.append(item)
+            if review_status:
+                review = Education.get_submission_review_by_submission_id(
+                    submission.id, db=db
+                )
+                item_status = review.review_status if review else "pending"
+                if item_status != review_status:
+                    continue
+            items.append(await _build_submission_list_item(submission, assignment, db))
 
-    items.sort(key=lambda item: item.submission.submitted_at, reverse=True)
-    return items
+    items.sort(key=lambda item: _review_sort_key(item, sort), reverse=True)
+    total = len(items)
+    limit = max(1, min(limit, REVIEW_QUEUE_MAX_LIMIT))
+    offset = max(offset, 0)
+    return TeacherReviewResponse(items=items[offset : offset + limit], total=total)
+
+
+@router.get("/teacher/classrooms/{classroom_id}", response_model=ClassroomResponse)
+async def get_teacher_classroom(
+    classroom_id: str,
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+):
+    _ensure_teacher_identity(user)
+    classroom = Education.get_classroom_by_id(classroom_id, db=db)
+    if classroom is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Classroom not found",
+        )
+    _ensure_classroom_access(user, classroom, db, require_teacher=True)
+    membership = Education.get_classroom_member(classroom.id, user.id, db=db)
+    return ClassroomResponse(classroom=classroom, membership=membership)
 
 
 @router.get(
@@ -2053,6 +2291,87 @@ async def bulk_import_classroom_members(
     return result
 
 
+@router.post(
+    "/teacher/classrooms/{classroom_id}/members/bulk-remove",
+    response_model=ClassroomMembersActionResult,
+)
+async def bulk_remove_classroom_members(
+    classroom_id: str,
+    form_data: ClassroomMembersActionForm,
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+):
+    _ensure_teacher_identity(user)
+    classroom = Education.get_classroom_by_id(classroom_id, db=db)
+    if classroom is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Classroom not found",
+        )
+    _ensure_classroom_access(user, classroom, db, require_teacher=True)
+
+    result = ClassroomMembersActionResult()
+    for user_id in dict.fromkeys(form_data.user_ids):
+        if not user_id or classroom.teacher_id == user_id:
+            result.skipped_users.append(user_id)
+            continue
+        if Education.delete_classroom_member(classroom.id, user_id, db=db):
+            result.affected_count += 1
+        else:
+            result.skipped_users.append(user_id)
+    return result
+
+
+@router.post(
+    "/teacher/classrooms/{classroom_id}/members/transfer",
+    response_model=ClassroomMembersActionResult,
+)
+async def transfer_classroom_members(
+    classroom_id: str,
+    form_data: ClassroomMemberTransferForm,
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+):
+    _ensure_teacher_identity(user)
+    classroom = Education.get_classroom_by_id(classroom_id, db=db)
+    if classroom is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Classroom not found",
+        )
+    _ensure_classroom_access(user, classroom, db, require_teacher=True)
+
+    target_classroom = Education.get_classroom_by_id(
+        form_data.target_classroom_id.strip(), db=db
+    )
+    if target_classroom is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Target classroom not found",
+        )
+    _ensure_classroom_access(user, target_classroom, db, require_teacher=True)
+    if target_classroom.id == classroom.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Target classroom must be different",
+        )
+
+    result = ClassroomMembersActionResult()
+    for user_id in dict.fromkeys(form_data.user_ids):
+        member = (
+            Education.get_classroom_member(classroom.id, user_id, db=db)
+            if user_id
+            else None
+        )
+        if member is None or member.member_role != "student":
+            result.skipped_users.append(user_id)
+            continue
+        Education.delete_classroom_member(classroom.id, user_id, db=db)
+        Education.ensure_classroom_member(target_classroom.id, user_id, "student", db=db)
+        result.affected_count += 1
+    return result
+
+
 @router.get(
     "/teacher/classrooms/{classroom_id}/progress",
     response_model=ClassroomProgressResponse,
@@ -2186,6 +2505,7 @@ async def export_classroom_progress(
             "submitted_at",
             "review_status",
             "score",
+            "overall_comment",
         ]
     )
 
@@ -2209,9 +2529,10 @@ async def export_classroom_progress(
                         student_detail.user_name,
                         student_detail.user_email,
                         assignment.title,
-                        latest_submission.submitted_at,
+                        _format_export_timestamp(latest_submission.submitted_at),
                         review.review_status if review else "pending",
                         review.score if review else "",
+                        (review.overall_comment or "") if review else "",
                     ]
                 )
             else:
@@ -2223,14 +2544,103 @@ async def export_classroom_progress(
                         "",
                         "unsubmitted",
                         "",
+                        "",
                     ]
                 )
 
     filename = f"classroom-{classroom.id}-progress.csv"
+    # utf-8-sig BOM 前缀,避免 Excel 打开含中文的 CSV 乱码
     return Response(
-        content=stream.getvalue(),
-        media_type="text/csv",
+        content="\ufeff" + stream.getvalue(),
+        media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get(
+    "/teacher/classrooms/{classroom_id}/students/{student_user_id}/performance",
+    response_model=StudentPerformanceResponse,
+)
+async def get_student_performance(
+    classroom_id: str,
+    student_user_id: str,
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+):
+    _ensure_teacher_identity(user)
+    classroom = Education.get_classroom_by_id(classroom_id, db=db)
+    if classroom is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Classroom not found",
+        )
+    _ensure_classroom_access(user, classroom, db, require_teacher=True)
+
+    member = Education.get_classroom_member(classroom.id, student_user_id, db=db)
+    if member is None or member.member_role != "student":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Student not found in classroom",
+        )
+
+    student = await Users.get_user_by_id(student_user_id, db=db)
+    assignments = Education.get_assignments_by_classroom(classroom.id, db=db)
+
+    items = []
+    submitted_count = 0
+    reviewed_count = 0
+    returned_count = 0
+    for assignment in assignments:
+        submission = Education.get_current_submission(
+            assignment.id, student_user_id, db=db
+        )
+        if submission is None:
+            items.append(StudentPerformanceItem(assignment=assignment))
+            continue
+
+        review = Education.get_submission_review_by_submission_id(
+            submission.id, db=db
+        )
+        review_status = review.review_status if review else "pending"
+        submitted_count += 1
+        if review_status == "reviewed":
+            reviewed_count += 1
+        elif review_status == "returned":
+            returned_count += 1
+        items.append(
+            StudentPerformanceItem(
+                assignment=assignment,
+                submission_id=submission.id,
+                submitted_at=submission.submitted_at,
+                round_no=submission.round_no,
+                review_status=review_status,
+                score=review.score if review else None,
+                prompt_count=submission.stats_json.get("prompt_count", 0),
+                source_stats=submission.stats_json,
+                has_reflection=(
+                    Education.get_micro_reflection_by_id(
+                        submission.micro_reflection_id, db=db
+                    )
+                    is not None
+                    if submission.micro_reflection_id
+                    else False
+                ),
+            )
+        )
+
+    scores = [item.score for item in items if item.score is not None]
+    return StudentPerformanceResponse(
+        classroom=classroom,
+        student_id=student_user_id,
+        student_name=student.name if student else student_user_id,
+        student_email=student.email if student else None,
+        assignment_count=len(assignments),
+        submitted_count=submitted_count,
+        unsubmitted_count=len(assignments) - submitted_count,
+        reviewed_count=reviewed_count,
+        returned_count=returned_count,
+        average_score=round(sum(scores) / len(scores), 1) if scores else None,
+        items=items,
     )
 
 
@@ -3067,8 +3477,10 @@ async def get_submission_detail(
         writing_session=session,
         final_version=final_version,
         versions=[
-            WritingVersionSummaryModel.model_validate(version) for version in versions
+            WritingVersionSummaryModel.model_validate(version)
+            for version in versions[-SUBMISSION_DETAIL_VERSION_LIMIT:]
         ],
+        version_count=len(versions),
         provenance_segments=provenance_segments,
         prompt_timeline=prompt_timeline,
         micro_reflection=reflection,
@@ -3078,6 +3490,30 @@ async def get_submission_detail(
         analysis=analysis,
         rounds=rounds,
     )
+
+
+@router.get(
+    "/teacher/submissions/{submission_id}/versions",
+    response_model=list[WritingVersionSummaryModel],
+)
+async def get_submission_versions(
+    submission_id: str,
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+):
+    _ensure_teacher_identity(user)
+    submission = Education.get_submission_by_id(submission_id, db=db)
+    if submission is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found"
+        )
+    assignment = _get_assignment_or_404(submission.assignment_id, db)
+    _ensure_assignment_access(user, assignment, db, require_teacher=True)
+    session = _get_workspace_session_or_404(submission.writing_session_id, db)
+    return [
+        WritingVersionSummaryModel.model_validate(version)
+        for version in Education.get_versions(session.id, db=db)
+    ]
 
 
 @router.get("/teacher/submissions/{submission_id}/diff")
@@ -3380,7 +3816,14 @@ async def get_teacher_dashboard(
                 student_name=student.name if student else submission.student_id,
                 source_stats=submission.stats_json,
                 prompt_count=submission.stats_json.get("prompt_count", 0),
-                has_reflection=True,
+                has_reflection=(
+                    Education.get_micro_reflection_by_id(
+                        submission.micro_reflection_id, db=db
+                    )
+                    is not None
+                    if submission.micro_reflection_id
+                    else False
+                ),
                 submitted_at=submission.submitted_at,
                 risk_summary=analysis.get("summary", {}),
             )
@@ -3414,7 +3857,12 @@ async def get_student_dashboard(
             student_name=user.name,
             source_stats=row.stats_json,
             prompt_count=row.stats_json.get("prompt_count", 0),
-            has_reflection=True,
+            has_reflection=(
+                Education.get_micro_reflection_by_id(row.micro_reflection_id, db=db)
+                is not None
+                if row.micro_reflection_id
+                else False
+            ),
             submitted_at=row.submitted_at,
             risk_summary=(
                 (
