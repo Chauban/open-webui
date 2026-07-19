@@ -35,6 +35,10 @@ from open_webui.models.education import (
     DashboardResponse,
     EditorOperationCreateForm,
     Education,
+    MyAssignmentSubmissionsResponse,
+    MySubmissionRound,
+    MySubmissionRoundContent,
+    MySubmissionRoundReview,
     PersonalWritingCreateForm,
     PersonalWorkspaceListItem,
     ProvenanceCreateForm,
@@ -2924,6 +2928,64 @@ async def submit_assignment(
         db,
     )
     return {"submission_id": submission.id, "final_version_id": final_version.id}
+
+
+@router.get(
+    "/assignments/{assignment_id}/me/submissions",
+    response_model=MyAssignmentSubmissionsResponse,
+)
+async def get_my_assignment_submissions(
+    assignment_id: str,
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+):
+    assignment = _get_assignment_or_404(assignment_id, db)
+    role = _ensure_assignment_access(user, assignment, db)
+    if role != "student":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only students can view their own submission history",
+        )
+
+    submissions = sorted(
+        Education.get_submission_rounds(assignment.id, user.id, db=db),
+        key=lambda submission: submission.round_no,
+    )
+
+    rounds = []
+    for submission in submissions:
+        version = Education.get_version_by_id(submission.final_version_id, db=db)
+        review = Education.get_submission_review_by_submission_id(
+            submission.id, db=db
+        )
+        rounds.append(
+            MySubmissionRound(
+                submission_id=submission.id,
+                round_no=submission.round_no,
+                is_current=submission.is_current,
+                submitted_at=submission.submitted_at,
+                content=MySubmissionRoundContent(
+                    content_json=version.note_snapshot_json if version else None,
+                    content_text=(version.note_snapshot_text if version else "")
+                    or "",
+                ),
+                review=(
+                    MySubmissionRoundReview(
+                        review_status=review.review_status,
+                        score=review.score,
+                        rubric=review.rubric_json,
+                        overall_comment=review.overall_comment,
+                        returned_comment=review.returned_comment,
+                        resubmit_due_at=review.resubmit_due_at,
+                        reviewed_at=review.reviewed_at,
+                    )
+                    if review is not None
+                    else None
+                ),
+            )
+        )
+
+    return MyAssignmentSubmissionsResponse(assignment_id=assignment.id, rounds=rounds)
 
 
 @router.get(

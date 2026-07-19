@@ -1,6 +1,6 @@
 <script lang="ts">
 	// @ts-nocheck
-	import { getContext, onMount } from 'svelte';
+	import { getContext, onDestroy, onMount } from 'svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import SidebarIcon from '$lib/components/icons/Sidebar.svelte';
 	import { get } from 'svelte/store';
@@ -8,6 +8,7 @@
 	import { toast } from 'svelte-sonner';
 	import {
 		chats,
+		educationNotificationSummary,
 		folders,
 		mobile,
 		pinnedChats,
@@ -35,6 +36,11 @@
 	let creatingPersonal = false;
 	let activeTab = 'personal';
 	let deletingPersonalIds = new Set<string>();
+	let homeLoading = false;
+	let unsubscribeNotifications;
+	let notificationsInitialized = false;
+
+	const DAY_SECONDS = 24 * 60 * 60;
 
 	const LEGACY_DEFAULT_CLASSROOM_NAMES = new Set(['Default Classroom', '默认班级']);
 	const getClassroomNameForDisplay = (name: string) => {
@@ -60,6 +66,70 @@
 		}
 
 		return date.toLocaleString();
+	};
+
+	// Returns due-date display info for a non-returned assignment card, or null when
+	// there is nothing to show (e.g. no effective_due_at).
+	const getDueInfo = (item) => {
+		if (item.review_status === 'returned') {
+			return null;
+		}
+		if (
+			typeof item.effective_due_at !== 'number' ||
+			!Number.isFinite(item.effective_due_at) ||
+			item.effective_due_at <= 0
+		) {
+			return null;
+		}
+
+		const remainingSeconds = item.effective_due_at - Date.now() / 1000;
+		const isUnsubmitted = item.status !== 'submitted';
+
+		if (isUnsubmitted && remainingSeconds <= 0) {
+			return { overdue: true, className: 'text-gray-500' };
+		}
+
+		if (isUnsubmitted && remainingSeconds < DAY_SECONDS) {
+			return {
+				overdue: false,
+				className: 'font-medium text-amber-600',
+				text: formatTimestamp(item.effective_due_at)
+			};
+		}
+
+		return {
+			overdue: false,
+			className: 'text-gray-500',
+			text: formatTimestamp(item.effective_due_at)
+		};
+	};
+
+	// Not-yet-submitted assignments float to the top, ordered by the soonest effective
+	// due date first (items without a due date sort to the end of that group).
+	// Already submitted/graded assignments keep the existing "most recently updated first" order.
+	const sortAssignmentItems = (items) => {
+		const pending = [];
+		const settled = [];
+		for (const item of items ?? []) {
+			if (item.status === 'submitted') {
+				settled.push(item);
+			} else {
+				pending.push(item);
+			}
+		}
+
+		pending.sort((a, b) => {
+			const aDue = typeof a.effective_due_at === 'number' ? a.effective_due_at : null;
+			const bDue = typeof b.effective_due_at === 'number' ? b.effective_due_at : null;
+			if (aDue === null && bDue === null) return 0;
+			if (aDue === null) return 1;
+			if (bDue === null) return -1;
+			return aDue - bDue;
+		});
+
+		settled.sort((a, b) => (b.updated_at ?? 0) - (a.updated_at ?? 0));
+
+		return [...pending, ...settled];
 	};
 
 	const openRecentItem = async (item) => {
@@ -169,36 +239,77 @@
 		}
 	};
 
-	const loadData = async () => {
+	// Fetch-only: refreshes `home` (plus the classroom fallback) without touching
+	// `activeTab`, so background refreshes never yank the user off their current tab.
+	const fetchHomeData = async () => {
+		if (homeLoading) {
+			return null;
+		}
+		homeLoading = true;
 		loadError = '';
 		try {
-			home = await getWritingHome(localStorage.token);
+			const data = await getWritingHome(localStorage.token);
 			const sessionUser = get(user);
-			const role = sessionUser?.education_role || home?.role;
-			if (role === 'student') {
-				const hasPendingAssignments = (home?.assignment_items ?? []).some(
-					(item) => item.status !== 'submitted'
-				);
-				activeTab = hasPendingAssignments ? 'assignment' : 'personal';
-			} else {
-				activeTab = 'personal';
-			}
-			if (!home?.classroom && role === 'student') {
+			const role = sessionUser?.education_role || data?.role;
+			if (!data?.classroom && role === 'student') {
 				try {
 					const classroomResponse = await getMyClassroom(localStorage.token);
-					home.classroom = classroomResponse.classroom;
+					data.classroom = classroomResponse.classroom;
 				} catch {}
 			}
+			home = data;
+			return { role };
 		} catch (error) {
 			loadError = `${error?.detail ?? error}`;
 			toast.error(loadError);
+			return null;
+		} finally {
+			homeLoading = false;
+		}
+	};
+
+	// Full load: fetches home data and (re)derives the default active tab. Used for the
+	// initial mount and for user-triggered reloads (e.g. after joining a classroom).
+	const loadData = async () => {
+		const result = await fetchHomeData();
+		if (!result) {
+			return;
+		}
+		const { role } = result;
+		if (role === 'student') {
+			const hasPendingAssignments = (home?.assignment_items ?? []).some(
+				(item) => item.status !== 'submitted'
+			);
+			activeTab = hasPendingAssignments ? 'assignment' : 'personal';
+		} else {
+			activeTab = 'personal';
 		}
 	};
 
 	onMount(async () => {
 		await loadData();
 		loaded = true;
+
+		// Refresh the homepage whenever a new education notification arrives (new
+		// assignment published, review completed/returned, etc.) so students who are
+		// sitting on this page see updates without reloading. Uses the fetch-only helper
+		// so a background refresh never changes which tab the user is currently viewing.
+		// Skip the initial value the subscription fires with on subscribe — that's just
+		// this mount's own state, not a new notification.
+		unsubscribeNotifications = educationNotificationSummary.subscribe(() => {
+			if (!notificationsInitialized) {
+				notificationsInitialized = true;
+				return;
+			}
+			fetchHomeData();
+		});
 	});
+
+	onDestroy(() => {
+		unsubscribeNotifications?.();
+	});
+
+	$: sortedAssignmentItems = sortAssignmentItems(home?.assignment_items ?? []);
 </script>
 
 {#if loaded && !loadError}
@@ -328,13 +439,13 @@
 								<div class="text-lg font-semibold">{$i18n.t('Pending Assignments')}</div>
 							</div>
 
-							{#if (home?.assignment_items ?? []).length === 0}
+							{#if sortedAssignmentItems.length === 0}
 								<div class="rounded-3xl border border-gray-200 bg-white p-6 text-sm text-gray-500">
 									{$i18n.t('No assignments available yet.')}
 								</div>
 							{:else}
 								<div class="grid gap-4">
-									{#each home.assignment_items as item}
+									{#each sortedAssignmentItems as item}
 										<div class="rounded-3xl border border-gray-200 bg-white p-5">
 											<div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
 												<div>
@@ -370,6 +481,15 @@
 															<div class="font-medium text-rose-600">
 																{$i18n.t('Resubmit before')}: {formatTimestamp(item.effective_due_at)}
 															</div>
+														{:else}
+															{@const dueInfo = getDueInfo(item)}
+															{#if dueInfo?.overdue}
+																<div class={dueInfo.className}>{$i18n.t('Overdue')}</div>
+															{:else if dueInfo}
+																<div class={dueInfo.className}>
+																	{$i18n.t('Due At')}: {dueInfo.text}
+																</div>
+															{/if}
 														{/if}
 													</div>
 												</div>

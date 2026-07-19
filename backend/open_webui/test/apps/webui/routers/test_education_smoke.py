@@ -2016,3 +2016,107 @@ def test_returned_review_sends_return_notification(education_client):
     UserContext.current_user = student
     summary = client.get("/api/v1/me/notifications/summary").json()
     assert summary["by_type"].get("submission_returned") == 1
+
+
+def test_my_assignment_submissions_returns_rounds_with_content_and_review(
+    education_client,
+):
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id, first_submission_id = _setup_submitted_assignment(
+        client, teacher, student, "My Submissions Rounds"
+    )
+
+    UserContext.current_user = teacher
+    returned = client.post(
+        f"/api/v1/teacher/submissions/{first_submission_id}/review",
+        json={
+            "review_status": "returned",
+            "returned_comment": "Please add more evidence",
+            "resubmit_due_at": 2100000000,
+        },
+    )
+    assert returned.status_code == 200, returned.text
+
+    UserContext.current_user = student
+    resubmit = client.post(
+        f"/api/v1/assignments/{assignment['id']}/submit",
+        json=_submit_body(session_id, "second draft with more evidence added"),
+    )
+    assert resubmit.status_code == 200, resubmit.text
+    second_submission_id = resubmit.json()["submission_id"]
+    assert second_submission_id != first_submission_id
+
+    my_submissions_res = client.get(
+        f"/api/v1/assignments/{assignment['id']}/me/submissions"
+    )
+    assert my_submissions_res.status_code == 200, my_submissions_res.text
+    payload = my_submissions_res.json()
+    assert payload["assignment_id"] == assignment["id"]
+
+    rounds = payload["rounds"]
+    assert [r["round_no"] for r in rounds] == [1, 2]
+
+    first_round, second_round = rounds
+    assert first_round["submission_id"] == first_submission_id
+    assert first_round["is_current"] == 0
+    assert first_round["review"]["review_status"] == "returned"
+    assert first_round["review"]["returned_comment"] == "Please add more evidence"
+    assert first_round["review"]["resubmit_due_at"] == 2100000000
+    assert (
+        first_round["content"]["content_text"]
+        == "first draft text for the round essay"
+    )
+
+    assert second_round["submission_id"] == second_submission_id
+    assert second_round["is_current"] == 1
+    assert second_round["review"] is None
+    assert (
+        second_round["content"]["content_text"]
+        == "second draft with more evidence added"
+    )
+
+
+def test_my_assignment_submissions_access_control(education_client):
+    client, teacher, _, student, outsider, _ = education_client
+    assignment, _session_id, _submission_id = _setup_submitted_assignment(
+        client, teacher, student, "My Submissions Access"
+    )
+
+    # 老师(非学生角色)不能访问该端点,即便是本作业的老师
+    UserContext.current_user = teacher
+    teacher_res = client.get(f"/api/v1/assignments/{assignment['id']}/me/submissions")
+    assert teacher_res.status_code == 403, teacher_res.text
+
+    # 未加入班级的学生完全无访问权限
+    UserContext.current_user = outsider
+    outsider_res = client.get(
+        f"/api/v1/assignments/{assignment['id']}/me/submissions"
+    )
+    assert outsider_res.status_code == 403, outsider_res.text
+
+    # 加入同一班级但未提交过的学生只应看到自己的空历史,不会拿到别的学生的数据
+    UserContext.current_user = teacher
+    assignments = client.get("/api/v1/teacher/assignments").json()
+    classroom_id = next(
+        item["classroom"]["id"]
+        for item in assignments
+        if item["assignment"]["id"] == assignment["id"]
+    )
+    add_member_res = client.post(
+        f"/api/v1/teacher/classrooms/{classroom_id}/members",
+        json={"user_id": outsider.id},
+    )
+    assert add_member_res.status_code == 200, add_member_res.text
+
+    UserContext.current_user = outsider
+    member_res = client.get(f"/api/v1/assignments/{assignment['id']}/me/submissions")
+    assert member_res.status_code == 200, member_res.text
+    assert member_res.json()["rounds"] == []
+
+
+def test_my_assignment_submissions_missing_assignment_returns_404(education_client):
+    client, _, _, student, _, _ = education_client
+
+    UserContext.current_user = student
+    res = client.get("/api/v1/assignments/does-not-exist/me/submissions")
+    assert res.status_code == 404, res.text

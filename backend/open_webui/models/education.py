@@ -635,6 +635,35 @@ class SubmissionDetailResponse(BaseModel):
     rounds: list[dict] = Field(default_factory=list)
 
 
+class MySubmissionRoundContent(BaseModel):
+    content_json: Optional[dict] = None
+    content_text: str = ""
+
+
+class MySubmissionRoundReview(BaseModel):
+    review_status: str
+    score: Optional[int] = None
+    rubric: Optional[dict] = None
+    overall_comment: Optional[str] = None
+    returned_comment: Optional[str] = None
+    resubmit_due_at: Optional[int] = None
+    reviewed_at: Optional[int] = None
+
+
+class MySubmissionRound(BaseModel):
+    submission_id: str
+    round_no: int
+    is_current: int
+    submitted_at: int
+    content: MySubmissionRoundContent
+    review: Optional[MySubmissionRoundReview] = None
+
+
+class MyAssignmentSubmissionsResponse(BaseModel):
+    assignment_id: str
+    rounds: list[MySubmissionRound] = Field(default_factory=list)
+
+
 class DashboardItem(BaseModel):
     submission_id: str
     student_id: str

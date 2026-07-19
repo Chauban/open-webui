@@ -8,8 +8,10 @@
 	import { mobile, selectedFolder } from '$lib/stores';
 
 	import RichTextInput from '$lib/components/common/RichTextInput.svelte';
+	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Chat from '$lib/components/chat/Chat.svelte';
 	import ReviewResultCard from '$lib/components/education/ReviewResultCard.svelte';
+	import SubmissionHistoryModal from '$lib/components/education/SubmissionHistoryModal.svelte';
 	import { prepareAssistantContentForWriting } from '$lib/utils/writing-content';
 	import { createSerializedSaveRunner } from '$lib/utils/save-coordinator';
 	import {
@@ -58,6 +60,18 @@
 	let isPastDue = false;
 	let isReadOnly = false;
 	let canSubmitAssignment = false;
+	let isSubmitting = false;
+	let showAssignmentDescription = false;
+	let showSubmissionHistory = false;
+
+	let nowTick = Date.now();
+	let countdownIntervalId: ReturnType<typeof setInterval> | null = null;
+
+	const MAX_SAVE_RETRIES = 3;
+	const SAVE_RETRY_DELAYS_MS = [2000, 4000, 8000];
+	let saveRetryAttempt = 0;
+	let saveRetryTimer: ReturnType<typeof setTimeout> | null = null;
+	let hasUnsavedFailure = false;
 
 	let aiHelpTypes = ["Help Break Through Writer's Block"];
 	let otherAiHelpText = '';
@@ -98,6 +112,58 @@
 		return normalized;
 	};
 
+	const DAY_SECONDS = 24 * 60 * 60;
+	const HOUR_SECONDS = 60 * 60;
+
+	// Mirrors the amber/gray urgency coloring already used on the /me/writing due-date
+	// badges, with an added rose tier for the last hour before the deadline.
+	const computeDueCountdown = (dueAtSeconds: number, nowMs: number) => {
+		const remainingSeconds = dueAtSeconds - nowMs / 1000;
+
+		if (remainingSeconds <= 0) {
+			return { overdue: true, className: 'text-gray-500', labelKey: '', params: {} };
+		}
+
+		let className = 'text-gray-500';
+		if (remainingSeconds < HOUR_SECONDS) {
+			className = 'font-medium text-rose-600';
+		} else if (remainingSeconds < DAY_SECONDS) {
+			className = 'font-medium text-amber-600';
+		}
+
+		const totalMinutes = Math.max(1, Math.floor(remainingSeconds / 60));
+		const days = Math.floor(totalMinutes / 1440);
+		const hours = Math.floor((totalMinutes % 1440) / 60);
+		const minutes = totalMinutes % 60;
+
+		if (days >= 1) {
+			return {
+				overdue: false,
+				className,
+				labelKey: 'Due in {{days}}d {{hours}}h',
+				params: { days, hours }
+			};
+		}
+		if (hours >= 1) {
+			return { overdue: false, className, labelKey: 'Due in {{hours}}h', params: { hours } };
+		}
+		return { overdue: false, className, labelKey: 'Due in {{minutes}}m', params: { minutes } };
+	};
+
+	$: isResubmitDeadline = review?.review_status === 'returned';
+	$: formattedDueAt = effectiveDueAt ? new Date(effectiveDueAt * 1000).toLocaleString() : '';
+	$: dueCountdown =
+		isAssignment && effectiveDueAt ? computeDueCountdown(effectiveDueAt, nowTick) : null;
+	$: dueLabelKey = isResubmitDeadline ? 'Resubmit before' : 'Due At';
+	$: dueColorClass = isResubmitDeadline
+		? 'font-medium text-rose-600'
+		: (dueCountdown?.className ?? 'text-gray-500');
+
+	$: saveStatusDisplay =
+		saveStatusKey === 'Retrying...' && saveRetryAttempt > 0
+			? `${$i18n.t('Retrying...')} (${saveRetryAttempt}/${MAX_SAVE_RETRIES})`
+			: $i18n.t(saveStatusKey);
+
 	$: if (!aiHelpTypes.includes('Other') && otherAiHelpText) {
 		otherAiHelpText = '';
 	}
@@ -116,6 +182,46 @@
 		aiHelpTypes = aiHelpTypes.includes(helpType)
 			? aiHelpTypes.filter((item) => item !== helpType)
 			: [...aiHelpTypes, helpType];
+		saveReflectionDraft(reflectionText, otherAiHelpText);
+	};
+
+	const getReflectionDraftKey = () => `education:reflection-draft:${assignment?.id ?? ''}`;
+
+	const loadReflectionDraft = () => {
+		if (!isAssignment || !assignment?.id) return;
+		try {
+			const raw = localStorage.getItem(getReflectionDraftKey());
+			if (!raw) return;
+			const draft = JSON.parse(raw);
+			reflectionText = draft?.reflectionText ?? reflectionText;
+			otherAiHelpText = draft?.otherAiHelpText ?? otherAiHelpText;
+			if (Array.isArray(draft?.aiHelpTypes) && draft.aiHelpTypes.length > 0) {
+				aiHelpTypes = draft.aiHelpTypes;
+			}
+		} catch (error) {
+			console.error(error);
+		}
+	};
+
+	const saveReflectionDraft = (reflection: string, otherHelp: string) => {
+		if (!isAssignment || !assignment?.id) return;
+		try {
+			localStorage.setItem(
+				getReflectionDraftKey(),
+				JSON.stringify({ reflectionText: reflection, otherAiHelpText: otherHelp, aiHelpTypes })
+			);
+		} catch (error) {
+			console.error(error);
+		}
+	};
+
+	const clearReflectionDraft = () => {
+		if (!isAssignment || !assignment?.id) return;
+		try {
+			localStorage.removeItem(getReflectionDraftKey());
+		} catch (error) {
+			console.error(error);
+		}
 	};
 
 	const makeSegment = (
@@ -194,6 +300,7 @@
 		saveStatusKey = 'Saving...';
 		if (autoSaveTimer) clearTimeout(autoSaveTimer);
 		autoSaveTimer = setTimeout(() => {
+			autoSaveTimer = null;
 			void persistDraft('autosave');
 		}, 1200);
 	};
@@ -201,41 +308,64 @@
 	const performPersistDraft = async (triggerType = 'autosave') => {
 		if (!writingSession || isReadOnly) return;
 		saving = true;
+		hasUnsavedFailure = false;
+		saveRetryAttempt = 0;
 		saveStatusKey = 'Saving...';
 
-		try {
-			await autosaveWritingSession(localStorage.token, writingSession.id, {
-				content_json: noteJson,
-				content_html: noteHtml,
-				content_text: noteText,
-				save_reason: triggerType
-			});
-
-			const version = await createWritingVersion(localStorage.token, writingSession.id, {
-				trigger_type: triggerType,
-				content_json: noteJson,
-				content_text: noteText
-			});
-
-			if (unsavedOperations.length > 0) {
-				await createEditorOperations(localStorage.token, writingSession.id, {
-					operations: unsavedOperations
+		let version = null;
+		for (let attempt = 0; attempt <= MAX_SAVE_RETRIES; attempt += 1) {
+			try {
+				await autosaveWritingSession(localStorage.token, writingSession.id, {
+					content_json: noteJson,
+					content_html: noteHtml,
+					content_text: noteText,
+					save_reason: triggerType
 				});
-				unsavedOperations = [];
+
+				if (!version) {
+					version = await createWritingVersion(localStorage.token, writingSession.id, {
+						trigger_type: triggerType,
+						content_json: noteJson,
+						content_text: noteText
+					});
+				}
+
+				if (unsavedOperations.length > 0) {
+					await createEditorOperations(localStorage.token, writingSession.id, {
+						operations: unsavedOperations
+					});
+					unsavedOperations = [];
+				}
+
+				await createProvenanceSegments(localStorage.token, writingSession.id, {
+					version_id: version.id,
+					replace_existing: true,
+					segments: sourceRunsToProvenanceSegments(noteText, sourceRuns)
+				});
+
+				saveStatusKey = isSubmitted ? 'Submitted' : 'Saved';
+				hasUnsavedFailure = false;
+				saveRetryAttempt = 0;
+				saving = false;
+				return;
+			} catch (error) {
+				console.error(error);
+
+				if (attempt >= MAX_SAVE_RETRIES) {
+					hasUnsavedFailure = true;
+					saveStatusKey = 'Save failed';
+					saveRetryAttempt = 0;
+					saving = false;
+					return;
+				}
+
+				saveRetryAttempt = attempt + 1;
+				saveStatusKey = 'Retrying...';
+				await new Promise((resolve) => {
+					saveRetryTimer = setTimeout(resolve, SAVE_RETRY_DELAYS_MS[attempt]);
+				});
+				saveRetryTimer = null;
 			}
-
-			await createProvenanceSegments(localStorage.token, writingSession.id, {
-				version_id: version.id,
-				replace_existing: true,
-				segments: sourceRunsToProvenanceSegments(noteText, sourceRuns)
-			});
-
-			saveStatusKey = isSubmitted ? 'Submitted' : 'Saved';
-		} catch (error) {
-			console.error(error);
-			saveStatusKey = 'Save failed';
-		} finally {
-			saving = false;
 		}
 	};
 
@@ -387,7 +517,7 @@
 	};
 
 	const submit = async () => {
-		if (!canSubmitAssignment) return;
+		if (!canSubmitAssignment || isSubmitting) return;
 		if (aiHelpTypes.length === 0) {
 			toast.error($i18n.t('Select at least one AI help type.'));
 			return;
@@ -403,9 +533,10 @@
 			return;
 		}
 
-		await persistDraft('submit_preflight', { force: true });
-
+		isSubmitting = true;
 		try {
+			await persistDraft('submit_preflight', { force: true });
+
 			await submitAssignment(localStorage.token, assignment.id, {
 				writing_session_id: writingSession.id,
 				final_content_json: noteJson,
@@ -414,11 +545,14 @@
 				ai_help_types: aiHelpTypes,
 				reflection_text: submitReflectionText
 			});
+			clearReflectionDraft();
 			await load();
 			toast.success($i18n.t('Assignment submitted'));
 			await goto('/me/writing');
 		} catch (error) {
 			toast.error(`${error?.detail ?? error}`);
+		} finally {
+			isSubmitting = false;
 		}
 	};
 
@@ -450,7 +584,14 @@
 		}
 	};
 
-	onMount(load);
+	onMount(() => {
+		void load();
+		if (isAssignment) {
+			countdownIntervalId = setInterval(() => {
+				nowTick = Date.now();
+			}, 60000);
+		}
+	});
 
 	onDestroy(() => {
 		if (
@@ -461,6 +602,9 @@
 		) {
 			selectedFolder.set(null);
 		}
+		if (countdownIntervalId) clearInterval(countdownIntervalId);
+		if (autoSaveTimer) clearTimeout(autoSaveTimer);
+		if (saveRetryTimer) clearTimeout(saveRetryTimer);
 	});
 
 	$: if (loaded && workspaceProject?.id && $selectedFolder?.id !== workspaceProject.id) {
@@ -480,6 +624,15 @@
 		);
 	}
 </script>
+
+<svelte:window
+	on:beforeunload={(event) => {
+		if (autoSaveTimer || saving || hasUnsavedFailure) {
+			event.preventDefault();
+			event.returnValue = '';
+		}
+	}}
+/>
 
 {#if loaded}
 	<Chat
@@ -518,6 +671,20 @@
 									{$i18n.t('Track typed text, AI insertions, and in-app AI paste.')}
 								{/if}
 							</div>
+							{#if effectiveDueAt}
+								<div class="mt-1 text-xs {dueColorClass}">
+									{#if !isResubmitDeadline && dueCountdown?.overdue}
+										{$i18n.t('Overdue')}
+									{:else}
+										{$i18n.t(dueLabelKey)}: {formattedDueAt}
+										{#if dueCountdown?.overdue}
+											· {$i18n.t('Overdue')}
+										{:else if dueCountdown}
+											· {$i18n.t(dueCountdown.labelKey, dueCountdown.params)}
+										{/if}
+									{/if}
+								</div>
+							{/if}
 						{:else}
 							<input
 								bind:value={noteTitle}
@@ -534,13 +701,22 @@
 								{$i18n.t('Submitted')}
 							</div>
 						{/if}
+						{#if isAssignment && review}
+							<button
+								class="rounded-full border border-gray-200 px-3 py-1 text-xs text-gray-600 hover:bg-stone-100"
+								on:click={() => (showSubmissionHistory = true)}
+							>
+								{$i18n.t('Submission History')}
+							</button>
+						{/if}
 						<div class="rounded-full bg-stone-100 px-3 py-1 text-xs text-gray-600">
-							{$i18n.t(saveStatusKey)}
+							{saveStatusDisplay}
 						</div>
 						{#if canSubmitAssignment}
 							<button
 								class="rounded-full bg-gray-900 px-4 py-2 text-sm text-white"
 								on:click={() => {
+									loadReflectionDraft();
 									showSubmitModal = true;
 								}}
 							>
@@ -549,6 +725,26 @@
 						{/if}
 					</div>
 				</div>
+				{#if isAssignment && assignment?.description}
+					<div class="mt-3">
+						<button
+							type="button"
+							class="text-xs font-medium text-gray-500 hover:text-gray-700 hover:underline"
+							on:click={() => (showAssignmentDescription = !showAssignmentDescription)}
+						>
+							{$i18n.t(
+								showAssignmentDescription
+									? 'Hide assignment requirements'
+									: 'View assignment requirements'
+							)}
+						</button>
+						{#if showAssignmentDescription}
+							<div class="mt-2 whitespace-pre-wrap rounded-2xl bg-stone-50 p-3 text-xs text-gray-600">
+								{assignment.description}
+							</div>
+						{/if}
+					</div>
+				{/if}
 			</div>
 			<div class="min-h-0 flex-1 overflow-y-auto px-5 py-5">
 				{#if isAssignment && review}
@@ -597,7 +793,7 @@
 				class="pointer-events-auto flex items-center gap-2 rounded-full border border-gray-200 bg-white/95 px-3 py-2 shadow-lg backdrop-blur"
 			>
 				<div class="rounded-full bg-stone-100 px-3 py-1 text-xs text-gray-600">
-					{$i18n.t(saveStatusKey)}
+					{saveStatusDisplay}
 				</div>
 				<button
 					class="rounded-full border border-gray-300 px-3 py-1.5 text-sm text-gray-700"
@@ -611,6 +807,7 @@
 					<button
 						class="rounded-full bg-gray-900 px-3 py-1.5 text-sm text-white"
 						on:click={() => {
+							loadReflectionDraft();
 							showSubmitModal = true;
 						}}
 					>
@@ -692,6 +889,10 @@
 		</div>
 	{/if}
 
+	{#if isAssignment && assignment}
+		<SubmissionHistoryModal bind:show={showSubmissionHistory} assignmentId={assignment.id} />
+	{/if}
+
 	{#if isAssignment && showSubmitModal}
 		<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
 			<div class="w-full max-w-xl rounded-3xl bg-white p-6 shadow-2xl">
@@ -736,17 +937,34 @@
 							<input
 								id="other-ai-help-text"
 								bind:value={otherAiHelpText}
+								on:input={() => saveReflectionDraft(reflectionText, otherAiHelpText)}
 								class="w-full rounded-2xl border border-gray-300 px-3 py-3 text-sm outline-none"
 								placeholder="例如：帮我理解题目，或帮我整理论据。"
 							/>
+							{#if otherAiHelpText.trim().length === 0}
+								<div class="mt-1 text-xs text-rose-600">
+									{$i18n.t('Please add a short note about what else AI helped with.')}
+								</div>
+							{/if}
 						</div>
 					{/if}
 					<textarea
 						id="reflection-text"
 						bind:value={reflectionText}
+						on:input={() => saveReflectionDraft(reflectionText, otherAiHelpText)}
 						class="min-h-40 w-full rounded-2xl border border-gray-300 px-3 py-3 text-sm outline-none"
 						placeholder={$i18n.t('Recommended 50-100 characters. Minimum 30.')}
 					></textarea>
+					<div
+						class="mt-1 flex justify-end text-xs {reflectionText.trim().length < 30
+							? 'text-rose-600'
+							: 'text-gray-400'}"
+					>
+						{$i18n.t('{{count}} / {{min}} characters (minimum)', {
+							count: reflectionText.trim().length,
+							min: 30
+						})}
+					</div>
 				</div>
 
 				<div class="mt-6 flex justify-end gap-3">
@@ -758,8 +976,17 @@
 					>
 						{$i18n.t('Cancel')}
 					</button>
-					<button class="rounded-full bg-gray-900 px-4 py-2 text-sm text-white" on:click={submit}>
-						{$i18n.t('Submit Assignment')}
+					<button
+						class="flex items-center gap-2 rounded-full bg-gray-900 px-4 py-2 text-sm text-white disabled:cursor-not-allowed disabled:opacity-60"
+						disabled={isSubmitting}
+						on:click={submit}
+					>
+						{#if isSubmitting}
+							<Spinner className="size-4" />
+							{$i18n.t('Submitting...')}
+						{:else}
+							{$i18n.t('Submit Assignment')}
+						{/if}
 					</button>
 				</div>
 			</div>
