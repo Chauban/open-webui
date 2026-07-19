@@ -1,46 +1,69 @@
 <script lang="ts">
 	// @ts-nocheck
+	import { getContext, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { get } from 'svelte/store';
 	import { toast } from 'svelte-sonner';
 
 	import { user } from '$lib/stores';
-	import { updateUserInfo } from '$lib/apis/users';
-	import { createClassroom, joinClassroom } from '$lib/apis/education';
+	import { createClassroom, getMyClassroom, getTeacherClassrooms, joinClassroom } from '$lib/apis/education';
 
-	let educationRole = 'teacher';
+	const i18n = getContext('i18n');
+	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
+
 	let classroomName = '';
 	let inviteCode = '';
 	let submitting = false;
+	let checking = true;
 
-	const syncEducationRole = (role: string) => {
-		user.update((current) => {
-			if (!current) return current;
-			return {
-				...current,
-				education_role: role
-			};
-		});
-	};
+	$: educationRole = $user?.info?.education_role ?? null;
+
+	onMount(async () => {
+		// 引导页守卫:身份在注册时选定、由管理员管理,这里只做首次初始化;已完成初始化的直接跳走
+		const current = get(user);
+		const role = current?.info?.education_role ?? null;
+
+		if (current?.role === 'admin') {
+			goto('/teacher');
+			return;
+		}
+
+		if (role === 'teacher') {
+			try {
+				const classrooms = await getTeacherClassrooms(localStorage.token);
+				if ((classrooms ?? []).length > 0) {
+					goto('/teacher');
+					return;
+				}
+			} catch {}
+		} else if (role === 'student') {
+			try {
+				await getMyClassroom(localStorage.token);
+				goto('/me/writing');
+				return;
+			} catch {}
+		} else {
+			goto('/');
+			return;
+		}
+
+		checking = false;
+	});
 
 	const saveSetup = async () => {
 		submitting = true;
 		try {
-			await updateUserInfo(localStorage.token, {
-				education_role: educationRole
-			});
-			syncEducationRole(educationRole);
-
 			if (educationRole === 'teacher') {
 				const trimmedName = classroomName.trim();
 				if (!trimmedName) {
-					toast.error('Classroom name is required.');
+					toast.error(t('Classroom name is required.'));
 					return;
 				}
 
 				await createClassroom(localStorage.token, {
 					name: trimmedName
 				});
-				toast.success('Teacher identity saved. Your first classroom is ready.');
+				toast.success(t('Your first classroom is ready.'));
 				await goto('/teacher');
 				return;
 			}
@@ -49,9 +72,7 @@
 				await joinClassroom(localStorage.token, {
 					invite_code: inviteCode.trim()
 				});
-				toast.success('Student identity saved and classroom joined.');
-			} else {
-				toast.success('Student identity saved. You can join a classroom later.');
+				toast.success(t('Classroom joined.'));
 			}
 
 			await goto('/me/writing');
@@ -63,81 +84,60 @@
 	};
 </script>
 
-<div class="mx-auto max-w-3xl px-4 py-10">
-	<div class="mb-8">
-		<div class="text-xs uppercase tracking-[0.2em] text-gray-500">Education</div>
-		<h1 class="text-3xl font-semibold text-gray-900">Set up your teaching identity</h1>
-		<div class="mt-2 text-sm text-gray-500">
-			Choose how this account should participate in the writing platform.
+{#if !checking}
+	<div class="mx-auto max-w-3xl px-4 py-10">
+		<div class="mb-8">
+			<div class="text-xs uppercase tracking-[0.2em] text-gray-500">{$i18n.t('Education')}</div>
+			<h1 class="text-3xl font-semibold text-gray-900">
+				{educationRole === 'teacher'
+					? $i18n.t('Welcome, teacher')
+					: $i18n.t('Welcome, student')}
+			</h1>
+			<div class="mt-2 text-sm text-gray-500">
+				{educationRole === 'teacher'
+					? $i18n.t('Create your first classroom to start assigning writing tasks.')
+					: $i18n.t('Join your classroom with an invite code, or skip and join later.')}
+			</div>
+		</div>
+
+		<div class="rounded-[28px] border border-gray-200 bg-white p-6 shadow-sm">
+			{#if educationRole === 'teacher'}
+				<div>
+					<div class="mb-2 text-sm font-semibold text-gray-900">{$i18n.t('Classroom Name')}</div>
+					<input
+						bind:value={classroomName}
+						class="w-full rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none"
+						placeholder={$i18n.t('Example: Grade 8 Writing')}
+					/>
+					<div class="mt-2 text-sm text-gray-500">
+						{$i18n.t('Create your first classroom now. You can add more classrooms later from Teaching.')}
+					</div>
+				</div>
+			{:else}
+				<div>
+					<div class="mb-2 text-sm font-semibold text-gray-900">
+						{$i18n.t('Classroom Invite Code')}
+					</div>
+					<input
+						bind:value={inviteCode}
+						class="w-full rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none"
+						placeholder={$i18n.t('Enter invite code now, or leave blank and join later')}
+					/>
+					<div class="mt-2 text-sm text-gray-500">
+						{$i18n.t('You can skip this now. The invite code can also be entered later in Writing.')}
+					</div>
+				</div>
+			{/if}
+
+			<div class="mt-8 flex justify-end">
+				<button
+					class="rounded-full bg-black px-5 py-2.5 text-sm font-medium text-white disabled:opacity-60"
+					on:click={saveSetup}
+					disabled={submitting}
+				>
+					{submitting ? $i18n.t('Saving...') : $i18n.t('Save and Continue')}
+				</button>
+			</div>
 		</div>
 	</div>
-
-	<div class="rounded-[28px] border border-gray-200 bg-white p-6 shadow-sm">
-		<div class="mb-5 text-sm font-semibold text-gray-900">Role</div>
-		<div class="grid gap-3 md:grid-cols-2">
-			<button
-				class={`rounded-3xl border px-5 py-4 text-left transition ${
-					educationRole === 'teacher'
-						? 'border-black bg-black text-white'
-						: 'border-gray-200 bg-white text-gray-900'
-				}`}
-				on:click={() => (educationRole = 'teacher')}
-			>
-				<div class="text-base font-semibold">Teacher</div>
-				<div class={`mt-1 text-sm ${educationRole === 'teacher' ? 'text-gray-200' : 'text-gray-500'}`}>
-					Create a classroom, share an invite code, and publish assignments.
-				</div>
-			</button>
-
-			<button
-				class={`rounded-3xl border px-5 py-4 text-left transition ${
-					educationRole === 'student'
-						? 'border-black bg-black text-white'
-						: 'border-gray-200 bg-white text-gray-900'
-				}`}
-				on:click={() => (educationRole = 'student')}
-			>
-				<div class="text-base font-semibold">Student</div>
-				<div class={`mt-1 text-sm ${educationRole === 'student' ? 'text-gray-200' : 'text-gray-500'}`}>
-					Join a teacher's classroom and see assigned writing tasks.
-				</div>
-			</button>
-		</div>
-
-		{#if educationRole === 'teacher'}
-			<div class="mt-6">
-				<div class="mb-2 text-sm font-semibold text-gray-900">Classroom Name</div>
-				<input
-					bind:value={classroomName}
-					class="w-full rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none"
-					placeholder="Example: Grade 8 Writing"
-				/>
-				<div class="mt-2 text-sm text-gray-500">
-					Create your first classroom now. You can add more classrooms later from Teaching.
-				</div>
-			</div>
-		{:else}
-			<div class="mt-6">
-				<div class="mb-2 text-sm font-semibold text-gray-900">Classroom Invite Code</div>
-				<input
-					bind:value={inviteCode}
-					class="w-full rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none"
-					placeholder="Enter invite code now, or leave blank and join later"
-				/>
-				<div class="mt-2 text-sm text-gray-500">
-					You can skip this now. The invite code can also be entered later in Writing.
-				</div>
-			</div>
-		{/if}
-
-		<div class="mt-8 flex justify-end">
-			<button
-				class="rounded-full bg-black px-5 py-2.5 text-sm font-medium text-white disabled:opacity-60"
-				on:click={saveSetup}
-				disabled={submitting}
-			>
-				{submitting ? 'Saving...' : 'Save and Continue'}
-			</button>
-		</div>
-	</div>
-</div>
+{/if}

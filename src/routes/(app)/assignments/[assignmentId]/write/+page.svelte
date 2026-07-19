@@ -14,7 +14,13 @@
 		try {
 			await markEducationNotificationsRead(localStorage.token, {
 				assignment_id: $page.params.assignmentId,
-				types: ['assignment_published', 'review_completed', 'submission_returned']
+				types: [
+					'assignment_published',
+					'assignment_updated',
+					'assignment_reminder',
+					'review_completed',
+					'submission_returned'
+				]
 			});
 			educationNotificationSummary.set(
 				await getEducationNotificationSummary(localStorage.token).catch(() => null)

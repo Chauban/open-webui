@@ -105,6 +105,8 @@
 	$: educationByType = $educationNotificationSummary?.by_type ?? {};
 	$: studentUnread =
 		(educationByType['assignment_published'] ?? 0) +
+		(educationByType['assignment_updated'] ?? 0) +
+		(educationByType['assignment_reminder'] ?? 0) +
 		(educationByType['review_completed'] ?? 0) +
 		(educationByType['submission_returned'] ?? 0);
 	$: teacherUnread = educationByType['submission_created'] ?? 0;

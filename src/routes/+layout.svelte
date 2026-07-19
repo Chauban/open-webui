@@ -812,6 +812,10 @@
 			toast.success($i18n.t('Your submission for {{title}} has been reviewed', { title }));
 		} else if (data?.type === 'submission_returned') {
 			toast.warning($i18n.t('Your submission for {{title}} was returned', { title }));
+		} else if (data?.type === 'assignment_updated') {
+			toast.info($i18n.t('The due time of {{title}} has changed', { title }));
+		} else if (data?.type === 'assignment_reminder') {
+			toast.warning($i18n.t('Reminder: {{title}} is waiting for your submission', { title }));
 		}
 
 		educationNotificationSummary.set(
