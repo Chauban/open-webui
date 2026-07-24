@@ -1537,7 +1537,9 @@ class EducationTable:
 
         # Phase 2 (async sessions): clean up related chats, folders, and the
         # note through the async table APIs now that no sync write lock is
-        # held on the database.
+        # held on the database. Known tradeoff: the session row is already
+        # committed away, so a failure below leaves orphaned chats/folders/note
+        # behind with no retry or repair path — accepted for personal writing.
         deleted_chat_ids: list[str] = []
         deleted_folder_ids: list[str] = []
 
@@ -2051,6 +2053,23 @@ class EducationTable:
                     .first()
                 )
             return SubmissionReviewModel.model_validate(review) if review else None
+
+    def get_submission_reviews_by_submission_ids(
+        self, submission_ids: list[str], db: Optional[Session] = None
+    ) -> dict[str, SubmissionReviewModel]:
+        if not submission_ids:
+            return {}
+        with get_db_context(db) as db:
+            self._ensure_writing_tables(db)
+            reviews = (
+                db.query(SubmissionReview)
+                .filter(SubmissionReview.submission_id.in_(submission_ids))
+                .all()
+            )
+            return {
+                review.submission_id: SubmissionReviewModel.model_validate(review)
+                for review in reviews
+            }
 
     def upsert_submission_review(
         self,

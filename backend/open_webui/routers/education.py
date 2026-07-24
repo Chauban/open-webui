@@ -294,15 +294,19 @@ def _get_assignment_or_404(assignment_id: str, db: Session) -> AssignmentModel:
     return assignment
 
 
-def _get_effective_due_at(
+def _load_submission_rounds_with_reviews(
     assignment, student_id: str, db: Session
-) -> Optional[int]:
-    for submission in Education.get_submission_rounds(
-        assignment.id, student_id, db=db
-    ):
-        review = Education.get_submission_review_by_submission_id(
-            submission.id, db=db
-        )
+) -> tuple[list, dict]:
+    rounds = Education.get_submission_rounds(assignment.id, student_id, db=db)
+    reviews = Education.get_submission_reviews_by_submission_ids(
+        [submission.id for submission in rounds], db=db
+    )
+    return rounds, reviews
+
+
+def _resolve_effective_due_at(assignment, rounds: list, reviews: dict) -> Optional[int]:
+    for submission in rounds:
+        review = reviews.get(submission.id)
         if review is None or review.review_status == "pending":
             continue
         if review.review_status == "returned" and review.resubmit_due_at:
@@ -311,14 +315,25 @@ def _get_effective_due_at(
     return assignment.due_at
 
 
+def _get_effective_due_at(
+    assignment, student_id: str, db: Session
+) -> Optional[int]:
+    rounds, reviews = _load_submission_rounds_with_reviews(assignment, student_id, db)
+    return _resolve_effective_due_at(assignment, rounds, reviews)
+
+
 def _build_student_review_view(
     assignment, student_id: str, db: Session
 ) -> tuple[Optional[dict], Optional[int]]:
-    effective_due_at = _get_effective_due_at(assignment, student_id, db)
-    submission = Education.get_current_submission(assignment.id, student_id, db=db)
+    rounds, reviews = _load_submission_rounds_with_reviews(assignment, student_id, db)
+    effective_due_at = _resolve_effective_due_at(assignment, rounds, reviews)
+    submission = next(
+        (item for item in rounds if item.is_current == 1),
+        None,
+    )
     if submission is None:
         return None, effective_due_at
-    review = Education.get_submission_review_by_submission_id(submission.id, db=db)
+    review = reviews.get(submission.id)
     view = {
         "round_no": submission.round_no,
         "submitted_at": submission.submitted_at,
@@ -3578,6 +3593,12 @@ async def recompute_submission_analysis(
         )
     assignment = _get_assignment_or_404(submission.assignment_id, db)
     _ensure_assignment_access(user, assignment, db, require_teacher=True)
+    if submission.is_current != 1:
+        # 历史轮只读:重算会用当前会话数据覆盖 text_segments/analysis_result
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Historical submission rounds are read-only",
+        )
     session = _get_workspace_session_or_404(submission.writing_session_id, db)
     versions = Education.get_versions(session.id, db=db)
     prompt_timeline = await _get_prompt_timeline(session, db)

@@ -46,7 +46,7 @@ def upgrade() -> None:
 
     op.execute(
         "CREATE TABLE IF NOT EXISTS education_notification ("
-        "id TEXT PRIMARY KEY, "
+        "id TEXT PRIMARY KEY NOT NULL, "
         "user_id TEXT NOT NULL, "
         "type TEXT NOT NULL, "
         "payload_json TEXT NOT NULL DEFAULT '{}', "
