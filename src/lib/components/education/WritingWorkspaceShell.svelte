@@ -100,7 +100,7 @@
 
 	const isAssignment = scope === 'assignment';
 	$: activeDueAt = isAssignment ? (effectiveDueAt ?? assignment?.due_at ?? null) : null;
-	$: isPastDue = activeDueAt ? activeDueAt <= Math.floor(Date.now() / 1000) : false;
+	$: isPastDue = activeDueAt ? activeDueAt * 1000 <= nowTick : false;
 	$: isReadOnly = isAssignment ? isPastDue : false;
 	$: canSubmitAssignment = isAssignment && !isPastDue;
 	const getDefaultPersonalTitle = () => get(i18n).t('Untitled Writing');
@@ -175,7 +175,7 @@
 		}
 
 		const otherDetail = otherAiHelpText.trim();
-		return `其他帮助内容：${otherDetail}\n\n${baseReflection}`.trim();
+		return `${$i18n.t('Other help: {{detail}}', { detail: otherDetail })}\n\n${baseReflection}`.trim();
 	};
 
 	const toggleAiHelpType = (helpType: string) => {
@@ -523,7 +523,7 @@
 			return;
 		}
 		if (aiHelpTypes.includes('Other') && otherAiHelpText.trim().length === 0) {
-			toast.error('请简单写一下 AI 还帮助了你什么。');
+			toast.error($i18n.t('Please add a short note about what else AI helped with.'));
 			return;
 		}
 
@@ -603,8 +603,15 @@
 			selectedFolder.set(null);
 		}
 		if (countdownIntervalId) clearInterval(countdownIntervalId);
+
+		// beforeunload 只能拦住关闭/刷新,拦不住 SvelteKit 客户端路由跳转,
+		// 所以销毁前要把防抖窗口内的最后一次编辑补交,否则这段编辑会丢。
+		const hasPendingDraft = autoSaveTimer !== null || unsavedOperations.length > 0;
 		if (autoSaveTimer) clearTimeout(autoSaveTimer);
 		if (saveRetryTimer) clearTimeout(saveRetryTimer);
+		if (hasPendingDraft) {
+			void persistDraft('autosave');
+		}
 	});
 
 	$: if (loaded && workspaceProject?.id && $selectedFolder?.id !== workspaceProject.id) {
@@ -658,7 +665,7 @@
 				<div class="flex items-start justify-between gap-4">
 					<div class="min-w-0 flex-1">
 						<div class="text-xs uppercase tracking-[0.18em] text-gray-500">
-							{$i18n.t(isAssignment ? 'Assignment Writing' : '写作')}
+							{$i18n.t(isAssignment ? 'Assignment Writing' : 'Writing')}
 						</div>
 						{#if isAssignment}
 							<div class="text-sm font-semibold text-gray-900">{assignment?.title}</div>
@@ -831,7 +838,7 @@
 					<div class="flex items-start justify-between gap-4">
 						<div class="min-w-0 flex-1">
 							<div class="text-xs uppercase tracking-[0.18em] text-gray-500">
-								{$i18n.t(isAssignment ? 'Assignment Writing' : '写作')}
+								{$i18n.t(isAssignment ? 'Assignment Writing' : 'Writing')}
 							</div>
 							<div class="text-sm font-semibold text-gray-900">
 								{isAssignment ? assignment?.title : noteTitle}
@@ -932,14 +939,16 @@
 					{#if aiHelpTypes.includes('Other')}
 						<div class="mb-3">
 							<label for="other-ai-help-text" class="mb-2 block text-sm font-medium text-gray-800">
-								请简单写一下 AI 还帮助了你什么。
+								{$i18n.t('Please briefly describe what else AI helped with.')}
 							</label>
 							<input
 								id="other-ai-help-text"
 								bind:value={otherAiHelpText}
 								on:input={() => saveReflectionDraft(reflectionText, otherAiHelpText)}
 								class="w-full rounded-2xl border border-gray-300 px-3 py-3 text-sm outline-none"
-								placeholder="例如：帮我理解题目，或帮我整理论据。"
+								placeholder={$i18n.t(
+									'For example: helping me understand the topic or organize evidence.'
+								)}
 							/>
 							{#if otherAiHelpText.trim().length === 0}
 								<div class="mt-1 text-xs text-rose-600">
