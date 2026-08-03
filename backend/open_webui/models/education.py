@@ -626,7 +626,7 @@ class SubmissionListItem(BaseModel):
     student_name: Optional[str] = None
     review_status: str = "pending"
     score: Optional[float] = None
-    analysis_summary: Optional[dict] = None
+    risk_summary: Optional[dict] = None
 
 
 class SubmissionDetailResponse(BaseModel):

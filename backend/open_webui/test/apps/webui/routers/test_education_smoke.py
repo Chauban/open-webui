@@ -837,7 +837,7 @@ def test_teacher_overview_and_assignment_listing(education_client):
     assert overview["recent_assignments"][0]["assignment"]["id"] == assignment["id"]
     assert overview["recent_submissions"][0]["submission"]["id"] == submission_id
     assert overview["pending_review_items"][0]["submission"]["id"] == submission_id
-    assert overview["recent_submissions"][0]["analysis_summary"]["burst_count"] >= 1
+    assert overview["recent_submissions"][0]["risk_summary"]["burst_count"] >= 1
 
     review_res = client.get("/api/v1/teacher/review")
     assert review_res.status_code == 200, review_res.text
@@ -847,7 +847,7 @@ def test_teacher_overview_and_assignment_listing(education_client):
     assert len(review_items) == 1
     assert review_items[0]["submission"]["id"] == submission_id
     assert review_items[0]["review_status"] == "pending"
-    assert review_items[0]["analysis_summary"]["ai_inserted_chars"] >= 1
+    assert review_items[0]["risk_summary"]["ai_inserted_chars"] >= 1
 
 
 def test_teacher_review_lifecycle_assignment_update_and_classroom_progress(

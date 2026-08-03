@@ -209,7 +209,7 @@ async def _build_submission_list_item(submission, assignment, db: Session):
         student_name=student.name if student else submission.student_id,
         review_status=review.review_status if review else "pending",
         score=review.score if review else None,
-        analysis_summary=analysis.get("summary", {}),
+        risk_summary=analysis.get("summary", {}),
     )
 
 
@@ -2029,10 +2029,10 @@ async def get_teacher_overview(
                 )
                 submission_items.append(submission_item)
                 _accumulate_risk_summary(
-                    assignment_risk_summary, submission_item.analysis_summary or {}
+                    assignment_risk_summary, submission_item.risk_summary or {}
                 )
                 _accumulate_risk_summary(
-                    classroom_risk_summary, submission_item.analysis_summary or {}
+                    classroom_risk_summary, submission_item.risk_summary or {}
                 )
                 if submission_item.review_status == "pending":
                     pending_review_items.append(submission_item)
@@ -2098,7 +2098,7 @@ REVIEW_QUEUE_MAX_LIMIT = 200
 
 
 def _review_sort_key(item: SubmissionListItem, sort: str):
-    summary = item.analysis_summary or {}
+    summary = item.risk_summary or {}
     if sort == "suspected":
         return summary.get("suspected_unmarked_import_count", 0) or 0
     if sort == "burst":
@@ -2180,12 +2180,11 @@ async def get_teacher_review(
         items = [
             item
             for item in items
-            if (item.analysis_summary or {}).get("suspected_unmarked_import_count", 0)
-            > 0
+            if (item.risk_summary or {}).get("suspected_unmarked_import_count", 0) > 0
         ]
     if only_bursts:
         items = [
-            item for item in items if (item.analysis_summary or {}).get("burst_count", 0) > 0
+            item for item in items if (item.risk_summary or {}).get("burst_count", 0) > 0
         ]
     items.sort(key=lambda item: _review_sort_key(item, sort), reverse=True)
     return TeacherReviewResponse(items=items[offset : offset + limit], total=len(items))

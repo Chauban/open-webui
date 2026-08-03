@@ -24,8 +24,8 @@
 	const i18n = getContext('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
 	const getRiskTone = (item) => {
-		if ((item.analysis_summary?.suspected_unmarked_import_count ?? 0) > 0) return 'rose';
-		if ((item.analysis_summary?.burst_count ?? 0) > 0) return 'amber';
+		if ((item.risk_summary?.suspected_unmarked_import_count ?? 0) > 0) return 'rose';
+		if ((item.risk_summary?.burst_count ?? 0) > 0) return 'amber';
 		return 'gray';
 	};
 
@@ -286,10 +286,10 @@
 								</div>
 								<div class="mt-3 flex flex-wrap gap-2 text-xs">
 									<div class="rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5 text-gray-700">
-										{$i18n.t('AI inserted')}: {item.analysis_summary?.ai_inserted_chars ?? 0}
+										{$i18n.t('AI inserted')}: {item.risk_summary?.ai_inserted_chars ?? 0}
 									</div>
 									<div class="rounded-full border border-sky-200 bg-sky-50 px-3 py-1.5 text-sky-700">
-										{$i18n.t('AI pasted')}: {item.analysis_summary?.ai_pasted_chars ?? 0}
+										{$i18n.t('AI pasted')}: {item.risk_summary?.ai_pasted_chars ?? 0}
 									</div>
 									<div
 										class={`rounded-full border px-3 py-1.5 ${
@@ -300,13 +300,13 @@
 													: 'border-gray-200 bg-gray-50 text-gray-700'
 										}`}
 									>
-										{$i18n.t('Suspected Unmarked Imports')}: {item.analysis_summary?.suspected_unmarked_import_count ?? 0}
+										{$i18n.t('Suspected Unmarked Imports')}: {item.risk_summary?.suspected_unmarked_import_count ?? 0}
 									</div>
 									<div class="rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-amber-700">
-										{$i18n.t('Large Bursts')}: {item.analysis_summary?.burst_count ?? 0}
+										{$i18n.t('Large Bursts')}: {item.risk_summary?.burst_count ?? 0}
 									</div>
 									<div class="rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5 text-gray-700">
-										{$i18n.t('Average Rewrite Ratio')}: {item.analysis_summary?.average_rewrite_ratio ?? 0}%
+										{$i18n.t('Average Rewrite Ratio')}: {item.risk_summary?.average_rewrite_ratio ?? 0}%
 									</div>
 								</div>
 							</div>

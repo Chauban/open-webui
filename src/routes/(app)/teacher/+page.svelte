@@ -126,10 +126,10 @@
 									</div>
 									<div class="mt-3 flex flex-wrap gap-2 text-xs">
 										<div class="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-rose-700">
-											{$i18n.t('Suspected Unmarked Imports')}: {item.analysis_summary?.suspected_unmarked_import_count ?? 0}
+											{$i18n.t('Suspected Unmarked Imports')}: {item.risk_summary?.suspected_unmarked_import_count ?? 0}
 										</div>
 										<div class="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-amber-700">
-											{$i18n.t('Large Bursts')}: {item.analysis_summary?.burst_count ?? 0}
+											{$i18n.t('Large Bursts')}: {item.risk_summary?.burst_count ?? 0}
 										</div>
 									</div>
 								</button>
@@ -165,10 +165,10 @@
 									</div>
 									<div class="mt-3 flex flex-wrap gap-2 text-xs">
 										<div class="rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-sky-700">
-											{$i18n.t('AI pasted')}: {item.analysis_summary?.ai_pasted_chars ?? 0}
+											{$i18n.t('AI pasted')}: {item.risk_summary?.ai_pasted_chars ?? 0}
 										</div>
 										<div class="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-amber-700">
-											{$i18n.t('Large Bursts')}: {item.analysis_summary?.burst_count ?? 0}
+											{$i18n.t('Large Bursts')}: {item.risk_summary?.burst_count ?? 0}
 										</div>
 									</div>
 								</button>
