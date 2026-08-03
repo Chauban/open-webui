@@ -1352,7 +1352,6 @@ async def _get_or_build_submission_analysis(submission, session, db: Session) ->
         operations,
         prompt_timeline,
     )
-    Education.replace_text_segments(session.id, payload.get("segments", []), db=db)
     Education.upsert_analysis_result(
         session.id,
         "submission_analysis",
@@ -3358,9 +3357,6 @@ async def submit_assignment(
         Education.get_editor_operations(session.id, db=db),
         prompt_timeline,
     )
-    Education.replace_text_segments(
-        session.id, analysis_payload.get("segments", []), db=db
-    )
     Education.upsert_analysis_result(
         session.id,
         "submission_analysis",
@@ -3633,7 +3629,7 @@ async def recompute_submission_analysis(
     assignment = _get_assignment_or_404(submission.assignment_id, db)
     _ensure_assignment_access(user, assignment, db, require_teacher=True)
     if submission.is_current != 1:
-        # 历史轮只读:重算会用当前会话数据覆盖 text_segments/analysis_result
+        # 历史轮只读:重算会用当前会话数据覆盖该轮的 analysis_result
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Historical submission rounds are read-only",
@@ -3649,7 +3645,6 @@ async def recompute_submission_analysis(
         Education.get_editor_operations(session.id, db=db),
         prompt_timeline,
     )
-    Education.replace_text_segments(session.id, payload.get("segments", []), db=db)
     Education.upsert_analysis_result(
         session.id,
         "submission_analysis",

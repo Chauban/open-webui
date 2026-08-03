@@ -114,29 +114,6 @@ class EditorOperation(Base):
     created_at = Column(BigInteger, nullable=False)
 
 
-class TextSegment(Base):
-    __tablename__ = "text_segment"
-
-    id = Column(Text, primary_key=True, unique=True)
-    writing_session_id = Column(Text, nullable=False)
-    source_operation_id = Column(Text, nullable=True)
-    segment_id = Column(Text, nullable=False)
-    origin_type = Column(Text, nullable=False)
-    content_initial = Column(Text, nullable=False)
-    content_current = Column(Text, nullable=False)
-    first_seen_version_id = Column(Text, nullable=True)
-    last_seen_version_id = Column(Text, nullable=True)
-    retained_ratio = Column(BigInteger, nullable=False, default=0)
-    rewrite_ratio = Column(BigInteger, nullable=False, default=0)
-    rewrite_level = Column(Text, nullable=False, default="unchanged")
-    suspicion_score = Column(BigInteger, nullable=False, default=0)
-    is_suspected_unmarked_import = Column(BigInteger, nullable=False, default=0)
-    suspicion_reason = Column(Text, nullable=True)
-    metadata_json = Column(JSONField, nullable=True)
-    created_at = Column(BigInteger, nullable=False)
-    updated_at = Column(BigInteger, nullable=False)
-
-
 class AnalysisResult(Base):
     __tablename__ = "analysis_result"
 
@@ -322,29 +299,6 @@ class EditorOperationModel(BaseModel):
     batch_id: str
     metadata_json: Optional[dict] = None
     created_at: int
-
-
-class TextSegmentModel(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: str
-    writing_session_id: str
-    source_operation_id: Optional[str] = None
-    segment_id: str
-    origin_type: str
-    content_initial: str
-    content_current: str
-    first_seen_version_id: Optional[str] = None
-    last_seen_version_id: Optional[str] = None
-    retained_ratio: int
-    rewrite_ratio: int
-    rewrite_level: str
-    suspicion_score: int
-    is_suspected_unmarked_import: int
-    suspicion_reason: Optional[str] = None
-    metadata_json: Optional[dict] = None
-    created_at: int
-    updated_at: int
 
 
 class AnalysisResultModel(BaseModel):
@@ -883,7 +837,6 @@ class EducationTable:
             WritingVersion.__table__,
             ProvenanceSegment.__table__,
             EditorOperation.__table__,
-            TextSegment.__table__,
             AnalysisResult.__table__,
             MicroReflection.__table__,
             Submission.__table__,
@@ -1744,61 +1697,6 @@ class EducationTable:
                 EditorOperationModel.model_validate(operation)
                 for operation in operations
             ]
-
-    def replace_text_segments(
-        self,
-        session_id: str,
-        segments: list[dict],
-        db: Optional[Session] = None,
-    ) -> list[TextSegmentModel]:
-        with get_db_context(db) as db:
-            self._ensure_writing_tables(db)
-            db.query(TextSegment).filter(
-                TextSegment.writing_session_id == session_id
-            ).delete()
-            now = int(time.time())
-            records = []
-            for segment in segments:
-                record = TextSegment(
-                    id=str(uuid.uuid4()),
-                    writing_session_id=session_id,
-                    source_operation_id=segment.get("source_operation_id"),
-                    segment_id=segment["segment_id"],
-                    origin_type=segment["origin_type"],
-                    content_initial=segment["content_initial"],
-                    content_current=segment["content_current"],
-                    first_seen_version_id=segment.get("first_seen_version_id"),
-                    last_seen_version_id=segment.get("last_seen_version_id"),
-                    retained_ratio=segment.get("retained_ratio", 0),
-                    rewrite_ratio=segment.get("rewrite_ratio", 0),
-                    rewrite_level=segment.get("rewrite_level", "unchanged"),
-                    suspicion_score=segment.get("suspicion_score", 0),
-                    is_suspected_unmarked_import=(
-                        1 if segment.get("is_suspected_unmarked_import") else 0
-                    ),
-                    suspicion_reason=segment.get("suspicion_reason"),
-                    metadata_json=segment.get("metadata_json"),
-                    created_at=now,
-                    updated_at=now,
-                )
-                db.add(record)
-                records.append(record)
-
-            db.commit()
-            return [TextSegmentModel.model_validate(record) for record in records]
-
-    def get_text_segments(
-        self, session_id: str, db: Optional[Session] = None
-    ) -> list[TextSegmentModel]:
-        with get_db_context(db) as db:
-            self._ensure_writing_tables(db)
-            segments = (
-                db.query(TextSegment)
-                .filter(TextSegment.writing_session_id == session_id)
-                .order_by(TextSegment.created_at.asc(), TextSegment.id.asc())
-                .all()
-            )
-            return [TextSegmentModel.model_validate(segment) for segment in segments]
 
     def upsert_analysis_result(
         self,
