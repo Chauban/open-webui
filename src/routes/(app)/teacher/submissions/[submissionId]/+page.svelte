@@ -21,6 +21,9 @@
 	import { buildSubmissionReviewOverview } from '$lib/utils/submission-review';
 	import { getAiHelpTypeLabel, toLocalDateTimeInput } from '$lib/utils/education';
 	import LoadingState from '$lib/components/education/LoadingState.svelte';
+	import EduBadge from '$lib/components/education/EduBadge.svelte';
+	import EduButton from '$lib/components/education/EduButton.svelte';
+	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 
 	const i18n = getContext('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
@@ -388,20 +391,20 @@
 						&larr; {$i18n.t('Back to review queue')}
 					</button>
 					<div class="flex items-center gap-1.5">
-						<button
-							class="rounded-full border border-gray-300 px-3 py-1.5 text-xs text-gray-600 transition-colors hover:bg-gray-50 disabled:opacity-40"
+						<EduButton
+							size="sm"
 							disabled={!prevPendingId}
 							on:click={() => prevPendingId && goto(`/teacher/submissions/${prevPendingId}`)}
 						>
 							&larr; {$i18n.t('Previous pending')}
-						</button>
-						<button
-							class="rounded-full border border-gray-300 px-3 py-1.5 text-xs text-gray-600 transition-colors hover:bg-gray-50 disabled:opacity-40"
+						</EduButton>
+						<EduButton
+							size="sm"
 							disabled={!nextPendingId}
 							on:click={() => nextPendingId && goto(`/teacher/submissions/${nextPendingId}`)}
 						>
 							{$i18n.t('Next pending')} &rarr;
-						</button>
+						</EduButton>
 					</div>
 				</div>
 
@@ -524,26 +527,26 @@
 						</div>
 						{#if highlight}
 							<div class="mt-3 flex flex-wrap gap-2 text-xs">
-								<div class="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-amber-700">
+								<EduBadge tone="amber" class="inline-flex items-center gap-1.5">
 									<span class="inline-block h-2.5 w-2.5 rounded bg-amber-300"></span>
 									{$i18n.t('AI inserted')}
-								</div>
-								<div class="inline-flex items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-sky-700">
+								</EduBadge>
+								<EduBadge tone="sky" class="inline-flex items-center gap-1.5">
 									<span class="inline-block h-2.5 w-2.5 rounded bg-sky-300"></span>
 									{$i18n.t('AI pasted')}
-								</div>
-								<div class="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-emerald-700">
+								</EduBadge>
+								<EduBadge tone="emerald" class="inline-flex items-center gap-1.5">
 									<span class="inline-block h-2.5 w-2.5 rounded bg-emerald-300"></span>
 									{$i18n.t('Typed')}
-								</div>
-								<div class="inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-rose-700">
+								</EduBadge>
+								<EduBadge tone="rose" class="inline-flex items-center gap-1.5">
 									<span class="inline-block h-2.5 w-2.5 rounded bg-rose-300"></span>
 									{$i18n.t('External paste / suspected import')}
-								</div>
-								<div class="inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-gray-600">
+								</EduBadge>
+								<EduBadge class="inline-flex items-center gap-1.5">
 									<span class="inline-block h-2.5 w-2.5 rounded bg-gray-300"></span>
 									{$i18n.t('Unknown source')}
-								</div>
+								</EduBadge>
 							</div>
 						{/if}
 					</div>
@@ -723,20 +726,19 @@
 								<!-- Actions + persistent save status -->
 								<div class="flex flex-wrap items-center justify-between gap-3">
 									<div class="flex flex-wrap gap-2">
-										<button
-											class="rounded-full border border-gray-300 px-4 py-2 text-sm hover:bg-gray-50 disabled:opacity-50 transition-colors"
+										<EduButton
 											disabled={saving || isHistoricalRound}
 											on:click={() => saveReview('returned')}
 										>
 											{$i18n.t('Return for Revision')}
-										</button>
-										<button
-											class="rounded-full bg-black px-4 py-2 text-sm text-white hover:bg-gray-800 disabled:opacity-60 transition-colors"
+										</EduButton>
+										<EduButton
+											variant="primary"
 											disabled={saving || isHistoricalRound}
 											on:click={() => saveReview()}
 										>
 											{saving ? $i18n.t('Saving...') : $i18n.t('Save Review')}
-										</button>
+										</EduButton>
 										<button
 											class="rounded-full bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-700 disabled:opacity-60 transition-colors"
 											disabled={saving || isHistoricalRound}
@@ -761,13 +763,9 @@
 								<div>
 									<div class="mb-3 flex items-center justify-between">
 										<div class="text-sm font-semibold text-gray-950">{$i18n.t('Segment Details')}</div>
-										<button
-											class="rounded-full border border-gray-300 px-3 py-1.5 text-xs text-gray-600 transition-colors hover:bg-gray-50 disabled:opacity-50"
-											disabled={recomputing}
-											on:click={recomputeAnalysis}
-										>
+										<EduButton size="sm" disabled={recomputing} on:click={recomputeAnalysis}>
 											{recomputing ? $i18n.t('Recomputing...') : $i18n.t('Recompute Analysis')}
-										</button>
+										</EduButton>
 									</div>
 									{#if analysisSegments.length === 0}
 										<div class="rounded-2xl bg-gray-50 px-4 py-4 text-sm text-gray-400">
@@ -787,9 +785,7 @@
 														<div class="font-medium text-gray-900">{segment.origin_type}</div>
 														<div class="flex shrink-0 items-center gap-2">
 															{#if segment.is_suspected_unmarked_import}
-																<span class="rounded-full bg-rose-100 px-2.5 py-0.5 text-[11px] text-rose-700">
-																	{$i18n.t('Suspected')}
-																</span>
+																<EduBadge soft tone="rose">{$i18n.t('Suspected')}</EduBadge>
 															{/if}
 															<!-- Chevron -->
 															<svg
@@ -1004,9 +1000,9 @@
 												</span>
 												<div class="flex items-center gap-2 text-right">
 													{#if !isAutosave}
-														<span class="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[11px] text-emerald-700">
+														<EduBadge soft tone="emerald">
 															{getReviewTriggerTypeLabel(version.trigger_type)}
-														</span>
+														</EduBadge>
 													{/if}
 													<span class="text-xs text-gray-400 tabular-nums">
 														{isAutosave
@@ -1018,17 +1014,13 @@
 										{/each}
 									</div>
 									{#if hiddenVersionCount > 0 || showAllVersions}
-										<button
-											class="mt-3 rounded-full border border-gray-300 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50"
-											disabled={loadingVersions}
-											on:click={toggleAllVersions}
-										>
+										<EduButton class="mt-3" disabled={loadingVersions} on:click={toggleAllVersions}>
 											{loadingVersions
 												? $i18n.t('Loading...')
 												: showAllVersions
 													? $i18n.t('Show Less')
 													: `${$i18n.t('Show All')} (${hiddenVersionCount} ${$i18n.t('more')})`}
-										</button>
+										</EduButton>
 									{/if}
 								</div>
 							</div>
@@ -1041,9 +1033,7 @@
 
 	{:else if loaded && loadError}
 		<div class="mx-auto max-w-3xl px-4 py-16">
-			<div class="rounded-3xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">
-				{loadError}
-			</div>
+			<EduStateCard tone="error">{loadError}</EduStateCard>
 		</div>
 	{:else}
 		<LoadingState messageKey="Loading submission..." />

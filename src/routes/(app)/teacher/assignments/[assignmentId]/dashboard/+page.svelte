@@ -11,6 +11,11 @@
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
 	import LoadingState from '$lib/components/education/LoadingState.svelte';
+	import EduBadge from '$lib/components/education/EduBadge.svelte';
+	import EduButton from '$lib/components/education/EduButton.svelte';
+	import EduCard from '$lib/components/education/EduCard.svelte';
+	import EduStatCard from '$lib/components/education/EduStatCard.svelte';
+	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 
 	const i18n = getContext('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
@@ -68,43 +73,34 @@
 				<h1 class="text-2xl font-semibold">{$i18n.t('Class Overview')}</h1>
 			</div>
 			<div class="flex gap-2">
-				<button
-					class="rounded-full border border-gray-300 px-4 py-2 text-sm disabled:opacity-60"
-					disabled={refreshing}
-					on:click={loadDashboard}
-				>
+				<EduButton disabled={refreshing} on:click={loadDashboard}>
 					{refreshing ? $i18n.t('Refreshing...') : $i18n.t('Refresh')}
-				</button>
-				<button
-					class="rounded-full border border-gray-300 px-4 py-2 text-sm"
-					on:click={() => goto(`/teacher/assignments/${$page.params.assignmentId}`)}
-				>
+				</EduButton>
+				<EduButton on:click={() => goto(`/teacher/assignments/${$page.params.assignmentId}`)}>
 					{$i18n.t('Back')}
-				</button>
+				</EduButton>
 			</div>
 		</div>
 
 		<div class="mb-6 grid gap-4 md:grid-cols-4">
-			<div class="rounded-3xl border border-gray-200 bg-white p-5">
-				<div class="text-xs uppercase tracking-[0.16em] text-gray-500">{$i18n.t('Submissions')}</div>
-				<div class="mt-2 text-3xl font-semibold">{dashboard.summary?.submission_count ?? dashboard.items.length}</div>
-			</div>
-			<div class="rounded-3xl border border-rose-200 bg-rose-50 p-5">
-				<div class="text-xs uppercase tracking-[0.16em] text-rose-600">{$i18n.t('Suspected Unmarked Imports')}</div>
-				<div class="mt-2 text-3xl font-semibold text-rose-700">{dashboard.summary?.suspected_unmarked_import_count ?? 0}</div>
-			</div>
-			<div class="rounded-3xl border border-amber-200 bg-amber-50 p-5">
-				<div class="text-xs uppercase tracking-[0.16em] text-amber-600">{$i18n.t('Large Bursts')}</div>
-				<div class="mt-2 text-3xl font-semibold text-amber-700">{dashboard.summary?.burst_count ?? 0}</div>
-			</div>
-			<div class="rounded-3xl border border-gray-200 bg-white p-5">
-				<div class="text-xs uppercase tracking-[0.16em] text-gray-500">{$i18n.t('Average Rewrite Ratio')}</div>
-				<div class="mt-2 text-3xl font-semibold">{dashboard.summary?.average_rewrite_ratio ?? 0}%</div>
-			</div>
+			<EduStatCard
+				label="Submissions"
+				value={dashboard.summary?.submission_count ?? dashboard.items.length}
+			/>
+			<EduStatCard
+				tone="rose"
+				label="Suspected Unmarked Imports"
+				value={dashboard.summary?.suspected_unmarked_import_count ?? 0}
+			/>
+			<EduStatCard tone="amber" label="Large Bursts" value={dashboard.summary?.burst_count ?? 0} />
+			<EduStatCard
+				label="Average Rewrite Ratio"
+				value={`${dashboard.summary?.average_rewrite_ratio ?? 0}%`}
+			/>
 		</div>
 
 		<div class="mb-6 grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
-			<div class="rounded-3xl border border-gray-200 bg-white p-5">
+			<EduCard>
 				<div class="mb-4 text-sm font-semibold">{$i18n.t('Rewrite Distribution')}</div>
 				<div class="space-y-3">
 					{#each Object.entries(dashboard.distributions?.rewrite_levels ?? {}) as [level, count]}
@@ -131,9 +127,9 @@
 						</div>
 					{/each}
 				</div>
-			</div>
+			</EduCard>
 
-			<div class="rounded-3xl border border-gray-200 bg-white p-5">
+			<EduCard>
 				<div class="mb-4 text-sm font-semibold">{$i18n.t('Top Risk Submissions')}</div>
 				<div class="space-y-3">
 					{#each [...dashboard.items].sort((a, b) => (b.risk_summary?.suspected_unmarked_import_count ?? 0) - (a.risk_summary?.suspected_unmarked_import_count ?? 0) || (b.risk_summary?.burst_count ?? 0) - (a.risk_summary?.burst_count ?? 0)).slice(0, 5) as item}
@@ -143,25 +139,23 @@
 						>
 							<div class="font-medium text-gray-900">{item.student_name}</div>
 							<div class="mt-2 flex flex-wrap gap-2 text-xs">
-								<div class="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-rose-700">
-									{$i18n.t('Suspected Unmarked Imports')}: {item.risk_summary?.suspected_unmarked_import_count ?? 0}
-								</div>
-								<div class="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-amber-700">
+								<EduBadge tone="rose">
+									{$i18n.t('Suspected Unmarked Imports')}: {item.risk_summary
+										?.suspected_unmarked_import_count ?? 0}
+								</EduBadge>
+								<EduBadge tone="amber">
 									{$i18n.t('Large Bursts')}: {item.risk_summary?.burst_count ?? 0}
-								</div>
+								</EduBadge>
 							</div>
 						</button>
 					{/each}
 				</div>
-			</div>
+			</EduCard>
 		</div>
 
 		<div class="grid gap-4 md:grid-cols-2">
 			{#each dashboard.items as item}
-				<button
-					class="rounded-3xl border border-gray-200 bg-white p-5 text-left transition hover:border-gray-400"
-					on:click={() => goto(`/teacher/submissions/${item.submission_id}`)}
-				>
+				<EduCard interactive on:click={() => goto(`/teacher/submissions/${item.submission_id}`)}>
 					<div class="text-lg font-semibold">{item.student_name}</div>
 					<div class="mt-3 space-y-1 text-sm text-gray-600">
 						<div>{$i18n.t('Typed')}: {item.source_stats.user_typed_chars ?? 0}</div>
@@ -171,25 +165,24 @@
 						<div>{$i18n.t('Reflection')}: {item.has_reflection ? t('Yes') : t('No')}</div>
 					</div>
 					<div class="mt-3 flex flex-wrap gap-2 text-xs">
-						<div class="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-rose-700">
-							{$i18n.t('Suspected Unmarked Imports')}: {item.risk_summary?.suspected_unmarked_import_count ?? 0}
-						</div>
-						<div class="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-amber-700">
+						<EduBadge tone="rose">
+							{$i18n.t('Suspected Unmarked Imports')}: {item.risk_summary
+								?.suspected_unmarked_import_count ?? 0}
+						</EduBadge>
+						<EduBadge tone="amber">
 							{$i18n.t('Large Bursts')}: {item.risk_summary?.burst_count ?? 0}
-						</div>
-						<div class="rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-gray-700">
+						</EduBadge>
+						<EduBadge>
 							{$i18n.t('Average Rewrite Ratio')}: {item.risk_summary?.average_rewrite_ratio ?? 0}%
-						</div>
+						</EduBadge>
 					</div>
-				</button>
+				</EduCard>
 			{/each}
 		</div>
 		</div>
 	{:else if loadError}
 		<div class="mx-auto max-w-3xl px-4 py-16">
-			<div class="rounded-3xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">
-				{loadError}
-			</div>
+			<EduStateCard tone="error">{loadError}</EduStateCard>
 		</div>
 	{:else}
 		<LoadingState messageKey="Loading dashboard..." />

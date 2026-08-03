@@ -27,6 +27,11 @@
 	import { getClassroomDisplayName } from '$lib/utils/education';
 	import LoadingState from '$lib/components/education/LoadingState.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
+	import EduBadge from '$lib/components/education/EduBadge.svelte';
+	import EduButton from '$lib/components/education/EduButton.svelte';
+	import EduCard from '$lib/components/education/EduCard.svelte';
+	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
+	import { EDU_FIELD_CLASS, eduSegmentClass } from '$lib/components/education/styles';
 
 	const i18n = getContext('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
@@ -363,7 +368,7 @@
 
 		<div class="flex-1 overflow-y-auto">
 			<div class="mx-auto max-w-6xl px-4 py-8">
-				<div class="mb-8 rounded-3xl border border-gray-200 bg-white p-5">
+				<EduCard class="mb-8">
 					<div class="mb-4 flex items-center justify-between gap-4">
 						<div>
 							<div class="text-lg font-semibold">{$i18n.t('Continue Recent Writing')}</div>
@@ -384,11 +389,11 @@
 								>
 									<div class="flex items-center justify-between gap-3">
 										<div class="text-sm font-semibold text-gray-900">{item.title}</div>
-										<div class="rounded-full bg-white px-2.5 py-1 text-xs text-gray-600">
+										<EduBadge soft>
 											{item.project_mode === 'assignment_writing'
 												? $i18n.t('Assignment Writing')
 												: $i18n.t('Personal Writing')}
-										</div>
+										</EduBadge>
 									</div>
 									<div class="mt-2 text-xs text-gray-500">
 										{$i18n.t('Updated')}: {formatTimestamp(item.updated_at)}
@@ -397,18 +402,18 @@
 							{/each}
 						</div>
 					{/if}
-				</div>
+				</EduCard>
 
 				{#if ($user?.education_role || home?.role) === 'student'}
 					<div class="mb-5 flex gap-2">
 						<button
-							class={`rounded-full px-4 py-2 text-sm ${activeTab === 'assignment' ? 'bg-black text-white' : 'border border-gray-300 bg-white text-gray-700'}`}
+							class={eduSegmentClass(activeTab === 'assignment')}
 							on:click={() => (activeTab = 'assignment')}
 						>
 							{$i18n.t('Assignment Writing')}
 						</button>
 						<button
-							class={`rounded-full px-4 py-2 text-sm ${activeTab === 'personal' ? 'bg-black text-white' : 'border border-gray-300 bg-white text-gray-700'}`}
+							class={eduSegmentClass(activeTab === 'personal')}
 							on:click={() => (activeTab = 'personal')}
 						>
 							{$i18n.t('Personal Writing')}
@@ -417,7 +422,7 @@
 
 					{#if activeTab === 'assignment'}
 						<div class="mb-8">
-							<div class="mb-6 rounded-3xl border border-gray-200 bg-white p-5">
+							<EduCard class="mb-6">
 								<div class="mb-3 text-sm font-semibold">{$i18n.t('My Classroom')}</div>
 								{#if home?.classroom}
 									<div class="text-sm text-gray-600">
@@ -434,54 +439,38 @@
 									<div class="mt-4 flex flex-col gap-3 md:flex-row">
 										<input
 											bind:value={inviteCode}
-											class="flex-1 rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none"
+											class="flex-1 {EDU_FIELD_CLASS}"
 											placeholder={$i18n.t('Enter classroom invite code')}
 										/>
-										<button
-											class="rounded-full bg-black px-4 py-2 text-sm text-white disabled:opacity-60"
-											on:click={joinCurrentClassroom}
-											disabled={joining}
-										>
+										<EduButton variant="primary" on:click={joinCurrentClassroom} disabled={joining}>
 											{joining ? $i18n.t('Joining...') : $i18n.t('Join Classroom')}
-										</button>
+										</EduButton>
 									</div>
 								{/if}
-							</div>
+							</EduCard>
 
 							<div class="mb-4">
 								<div class="text-lg font-semibold">{$i18n.t('Pending Assignments')}</div>
 							</div>
 
 							{#if sortedAssignmentItems.length === 0}
-								<div class="rounded-3xl border border-gray-200 bg-white p-6 text-sm text-gray-500">
-									{$i18n.t('No assignments available yet.')}
-								</div>
+								<EduStateCard>{$i18n.t('No assignments available yet.')}</EduStateCard>
 							{:else}
 								<div class="grid gap-4">
 									{#each sortedAssignmentItems as item}
-										<div class="rounded-3xl border border-gray-200 bg-white p-5">
+										<EduCard>
 											<div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
 												<div>
 													<div class="flex flex-wrap items-center gap-2">
 														<div class="text-lg font-semibold">{item.assignment.title}</div>
 														{#if item.review_status === 'returned'}
-															<span
-																class="rounded-full bg-rose-100 px-2 py-0.5 text-xs text-rose-700"
-															>
-																{$i18n.t('Returned')}
-															</span>
+															<EduBadge soft tone="rose">{$i18n.t('Returned')}</EduBadge>
 														{:else if item.review_status === 'reviewed'}
-															<span
-																class="rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-700"
-															>
+															<EduBadge soft tone="emerald">
 																{$i18n.t('Reviewed')} {item.score ?? ''}
-															</span>
+															</EduBadge>
 														{:else if item.review_status === 'pending'}
-															<span
-																class="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600"
-															>
-																{$i18n.t('Awaiting review')}
-															</span>
+															<EduBadge soft>{$i18n.t('Awaiting review')}</EduBadge>
 														{/if}
 													</div>
 													<div class="mt-1 text-sm text-gray-500">
@@ -507,14 +496,14 @@
 													</div>
 												</div>
 
-												<button
-													class="rounded-full bg-black px-4 py-2 text-sm text-white"
+												<EduButton
+													variant="primary"
 													on:click={() => goto(`/assignments/${item.assignment.id}/write`)}
 												>
 													{$i18n.t('Open Assignment')}
-												</button>
+												</EduButton>
 											</div>
-										</div>
+										</EduCard>
 									{/each}
 								</div>
 							{/if}
@@ -526,24 +515,23 @@
 					<div>
 						<div class="mb-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
 							<div class="text-lg font-semibold">{$i18n.t('My Writing')}</div>
-							<button
-								class="w-full rounded-full bg-black px-4 py-2 text-sm text-white disabled:opacity-60 md:w-auto"
+							<EduButton
+								variant="primary"
+								class="w-full md:w-auto"
 								on:click={startPersonalWriting}
 								disabled={creatingPersonal}
 							>
 								{creatingPersonal ? $i18n.t('Creating...') : $i18n.t('New Writing')}
-							</button>
+							</EduButton>
 						</div>
 						<div class="mb-4 text-sm text-gray-500">{$i18n.t('Your personal drafts live here.')}</div>
 
 						{#if (home?.personal_items ?? []).length === 0}
-							<div class="rounded-3xl border border-gray-200 bg-white p-6 text-sm text-gray-500">
-								{$i18n.t('No personal writing yet.')}
-							</div>
+							<EduStateCard>{$i18n.t('No personal writing yet.')}</EduStateCard>
 						{:else}
 							<div class="grid gap-4">
 								{#each home.personal_items as item}
-									<div class="rounded-3xl border border-gray-200 bg-white p-5">
+									<EduCard>
 										<div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
 											<div class="min-w-0">
 												<div class="truncate text-lg font-semibold">{item.title}</div>
@@ -555,24 +543,23 @@
 												</div>
 											</div>
 											<div class="flex gap-2">
-												<button
-													class="rounded-full border border-gray-300 px-4 py-2 text-sm text-gray-700"
+												<EduButton
 													on:click={() => requestRemovePersonalWriting(item.writing_session.id)}
 													disabled={deletingPersonalIds.has(item.writing_session.id)}
 												>
 													{deletingPersonalIds.has(item.writing_session.id)
 														? $i18n.t('Deleting...')
 														: $i18n.t('Delete')}
-												</button>
-												<button
-													class="rounded-full bg-black px-4 py-2 text-sm text-white"
+												</EduButton>
+												<EduButton
+													variant="primary"
 													on:click={() => goto(`/writing/${item.writing_session.id}`)}
 												>
 													{$i18n.t('Continue Writing')}
-												</button>
+												</EduButton>
 											</div>
 										</div>
-									</div>
+									</EduCard>
 								{/each}
 							</div>
 						{/if}
@@ -583,9 +570,7 @@
 	</div>
 {:else if loadError}
 	<div class="mx-auto max-w-3xl px-4 py-16">
-		<div class="rounded-3xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">
-			{loadError}
-		</div>
+		<EduStateCard tone="error">{loadError}</EduStateCard>
 	</div>
 {:else}
 	<LoadingState messageKey="Loading writing home..." />

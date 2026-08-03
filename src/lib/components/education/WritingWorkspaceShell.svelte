@@ -12,6 +12,9 @@
 	import Chat from '$lib/components/chat/Chat.svelte';
 	import ReviewResultCard from '$lib/components/education/ReviewResultCard.svelte';
 	import SubmissionHistoryModal from '$lib/components/education/SubmissionHistoryModal.svelte';
+	import EduButton from '$lib/components/education/EduButton.svelte';
+	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
+	import { EDU_FIELD_CLASS, eduSegmentClass } from '$lib/components/education/styles';
 	import { prepareAssistantContentForWriting } from '$lib/utils/writing-content';
 	import { createSerializedSaveRunner } from '$lib/utils/save-coordinator';
 	import {
@@ -806,24 +809,25 @@
 				<div class="rounded-full bg-stone-100 px-3 py-1 text-xs text-gray-600">
 					{saveStatusDisplay}
 				</div>
-				<button
-					class="rounded-full border border-gray-300 px-3 py-1.5 text-sm text-gray-700"
+				<EduButton
+					size="sm"
 					on:click={() => {
 						showMobileDraft = true;
 					}}
 				>
 					{$i18n.t(isAssignment ? 'Assignment Content' : 'Writing Content')}
-				</button>
+				</EduButton>
 				{#if canSubmitAssignment}
-					<button
-						class="rounded-full bg-gray-900 px-3 py-1.5 text-sm text-white"
+					<EduButton
+						variant="primary"
+						size="sm"
 						on:click={() => {
 							loadReflectionDraft();
 							showSubmitModal = true;
 						}}
 					>
 						{$i18n.t('Submit Assignment')}
-					</button>
+					</EduButton>
 				{/if}
 			</div>
 		</div>
@@ -848,14 +852,14 @@
 								{isAssignment ? assignment?.title : noteTitle}
 							</div>
 						</div>
-						<button
-							class="rounded-full border border-gray-300 px-3 py-1.5 text-sm"
+						<EduButton
+							size="sm"
 							on:click={() => {
 								showMobileDraft = false;
 							}}
 						>
 							{$i18n.t('Close')}
-						</button>
+						</EduButton>
 					</div>
 				</div>
 				<div class="min-h-0 flex-1 overflow-y-auto px-5 py-5">
@@ -923,11 +927,7 @@
 							<button
 								type="button"
 								aria-pressed={aiHelpTypes.includes(item)}
-								class={`rounded-full border px-3 py-2 text-sm transition ${
-									aiHelpTypes.includes(item)
-										? 'border-gray-900 bg-gray-900 text-white'
-										: 'border-gray-300 bg-white text-gray-700 hover:border-gray-500'
-								}`}
+								class={eduSegmentClass(aiHelpTypes.includes(item))}
 								on:click={() => toggleAiHelpType(item)}
 							>
 								{$i18n.t(item)}
@@ -949,7 +949,7 @@
 								id="other-ai-help-text"
 								bind:value={otherAiHelpText}
 								on:input={() => saveReflectionDraft(reflectionText, otherAiHelpText)}
-								class="w-full rounded-2xl border border-gray-300 px-3 py-3 text-sm outline-none"
+								class="w-full {EDU_FIELD_CLASS}"
 								placeholder={$i18n.t(
 									'For example: helping me understand the topic or organize evidence.'
 								)}
@@ -965,7 +965,7 @@
 						id="reflection-text"
 						bind:value={reflectionText}
 						on:input={() => saveReflectionDraft(reflectionText, otherAiHelpText)}
-						class="min-h-40 w-full rounded-2xl border border-gray-300 px-3 py-3 text-sm outline-none"
+						class="min-h-40 w-full {EDU_FIELD_CLASS}"
 						placeholder={$i18n.t('Recommended 50-100 characters. Minimum 30.')}
 					></textarea>
 					<div
@@ -981,16 +981,16 @@
 				</div>
 
 				<div class="mt-6 flex justify-end gap-3">
-					<button
-						class="rounded-full border border-gray-300 px-4 py-2 text-sm"
+					<EduButton
 						on:click={() => {
 							showSubmitModal = false;
 						}}
 					>
 						{$i18n.t('Cancel')}
-					</button>
-					<button
-						class="flex items-center gap-2 rounded-full bg-gray-900 px-4 py-2 text-sm text-white disabled:cursor-not-allowed disabled:opacity-60"
+					</EduButton>
+					<EduButton
+						variant="primary"
+						class="flex items-center gap-2 disabled:cursor-not-allowed"
 						disabled={isSubmitting}
 						on:click={submit}
 					>
@@ -1000,15 +1000,13 @@
 						{:else}
 							{$i18n.t('Submit Assignment')}
 						{/if}
-					</button>
+					</EduButton>
 				</div>
 			</div>
 		</div>
 	{/if}
 {:else if loadError}
 	<div class="mx-auto max-w-3xl px-4 py-16">
-		<div class="rounded-3xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">
-			{loadError}
-		</div>
+		<EduStateCard tone="error">{loadError}</EduStateCard>
 	</div>
 {/if}

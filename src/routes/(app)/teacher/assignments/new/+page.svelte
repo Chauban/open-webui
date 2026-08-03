@@ -9,6 +9,10 @@
 	import { createAssignment, getTeacherAssignment, getTeacherClassrooms } from '$lib/apis/education';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
+	import EduButton from '$lib/components/education/EduButton.svelte';
+	import EduCard from '$lib/components/education/EduCard.svelte';
+	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
+	import { EDU_FIELD_CLASS, eduSegmentClass } from '$lib/components/education/styles';
 	import { getClassroomDisplayName } from '$lib/utils/education';
 
 	const i18n = getContext('i18n');
@@ -116,24 +120,17 @@
 			<div class="mb-2 text-sm text-gray-500">{$i18n.t('Teaching')} / {$i18n.t('Assignments')}</div>
 			<h1 class="text-3xl font-semibold">{$i18n.t('Create Assignment')}</h1>
 		</div>
-		<button
-			class="rounded-full border border-gray-300 px-4 py-2 text-sm"
-			on:click={() => goto('/teacher/assignments')}
-		>
+		<EduButton on:click={() => goto('/teacher/assignments')}>
 			{$i18n.t('Back to Assignments')}
-		</button>
+		</EduButton>
 	</div>
 
 	{#if loadError}
-		<div class="rounded-3xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">
-			{loadError}
-		</div>
+		<EduStateCard tone="error">{loadError}</EduStateCard>
 	{:else if loading}
-		<div class="rounded-3xl border border-gray-200 bg-white p-6 text-sm text-gray-500">
-			{$i18n.t('Loading classrooms...')}
-		</div>
+		<EduStateCard>{$i18n.t('Loading classrooms...')}</EduStateCard>
 	{:else}
-		<div class="rounded-3xl border border-gray-200 bg-white p-6">
+		<EduCard padding="lg">
 			<div class="grid gap-4">
 				<div>
 					<div class="mb-2 flex items-center justify-between">
@@ -146,11 +143,7 @@
 						{#each classrooms as item}
 							<button
 								type="button"
-								class={`rounded-full border px-4 py-2 text-sm transition ${
-									selectedClassroomIds.has(item.classroom.id)
-										? 'border-black bg-black text-white'
-										: 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
-								}`}
+								class={eduSegmentClass(selectedClassroomIds.has(item.classroom.id))}
 								on:click={() => toggleClassroom(item.classroom.id)}
 							>
 								{getClassroomDisplayName(item.classroom.name, t)}
@@ -165,7 +158,7 @@
 					<div class="mb-2 text-sm font-semibold">{$i18n.t('Assignment title')}</div>
 					<input
 						bind:value={title}
-						class="w-full rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none"
+						class="w-full {EDU_FIELD_CLASS}"
 						placeholder={$i18n.t('Argument Essay 1')}
 					/>
 				</div>
@@ -173,30 +166,21 @@
 					<div class="mb-2 text-sm font-semibold">{$i18n.t('Assignment description')}</div>
 					<textarea
 						bind:value={description}
-						class="min-h-32 w-full rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none"
+						class="min-h-32 w-full {EDU_FIELD_CLASS}"
 						placeholder={$i18n.t('Write a short argument essay.')}
 					></textarea>
 				</div>
 				<div>
 					<div class="mb-2 text-sm font-semibold">{$i18n.t('Due At')}</div>
-					<input
-						bind:value={dueAt}
-						type="datetime-local"
-						required
-						class="w-full rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none"
-					/>
+					<input bind:value={dueAt} type="datetime-local" required class="w-full {EDU_FIELD_CLASS}" />
 				</div>
 				<div class="flex justify-end">
-					<button
-						class="rounded-full bg-black px-4 py-2 text-sm text-white disabled:opacity-60"
-						on:click={submit}
-						disabled={saving}
-					>
+					<EduButton variant="primary" on:click={submit} disabled={saving}>
 						{saving ? $i18n.t('Creating...') : $i18n.t('Create Assignment')}
-					</button>
+					</EduButton>
 				</div>
 			</div>
-		</div>
+		</EduCard>
 	{/if}
 	</div>
 </TeacherPageShell>

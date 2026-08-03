@@ -16,6 +16,10 @@
 	import { educationNotificationSummary } from '$lib/stores';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
+	import EduButton from '$lib/components/education/EduButton.svelte';
+	import EduCard from '$lib/components/education/EduCard.svelte';
+	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
+	import { eduSegmentClass } from '$lib/components/education/styles';
 	import { getAiHelpTypeLabel, getReviewStatusLabel } from '$lib/utils/education';
 
 	const i18n = getContext('i18n');
@@ -134,58 +138,35 @@
 			<h1 class="text-2xl font-semibold">{$i18n.t('Submissions')}</h1>
 		</div>
 		<div class="flex gap-2">
-			<button
-				class="rounded-full border border-gray-300 px-4 py-2 text-sm"
-				on:click={() => goto(`/teacher/assignments/${$page.params.assignmentId}`)}
-			>
+			<EduButton on:click={() => goto(`/teacher/assignments/${$page.params.assignmentId}`)}>
 				{$i18n.t('Assignment')}
-			</button>
-			<button
-				class="rounded-full border border-gray-300 px-4 py-2 text-sm"
+			</EduButton>
+			<EduButton
 				on:click={() => goto(`/teacher/assignments/${$page.params.assignmentId}/dashboard`)}
 			>
 				{$i18n.t('Dashboard')}
-			</button>
+			</EduButton>
 		</div>
 	</div>
 
 	<div class="mb-6 flex flex-wrap gap-2">
-		<button
-			class={`rounded-full border px-4 py-2 text-sm transition ${
-				selectedStatus === 'all'
-					? 'border-black bg-black text-white'
-					: 'border-gray-300 bg-white text-gray-700'
-			}`}
-			on:click={() => (selectedStatus = 'all')}
-		>
+		<button class={eduSegmentClass(selectedStatus === 'all')} on:click={() => (selectedStatus = 'all')}>
 			{$i18n.t('All')}
 		</button>
 		<button
-			class={`rounded-full border px-4 py-2 text-sm transition ${
-				selectedStatus === 'pending'
-					? 'border-black bg-black text-white'
-					: 'border-gray-300 bg-white text-gray-700'
-			}`}
+			class={eduSegmentClass(selectedStatus === 'pending')}
 			on:click={() => (selectedStatus = 'pending')}
 		>
 			{$i18n.t('To Review')}
 		</button>
 		<button
-			class={`rounded-full border px-4 py-2 text-sm transition ${
-				selectedStatus === 'reviewed'
-					? 'border-black bg-black text-white'
-					: 'border-gray-300 bg-white text-gray-700'
-			}`}
+			class={eduSegmentClass(selectedStatus === 'reviewed')}
 			on:click={() => (selectedStatus = 'reviewed')}
 		>
 			{$i18n.t('Reviewed')}
 		</button>
 		<button
-			class={`rounded-full border px-4 py-2 text-sm transition ${
-				selectedStatus === 'unsubmitted'
-					? 'border-black bg-black text-white'
-					: 'border-gray-300 bg-white text-gray-700'
-			}`}
+			class={eduSegmentClass(selectedStatus === 'unsubmitted')}
 			on:click={() => (selectedStatus = 'unsubmitted')}
 		>
 			{$i18n.t('Unsubmitted')} ({unsubmitted.length})
@@ -194,19 +175,15 @@
 
 	{#if loaded && !loadError}
 		{#if selectedStatus === 'unsubmitted'}
-			<div class="overflow-hidden rounded-3xl border border-gray-200 bg-white">
+			<EduCard padding="none">
 				<div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-4 py-3">
 					<div class="text-sm text-gray-600">
 						{$i18n.t('{{count}} students have not submitted yet.', { count: unsubmitted.length })}
 					</div>
 					{#if unsubmitted.length > 0}
-						<button
-							class="rounded-full bg-black px-4 py-2 text-sm text-white disabled:opacity-60"
-							disabled={remindingAll}
-							on:click={remindAll}
-						>
+						<EduButton variant="primary" disabled={remindingAll} on:click={remindAll}>
 							{remindingAll ? $i18n.t('Sending...') : $i18n.t('Remind All')}
-						</button>
+						</EduButton>
 					{/if}
 				</div>
 				{#if unsubmitted.length === 0}
@@ -228,28 +205,26 @@
 									<td class="px-4 py-4">{student.user_name}</td>
 									<td class="truncate px-4 py-4 text-gray-500">{student.user_email ?? '-'}</td>
 									<td class="px-4 py-4">
-										<button
-											class="rounded-full border border-gray-300 px-3 py-1.5 text-sm disabled:opacity-60"
+										<EduButton
+											size="sm"
 											disabled={remindingIds.has(student.user_id)}
 											on:click={() => remindOne(student.user_id)}
 										>
 											{remindingIds.has(student.user_id)
 												? $i18n.t('Sending...')
 												: $i18n.t('Remind')}
-										</button>
+										</EduButton>
 									</td>
 								</tr>
 							{/each}
 						</tbody>
 					</table>
 				{/if}
-			</div>
+			</EduCard>
 		{:else if filteredItems.length === 0}
-			<div class="rounded-3xl border border-gray-200 bg-white p-6 text-sm text-gray-500">
-				{$i18n.t('No submissions match the current filters.')}
-			</div>
+			<EduStateCard>{$i18n.t('No submissions match the current filters.')}</EduStateCard>
 		{:else}
-			<div class="overflow-hidden rounded-3xl border border-gray-200 bg-white">
+			<EduCard padding="none">
 				<table class="w-full table-fixed">
 					<thead class="bg-gray-50 text-left text-sm text-gray-600">
 						<tr>
@@ -272,23 +247,22 @@
 								</td>
 								<td class="px-4 py-4">{getReviewStatusLabel(item.review_status, t)}</td>
 								<td class="px-4 py-4">
-									<button
-										class="rounded-full bg-black px-3 py-1.5 text-white"
+									<EduButton
+										variant="primary"
+										size="sm"
 										on:click={() => goto(`/teacher/submissions/${item.submission.id}`)}
 									>
 										{$i18n.t('View')}
-									</button>
+									</EduButton>
 								</td>
 							</tr>
 						{/each}
 					</tbody>
 				</table>
-			</div>
+			</EduCard>
 		{/if}
 	{:else if loaded && loadError}
-		<div class="rounded-3xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">
-			{loadError}
-		</div>
+		<EduStateCard tone="error">{loadError}</EduStateCard>
 	{/if}
 	</div>
 </TeacherPageShell>

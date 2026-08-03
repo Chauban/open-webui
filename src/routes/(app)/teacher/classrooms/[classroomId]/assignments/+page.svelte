@@ -9,6 +9,9 @@
 	import { getTeacherClassroomAssignments, getTeacherClassrooms } from '$lib/apis/education';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
+	import EduButton from '$lib/components/education/EduButton.svelte';
+	import EduCard from '$lib/components/education/EduCard.svelte';
+	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 	import { getClassroomDisplayName } from '$lib/utils/education';
 
 	const i18n = getContext('i18n');
@@ -53,9 +56,7 @@
 		<div class="mx-auto max-w-6xl px-4 py-8 text-sm text-gray-500">{$i18n.t('Loading assignments...')}</div>
 	{:else if loadError}
 		<div class="mx-auto max-w-3xl px-4 py-16">
-			<div class="rounded-3xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">
-				{loadError}
-			</div>
+			<EduStateCard tone="error">{loadError}</EduStateCard>
 		</div>
 	{:else}
 		<div class="mx-auto max-w-6xl px-4 py-8">
@@ -69,29 +70,24 @@
 				<h1 class="text-3xl font-semibold">{$i18n.t('Classroom Assignments')}</h1>
 			</div>
 			<div class="flex flex-wrap gap-2">
-				<button
-					class="rounded-full border border-gray-300 px-4 py-2 text-sm"
-					on:click={() => goto(`/teacher/classrooms/${classroom.id}`)}
-				>
+				<EduButton on:click={() => goto(`/teacher/classrooms/${classroom.id}`)}>
 					{$i18n.t('Back to Classroom')}
-				</button>
-				<button
-					class="rounded-full bg-black px-4 py-2 text-sm text-white"
+				</EduButton>
+				<EduButton
+					variant="primary"
 					on:click={() => goto(`/teacher/assignments/new?classroomId=${classroom.id}`)}
 				>
 					{$i18n.t('Create Assignment')}
-				</button>
+				</EduButton>
 			</div>
 		</div>
 
 		{#if assignments.length === 0}
-			<div class="rounded-3xl border border-gray-200 bg-white p-6 text-sm text-gray-500">
-				{$i18n.t('No assignments yet.')}
-			</div>
+			<EduStateCard>{$i18n.t('No assignments yet.')}</EduStateCard>
 		{:else}
 			<div class="grid gap-4">
 				{#each assignments as item}
-					<div class="rounded-3xl border border-gray-200 bg-white p-5">
+					<EduCard>
 						<div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
 							<div>
 								<div class="text-lg font-semibold text-gray-900">{item.assignment.title}</div>
@@ -104,33 +100,25 @@
 								</div>
 							</div>
 							<div class="flex flex-wrap gap-2">
-								<button
-									class="rounded-full border border-gray-300 px-3 py-2 text-sm"
-									on:click={() => goto(`/teacher/assignments/${item.assignment.id}`)}
-								>
+								<EduButton on:click={() => goto(`/teacher/assignments/${item.assignment.id}`)}>
 									{$i18n.t('Open')}
-								</button>
-								<button
-									class="rounded-full border border-gray-300 px-3 py-2 text-sm"
-									on:click={() => copyWriteLink(item.assignment.id)}
-								>
+								</EduButton>
+								<EduButton on:click={() => copyWriteLink(item.assignment.id)}>
 									{$i18n.t('Copy Student Link')}
-								</button>
-								<button
-									class="rounded-full border border-gray-300 px-3 py-2 text-sm"
+								</EduButton>
+								<EduButton
 									on:click={() => goto(`/teacher/assignments/${item.assignment.id}/submissions`)}
 								>
 									{$i18n.t('Submissions')}
-								</button>
-								<button
-									class="rounded-full border border-gray-300 px-3 py-2 text-sm"
+								</EduButton>
+								<EduButton
 									on:click={() => goto(`/teacher/assignments/${item.assignment.id}/dashboard`)}
 								>
 									{$i18n.t('Dashboard')}
-								</button>
+								</EduButton>
 							</div>
 						</div>
-					</div>
+					</EduCard>
 				{/each}
 			</div>
 		{/if}

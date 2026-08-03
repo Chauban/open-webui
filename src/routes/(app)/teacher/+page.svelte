@@ -11,6 +11,13 @@
 	import { educationNotificationSummary } from '$lib/stores';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
+	import EduBadge from '$lib/components/education/EduBadge.svelte';
+	import EduButton from '$lib/components/education/EduButton.svelte';
+	import EduCard from '$lib/components/education/EduCard.svelte';
+	import EduEmpty from '$lib/components/education/EduEmpty.svelte';
+	import EduStatCard from '$lib/components/education/EduStatCard.svelte';
+	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
+	import EduTile from '$lib/components/education/EduTile.svelte';
 	import { getClassroomDisplayName } from '$lib/utils/education';
 
 	dayjs.extend(relativeTime);
@@ -68,52 +75,32 @@
 		<TeacherSectionNav />
 
 		{#if loadError}
-			<div class="rounded-3xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">
-				{loadError}
-			</div>
+			<EduStateCard tone="error">{loadError}</EduStateCard>
 		{:else if loading}
-			<div class="rounded-3xl border border-gray-200 bg-white p-6 text-sm text-gray-500">
-				{$i18n.t('Loading teaching overview...')}
-			</div>
+			<EduStateCard>{$i18n.t('Loading teaching overview...')}</EduStateCard>
 		{:else}
 			<div class="mb-8 grid gap-4 md:grid-cols-4">
-				<div class="rounded-3xl border border-gray-200 bg-white p-5">
-					<div class="text-xs uppercase tracking-[0.16em] text-gray-500">{$i18n.t('Classrooms')}</div>
-					<div class="mt-2 text-3xl font-semibold">{overview.classroom_count}</div>
-				</div>
-				<div class="rounded-3xl border border-gray-200 bg-white p-5">
-					<div class="text-xs uppercase tracking-[0.16em] text-gray-500">{$i18n.t('Assignments')}</div>
-					<div class="mt-2 text-3xl font-semibold">{overview.assignment_count}</div>
-				</div>
-				<div class="rounded-3xl border border-gray-200 bg-white p-5">
-					<div class="text-xs uppercase tracking-[0.16em] text-gray-500">{$i18n.t('To Review')}</div>
-					<div class="mt-2 text-3xl font-semibold">{overview.pending_review_count}</div>
-				</div>
-				<div class="rounded-3xl border border-gray-200 bg-white p-5">
-					<div class="text-xs uppercase tracking-[0.16em] text-gray-500">{$i18n.t('Unsubmitted')}</div>
-					<div class="mt-2 text-3xl font-semibold">{overview.unsubmitted_count}</div>
-				</div>
+				<EduStatCard label="Classrooms" value={overview.classroom_count} />
+				<EduStatCard label="Assignments" value={overview.assignment_count} />
+				<EduStatCard label="To Review" value={overview.pending_review_count} />
+				<EduStatCard label="Unsubmitted" value={overview.unsubmitted_count} />
 			</div>
 
 			<div class="mb-8 grid gap-4 lg:grid-cols-[1.05fr_0.95fr]">
-				<div class="rounded-3xl border border-gray-200 bg-white p-5">
+				<EduCard>
 					<div class="mb-4 flex items-center justify-between">
 						<div class="text-sm font-semibold">{$i18n.t('To Review')}</div>
-						<button class="text-sm text-gray-500" on:click={() => goto('/teacher/review')}>
+						<EduButton variant="link" on:click={() => goto('/teacher/review')}>
 							{$i18n.t('Open review queue')}
-						</button>
+						</EduButton>
 					</div>
 					{#if overview.pending_review_items.length === 0}
-						<div
-							class="rounded-2xl border border-dashed border-gray-300 px-4 py-5 text-sm text-gray-500"
-						>
-							{$i18n.t('No submissions to review yet.')}
-						</div>
+						<EduEmpty>{$i18n.t('No submissions to review yet.')}</EduEmpty>
 					{:else}
 						<div class="space-y-3">
 							{#each overview.pending_review_items as item}
-								<button
-									class="w-full rounded-2xl border border-gray-200 px-4 py-4 text-left text-sm transition hover:border-gray-300"
+								<EduTile
+									interactive
 									on:click={() => goto(`/teacher/submissions/${item.submission.id}`)}
 								>
 									<div class="font-medium text-gray-900">{item.student_name}</div>
@@ -125,37 +112,34 @@
 										</div>
 									</div>
 									<div class="mt-3 flex flex-wrap gap-2 text-xs">
-										<div class="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-rose-700">
-											{$i18n.t('Suspected Unmarked Imports')}: {item.risk_summary?.suspected_unmarked_import_count ?? 0}
-										</div>
-										<div class="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-amber-700">
+										<EduBadge tone="rose">
+											{$i18n.t('Suspected Unmarked Imports')}: {item.risk_summary
+												?.suspected_unmarked_import_count ?? 0}
+										</EduBadge>
+										<EduBadge tone="amber">
 											{$i18n.t('Large Bursts')}: {item.risk_summary?.burst_count ?? 0}
-										</div>
+										</EduBadge>
 									</div>
-								</button>
+								</EduTile>
 							{/each}
 						</div>
 					{/if}
-				</div>
+				</EduCard>
 
-				<div class="rounded-3xl border border-gray-200 bg-white p-5">
+				<EduCard>
 					<div class="mb-4 flex items-center justify-between">
 						<div class="text-sm font-semibold">{$i18n.t('Recent Submissions')}</div>
-						<button class="text-sm text-gray-500" on:click={() => goto('/teacher/assignments')}>
+						<EduButton variant="link" on:click={() => goto('/teacher/assignments')}>
 							{$i18n.t('Open assignments')}
-						</button>
+						</EduButton>
 					</div>
 					{#if overview.recent_submissions.length === 0}
-						<div
-							class="rounded-2xl border border-dashed border-gray-300 px-4 py-5 text-sm text-gray-500"
-						>
-							{$i18n.t('No submissions yet.')}
-						</div>
+						<EduEmpty>{$i18n.t('No submissions yet.')}</EduEmpty>
 					{:else}
 						<div class="space-y-3">
 							{#each overview.recent_submissions as item}
-								<button
-									class="w-full rounded-2xl border border-gray-200 px-4 py-4 text-left text-sm transition hover:border-gray-300"
+								<EduTile
+									interactive
 									on:click={() => goto(`/teacher/submissions/${item.submission.id}`)}
 								>
 									<div class="font-medium text-gray-900">{item.student_name}</div>
@@ -164,36 +148,34 @@
 										{formatRelative(item.submission.submitted_at)}
 									</div>
 									<div class="mt-3 flex flex-wrap gap-2 text-xs">
-										<div class="rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-sky-700">
+										<EduBadge tone="sky">
 											{$i18n.t('AI pasted')}: {item.risk_summary?.ai_pasted_chars ?? 0}
-										</div>
-										<div class="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-amber-700">
+										</EduBadge>
+										<EduBadge tone="amber">
 											{$i18n.t('Large Bursts')}: {item.risk_summary?.burst_count ?? 0}
-										</div>
+										</EduBadge>
 									</div>
-								</button>
+								</EduTile>
 							{/each}
 						</div>
 					{/if}
-				</div>
+				</EduCard>
 			</div>
 
-			<div class="mb-8 rounded-3xl border border-gray-200 bg-white p-5">
+			<EduCard class="mb-8">
 				<div class="mb-4 flex items-center justify-between">
 					<div class="text-sm font-semibold">{$i18n.t('Upcoming Due')}</div>
-					<button class="text-sm text-gray-500" on:click={() => goto('/teacher/assignments')}>
+					<EduButton variant="link" on:click={() => goto('/teacher/assignments')}>
 						{$i18n.t('View all')}
-					</button>
+					</EduButton>
 				</div>
 				{#if (overview.upcoming_due_assignments ?? []).length === 0}
-					<div class="rounded-2xl border border-dashed border-gray-300 px-4 py-5 text-sm text-gray-500">
-						{$i18n.t('No upcoming due assignments.')}
-					</div>
+					<EduEmpty>{$i18n.t('No upcoming due assignments.')}</EduEmpty>
 				{:else}
 					<div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
 						{#each overview.upcoming_due_assignments as item}
-							<button
-								class="rounded-2xl border border-gray-200 px-4 py-4 text-left text-sm transition hover:border-gray-300"
+							<EduTile
+								interactive
 								on:click={() => goto(`/teacher/assignments/${item.assignment.id}`)}
 							>
 								<div class="font-medium text-gray-900">{item.assignment.title}</div>
@@ -201,42 +183,36 @@
 									{item.classroom ? getClassroomDisplayName(item.classroom.name, t) : t('Unassigned classroom')}
 								</div>
 								<div class="mt-3 flex flex-wrap items-center gap-2 text-xs">
-									<div
-										class={`rounded-full border px-3 py-1 ${
-											item.assignment.due_at * 1000 - Date.now() < DAY_MS
-												? 'border-amber-200 bg-amber-50 text-amber-700'
-												: 'border-gray-200 bg-gray-50 text-gray-600'
-										}`}
+									<EduBadge
+										tone={item.assignment.due_at * 1000 - Date.now() < DAY_MS ? 'amber' : 'gray'}
 										title={formatAbsolute(item.assignment.due_at)}
 									>
 										{$i18n.t('Due')} {formatRelative(item.assignment.due_at)}
-									</div>
+									</EduBadge>
 									<div class="text-gray-500">
 										{$i18n.t('Submissions')}: {item.submission_count}/{item.student_count}
 									</div>
 								</div>
-							</button>
+							</EduTile>
 						{/each}
 					</div>
 				{/if}
-			</div>
+			</EduCard>
 
-			<div class="mb-8 rounded-3xl border border-gray-200 bg-white p-5">
+			<EduCard class="mb-8">
 				<div class="mb-4 flex items-center justify-between">
 					<div class="text-sm font-semibold">{$i18n.t('Recent Assignments')}</div>
-					<button class="text-sm text-gray-500" on:click={() => goto('/teacher/assignments')}>
+					<EduButton variant="link" on:click={() => goto('/teacher/assignments')}>
 						{$i18n.t('View all')}
-					</button>
+					</EduButton>
 				</div>
 				{#if overview.recent_assignments.length === 0}
-					<div class="rounded-2xl border border-dashed border-gray-300 px-4 py-5 text-sm text-gray-500">
-						{$i18n.t('No assignments yet.')}
-					</div>
+					<EduEmpty>{$i18n.t('No assignments yet.')}</EduEmpty>
 				{:else}
 					<div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
 						{#each overview.recent_assignments as item}
-							<button
-								class="rounded-2xl border border-gray-200 px-4 py-4 text-left text-sm transition hover:border-gray-300"
+							<EduTile
+								interactive
 								on:click={() => goto(`/teacher/assignments/${item.assignment.id}`)}
 							>
 								<div class="font-medium text-gray-900">{item.assignment.title}</div>
@@ -248,35 +224,34 @@
 									<div>{$i18n.t('Submissions')}: {item.submission_count}</div>
 								</div>
 								<div class="mt-3 flex flex-wrap gap-2 text-xs">
-									<div class="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-rose-700">
-										{$i18n.t('Suspected Unmarked Imports')}: {item.risk_summary?.suspected_unmarked_import_count ?? 0}
-									</div>
-									<div class="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-amber-700">
+									<EduBadge tone="rose">
+										{$i18n.t('Suspected Unmarked Imports')}: {item.risk_summary
+											?.suspected_unmarked_import_count ?? 0}
+									</EduBadge>
+									<EduBadge tone="amber">
 										{$i18n.t('Large Bursts')}: {item.risk_summary?.burst_count ?? 0}
-									</div>
+									</EduBadge>
 								</div>
-							</button>
+							</EduTile>
 						{/each}
 					</div>
 				{/if}
-			</div>
+			</EduCard>
 
-			<div class="rounded-3xl border border-gray-200 bg-white p-5">
+			<EduCard>
 				<div class="mb-4 flex items-center justify-between">
 					<div class="text-sm font-semibold">{$i18n.t('Classrooms')}</div>
-					<button class="text-sm text-gray-500" on:click={() => goto('/teacher/classrooms')}>
+					<EduButton variant="link" on:click={() => goto('/teacher/classrooms')}>
 						{$i18n.t('View all')}
-					</button>
+					</EduButton>
 				</div>
 				{#if overview.classrooms.length === 0}
-					<div class="rounded-2xl border border-dashed border-gray-300 px-4 py-5 text-sm text-gray-500">
-						{$i18n.t('No classrooms yet.')}
-					</div>
+					<EduEmpty>{$i18n.t('No classrooms yet.')}</EduEmpty>
 				{:else}
 					<div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
 						{#each overview.classrooms as item}
-							<button
-								class="rounded-2xl border border-gray-200 px-4 py-4 text-left text-sm transition hover:border-gray-300"
+							<EduTile
+								interactive
 								on:click={() => goto(`/teacher/classrooms/${item.classroom.id}`)}
 							>
 								<div class="font-medium text-gray-900">
@@ -287,18 +262,19 @@
 									<div>{$i18n.t('Assignments')}: {item.assignment_count}</div>
 								</div>
 								<div class="mt-3 flex flex-wrap gap-2 text-xs">
-									<div class="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-rose-700">
-										{$i18n.t('Suspected Unmarked Imports')}: {item.risk_summary?.suspected_unmarked_import_count ?? 0}
-									</div>
-									<div class="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-amber-700">
+									<EduBadge tone="rose">
+										{$i18n.t('Suspected Unmarked Imports')}: {item.risk_summary
+											?.suspected_unmarked_import_count ?? 0}
+									</EduBadge>
+									<EduBadge tone="amber">
 										{$i18n.t('Large Bursts')}: {item.risk_summary?.burst_count ?? 0}
-									</div>
+									</EduBadge>
 								</div>
-							</button>
+							</EduTile>
 						{/each}
 					</div>
 				{/if}
-			</div>
+			</EduCard>
 		{/if}
 	</div>
 </TeacherPageShell>

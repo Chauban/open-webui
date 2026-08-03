@@ -8,6 +8,9 @@
 	import { user } from '$lib/stores';
 	import { createClassroom, getMyClassroom, getTeacherClassrooms, joinClassroom } from '$lib/apis/education';
 	import LoadingState from '$lib/components/education/LoadingState.svelte';
+	import EduButton from '$lib/components/education/EduButton.svelte';
+	import EduCard from '$lib/components/education/EduCard.svelte';
+	import { EDU_FIELD_CLASS } from '$lib/components/education/styles';
 
 	const i18n = getContext('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
@@ -101,13 +104,13 @@
 			</div>
 		</div>
 
-		<div class="rounded-[28px] border border-gray-200 bg-white p-6 shadow-sm">
+		<EduCard padding="lg" class="shadow-sm">
 			{#if educationRole === 'teacher'}
 				<div>
 					<div class="mb-2 text-sm font-semibold text-gray-900">{$i18n.t('Classroom Name')}</div>
 					<input
 						bind:value={classroomName}
-						class="w-full rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none"
+						class="w-full {EDU_FIELD_CLASS}"
 						placeholder={$i18n.t('Example: Grade 8 Writing')}
 					/>
 					<div class="mt-2 text-sm text-gray-500">
@@ -121,7 +124,7 @@
 					</div>
 					<input
 						bind:value={inviteCode}
-						class="w-full rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none"
+						class="w-full {EDU_FIELD_CLASS}"
 						placeholder={$i18n.t('Enter invite code now, or leave blank and join later')}
 					/>
 					<div class="mt-2 text-sm text-gray-500">
@@ -131,15 +134,11 @@
 			{/if}
 
 			<div class="mt-8 flex justify-end">
-				<button
-					class="rounded-full bg-black px-5 py-2.5 text-sm font-medium text-white disabled:opacity-60"
-					on:click={saveSetup}
-					disabled={submitting}
-				>
+				<EduButton variant="primary" class="font-medium" on:click={saveSetup} disabled={submitting}>
 					{submitting ? $i18n.t('Saving...') : $i18n.t('Save and Continue')}
-				</button>
+				</EduButton>
 			</div>
-		</div>
+		</EduCard>
 	</div>
 {:else}
 	<LoadingState messageKey="Loading..." />

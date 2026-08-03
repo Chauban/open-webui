@@ -8,6 +8,11 @@
 	import { getTeacherAssignments } from '$lib/apis/education';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
+	import EduBadge from '$lib/components/education/EduBadge.svelte';
+	import EduButton from '$lib/components/education/EduButton.svelte';
+	import EduCard from '$lib/components/education/EduCard.svelte';
+	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
+	import { EDU_FIELD_CLASS, eduFilterClass } from '$lib/components/education/styles';
 	import { getAssignmentStatusLabel, getClassroomDisplayName } from '$lib/utils/education';
 
 	const i18n = getContext('i18n');
@@ -103,23 +108,20 @@
 			<div class="text-sm text-gray-500">
 				{$i18n.t('View every assignment across classrooms, then jump into submissions or analytics.')}
 			</div>
-			<button
-				class="rounded-full bg-black px-4 py-2 text-sm text-white"
-				on:click={() => goto('/teacher/assignments/new')}
-			>
+			<EduButton variant="primary" on:click={() => goto('/teacher/assignments/new')}>
 				{$i18n.t('New Assignment')}
-			</button>
+			</EduButton>
 		</div>
 
 		<TeacherSectionNav />
 
-		<div class="mb-8 grid gap-3 rounded-3xl border border-gray-200 bg-white p-5 md:grid-cols-4">
-			<select class="rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none" bind:value={selectedClassroom}>
+		<EduCard class="mb-8 grid gap-3 md:grid-cols-4">
+			<select class={EDU_FIELD_CLASS} bind:value={selectedClassroom}>
 				{#each classroomOptions as option}
 					<option value={option.value}>{option.label}</option>
 				{/each}
 			</select>
-			<select class="rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none" bind:value={selectedStatus}>
+			<select class={EDU_FIELD_CLASS} bind:value={selectedStatus}>
 				<option value="all">{$i18n.t('All')}</option>
 				<option value="active">{$i18n.t('Active')}</option>
 				<option value="past_due">{$i18n.t('Past Due')}</option>
@@ -128,29 +130,25 @@
 			</select>
 			<input
 				bind:value={keyword}
-				class="rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none"
+				class={EDU_FIELD_CLASS}
 				placeholder={$i18n.t('Search assignments')}
 			/>
-			<select class="rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none" bind:value={sortBy}>
+			<select class={EDU_FIELD_CLASS} bind:value={sortBy}>
 				<option value="latest_activity">{$i18n.t('Sort by Latest')}</option>
 				<option value="suspected">{$i18n.t('Sort by Suspected Imports')}</option>
 				<option value="burst">{$i18n.t('Sort by Large Bursts')}</option>
 				<option value="rewrite">{$i18n.t('Sort by Rewrite Ratio')}</option>
 			</select>
-		</div>
+		</EduCard>
 		<div class="mb-8 flex flex-wrap gap-2">
 			<button
-				class={`rounded-full border px-4 py-2 text-sm transition ${
-					onlySuspected ? 'border-rose-300 bg-rose-50 text-rose-700' : 'border-gray-300 bg-white text-gray-700'
-				}`}
+				class={eduFilterClass(onlySuspected, 'rose')}
 				on:click={() => (onlySuspected = !onlySuspected)}
 			>
 				{$i18n.t('Only Suspected Imports')}
 			</button>
 			<button
-				class={`rounded-full border px-4 py-2 text-sm transition ${
-					onlyBursts ? 'border-amber-300 bg-amber-50 text-amber-700' : 'border-gray-300 bg-white text-gray-700'
-				}`}
+				class={eduFilterClass(onlyBursts, 'amber')}
 				on:click={() => (onlyBursts = !onlyBursts)}
 			>
 				{$i18n.t('Only Large Bursts')}
@@ -158,21 +156,17 @@
 		</div>
 
 		{#if loadError}
-			<div class="rounded-3xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">
-				{loadError}
-			</div>
+			<EduStateCard tone="error">{loadError}</EduStateCard>
 		{:else if loading}
-			<div class="rounded-3xl border border-gray-200 bg-white p-6 text-sm text-gray-500">
-				{$i18n.t('Loading assignments...')}
-			</div>
+			<EduStateCard>{$i18n.t('Loading assignments...')}</EduStateCard>
 		{:else if filteredAssignments.length === 0}
-			<div class="rounded-3xl border border-gray-200 bg-white p-6 text-sm text-gray-500">
+			<EduStateCard>
 				{assignments.length === 0 ? $i18n.t('No assignments yet.') : $i18n.t('No assignments match the current filters.')}
-			</div>
+			</EduStateCard>
 		{:else}
 			<div class="grid gap-4">
 				{#each filteredAssignments as item}
-					<div class="rounded-3xl border border-gray-200 bg-white p-5">
+					<EduCard>
 						<div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
 							<div>
 								<div class="text-lg font-semibold text-gray-900">{item.assignment.title}</div>
@@ -208,55 +202,47 @@
 									</div>
 								</div>
 								<div class="mt-3 flex flex-wrap gap-2 text-xs">
-									<div class="rounded-full border border-sky-200 bg-sky-50 px-3 py-1.5 text-sky-700">
+									<EduBadge tone="sky">
 										{$i18n.t('AI pasted')}: {item.risk_summary?.ai_pasted_chars ?? 0}
-									</div>
-									<div class="rounded-full border border-gray-200 bg-gray-50 px-3 py-1.5 text-gray-700">
+									</EduBadge>
+									<EduBadge>
 										{$i18n.t('AI inserted')}: {item.risk_summary?.ai_inserted_chars ?? 0}
-									</div>
-									<div class="rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 text-rose-700">
-										{$i18n.t('Suspected Unmarked Imports')}: {item.risk_summary?.suspected_unmarked_import_count ?? 0}
-									</div>
-									<div class="rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-amber-700">
+									</EduBadge>
+									<EduBadge tone="rose">
+										{$i18n.t('Suspected Unmarked Imports')}: {item.risk_summary
+											?.suspected_unmarked_import_count ?? 0}
+									</EduBadge>
+									<EduBadge tone="amber">
 										{$i18n.t('Large Bursts')}: {item.risk_summary?.burst_count ?? 0}
-									</div>
+									</EduBadge>
 								</div>
 							</div>
 
 							<div class="flex flex-wrap gap-2">
-								<button
-									class="rounded-full border border-gray-300 px-3 py-2 text-sm"
-									on:click={() => goto(`/teacher/assignments/${item.assignment.id}`)}
-								>
+								<EduButton on:click={() => goto(`/teacher/assignments/${item.assignment.id}`)}>
 									{$i18n.t('Open')}
-								</button>
-								<button
-									class="rounded-full border border-gray-300 px-3 py-2 text-sm"
-									on:click={() => copyWriteLink(item.assignment.id)}
-								>
+								</EduButton>
+								<EduButton on:click={() => copyWriteLink(item.assignment.id)}>
 									{$i18n.t('Copy Student Link')}
-								</button>
-								<button
-									class="rounded-full border border-gray-300 px-3 py-2 text-sm"
+								</EduButton>
+								<EduButton
 									on:click={() => goto(`/teacher/assignments/new?from=${item.assignment.id}`)}
 								>
 									{$i18n.t('Duplicate')}
-								</button>
-								<button
-									class="rounded-full border border-gray-300 px-3 py-2 text-sm"
+								</EduButton>
+								<EduButton
 									on:click={() => goto(`/teacher/assignments/${item.assignment.id}/submissions`)}
 								>
 									{$i18n.t('Submissions')}
-								</button>
-								<button
-									class="rounded-full border border-gray-300 px-3 py-2 text-sm"
+								</EduButton>
+								<EduButton
 									on:click={() => goto(`/teacher/assignments/${item.assignment.id}/dashboard`)}
 								>
 									{$i18n.t('Dashboard')}
-								</button>
+								</EduButton>
 							</div>
 						</div>
-					</div>
+					</EduCard>
 				{/each}
 			</div>
 		{/if}

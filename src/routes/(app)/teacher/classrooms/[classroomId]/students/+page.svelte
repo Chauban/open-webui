@@ -20,6 +20,12 @@
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
+	import EduButton from '$lib/components/education/EduButton.svelte';
+	import EduCard from '$lib/components/education/EduCard.svelte';
+	import EduEmpty from '$lib/components/education/EduEmpty.svelte';
+	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
+	import EduTile from '$lib/components/education/EduTile.svelte';
+	import { EDU_FIELD_CLASS } from '$lib/components/education/styles';
 	import { getClassroomDisplayName } from '$lib/utils/education';
 
 	const i18n = getContext('i18n');
@@ -224,9 +230,7 @@
 		<div class="mx-auto max-w-6xl px-4 py-8 text-sm text-gray-500">{$i18n.t('Loading students...')}</div>
 	{:else if loadError}
 		<div class="mx-auto max-w-3xl px-4 py-16">
-			<div class="rounded-3xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">
-				{loadError}
-			</div>
+			<EduStateCard tone="error">{loadError}</EduStateCard>
 		</div>
 	{:else}
 		<div class="mx-auto max-w-6xl px-4 py-8">
@@ -239,72 +243,61 @@
 				</div>
 				<h1 class="text-3xl font-semibold">{$i18n.t('Manage Students')}</h1>
 			</div>
-			<button
-				class="rounded-full border border-gray-300 px-4 py-2 text-sm"
-				on:click={() => goto(`/teacher/classrooms/${classroom.id}`)}
-			>
+			<EduButton on:click={() => goto(`/teacher/classrooms/${classroom.id}`)}>
 				{$i18n.t('Back to Classroom')}
-			</button>
+			</EduButton>
 		</div>
 
-		<div class="mb-8 rounded-3xl border border-gray-200 bg-white p-5">
+		<EduCard class="mb-8">
 			<div class="mb-4 text-sm font-semibold">{$i18n.t('Add Student')}</div>
 			<div class="flex gap-2">
 				<input
 					bind:value={memberQuery}
-					class="flex-1 rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none"
+					class="flex-1 {EDU_FIELD_CLASS}"
 					placeholder={$i18n.t('Search by student name or email')}
 				/>
-				<button
-					class="rounded-full bg-black px-4 py-2 text-sm text-white disabled:opacity-60"
-					disabled={searching}
-					on:click={searchStudents}
-				>
+				<EduButton variant="primary" disabled={searching} on:click={searchStudents}>
 					{searching ? $i18n.t('Searching...') : $i18n.t('Search')}
-				</button>
+				</EduButton>
 			</div>
 
 			{#if searchResults.length > 0}
 				<div class="mt-3 space-y-2">
 					{#each searchResults as candidate}
-						<div class="flex items-center justify-between rounded-2xl border border-gray-200 px-3 py-3 text-sm">
+						<EduTile class="flex items-center justify-between">
 							<div>
 								<div class="font-medium">{candidate.name}</div>
 								<div class="text-xs text-gray-500">{candidate.email}</div>
 							</div>
-							<button
-								class="rounded-full border border-gray-300 px-3 py-1.5 text-sm disabled:opacity-60"
+							<EduButton
+								size="sm"
 								disabled={addingStudentId !== ''}
 								on:click={() => addStudent(candidate.id)}
 							>
 								{addingStudentId === candidate.id ? $i18n.t('Adding...') : $i18n.t('Add')}
-							</button>
-						</div>
+							</EduButton>
+						</EduTile>
 					{/each}
 				</div>
 			{/if}
-		</div>
+		</EduCard>
 
-		<div class="mb-8 rounded-3xl border border-gray-200 bg-white p-5">
+		<EduCard class="mb-8">
 			<div class="mb-4 text-sm font-semibold">{$i18n.t('Bulk Import Students')}</div>
 			<textarea
 				bind:value={bulkImportInput}
-				class="min-h-28 w-full rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none"
+				class="min-h-28 w-full {EDU_FIELD_CLASS}"
 				placeholder={$i18n.t('Enter one student email or user ID per line')}
 			></textarea>
 			<div class="mt-3 flex justify-end">
-				<button
-					class="rounded-full bg-black px-4 py-2 text-sm text-white disabled:opacity-60"
-					disabled={importing}
-					on:click={bulkImportStudents}
-				>
+				<EduButton variant="primary" disabled={importing} on:click={bulkImportStudents}>
 					{importing ? $i18n.t('Importing...') : $i18n.t('Import')}
-				</button>
+				</EduButton>
 			</div>
 			{#if bulkImportResult && (bulkImportResult.failed_users?.length || bulkImportResult.skipped_users?.length)}
 				<div class="mt-4 space-y-3">
 					{#if bulkImportResult.failed_users?.length}
-						<div class="rounded-2xl border border-rose-200 bg-rose-50 p-4">
+						<EduTile tone="rose">
 							<div class="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-rose-600">
 								{$i18n.t('Failed')} ({bulkImportResult.failed_users.length})
 							</div>
@@ -313,10 +306,10 @@
 									<div>{failure.value} — {$i18n.t(failure.reason)}</div>
 								{/each}
 							</div>
-						</div>
+						</EduTile>
 					{/if}
 					{#if bulkImportResult.skipped_users?.length}
-						<div class="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+						<EduTile tone="amber">
 							<div class="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-amber-600">
 								{$i18n.t('Skipped (already in this classroom)')} ({bulkImportResult.skipped_users.length})
 							</div>
@@ -325,30 +318,28 @@
 									<div>{skipped}</div>
 								{/each}
 							</div>
-						</div>
+						</EduTile>
 					{/if}
 				</div>
 			{/if}
-		</div>
+		</EduCard>
 
-		<div class="rounded-3xl border border-gray-200 bg-white p-5">
+		<EduCard>
 			<div class="mb-4 flex flex-wrap items-center justify-between gap-3">
 				<div class="text-sm font-semibold">{$i18n.t('Current Students')} ({members.length})</div>
 				{#if members.length > 0}
 					<div class="flex flex-wrap items-center gap-2">
-						<button
-							class="rounded-full border border-gray-300 px-3 py-1.5 text-xs"
-							on:click={toggleSelectAll}
-						>
+						<EduButton size="sm" on:click={toggleSelectAll}>
 							{selectedIds.size === members.length ? $i18n.t('Deselect All') : $i18n.t('Select All')}
-						</button>
+						</EduButton>
 						{#if selectedIds.size > 0}
-							<button
-								class="rounded-full border border-red-300 px-3 py-1.5 text-xs text-red-600"
+							<EduButton
+								variant="danger"
+								size="sm"
 								on:click={() => (showBulkRemoveConfirm = true)}
 							>
 								{$i18n.t('Remove Selected')} ({selectedIds.size})
-							</button>
+							</EduButton>
 							{#if otherClassrooms.length > 0}
 								<select
 									class="rounded-full border border-gray-300 px-3 py-1.5 text-xs outline-none"
@@ -360,25 +351,20 @@
 										</option>
 									{/each}
 								</select>
-								<button
-									class="rounded-full border border-gray-300 px-3 py-1.5 text-xs"
-									on:click={() => (showTransferConfirm = true)}
-								>
+								<EduButton size="sm" on:click={() => (showTransferConfirm = true)}>
 									{$i18n.t('Transfer Selected')} ({selectedIds.size})
-								</button>
+								</EduButton>
 							{/if}
 						{/if}
 					</div>
 				{/if}
 			</div>
 			{#if members.length === 0}
-				<div class="rounded-2xl border border-dashed border-gray-300 px-4 py-5 text-sm text-gray-500">
-					{$i18n.t('No students in this classroom yet.')}
-				</div>
+				<EduEmpty>{$i18n.t('No students in this classroom yet.')}</EduEmpty>
 			{:else}
 				<div class="space-y-2">
 					{#each members as member}
-						<div class="flex items-center justify-between gap-3 rounded-2xl border border-gray-200 px-4 py-3 text-sm">
+						<EduTile class="flex items-center justify-between gap-3">
 							<label class="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
 								<input
 									type="checkbox"
@@ -392,25 +378,26 @@
 								</div>
 							</label>
 							<div class="flex shrink-0 gap-2">
-								<button
-									class="rounded-full border border-gray-300 px-3 py-1.5 text-sm"
+								<EduButton
+									size="sm"
 									on:click={() =>
 										goto(`/teacher/classrooms/${classroom.id}/students/${member.member.user_id}`)}
 								>
 									{$i18n.t('Performance')}
-								</button>
-								<button
-									class="rounded-full border border-red-300 px-3 py-1.5 text-sm text-red-600"
+								</EduButton>
+								<EduButton
+									variant="danger"
+									size="sm"
 									on:click={() => requestRemoveStudent(member.member.user_id)}
 								>
 									{$i18n.t('Remove')}
-								</button>
+								</EduButton>
 							</div>
-						</div>
+						</EduTile>
 					{/each}
 				</div>
 			{/if}
-		</div>
+		</EduCard>
 		</div>
 	{/if}
 

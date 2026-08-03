@@ -16,6 +16,13 @@
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
+	import EduBadge from '$lib/components/education/EduBadge.svelte';
+	import EduButton from '$lib/components/education/EduButton.svelte';
+	import EduCard from '$lib/components/education/EduCard.svelte';
+	import EduEmpty from '$lib/components/education/EduEmpty.svelte';
+	import EduStatCard from '$lib/components/education/EduStatCard.svelte';
+	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
+	import EduTile from '$lib/components/education/EduTile.svelte';
 	import { getClassroomDisplayName } from '$lib/utils/education';
 
 	const i18n = getContext('i18n');
@@ -101,9 +108,7 @@
 		<div class="mx-auto max-w-6xl px-4 py-8 text-sm text-gray-500">{$i18n.t('Loading classroom...')}</div>
 	{:else if loadError}
 		<div class="mx-auto max-w-3xl px-4 py-16">
-			<div class="rounded-3xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">
-				{loadError}
-			</div>
+			<EduStateCard tone="error">{loadError}</EduStateCard>
 		</div>
 	{:else}
 		<div class="mx-auto max-w-6xl px-4 py-8">
@@ -115,114 +120,88 @@
 				<h1 class="text-3xl font-semibold">{getClassroomDisplayName(classroom.name, t)}</h1>
 			</div>
 			<div class="flex flex-wrap gap-2">
-				<button class="rounded-full border border-gray-300 px-4 py-2 text-sm" on:click={() => goto('/teacher/classrooms')}>
+				<EduButton on:click={() => goto('/teacher/classrooms')}>
 					{$i18n.t('Back to Classrooms')}
-				</button>
-				<button
-					class="rounded-full border border-gray-300 px-4 py-2 text-sm"
-					on:click={() => (showRegenerateConfirm = true)}
-				>
+				</EduButton>
+				<EduButton on:click={() => (showRegenerateConfirm = true)}>
 					{$i18n.t('Regenerate Code')}
-				</button>
-				<button class="rounded-full border border-gray-300 px-4 py-2 text-sm" on:click={downloadProgress}>
-					{$i18n.t('Export')}
-				</button>
+				</EduButton>
+				<EduButton on:click={downloadProgress}>{$i18n.t('Export')}</EduButton>
 			</div>
 		</div>
 
 		<div class="mb-8 grid gap-4 md:grid-cols-4">
-			<div class="rounded-3xl border border-gray-200 bg-white p-5 md:col-span-2">
+			<EduCard class="md:col-span-2">
 				<div class="text-xs uppercase tracking-[0.16em] text-gray-500">{$i18n.t('Invite Code')}</div>
 				<div class="mt-2 flex flex-wrap items-center gap-3">
 					<div class="font-mono text-3xl font-semibold">{classroom.invite_code}</div>
 					<div class="flex gap-2">
-						<button class="rounded-full border border-gray-300 px-3 py-1.5 text-xs" on:click={copyInviteCode}>
-							{$i18n.t('Copy Code')}
-						</button>
-						<button class="rounded-full border border-gray-300 px-3 py-1.5 text-xs" on:click={copyInviteLink}>
-							{$i18n.t('Copy Invite Link')}
-						</button>
+						<EduButton size="sm" on:click={copyInviteCode}>{$i18n.t('Copy Code')}</EduButton>
+						<EduButton size="sm" on:click={copyInviteLink}>{$i18n.t('Copy Invite Link')}</EduButton>
 					</div>
 				</div>
-			</div>
-			<div class="rounded-3xl border border-gray-200 bg-white p-5">
-				<div class="text-xs uppercase tracking-[0.16em] text-gray-500">{$i18n.t('Students')}</div>
-				<div class="mt-2 text-3xl font-semibold">{members.length}</div>
-			</div>
-			<div class="rounded-3xl border border-gray-200 bg-white p-5">
-				<div class="text-xs uppercase tracking-[0.16em] text-gray-500">{$i18n.t('Assignments')}</div>
-				<div class="mt-2 text-3xl font-semibold">{assignments.length}</div>
-			</div>
+			</EduCard>
+			<EduStatCard label="Students" value={members.length} />
+			<EduStatCard label="Assignments" value={assignments.length} />
 		</div>
 
 		<div class="mb-8 grid gap-4 md:grid-cols-4">
-			<div class="rounded-3xl border border-gray-200 bg-white p-5">
-				<div class="text-xs uppercase tracking-[0.16em] text-gray-500">{$i18n.t('Submitted')}</div>
-				<div class="mt-2 text-3xl font-semibold">{progress?.submitted_count ?? 0}</div>
-			</div>
-			<div class="rounded-3xl border border-gray-200 bg-white p-5">
-				<div class="text-xs uppercase tracking-[0.16em] text-gray-500">{$i18n.t('Unsubmitted')}</div>
-				<div class="mt-2 text-3xl font-semibold">{progress?.unsubmitted_count ?? 0}</div>
-			</div>
-			<div class="rounded-3xl border border-gray-200 bg-white p-5">
-				<div class="text-xs uppercase tracking-[0.16em] text-gray-500">{$i18n.t('Reviewed')}</div>
-				<div class="mt-2 text-3xl font-semibold">{progress?.reviewed_count ?? 0}</div>
-			</div>
-			<div class="rounded-3xl border border-gray-200 bg-white p-5">
-				<div class="text-xs uppercase tracking-[0.16em] text-gray-500">{$i18n.t('To Review')}</div>
-				<div class="mt-2 text-3xl font-semibold">{progress?.pending_review_count ?? 0}</div>
-			</div>
+			<EduStatCard label="Submitted" value={progress?.submitted_count ?? 0} />
+			<EduStatCard label="Unsubmitted" value={progress?.unsubmitted_count ?? 0} />
+			<EduStatCard label="Reviewed" value={progress?.reviewed_count ?? 0} />
+			<EduStatCard label="To Review" value={progress?.pending_review_count ?? 0} />
 		</div>
 		<div class="mb-8 grid gap-4 md:grid-cols-4">
-			<div class="rounded-3xl border border-rose-200 bg-rose-50 p-5">
-				<div class="text-xs uppercase tracking-[0.16em] text-rose-600">{$i18n.t('Suspected Unmarked Imports')}</div>
-				<div class="mt-2 text-3xl font-semibold text-rose-700">{progress?.risk_summary?.suspected_unmarked_import_count ?? 0}</div>
-			</div>
-			<div class="rounded-3xl border border-amber-200 bg-amber-50 p-5">
-				<div class="text-xs uppercase tracking-[0.16em] text-amber-600">{$i18n.t('Large Bursts')}</div>
-				<div class="mt-2 text-3xl font-semibold text-amber-700">{progress?.risk_summary?.burst_count ?? 0}</div>
-			</div>
-			<div class="rounded-3xl border border-sky-200 bg-sky-50 p-5">
-				<div class="text-xs uppercase tracking-[0.16em] text-sky-600">{$i18n.t('AI pasted')}</div>
-				<div class="mt-2 text-3xl font-semibold text-sky-700">{progress?.risk_summary?.ai_pasted_chars ?? 0}</div>
-			</div>
-			<div class="rounded-3xl border border-gray-200 bg-gray-50 p-5">
-				<div class="text-xs uppercase tracking-[0.16em] text-gray-500">{$i18n.t('AI inserted')}</div>
-				<div class="mt-2 text-3xl font-semibold text-gray-800">{progress?.risk_summary?.ai_inserted_chars ?? 0}</div>
-			</div>
+			<EduStatCard
+				tone="rose"
+				label="Suspected Unmarked Imports"
+				value={progress?.risk_summary?.suspected_unmarked_import_count ?? 0}
+			/>
+			<EduStatCard
+				tone="amber"
+				label="Large Bursts"
+				value={progress?.risk_summary?.burst_count ?? 0}
+			/>
+			<EduStatCard
+				tone="sky"
+				label="AI pasted"
+				value={progress?.risk_summary?.ai_pasted_chars ?? 0}
+			/>
+			<EduStatCard label="AI inserted" value={progress?.risk_summary?.ai_inserted_chars ?? 0} />
 		</div>
 
 		<div class="mb-8 grid gap-4 lg:grid-cols-3">
-			<button class="rounded-3xl border border-gray-200 bg-white p-5 text-left transition hover:border-gray-300" on:click={() => goto(`/teacher/classrooms/${classroom.id}/students`)}>
+			<EduCard interactive on:click={() => goto(`/teacher/classrooms/${classroom.id}/students`)}>
 				<div class="text-lg font-semibold">{$i18n.t('Manage Students')}</div>
 				<div class="mt-2 text-sm text-gray-500">
 					{$i18n.t('Search for students, add them to this classroom, or remove them from the roster.')}
 				</div>
-			</button>
-			<button class="rounded-3xl border border-gray-200 bg-white p-5 text-left transition hover:border-gray-300" on:click={() => goto(`/teacher/classrooms/${classroom.id}/assignments`)}>
+			</EduCard>
+			<EduCard interactive on:click={() => goto(`/teacher/classrooms/${classroom.id}/assignments`)}>
 				<div class="text-lg font-semibold">{$i18n.t('Classroom Assignments')}</div>
 				<div class="mt-2 text-sm text-gray-500">
 					{$i18n.t('Review only the assignments that belong to this classroom.')}
 				</div>
-			</button>
-			<button class="rounded-3xl border border-gray-200 bg-white p-5 text-left transition hover:border-gray-300" on:click={() => goto(`/teacher/assignments/new?classroomId=${classroom.id}`)}>
+			</EduCard>
+			<EduCard
+				interactive
+				on:click={() => goto(`/teacher/assignments/new?classroomId=${classroom.id}`)}
+			>
 				<div class="text-lg font-semibold">{$i18n.t('Create Assignment')}</div>
 				<div class="mt-2 text-sm text-gray-500">
 					{$i18n.t('Start a new writing task for this classroom.')}
 				</div>
-			</button>
+			</EduCard>
 		</div>
 
-		<div class="mb-8 rounded-3xl border border-gray-200 bg-white p-5">
+		<EduCard class="mb-8">
 			<div class="mb-4 text-sm font-semibold">{$i18n.t('Assignment Progress')}</div>
 			{#if !progress?.assignments?.length}
-				<div class="rounded-2xl border border-dashed border-gray-300 px-4 py-5 text-sm text-gray-500">
-					{$i18n.t('No assignments yet.')}
-				</div>
+				<EduEmpty>{$i18n.t('No assignments yet.')}</EduEmpty>
 			{:else}
 				<div class="space-y-3">
 					{#each progress.assignments as item}
-						<div class="rounded-2xl border border-gray-200 px-4 py-4 text-sm">
+						<EduTile>
 							<div class="font-medium text-gray-900">{item.assignment.title}</div>
 							<div class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500">
 								<div>{$i18n.t('Submitted')}: {item.submitted_count}</div>
@@ -231,61 +210,66 @@
 								<div>{$i18n.t('To Review')}: {item.pending_review_count}</div>
 							</div>
 							<div class="mt-3 flex flex-wrap gap-2 text-xs">
-								<div class="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-rose-700">
-									{$i18n.t('Suspected Unmarked Imports')}: {item.risk_summary?.suspected_unmarked_import_count ?? 0}
-								</div>
-								<div class="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-amber-700">
+								<EduBadge tone="rose">
+									{$i18n.t('Suspected Unmarked Imports')}: {item.risk_summary
+										?.suspected_unmarked_import_count ?? 0}
+								</EduBadge>
+								<EduBadge tone="amber">
 									{$i18n.t('Large Bursts')}: {item.risk_summary?.burst_count ?? 0}
-								</div>
+								</EduBadge>
 							</div>
-						</div>
+						</EduTile>
 					{/each}
 				</div>
 			{/if}
-		</div>
+		</EduCard>
 
-		<div class="rounded-3xl border border-gray-200 bg-white p-5">
+		<EduCard>
 			<div class="mb-4 flex items-center justify-between">
 				<div class="text-sm font-semibold">{$i18n.t('Recent Assignments')}</div>
-				<button class="text-sm text-gray-500" on:click={() => goto(`/teacher/classrooms/${classroom.id}/assignments`)}>
+				<EduButton
+					variant="link"
+					on:click={() => goto(`/teacher/classrooms/${classroom.id}/assignments`)}
+				>
 					{$i18n.t('View all')}
-				</button>
+				</EduButton>
 			</div>
 			{#if assignments.length === 0}
-				<div class="rounded-2xl border border-dashed border-gray-300 px-4 py-5 text-sm text-gray-500">
-					{$i18n.t('No assignments yet.')}
-				</div>
+				<EduEmpty>{$i18n.t('No assignments yet.')}</EduEmpty>
 			{:else}
 				<div class="space-y-3">
 					{#each assignments.slice(0, 5) as item}
-						<div class="flex flex-col gap-4 rounded-2xl border border-gray-200 px-4 py-4 text-sm md:flex-row md:items-center md:justify-between">
+						<EduTile class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
 							<div>
 								<div class="font-medium text-gray-900">{item.assignment.title}</div>
 								<div class="mt-1 text-gray-500">
 									{item.assignment.description || $i18n.t('No description')}
 								</div>
 								<div class="mt-3 flex flex-wrap gap-2 text-xs">
-									<div class="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-rose-700">
-										{$i18n.t('Suspected Unmarked Imports')}: {item.risk_summary?.suspected_unmarked_import_count ?? 0}
-									</div>
-									<div class="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-amber-700">
+									<EduBadge tone="rose">
+										{$i18n.t('Suspected Unmarked Imports')}: {item.risk_summary
+											?.suspected_unmarked_import_count ?? 0}
+									</EduBadge>
+									<EduBadge tone="amber">
 										{$i18n.t('Large Bursts')}: {item.risk_summary?.burst_count ?? 0}
-									</div>
+									</EduBadge>
 								</div>
 							</div>
 							<div class="flex flex-wrap gap-2">
-								<button class="rounded-full border border-gray-300 px-3 py-2 text-sm" on:click={() => goto(`/teacher/assignments/${item.assignment.id}`)}>
+								<EduButton on:click={() => goto(`/teacher/assignments/${item.assignment.id}`)}>
 									{$i18n.t('Open')}
-								</button>
-								<button class="rounded-full border border-gray-300 px-3 py-2 text-sm" on:click={() => goto(`/teacher/assignments/${item.assignment.id}/submissions`)}>
+								</EduButton>
+								<EduButton
+									on:click={() => goto(`/teacher/assignments/${item.assignment.id}/submissions`)}
+								>
 									{$i18n.t('Submissions')}
-								</button>
+								</EduButton>
 							</div>
-						</div>
+						</EduTile>
 					{/each}
 				</div>
 			{/if}
-		</div>
+		</EduCard>
 		</div>
 	{/if}
 

@@ -16,6 +16,11 @@
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
+	import EduButton from '$lib/components/education/EduButton.svelte';
+	import EduCard from '$lib/components/education/EduCard.svelte';
+	import EduStatCard from '$lib/components/education/EduStatCard.svelte';
+	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
+	import { EDU_FIELD_CLASS } from '$lib/components/education/styles';
 	import { getAssignmentStatusLabel, getClassroomDisplayName, toLocalDateTimeInput } from '$lib/utils/education';
 
 	const i18n = getContext('i18n');
@@ -141,9 +146,7 @@
 		<div class="mx-auto max-w-6xl px-4 py-8 text-sm text-gray-500">{$i18n.t('Loading assignment...')}</div>
 	{:else if loadError}
 		<div class="mx-auto max-w-3xl px-4 py-16">
-			<div class="rounded-3xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">
-				{loadError}
-			</div>
+			<EduStateCard tone="error">{loadError}</EduStateCard>
 		</div>
 	{:else}
 		<div class="mx-auto max-w-6xl px-4 py-8">
@@ -158,63 +161,51 @@
 					</div>
 				</div>
 				<div class="flex flex-wrap gap-2">
-					<button
-						class="rounded-full border border-gray-300 px-4 py-2 text-sm"
-						on:click={() => goto('/teacher/assignments')}
-					>
+					<EduButton on:click={() => goto('/teacher/assignments')}>
 						{$i18n.t('Back to Assignments')}
-					</button>
-					<button class="rounded-full border border-gray-300 px-4 py-2 text-sm" on:click={copyWriteLink}>
+					</EduButton>
+					<EduButton on:click={copyWriteLink}>
 						{$i18n.t('Copy Student Link')}
-					</button>
-					<button
-						class="rounded-full border border-gray-300 px-4 py-2 text-sm"
-						on:click={() => goto(`/teacher/assignments/new?from=${item.assignment.id}`)}
-					>
+					</EduButton>
+					<EduButton on:click={() => goto(`/teacher/assignments/new?from=${item.assignment.id}`)}>
 						{$i18n.t('Duplicate')}
-					</button>
+					</EduButton>
 				</div>
 			</div>
 
 			<div class="mb-8 grid gap-4 md:grid-cols-4">
-				<div class="rounded-3xl border border-gray-200 bg-white p-5">
-					<div class="text-xs uppercase tracking-[0.16em] text-gray-500">{$i18n.t('Students')}</div>
-					<div class="mt-2 text-3xl font-semibold">{item.student_count}</div>
-				</div>
-				<div class="rounded-3xl border border-gray-200 bg-white p-5">
-					<div class="text-xs uppercase tracking-[0.16em] text-gray-500">{$i18n.t('Submissions')}</div>
-					<div class="mt-2 text-3xl font-semibold">{item.submission_count}</div>
-				</div>
-				<div class="rounded-3xl border border-gray-200 bg-white p-5">
+				<EduStatCard label="Students" value={item.student_count} />
+				<EduStatCard label="Submissions" value={item.submission_count} />
+				<EduCard>
 					<div class="text-xs uppercase tracking-[0.16em] text-gray-500">{$i18n.t('Status')}</div>
 					<div class="mt-2 text-sm font-medium {isPastDue ? 'text-rose-600' : 'text-gray-900'}">
 						{isPastDue ? $i18n.t('Past Due') : getAssignmentStatusLabel(item.assignment.status, t)}
 					</div>
-				</div>
-				<div class="rounded-3xl border border-gray-200 bg-white p-5">
+				</EduCard>
+				<EduCard>
 					<div class="text-xs uppercase tracking-[0.16em] text-gray-500">{$i18n.t('Due At')}</div>
 					<div class="mt-2 text-sm font-medium text-gray-900">
 						{item.assignment.due_at ? new Date(item.assignment.due_at * 1000).toLocaleString() : t('Not set')}
 					</div>
-				</div>
+				</EduCard>
 			</div>
 
 			<div class="mb-8 grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-				<div class="rounded-3xl border border-gray-200 bg-white p-5">
+				<EduCard>
 					<div class="mb-4 text-sm font-semibold">{$i18n.t('Assignment Details')}</div>
 					<div class="grid gap-4">
 						<div>
 							<div class="mb-2 text-sm font-medium">{$i18n.t('Title')}</div>
-							<input bind:value={title} class="w-full rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none" />
+							<input bind:value={title} class="w-full {EDU_FIELD_CLASS}" />
 						</div>
 						<div>
 							<div class="mb-2 text-sm font-medium">{$i18n.t('Description')}</div>
-							<textarea bind:value={description} class="min-h-28 w-full rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none"></textarea>
+							<textarea bind:value={description} class="min-h-28 w-full {EDU_FIELD_CLASS}"></textarea>
 						</div>
 						<div class="grid gap-4 md:grid-cols-3">
 							<div>
 								<div class="mb-2 text-sm font-medium">{$i18n.t('Classroom')}</div>
-								<select bind:value={classroomId} class="w-full rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none">
+								<select bind:value={classroomId} class="w-full {EDU_FIELD_CLASS}">
 									{#each classrooms as classroom}
 										<option value={classroom.classroom.id}>{getClassroomDisplayName(classroom.classroom.name, t)}</option>
 									{/each}
@@ -222,66 +213,60 @@
 							</div>
 							<div>
 								<div class="mb-2 text-sm font-medium">{$i18n.t('Status')}</div>
-								<select bind:value={status} class="w-full rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none">
+								<select bind:value={status} class="w-full {EDU_FIELD_CLASS}">
 									<option value="active">{$i18n.t('Active')}</option>
 									<option value="archived">{$i18n.t('Archived')}</option>
 								</select>
 							</div>
 							<div>
 								<div class="mb-2 text-sm font-medium">{$i18n.t('Due At')}</div>
-								<input bind:value={dueAt} type="datetime-local" required class="w-full rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none" />
+								<input bind:value={dueAt} type="datetime-local" required class="w-full {EDU_FIELD_CLASS}" />
 							</div>
 						</div>
 						<div class="flex flex-wrap justify-between gap-2">
 							<div class="flex flex-wrap gap-2">
-								<button
-									class="rounded-full border border-red-300 px-4 py-2 text-sm text-red-600"
-									on:click={() => (showArchiveConfirm = true)}
-								>
+								<EduButton variant="danger" on:click={() => (showArchiveConfirm = true)}>
 									{$i18n.t('Archive')}
-								</button>
-								<button
-									class="rounded-full border border-red-300 px-4 py-2 text-sm text-red-600"
-									on:click={() => (showDeleteConfirm = true)}
-								>
+								</EduButton>
+								<EduButton variant="danger" on:click={() => (showDeleteConfirm = true)}>
 									{$i18n.t('Delete')}
-								</button>
+								</EduButton>
 							</div>
-							<button class="rounded-full bg-black px-4 py-2 text-sm text-white disabled:opacity-60" disabled={saving} on:click={saveAssignment}>
+							<EduButton variant="primary" disabled={saving} on:click={saveAssignment}>
 								{saving ? $i18n.t('Saving...') : $i18n.t('Save Changes')}
-							</button>
+							</EduButton>
 						</div>
 					</div>
-				</div>
+				</EduCard>
 
 				<div class="grid gap-4 md:grid-cols-1">
-					<button
-						class="rounded-3xl border border-gray-200 bg-white p-5 text-left transition hover:border-gray-300"
+					<EduCard
+						interactive
 						on:click={() => goto(`/teacher/assignments/${item.assignment.id}/submissions`)}
 					>
 						<div class="text-lg font-semibold">{$i18n.t('Submissions')}</div>
 						<div class="mt-2 text-sm text-gray-500">
 							{$i18n.t('Review each student submission for this assignment.')}
 						</div>
-					</button>
-					<button
-						class="rounded-3xl border border-gray-200 bg-white p-5 text-left transition hover:border-gray-300"
+					</EduCard>
+					<EduCard
+						interactive
 						on:click={() => goto(`/teacher/assignments/${item.assignment.id}/dashboard`)}
 					>
 						<div class="text-lg font-semibold">{$i18n.t('Dashboard')}</div>
 						<div class="mt-2 text-sm text-gray-500">
 							{$i18n.t('Inspect writing-source analytics and reflection coverage.')}
 						</div>
-					</button>
-					<button
-						class="rounded-3xl border border-gray-200 bg-white p-5 text-left transition hover:border-gray-300"
+					</EduCard>
+					<EduCard
+						interactive
 						on:click={() => goto(`/teacher/classrooms/${item.assignment.classroom_id}`)}
 					>
 						<div class="text-lg font-semibold">{$i18n.t('Open Classroom')}</div>
 						<div class="mt-2 text-sm text-gray-500">
 							{$i18n.t('Return to the classroom that owns this assignment.')}
 						</div>
-					</button>
+					</EduCard>
 				</div>
 			</div>
 		</div>
