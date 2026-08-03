@@ -1893,6 +1893,60 @@ def test_returned_submission_opens_new_round_and_keeps_history(education_client)
     assert current_recompute.status_code == 200, current_recompute.text
 
 
+def test_reviewed_submission_cannot_be_resubmitted(education_client):
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id, submission_id = _setup_submitted_assignment(
+        client, teacher, student, "Graded Final"
+    )
+
+    UserContext.current_user = teacher
+    graded = client.post(
+        f"/api/v1/teacher/submissions/{submission_id}/review",
+        json={"review_status": "reviewed", "score": 85},
+    )
+    assert graded.status_code == 200, graded.text
+
+    # 已批改即定稿:截止时间还没到也不能再交,否则该学生会被打回「待批改」、
+    # 旧分数进历史轮后不再计入平均分
+    UserContext.current_user = student
+    resubmit = client.post(
+        f"/api/v1/assignments/{assignment['id']}/submit",
+        json=_submit_body(session_id, "sneaking in a revision after being graded"),
+    )
+    assert resubmit.status_code == 409, resubmit.text
+    assert resubmit.json()["detail"] == "Submission has already been reviewed"
+
+    # 分数与轮次都没被动过
+    UserContext.current_user = teacher
+    submissions = client.get(
+        f"/api/v1/teacher/assignments/{assignment['id']}/submissions"
+    ).json()
+    assert len(submissions) == 1
+    assert submissions[0]["submission"]["id"] == submission_id
+    assert submissions[0]["submission"]["round_no"] == 1
+    assert submissions[0]["review_status"] == "reviewed"
+    assert submissions[0]["score"] == 85
+
+    # 老师退回后重新解锁,这时才开新轮
+    returned = client.post(
+        f"/api/v1/teacher/submissions/{submission_id}/review",
+        json={
+            "review_status": "returned",
+            "returned_comment": "Please expand the second paragraph",
+            "resubmit_due_at": 2100000000,
+        },
+    )
+    assert returned.status_code == 200, returned.text
+
+    UserContext.current_user = student
+    after_return = client.post(
+        f"/api/v1/assignments/{assignment['id']}/submit",
+        json=_submit_body(session_id, "revised draft after the teacher returned it"),
+    )
+    assert after_return.status_code == 200, after_return.text
+    assert after_return.json()["submission_id"] != submission_id
+
+
 def test_effective_due_uses_resubmit_due_after_return(education_client):
     client, teacher, _, student, _, _ = education_client
     assignment, session_id, submission_id = _setup_submitted_assignment(

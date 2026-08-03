@@ -12,6 +12,10 @@ from open_webui.internal.db import Base, JSONField, get_db_context
 ASSIGNMENT_STATUSES = ("active", "archived")
 
 
+class SubmissionAlreadyReviewedError(Exception):
+    """学生想重交,但当前轮已被批改(只有退回才允许开新轮)。"""
+
+
 class Assignment(Base):
     __tablename__ = "assignment"
 
@@ -1694,10 +1698,17 @@ class EducationTable:
                 else None
             )
 
+            if review is not None and review.review_status == "reviewed":
+                # 已批改即定稿:再开新轮会把该学生打回「待批改」,旧分数进历史轮
+                # 后不再计入平均分。要让学生继续改,老师应显式退回。
+                raise SubmissionAlreadyReviewedError(
+                    "Submission has already been reviewed"
+                )
+
             if current is None or (
-                review is not None and review.review_status in ("reviewed", "returned")
+                review is not None and review.review_status == "returned"
             ):
-                # 首轮,或已批改/退回后的重交:开新轮,旧轮完整保留
+                # 首轮,或退回后的重交:开新轮,旧轮完整保留
                 if current is not None:
                     current.is_current = 0
                 submission = Submission(

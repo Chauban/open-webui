@@ -101,8 +101,10 @@
 	const isAssignment = scope === 'assignment';
 	$: activeDueAt = isAssignment ? (effectiveDueAt ?? assignment?.due_at ?? null) : null;
 	$: isPastDue = activeDueAt ? activeDueAt * 1000 <= nowTick : false;
-	$: isReadOnly = isAssignment ? isPastDue : false;
-	$: canSubmitAssignment = isAssignment && !isPastDue;
+	// 已批改即定稿:只有老师退回(review_status 变回 returned)才重新解锁。
+	$: isGraded = review?.review_status === 'reviewed';
+	$: isReadOnly = isAssignment ? isPastDue || isGraded : false;
+	$: canSubmitAssignment = isAssignment && !isPastDue && !isGraded;
 	const getDefaultPersonalTitle = () => get(i18n).t('Untitled Writing');
 	const normalizePersonalTitle = (value?: string | null) => {
 		const normalized = value?.trim();
@@ -670,7 +672,9 @@
 						{#if isAssignment}
 							<div class="text-sm font-semibold text-gray-900">{assignment?.title}</div>
 							<div class="text-xs text-gray-500">
-								{#if isPastDue}
+								{#if isGraded}
+									{$i18n.t('Graded. Ask your teacher to return it if you need to revise.')}
+								{:else if isPastDue}
 									{$i18n.t('Submitted assignments stay available for review in read-only mode.')}
 								{:else if isSubmitted}
 									{$i18n.t('Submitted. You can revise and resubmit before the deadline.')}

@@ -50,6 +50,7 @@ from open_webui.models.education import (
     PersonalWorkspaceListItem,
     ProvenanceCreateForm,
     Submission,
+    SubmissionAlreadyReviewedError,
     SubmissionCreateForm,
     SubmissionDetailResponse,
     SubmissionListItem,
@@ -3323,6 +3324,20 @@ async def submit_assignment(
         )
     _ensure_workspace_session_owner(user, session)
 
+    # 已批改即定稿,提前拦下,免得白跑一遍保存与分析。
+    current_submission = Education.get_current_submission(
+        assignment.id, session.owner_user_id, db=db
+    )
+    if current_submission is not None:
+        current_review = Education.get_submission_review_by_submission_id(
+            current_submission.id, db=db
+        )
+        if current_review is not None and current_review.review_status == "reviewed":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Submission has already been reviewed",
+            )
+
     # 截止时间按会话归属人算:管理员代提交时不应套用管理员自己的轮次。
     effective_due_at = _get_effective_due_at(assignment, session.owner_user_id, db)
     if effective_due_at is not None and effective_due_at <= int(time.time()):
@@ -3411,6 +3426,12 @@ async def submit_assignment(
             stats,
             reflection.id,
             db=db,
+        )
+    except SubmissionAlreadyReviewedError:
+        # 上面已提前拦过一次,这里兜住「批改与提交并发」的窄窗口。
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Submission has already been reviewed",
         )
     except IntegrityError:
         # 唯一约束 (assignment_id, student_id, round_no):同一轮已被并发请求写入。
