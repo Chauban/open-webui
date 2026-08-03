@@ -75,7 +75,7 @@
 
 <TeacherPageShell title="Classrooms">
 	<div class="mx-auto max-w-6xl px-4 py-8">
-		<div class="mb-8 text-sm text-gray-500">
+		<div class="mb-8 text-sm text-gray-500 dark:text-gray-400">
 			{$i18n.t('Create classrooms, share invite codes, and manage student rosters.')}
 		</div>
 
@@ -107,10 +107,10 @@
 					<EduCard>
 						<div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
 							<div>
-								<div class="text-lg font-semibold text-gray-900">
+								<div class="text-lg font-semibold text-gray-900 dark:text-gray-100">
 									{getClassroomDisplayName(item.classroom.name, t)}
 								</div>
-								<div class="mt-3 flex flex-wrap items-center gap-3 text-xs text-gray-500">
+								<div class="mt-3 flex flex-wrap items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
 									<div>{$i18n.t('Invite Code')}: {item.classroom.invite_code}</div>
 									<EduButton size="sm" on:click={() => copyInviteCode(item.classroom.invite_code)}>
 										{$i18n.t('Copy Code')}

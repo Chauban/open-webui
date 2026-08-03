@@ -8,6 +8,6 @@
 	const i18n = getContext('i18n');
 </script>
 
-<div class="mx-auto max-w-6xl px-4 py-16 text-sm text-gray-500">
+<div class="mx-auto max-w-6xl px-4 py-16 text-sm text-gray-500 dark:text-gray-400">
 	{$i18n.t(messageKey)}
 </div>

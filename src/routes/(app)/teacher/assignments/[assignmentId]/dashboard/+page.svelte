@@ -69,7 +69,7 @@
 
 		<div class="mb-6 flex items-center justify-between">
 			<div>
-				<div class="text-xs uppercase tracking-[0.2em] text-gray-500">{$i18n.t('Teacher Dashboard')}</div>
+				<div class="text-xs uppercase tracking-[0.2em] text-gray-500 dark:text-gray-400">{$i18n.t('Teacher Dashboard')}</div>
 				<h1 class="text-2xl font-semibold">{$i18n.t('Class Overview')}</h1>
 			</div>
 			<div class="flex gap-2">
@@ -105,13 +105,13 @@
 				<div class="space-y-3">
 					{#each Object.entries(dashboard.distributions?.rewrite_levels ?? {}) as [level, count]}
 						<div>
-							<div class="mb-1 flex items-center justify-between text-sm text-gray-700">
+							<div class="mb-1 flex items-center justify-between text-sm text-gray-700 dark:text-gray-300">
 								<span>{$i18n.t(rewriteLevelLabels[level] ?? level)}</span>
 								<span>{count}</span>
 							</div>
-							<div class="h-2 rounded-full bg-gray-100">
+							<div class="h-2 rounded-full bg-gray-100 dark:bg-gray-800">
 								<div
-									class="h-2 rounded-full bg-black"
+									class="h-2 rounded-full bg-black dark:bg-gray-100"
 									style={`width: ${Math.max(
 										8,
 										((count as number) / Math.max(
@@ -134,10 +134,10 @@
 				<div class="space-y-3">
 					{#each [...dashboard.items].sort((a, b) => (b.risk_summary?.suspected_unmarked_import_count ?? 0) - (a.risk_summary?.suspected_unmarked_import_count ?? 0) || (b.risk_summary?.burst_count ?? 0) - (a.risk_summary?.burst_count ?? 0)).slice(0, 5) as item}
 						<button
-							class="w-full rounded-2xl border border-gray-200 px-4 py-4 text-left text-sm"
+							class="w-full rounded-2xl border border-gray-200 dark:border-gray-800 px-4 py-4 text-left text-sm"
 							on:click={() => goto(`/teacher/submissions/${item.submission_id}`)}
 						>
-							<div class="font-medium text-gray-900">{item.student_name}</div>
+							<div class="font-medium text-gray-900 dark:text-gray-100">{item.student_name}</div>
 							<div class="mt-2 flex flex-wrap gap-2 text-xs">
 								<EduBadge tone="rose">
 									{$i18n.t('Suspected Unmarked Imports')}: {item.risk_summary
@@ -157,7 +157,7 @@
 			{#each dashboard.items as item}
 				<EduCard interactive on:click={() => goto(`/teacher/submissions/${item.submission_id}`)}>
 					<div class="text-lg font-semibold">{item.student_name}</div>
-					<div class="mt-3 space-y-1 text-sm text-gray-600">
+					<div class="mt-3 space-y-1 text-sm text-gray-600 dark:text-gray-400">
 						<div>{$i18n.t('Typed')}: {item.source_stats.user_typed_chars ?? 0}</div>
 						<div>{$i18n.t('AI inserted')}: {item.source_stats.ai_inserted_chars ?? 0}</div>
 						<div>{$i18n.t('AI pasted')}: {item.source_stats.ai_pasted_chars ?? 0}</div>

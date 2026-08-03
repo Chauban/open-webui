@@ -18,6 +18,8 @@
 		: buildSourceHighlightedHtml({ text, segments, activeSegmentId });
 </script>
 
-<div class="prose prose-sm max-w-none whitespace-pre-wrap leading-7 break-words">
+<div
+	class="prose prose-sm dark:prose-invert max-w-none whitespace-pre-wrap leading-7 break-words"
+>
 	{@html highlighted}
 </div>

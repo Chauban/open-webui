@@ -117,7 +117,7 @@
 
 	<div class="mb-6 flex flex-wrap items-end justify-between gap-3">
 		<div>
-			<div class="mb-2 text-sm text-gray-500">{$i18n.t('Teaching')} / {$i18n.t('Assignments')}</div>
+			<div class="mb-2 text-sm text-gray-500 dark:text-gray-400">{$i18n.t('Teaching')} / {$i18n.t('Assignments')}</div>
 			<h1 class="text-3xl font-semibold">{$i18n.t('Create Assignment')}</h1>
 		</div>
 		<EduButton on:click={() => goto('/teacher/assignments')}>

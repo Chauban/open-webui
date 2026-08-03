@@ -105,7 +105,7 @@
 
 <TeacherPageShell title="Classrooms">
 	{#if loading}
-		<div class="mx-auto max-w-6xl px-4 py-8 text-sm text-gray-500">{$i18n.t('Loading classroom...')}</div>
+		<div class="mx-auto max-w-6xl px-4 py-8 text-sm text-gray-500 dark:text-gray-400">{$i18n.t('Loading classroom...')}</div>
 	{:else if loadError}
 		<div class="mx-auto max-w-3xl px-4 py-16">
 			<EduStateCard tone="error">{loadError}</EduStateCard>
@@ -116,7 +116,7 @@
 
 		<div class="mb-6 flex flex-wrap items-center justify-between gap-3">
 			<div>
-				<div class="mb-2 text-sm text-gray-500">{$i18n.t('Teaching')} / {$i18n.t('Classrooms')}</div>
+				<div class="mb-2 text-sm text-gray-500 dark:text-gray-400">{$i18n.t('Teaching')} / {$i18n.t('Classrooms')}</div>
 				<h1 class="text-3xl font-semibold">{getClassroomDisplayName(classroom.name, t)}</h1>
 			</div>
 			<div class="flex flex-wrap gap-2">
@@ -132,7 +132,7 @@
 
 		<div class="mb-8 grid gap-4 md:grid-cols-4">
 			<EduCard class="md:col-span-2">
-				<div class="text-xs uppercase tracking-[0.16em] text-gray-500">{$i18n.t('Invite Code')}</div>
+				<div class="text-xs uppercase tracking-[0.16em] text-gray-500 dark:text-gray-400">{$i18n.t('Invite Code')}</div>
 				<div class="mt-2 flex flex-wrap items-center gap-3">
 					<div class="font-mono text-3xl font-semibold">{classroom.invite_code}</div>
 					<div class="flex gap-2">
@@ -173,13 +173,13 @@
 		<div class="mb-8 grid gap-4 lg:grid-cols-3">
 			<EduCard interactive on:click={() => goto(`/teacher/classrooms/${classroom.id}/students`)}>
 				<div class="text-lg font-semibold">{$i18n.t('Manage Students')}</div>
-				<div class="mt-2 text-sm text-gray-500">
+				<div class="mt-2 text-sm text-gray-500 dark:text-gray-400">
 					{$i18n.t('Search for students, add them to this classroom, or remove them from the roster.')}
 				</div>
 			</EduCard>
 			<EduCard interactive on:click={() => goto(`/teacher/classrooms/${classroom.id}/assignments`)}>
 				<div class="text-lg font-semibold">{$i18n.t('Classroom Assignments')}</div>
-				<div class="mt-2 text-sm text-gray-500">
+				<div class="mt-2 text-sm text-gray-500 dark:text-gray-400">
 					{$i18n.t('Review only the assignments that belong to this classroom.')}
 				</div>
 			</EduCard>
@@ -188,7 +188,7 @@
 				on:click={() => goto(`/teacher/assignments/new?classroomId=${classroom.id}`)}
 			>
 				<div class="text-lg font-semibold">{$i18n.t('Create Assignment')}</div>
-				<div class="mt-2 text-sm text-gray-500">
+				<div class="mt-2 text-sm text-gray-500 dark:text-gray-400">
 					{$i18n.t('Start a new writing task for this classroom.')}
 				</div>
 			</EduCard>
@@ -202,8 +202,8 @@
 				<div class="space-y-3">
 					{#each progress.assignments as item}
 						<EduTile>
-							<div class="font-medium text-gray-900">{item.assignment.title}</div>
-							<div class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500">
+							<div class="font-medium text-gray-900 dark:text-gray-100">{item.assignment.title}</div>
+							<div class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500 dark:text-gray-400">
 								<div>{$i18n.t('Submitted')}: {item.submitted_count}</div>
 								<div>{$i18n.t('Unsubmitted')}: {item.unsubmitted_count}</div>
 								<div>{$i18n.t('Reviewed')}: {item.reviewed_count}</div>
@@ -241,8 +241,8 @@
 					{#each assignments.slice(0, 5) as item}
 						<EduTile class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
 							<div>
-								<div class="font-medium text-gray-900">{item.assignment.title}</div>
-								<div class="mt-1 text-gray-500">
+								<div class="font-medium text-gray-900 dark:text-gray-100">{item.assignment.title}</div>
+								<div class="mt-1 text-gray-500 dark:text-gray-400">
 									{item.assignment.description || $i18n.t('No description')}
 								</div>
 								<div class="mt-3 flex flex-wrap gap-2 text-xs">

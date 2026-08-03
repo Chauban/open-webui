@@ -9,11 +9,11 @@
 	export { className as class };
 
 	const TONES = {
-		default: 'border-gray-200 bg-white',
-		muted: 'border-gray-200 bg-gray-50',
-		rose: 'border-rose-200 bg-rose-50',
-		amber: 'border-amber-200 bg-amber-50',
-		sky: 'border-sky-200 bg-sky-50'
+		default: 'border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-850',
+		muted: 'border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900',
+		rose: 'border-rose-200 bg-rose-50 dark:border-rose-900 dark:bg-rose-950/40',
+		amber: 'border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/40',
+		sky: 'border-sky-200 bg-sky-50 dark:border-sky-900 dark:bg-sky-950/40'
 	};
 	const PADDINGS = { none: 'overflow-hidden', md: 'p-5', lg: 'p-6' };
 
@@ -23,7 +23,7 @@
 {#if interactive}
 	<button
 		type="button"
-		class="{surface} w-full text-left transition hover:border-gray-400"
+		class="{surface} w-full text-left transition hover:border-gray-400 dark:hover:border-gray-600"
 		on:click
 	>
 		<slot />

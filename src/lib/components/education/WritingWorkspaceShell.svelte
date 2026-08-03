@@ -126,14 +126,14 @@
 		const remainingSeconds = dueAtSeconds - nowMs / 1000;
 
 		if (remainingSeconds <= 0) {
-			return { overdue: true, className: 'text-gray-500', labelKey: '', params: {} };
+			return { overdue: true, className: 'text-gray-500 dark:text-gray-400', labelKey: '', params: {} };
 		}
 
-		let className = 'text-gray-500';
+		let className = 'text-gray-500 dark:text-gray-400';
 		if (remainingSeconds < HOUR_SECONDS) {
-			className = 'font-medium text-rose-600';
+			className = 'font-medium text-rose-600 dark:text-rose-400';
 		} else if (remainingSeconds < DAY_SECONDS) {
-			className = 'font-medium text-amber-600';
+			className = 'font-medium text-amber-600 dark:text-amber-400';
 		}
 
 		const totalMinutes = Math.max(1, Math.floor(remainingSeconds / 60));
@@ -161,8 +161,8 @@
 		isAssignment && effectiveDueAt ? computeDueCountdown(effectiveDueAt, nowTick) : null;
 	$: dueLabelKey = isResubmitDeadline ? 'Resubmit before' : 'Due At';
 	$: dueColorClass = isResubmitDeadline
-		? 'font-medium text-rose-600'
-		: (dueCountdown?.className ?? 'text-gray-500');
+		? 'font-medium text-rose-600 dark:text-rose-400'
+		: (dueCountdown?.className ?? 'text-gray-500 dark:text-gray-400');
 
 	$: saveStatusDisplay =
 		saveStatusKey === 'Retrying...' && saveRetryAttempt > 0
@@ -664,17 +664,17 @@
 	>
 		<div
 			slot="right-panel"
-			class="h-full w-full flex-col border-l border-gray-200 bg-stone-50 lg:flex"
+			class="h-full w-full flex-col border-l border-gray-200 dark:border-gray-800 bg-stone-50 dark:bg-gray-900 lg:flex"
 		>
-			<div class="border-b border-gray-200 bg-white px-5 py-4">
+			<div class="border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-5 py-4">
 				<div class="flex items-start justify-between gap-4">
 					<div class="min-w-0 flex-1">
-						<div class="text-xs uppercase tracking-[0.18em] text-gray-500">
+						<div class="text-xs uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
 							{$i18n.t(isAssignment ? 'Assignment Writing' : 'Writing')}
 						</div>
 						{#if isAssignment}
-							<div class="text-sm font-semibold text-gray-900">{assignment?.title}</div>
-							<div class="text-xs text-gray-500">
+							<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">{assignment?.title}</div>
+							<div class="text-xs text-gray-500 dark:text-gray-400">
 								{#if isGraded}
 									{$i18n.t('Graded. Ask your teacher to return it if you need to revise.')}
 								{:else if isPastDue}
@@ -702,40 +702,40 @@
 						{:else}
 							<input
 								bind:value={noteTitle}
-								class="mt-1 w-full rounded-2xl border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-900 outline-none"
+								class="mt-1 w-full rounded-2xl border border-gray-200 dark:border-gray-800 px-3 py-2 text-sm font-semibold text-gray-900 dark:text-gray-100 outline-none"
 								placeholder={$i18n.t('Untitled Writing')}
 								on:blur={saveTitle}
 							/>
-							<div class="mt-1 text-xs text-gray-500">{$i18n.t('Write freely. Autosaved.')}</div>
+							<div class="mt-1 text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Write freely. Autosaved.')}</div>
 						{/if}
 					</div>
 					<div class="flex items-center gap-2">
 						{#if isSubmitted}
-							<div class="rounded-full bg-emerald-100 px-3 py-1 text-xs text-emerald-700">
+							<div class="rounded-full bg-emerald-100 px-3 py-1 text-xs text-emerald-700 dark:text-emerald-300">
 								{$i18n.t('Submitted')}
 							</div>
 						{/if}
 						{#if isAssignment && review}
 							<button
-								class="rounded-full border border-gray-200 px-3 py-1 text-xs text-gray-600 hover:bg-stone-100"
+								class="rounded-full border border-gray-200 dark:border-gray-800 px-3 py-1 text-xs text-gray-600 dark:text-gray-400 hover:bg-stone-100 dark:hover:bg-gray-800"
 								on:click={() => (showSubmissionHistory = true)}
 							>
 								{$i18n.t('Submission History')}
 							</button>
 						{/if}
-						<div class="rounded-full bg-stone-100 px-3 py-1 text-xs text-gray-600">
+						<div class="rounded-full bg-stone-100 dark:bg-gray-800 px-3 py-1 text-xs text-gray-600 dark:text-gray-400">
 							{saveStatusDisplay}
 						</div>
 						{#if canSubmitAssignment}
-							<button
-								class="rounded-full bg-gray-900 px-4 py-2 text-sm text-white"
+							<EduButton
+								variant="primary"
 								on:click={() => {
 									loadReflectionDraft();
 									showSubmitModal = true;
 								}}
 							>
 								{$i18n.t('Submit Assignment')}
-							</button>
+							</EduButton>
 						{/if}
 					</div>
 				</div>
@@ -743,7 +743,7 @@
 					<div class="mt-3">
 						<button
 							type="button"
-							class="text-xs font-medium text-gray-500 hover:text-gray-700 hover:underline"
+							class="text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:underline"
 							on:click={() => (showAssignmentDescription = !showAssignmentDescription)}
 						>
 							{$i18n.t(
@@ -753,7 +753,7 @@
 							)}
 						</button>
 						{#if showAssignmentDescription}
-							<div class="mt-2 whitespace-pre-wrap rounded-2xl bg-stone-50 p-3 text-xs text-gray-600">
+							<div class="mt-2 whitespace-pre-wrap rounded-2xl bg-stone-50 dark:bg-gray-900 p-3 text-xs text-gray-600 dark:text-gray-400">
 								{assignment.description}
 							</div>
 						{/if}
@@ -804,9 +804,9 @@
 	{#if $mobile}
 		<div class="pointer-events-none fixed inset-x-0 bottom-4 z-30 flex justify-center px-4">
 			<div
-				class="pointer-events-auto flex items-center gap-2 rounded-full border border-gray-200 bg-white/95 px-3 py-2 shadow-lg backdrop-blur"
+				class="pointer-events-auto flex items-center gap-2 rounded-full border border-gray-200 dark:border-gray-800 bg-white/95 dark:bg-gray-850/95 px-3 py-2 shadow-lg backdrop-blur"
 			>
-				<div class="rounded-full bg-stone-100 px-3 py-1 text-xs text-gray-600">
+				<div class="rounded-full bg-stone-100 dark:bg-gray-800 px-3 py-1 text-xs text-gray-600 dark:text-gray-400">
 					{saveStatusDisplay}
 				</div>
 				<EduButton
@@ -839,16 +839,16 @@
 			on:click={() => (showMobileDraft = false)}
 		>
 			<div
-				class="flex h-[78dvh] w-full flex-col rounded-t-3xl bg-stone-50"
+				class="flex h-[78dvh] w-full flex-col rounded-t-3xl bg-stone-50 dark:bg-gray-900"
 				on:click|stopPropagation
 			>
-				<div class="border-b border-gray-200 bg-white px-5 py-4">
+				<div class="border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-5 py-4">
 					<div class="flex items-start justify-between gap-4">
 						<div class="min-w-0 flex-1">
-							<div class="text-xs uppercase tracking-[0.18em] text-gray-500">
+							<div class="text-xs uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
 								{$i18n.t(isAssignment ? 'Assignment Writing' : 'Writing')}
 							</div>
-							<div class="text-sm font-semibold text-gray-900">
+							<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">
 								{isAssignment ? assignment?.title : noteTitle}
 							</div>
 						</div>
@@ -910,16 +910,16 @@
 
 	{#if isAssignment && showSubmitModal}
 		<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-			<div class="w-full max-w-xl rounded-3xl bg-white p-6 shadow-2xl">
-				<h2 class="text-xl font-semibold text-gray-900">
+			<div class="w-full max-w-xl rounded-3xl bg-white dark:bg-gray-850 p-6 shadow-2xl">
+				<h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100">
 					{$i18n.t('Reflection Before Submitting Assignment')}
 				</h2>
-				<p class="mt-1 text-sm text-gray-500">
+				<p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
 					{$i18n.t('Complete your reflection before submitting your assignment.')}
 				</p>
 
 				<div class="mt-5">
-					<div class="mb-2 block text-sm font-medium text-gray-800">
+					<div class="mb-2 block text-sm font-medium text-gray-800 dark:text-gray-200">
 						{$i18n.t('What did AI help you with? Select all that apply.')}
 					</div>
 					<div class="flex flex-wrap gap-2">
@@ -937,12 +937,12 @@
 				</div>
 
 				<div class="mt-4">
-					<label for="reflection-text" class="mb-2 block text-sm font-medium text-gray-800">
+					<label for="reflection-text" class="mb-2 block text-sm font-medium text-gray-800 dark:text-gray-200">
 						{$i18n.t('How did you judge, revise, or reject AI suggestions?')}
 					</label>
 					{#if aiHelpTypes.includes('Other')}
 						<div class="mb-3">
-							<label for="other-ai-help-text" class="mb-2 block text-sm font-medium text-gray-800">
+							<label for="other-ai-help-text" class="mb-2 block text-sm font-medium text-gray-800 dark:text-gray-200">
 								{$i18n.t('Please briefly describe what else AI helped with.')}
 							</label>
 							<input
@@ -955,7 +955,7 @@
 								)}
 							/>
 							{#if otherAiHelpText.trim().length === 0}
-								<div class="mt-1 text-xs text-rose-600">
+								<div class="mt-1 text-xs text-rose-600 dark:text-rose-400">
 									{$i18n.t('Please add a short note about what else AI helped with.')}
 								</div>
 							{/if}
@@ -970,7 +970,7 @@
 					></textarea>
 					<div
 						class="mt-1 flex justify-end text-xs {reflectionText.trim().length < 30
-							? 'text-rose-600'
+							? 'text-rose-600 dark:text-rose-400'
 							: 'text-gray-400'}"
 					>
 						{$i18n.t('{{count}} / {{min}} characters (minimum)', {

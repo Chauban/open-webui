@@ -227,7 +227,7 @@
 
 <TeacherPageShell title="Classrooms">
 	{#if loading}
-		<div class="mx-auto max-w-6xl px-4 py-8 text-sm text-gray-500">{$i18n.t('Loading students...')}</div>
+		<div class="mx-auto max-w-6xl px-4 py-8 text-sm text-gray-500 dark:text-gray-400">{$i18n.t('Loading students...')}</div>
 	{:else if loadError}
 		<div class="mx-auto max-w-3xl px-4 py-16">
 			<EduStateCard tone="error">{loadError}</EduStateCard>
@@ -238,7 +238,7 @@
 
 		<div class="mb-6 flex flex-wrap items-end justify-between gap-3">
 			<div>
-				<div class="mb-2 text-sm text-gray-500">
+				<div class="mb-2 text-sm text-gray-500 dark:text-gray-400">
 					{$i18n.t('Teaching')} / {$i18n.t('Classrooms')} / {getClassroomDisplayName(classroom.name, t)}
 				</div>
 				<h1 class="text-3xl font-semibold">{$i18n.t('Manage Students')}</h1>
@@ -267,7 +267,7 @@
 						<EduTile class="flex items-center justify-between">
 							<div>
 								<div class="font-medium">{candidate.name}</div>
-								<div class="text-xs text-gray-500">{candidate.email}</div>
+								<div class="text-xs text-gray-500 dark:text-gray-400">{candidate.email}</div>
 							</div>
 							<EduButton
 								size="sm"
@@ -298,10 +298,10 @@
 				<div class="mt-4 space-y-3">
 					{#if bulkImportResult.failed_users?.length}
 						<EduTile tone="rose">
-							<div class="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-rose-600">
+							<div class="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-rose-600 dark:text-rose-400">
 								{$i18n.t('Failed')} ({bulkImportResult.failed_users.length})
 							</div>
-							<div class="space-y-1 text-sm text-rose-700">
+							<div class="space-y-1 text-sm text-rose-700 dark:text-rose-300">
 								{#each bulkImportResult.failed_users as failure}
 									<div>{failure.value} — {$i18n.t(failure.reason)}</div>
 								{/each}
@@ -310,10 +310,10 @@
 					{/if}
 					{#if bulkImportResult.skipped_users?.length}
 						<EduTile tone="amber">
-							<div class="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-amber-600">
+							<div class="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-amber-600 dark:text-amber-400">
 								{$i18n.t('Skipped (already in this classroom)')} ({bulkImportResult.skipped_users.length})
 							</div>
-							<div class="space-y-1 text-sm text-amber-700">
+							<div class="space-y-1 text-sm text-amber-700 dark:text-amber-300">
 								{#each bulkImportResult.skipped_users as skipped}
 									<div>{skipped}</div>
 								{/each}
@@ -342,7 +342,7 @@
 							</EduButton>
 							{#if otherClassrooms.length > 0}
 								<select
-									class="rounded-full border border-gray-300 px-3 py-1.5 text-xs outline-none"
+									class="rounded-full border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-xs outline-none"
 									bind:value={transferTargetId}
 								>
 									{#each otherClassrooms as item}
@@ -368,13 +368,13 @@
 							<label class="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
 								<input
 									type="checkbox"
-									class="accent-black"
+									class="accent-black dark:accent-white"
 									checked={selectedIds.has(member.member.user_id)}
 									on:change={() => toggleSelected(member.member.user_id)}
 								/>
 								<div class="min-w-0">
 									<div class="truncate font-medium">{member.user_name}</div>
-									<div class="truncate text-xs text-gray-500">{member.user_email}</div>
+									<div class="truncate text-xs text-gray-500 dark:text-gray-400">{member.user_email}</div>
 								</div>
 							</label>
 							<div class="flex shrink-0 gap-2">

@@ -11,16 +11,16 @@
 	const i18n = getContext('i18n');
 
 	const LABEL_TONES = {
-		default: 'text-gray-500',
-		rose: 'text-rose-600',
-		amber: 'text-amber-600',
-		sky: 'text-sky-600'
+		default: 'text-gray-500 dark:text-gray-400',
+		rose: 'text-rose-600 dark:text-rose-400',
+		amber: 'text-amber-600 dark:text-amber-400',
+		sky: 'text-sky-600 dark:text-sky-400'
 	};
 	const VALUE_TONES = {
 		default: '',
-		rose: 'text-rose-700',
-		amber: 'text-amber-700',
-		sky: 'text-sky-700'
+		rose: 'text-rose-700 dark:text-rose-300',
+		amber: 'text-amber-700 dark:text-amber-300',
+		sky: 'text-sky-700 dark:text-sky-300'
 	};
 
 	// 统计卡的底色跟随语义色，default 用普通白卡。

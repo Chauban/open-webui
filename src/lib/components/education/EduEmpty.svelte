@@ -5,7 +5,7 @@
 </script>
 
 <div
-	class="rounded-2xl border border-dashed border-gray-300 px-4 py-5 text-sm text-gray-500 {className}"
+	class="rounded-2xl border border-dashed border-gray-300 px-4 py-5 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400 {className}"
 >
 	<slot />
 </div>

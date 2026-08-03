@@ -37,7 +37,7 @@
 
 			<div class="ml-2 flex w-full items-center justify-between py-1">
 				<div>
-					<div class="text-xs uppercase tracking-[0.2em] text-gray-500">{$i18n.t(eyebrow)}</div>
+					<div class="text-xs uppercase tracking-[0.2em] text-gray-500 dark:text-gray-400">{$i18n.t(eyebrow)}</div>
 					<h1 class="text-2xl font-semibold">{$i18n.t(title)}</h1>
 				</div>
 				<slot name="nav-actions" />

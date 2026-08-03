@@ -90,20 +90,20 @@
 		const isUnsubmitted = item.status !== 'submitted';
 
 		if (isUnsubmitted && remainingSeconds <= 0) {
-			return { overdue: true, className: 'text-gray-500' };
+			return { overdue: true, className: 'text-gray-500 dark:text-gray-400' };
 		}
 
 		if (isUnsubmitted && remainingSeconds < DAY_SECONDS) {
 			return {
 				overdue: false,
-				className: 'font-medium text-amber-600',
+				className: 'font-medium text-amber-600 dark:text-amber-400',
 				text: formatTimestamp(item.effective_due_at)
 			};
 		}
 
 		return {
 			overdue: false,
-			className: 'text-gray-500',
+			className: 'text-gray-500 dark:text-gray-400',
 			text: formatTimestamp(item.effective_due_at)
 		};
 	};
@@ -359,7 +359,7 @@
 
 				<div class="ml-2 flex w-full items-center justify-between py-1">
 					<div>
-						<div class="text-xs uppercase tracking-[0.2em] text-gray-500">{$i18n.t('Writing')}</div>
+						<div class="text-xs uppercase tracking-[0.2em] text-gray-500 dark:text-gray-400">{$i18n.t('Writing')}</div>
 						<h1 class="text-2xl font-semibold">{$i18n.t('Writing')}</h1>
 					</div>
 				</div>
@@ -372,30 +372,30 @@
 					<div class="mb-4 flex items-center justify-between gap-4">
 						<div>
 							<div class="text-lg font-semibold">{$i18n.t('Continue Recent Writing')}</div>
-							<div class="text-sm text-gray-500">{$i18n.t('Jump back into your latest draft.')}</div>
+							<div class="text-sm text-gray-500 dark:text-gray-400">{$i18n.t('Jump back into your latest draft.')}</div>
 						</div>
 					</div>
 
 					{#if (home?.recent_items ?? []).length === 0}
-						<div class="rounded-2xl border border-dashed border-gray-200 bg-stone-50 p-5 text-sm text-gray-500">
+						<div class="rounded-2xl border border-dashed border-gray-200 dark:border-gray-800 bg-stone-50 dark:bg-gray-900 p-5 text-sm text-gray-500 dark:text-gray-400">
 							{$i18n.t('No recent writing yet.')}
 						</div>
 					{:else}
 						<div class="grid gap-3 md:grid-cols-2">
 							{#each home.recent_items as item}
 								<button
-									class="rounded-3xl border border-gray-200 bg-stone-50 p-4 text-left transition hover:border-gray-300 hover:bg-white"
+									class="rounded-3xl border border-gray-200 dark:border-gray-800 bg-stone-50 dark:bg-gray-900 p-4 text-left transition hover:border-gray-300 dark:hover:border-gray-600 hover:bg-white dark:hover:bg-gray-800"
 									on:click={() => openRecentItem(item)}
 								>
 									<div class="flex items-center justify-between gap-3">
-										<div class="text-sm font-semibold text-gray-900">{item.title}</div>
+										<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">{item.title}</div>
 										<EduBadge soft>
 											{item.project_mode === 'assignment_writing'
 												? $i18n.t('Assignment Writing')
 												: $i18n.t('Personal Writing')}
 										</EduBadge>
 									</div>
-									<div class="mt-2 text-xs text-gray-500">
+									<div class="mt-2 text-xs text-gray-500 dark:text-gray-400">
 										{$i18n.t('Updated')}: {formatTimestamp(item.updated_at)}
 									</div>
 								</button>
@@ -425,13 +425,13 @@
 							<EduCard class="mb-6">
 								<div class="mb-3 text-sm font-semibold">{$i18n.t('My Classroom')}</div>
 								{#if home?.classroom}
-									<div class="text-sm text-gray-600">
+									<div class="text-sm text-gray-600 dark:text-gray-400">
 										{$i18n.t('You are connected to {{name}}.', {
 											name: getClassroomDisplayName(home.classroom.name, t)
 										})}
 									</div>
 								{:else}
-									<div class="text-sm text-gray-500">
+									<div class="text-sm text-gray-500 dark:text-gray-400">
 										{$i18n.t(
 											"You have not joined a classroom yet. Enter your teacher's invite code to unlock assignments."
 										)}
@@ -473,14 +473,14 @@
 															<EduBadge soft>{$i18n.t('Awaiting review')}</EduBadge>
 														{/if}
 													</div>
-													<div class="mt-1 text-sm text-gray-500">
+													<div class="mt-1 text-sm text-gray-500 dark:text-gray-400">
 														{item.assignment.description || $i18n.t('No description')}
 													</div>
-													<div class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500">
+													<div class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500 dark:text-gray-400">
 														<div>{$i18n.t('Status')}: {getAssignmentStatusLabel(item.status)}</div>
 														<div>{$i18n.t('Updated')}: {formatTimestamp(item.updated_at)}</div>
 														{#if item.review_status === 'returned'}
-															<div class="font-medium text-rose-600">
+															<div class="font-medium text-rose-600 dark:text-rose-400">
 																{$i18n.t('Resubmit before')}: {formatTimestamp(item.effective_due_at)}
 															</div>
 														{:else}
@@ -524,7 +524,7 @@
 								{creatingPersonal ? $i18n.t('Creating...') : $i18n.t('New Writing')}
 							</EduButton>
 						</div>
-						<div class="mb-4 text-sm text-gray-500">{$i18n.t('Your personal drafts live here.')}</div>
+						<div class="mb-4 text-sm text-gray-500 dark:text-gray-400">{$i18n.t('Your personal drafts live here.')}</div>
 
 						{#if (home?.personal_items ?? []).length === 0}
 							<EduStateCard>{$i18n.t('No personal writing yet.')}</EduStateCard>
@@ -535,10 +535,10 @@
 										<div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
 											<div class="min-w-0">
 												<div class="truncate text-lg font-semibold">{item.title}</div>
-												<div class="mt-1 text-sm text-gray-500">
+												<div class="mt-1 text-sm text-gray-500 dark:text-gray-400">
 													{item.preview_text || $i18n.t('No content yet.')}
 												</div>
-												<div class="mt-3 text-xs text-gray-500">
+												<div class="mt-3 text-xs text-gray-500 dark:text-gray-400">
 													{$i18n.t('Updated')}: {formatTimestamp(item.updated_at)}
 												</div>
 											</div>

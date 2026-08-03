@@ -27,8 +27,8 @@
 			href={link.href}
 			class={`rounded-full border px-4 py-2 text-sm transition ${
 				isActive(link.href, $page.url.pathname)
-					? 'border-black bg-black text-white'
-					: 'border-gray-300 bg-white text-gray-700'
+					? 'border-black dark:border-gray-100 bg-black dark:bg-gray-100 text-white dark:text-gray-900'
+					: 'border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-850 text-gray-700 dark:text-gray-300'
 			}`}
 		>
 			{get(i18n).t(link.label)}

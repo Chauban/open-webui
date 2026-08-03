@@ -65,7 +65,7 @@
 		{#if review.overall_comment}
 			<p class="mt-2 text-sm whitespace-pre-wrap">{review.overall_comment}</p>
 		{/if}
-		<div class="mt-2 text-xs text-gray-500">{formatTime(review.reviewed_at)}</div>
+		<div class="mt-2 text-xs text-gray-500 dark:text-gray-400">{formatTime(review.reviewed_at)}</div>
 	</div>
 {:else}
 	<div

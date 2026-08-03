@@ -170,7 +170,7 @@
 
 <TeacherPageShell title="Review">
 	<div class="mx-auto max-w-6xl px-4 py-8">
-		<div class="mb-8 text-sm text-gray-500">
+		<div class="mb-8 text-sm text-gray-500 dark:text-gray-400">
 			{$i18n.t('Review pending submissions across classrooms from one queue.')}
 		</div>
 
@@ -211,7 +211,7 @@
 					<option value={option.value}>{option.label}</option>
 				{/each}
 			</select>
-			<div class="flex items-center rounded-2xl border border-gray-200 px-4 py-3 text-sm text-gray-600">
+			<div class="flex items-center rounded-2xl border border-gray-200 dark:border-gray-800 px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
 				{$i18n.t('Results')}: {items.length} / {total}
 			</div>
 			<select class={EDU_FIELD_CLASS} bind:value={sortBy} on:change={() => loadQueue()}>
@@ -248,9 +248,9 @@
 					<EduCard>
 						<div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
 							<div>
-								<div class="text-lg font-semibold text-gray-900">{item.student_name}</div>
-								<div class="mt-1 text-sm text-gray-500">{item.assignment.title}</div>
-								<div class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500">
+								<div class="text-lg font-semibold text-gray-900 dark:text-gray-100">{item.student_name}</div>
+								<div class="mt-1 text-sm text-gray-500 dark:text-gray-400">{item.assignment.title}</div>
+								<div class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500 dark:text-gray-400">
 									<div>
 										{$i18n.t('Classroom')}:
 										{item.classroom ? getClassroomDisplayName(item.classroom.name, t) : t('Unknown')}

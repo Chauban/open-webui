@@ -68,7 +68,7 @@
 
 <TeacherPageShell title="Overview">
 	<div class="mx-auto max-w-6xl px-4 py-8">
-		<div class="mb-8 text-sm text-gray-500">
+		<div class="mb-8 text-sm text-gray-500 dark:text-gray-400">
 			{$i18n.t('Track classroom activity, assignments, and recent submissions from one place.')}
 		</div>
 
@@ -103,9 +103,9 @@
 									interactive
 									on:click={() => goto(`/teacher/submissions/${item.submission.id}`)}
 								>
-									<div class="font-medium text-gray-900">{item.student_name}</div>
-									<div class="mt-1 text-gray-500">{item.assignment.title}</div>
-									<div class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500">
+									<div class="font-medium text-gray-900 dark:text-gray-100">{item.student_name}</div>
+									<div class="mt-1 text-gray-500 dark:text-gray-400">{item.assignment.title}</div>
+									<div class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500 dark:text-gray-400">
 										<div>{item.classroom ? getClassroomDisplayName(item.classroom.name, t) : t('Unknown')}</div>
 										<div title={formatAbsolute(item.submission.submitted_at)}>
 											{formatRelative(item.submission.submitted_at)}
@@ -142,9 +142,9 @@
 									interactive
 									on:click={() => goto(`/teacher/submissions/${item.submission.id}`)}
 								>
-									<div class="font-medium text-gray-900">{item.student_name}</div>
-									<div class="mt-1 text-gray-500">{item.assignment.title}</div>
-									<div class="mt-3 text-xs text-gray-500" title={formatAbsolute(item.submission.submitted_at)}>
+									<div class="font-medium text-gray-900 dark:text-gray-100">{item.student_name}</div>
+									<div class="mt-1 text-gray-500 dark:text-gray-400">{item.assignment.title}</div>
+									<div class="mt-3 text-xs text-gray-500 dark:text-gray-400" title={formatAbsolute(item.submission.submitted_at)}>
 										{formatRelative(item.submission.submitted_at)}
 									</div>
 									<div class="mt-3 flex flex-wrap gap-2 text-xs">
@@ -178,8 +178,8 @@
 								interactive
 								on:click={() => goto(`/teacher/assignments/${item.assignment.id}`)}
 							>
-								<div class="font-medium text-gray-900">{item.assignment.title}</div>
-								<div class="mt-1 text-gray-500">
+								<div class="font-medium text-gray-900 dark:text-gray-100">{item.assignment.title}</div>
+								<div class="mt-1 text-gray-500 dark:text-gray-400">
 									{item.classroom ? getClassroomDisplayName(item.classroom.name, t) : t('Unassigned classroom')}
 								</div>
 								<div class="mt-3 flex flex-wrap items-center gap-2 text-xs">
@@ -189,7 +189,7 @@
 									>
 										{$i18n.t('Due')} {formatRelative(item.assignment.due_at)}
 									</EduBadge>
-									<div class="text-gray-500">
+									<div class="text-gray-500 dark:text-gray-400">
 										{$i18n.t('Submissions')}: {item.submission_count}/{item.student_count}
 									</div>
 								</div>
@@ -215,11 +215,11 @@
 								interactive
 								on:click={() => goto(`/teacher/assignments/${item.assignment.id}`)}
 							>
-								<div class="font-medium text-gray-900">{item.assignment.title}</div>
-								<div class="mt-1 text-gray-500">
+								<div class="font-medium text-gray-900 dark:text-gray-100">{item.assignment.title}</div>
+								<div class="mt-1 text-gray-500 dark:text-gray-400">
 									{item.classroom ? getClassroomDisplayName(item.classroom.name, t) : t('Unassigned classroom')}
 								</div>
-								<div class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500">
+								<div class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500 dark:text-gray-400">
 									<div>{$i18n.t('Students')}: {item.student_count}</div>
 									<div>{$i18n.t('Submissions')}: {item.submission_count}</div>
 								</div>
@@ -254,10 +254,10 @@
 								interactive
 								on:click={() => goto(`/teacher/classrooms/${item.classroom.id}`)}
 							>
-								<div class="font-medium text-gray-900">
+								<div class="font-medium text-gray-900 dark:text-gray-100">
 									{getClassroomDisplayName(item.classroom.name, t)}
 								</div>
-								<div class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500">
+								<div class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500 dark:text-gray-400">
 									<div>{$i18n.t('Students')}: {item.student_count}</div>
 									<div>{$i18n.t('Assignments')}: {item.assignment_count}</div>
 								</div>

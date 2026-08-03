@@ -53,7 +53,7 @@
 
 <TeacherPageShell title="Classrooms">
 	{#if loading}
-		<div class="mx-auto max-w-6xl px-4 py-8 text-sm text-gray-500">{$i18n.t('Loading assignments...')}</div>
+		<div class="mx-auto max-w-6xl px-4 py-8 text-sm text-gray-500 dark:text-gray-400">{$i18n.t('Loading assignments...')}</div>
 	{:else if loadError}
 		<div class="mx-auto max-w-3xl px-4 py-16">
 			<EduStateCard tone="error">{loadError}</EduStateCard>
@@ -64,7 +64,7 @@
 
 		<div class="mb-6 flex flex-wrap items-end justify-between gap-3">
 			<div>
-				<div class="mb-2 text-sm text-gray-500">
+				<div class="mb-2 text-sm text-gray-500 dark:text-gray-400">
 					{$i18n.t('Teaching')} / {$i18n.t('Classrooms')} / {getClassroomDisplayName(classroom.name, t)}
 				</div>
 				<h1 class="text-3xl font-semibold">{$i18n.t('Classroom Assignments')}</h1>
@@ -90,11 +90,11 @@
 					<EduCard>
 						<div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
 							<div>
-								<div class="text-lg font-semibold text-gray-900">{item.assignment.title}</div>
-								<div class="mt-1 text-sm text-gray-500">
+								<div class="text-lg font-semibold text-gray-900 dark:text-gray-100">{item.assignment.title}</div>
+								<div class="mt-1 text-sm text-gray-500 dark:text-gray-400">
 									{item.assignment.description || $i18n.t('No description')}
 								</div>
-								<div class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500">
+								<div class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500 dark:text-gray-400">
 									<div>{$i18n.t('Students')}: {item.student_count}</div>
 									<div>{$i18n.t('Submissions')}: {item.submission_count}</div>
 								</div>

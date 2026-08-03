@@ -105,7 +105,7 @@
 <TeacherPageShell title="Assignments">
 	<div class="mx-auto max-w-6xl px-4 py-8">
 		<div class="mb-8 flex flex-wrap items-center justify-between gap-3">
-			<div class="text-sm text-gray-500">
+			<div class="text-sm text-gray-500 dark:text-gray-400">
 				{$i18n.t('View every assignment across classrooms, then jump into submissions or analytics.')}
 			</div>
 			<EduButton variant="primary" on:click={() => goto('/teacher/assignments/new')}>
@@ -169,11 +169,11 @@
 					<EduCard>
 						<div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
 							<div>
-								<div class="text-lg font-semibold text-gray-900">{item.assignment.title}</div>
-								<div class="mt-1 text-sm text-gray-500">
+								<div class="text-lg font-semibold text-gray-900 dark:text-gray-100">{item.assignment.title}</div>
+								<div class="mt-1 text-sm text-gray-500 dark:text-gray-400">
 									{item.assignment.description || $i18n.t('No description')}
 								</div>
-								<div class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500">
+								<div class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500 dark:text-gray-400">
 									<div>
 										{$i18n.t('Classroom')}:
 										{item.classroom ? getClassroomDisplayName(item.classroom.name, t) : t('Unknown')}
@@ -183,7 +183,7 @@
 									<div>
 										{$i18n.t('Status')}:
 										{#if isPastDue(item)}
-											<span class="text-rose-600">{$i18n.t('Past Due')}</span>
+											<span class="text-rose-600 dark:text-rose-400">{$i18n.t('Past Due')}</span>
 										{:else}
 											{getAssignmentStatusLabel(item.assignment.status, t)}
 										{/if}

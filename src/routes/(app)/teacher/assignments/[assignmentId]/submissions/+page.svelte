@@ -134,7 +134,7 @@
 
 	<div class="mb-6 flex flex-wrap items-center justify-between gap-3">
 		<div>
-			<div class="text-xs uppercase tracking-[0.2em] text-gray-500">{$i18n.t('Teacher Review')}</div>
+			<div class="text-xs uppercase tracking-[0.2em] text-gray-500 dark:text-gray-400">{$i18n.t('Teacher Review')}</div>
 			<h1 class="text-2xl font-semibold">{$i18n.t('Submissions')}</h1>
 		</div>
 		<div class="flex gap-2">
@@ -176,8 +176,8 @@
 	{#if loaded && !loadError}
 		{#if selectedStatus === 'unsubmitted'}
 			<EduCard padding="none">
-				<div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-4 py-3">
-					<div class="text-sm text-gray-600">
+				<div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 dark:border-gray-800 px-4 py-3">
+					<div class="text-sm text-gray-600 dark:text-gray-400">
 						{$i18n.t('{{count}} students have not submitted yet.', { count: unsubmitted.length })}
 					</div>
 					{#if unsubmitted.length > 0}
@@ -187,12 +187,12 @@
 					{/if}
 				</div>
 				{#if unsubmitted.length === 0}
-					<div class="px-4 py-6 text-sm text-gray-500">
+					<div class="px-4 py-6 text-sm text-gray-500 dark:text-gray-400">
 						{$i18n.t('Everyone has submitted. Nice!')}
 					</div>
 				{:else}
 					<table class="w-full table-fixed">
-						<thead class="bg-gray-50 text-left text-sm text-gray-600">
+						<thead class="bg-gray-50 dark:bg-gray-800 text-left text-sm text-gray-600 dark:text-gray-400">
 							<tr>
 								<th class="px-4 py-3">{$i18n.t('Student')}</th>
 								<th class="px-4 py-3">{$i18n.t('Email')}</th>
@@ -201,9 +201,9 @@
 						</thead>
 						<tbody>
 							{#each unsubmitted as student}
-								<tr class="border-t border-gray-100 text-sm">
+								<tr class="border-t border-gray-100 dark:border-gray-800 text-sm">
 									<td class="px-4 py-4">{student.user_name}</td>
-									<td class="truncate px-4 py-4 text-gray-500">{student.user_email ?? '-'}</td>
+									<td class="truncate px-4 py-4 text-gray-500 dark:text-gray-400">{student.user_email ?? '-'}</td>
 									<td class="px-4 py-4">
 										<EduButton
 											size="sm"
@@ -226,7 +226,7 @@
 		{:else}
 			<EduCard padding="none">
 				<table class="w-full table-fixed">
-					<thead class="bg-gray-50 text-left text-sm text-gray-600">
+					<thead class="bg-gray-50 dark:bg-gray-800 text-left text-sm text-gray-600 dark:text-gray-400">
 						<tr>
 							<th class="px-4 py-3">{$i18n.t('Student')}</th>
 							<th class="px-4 py-3">{$i18n.t('Submitted At')}</th>
@@ -237,7 +237,7 @@
 					</thead>
 					<tbody>
 						{#each filteredItems as item}
-							<tr class="border-t border-gray-100 text-sm">
+							<tr class="border-t border-gray-100 dark:border-gray-800 text-sm">
 								<td class="px-4 py-4">{item.student_name}</td>
 								<td class="px-4 py-4">{new Date(item.submission.submitted_at * 1000).toLocaleString()}</td>
 								<td class="px-4 py-4">

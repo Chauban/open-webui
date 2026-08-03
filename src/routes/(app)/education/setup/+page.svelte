@@ -91,13 +91,13 @@
 {#if !checking}
 	<div class="mx-auto max-w-3xl px-4 py-10">
 		<div class="mb-8">
-			<div class="text-xs uppercase tracking-[0.2em] text-gray-500">{$i18n.t('Education')}</div>
-			<h1 class="text-3xl font-semibold text-gray-900">
+			<div class="text-xs uppercase tracking-[0.2em] text-gray-500 dark:text-gray-400">{$i18n.t('Education')}</div>
+			<h1 class="text-3xl font-semibold text-gray-900 dark:text-gray-100">
 				{educationRole === 'teacher'
 					? $i18n.t('Welcome, teacher')
 					: $i18n.t('Welcome, student')}
 			</h1>
-			<div class="mt-2 text-sm text-gray-500">
+			<div class="mt-2 text-sm text-gray-500 dark:text-gray-400">
 				{educationRole === 'teacher'
 					? $i18n.t('Create your first classroom to start assigning writing tasks.')
 					: $i18n.t('Join your classroom with an invite code, or skip and join later.')}
@@ -107,19 +107,19 @@
 		<EduCard padding="lg" class="shadow-sm">
 			{#if educationRole === 'teacher'}
 				<div>
-					<div class="mb-2 text-sm font-semibold text-gray-900">{$i18n.t('Classroom Name')}</div>
+					<div class="mb-2 text-sm font-semibold text-gray-900 dark:text-gray-100">{$i18n.t('Classroom Name')}</div>
 					<input
 						bind:value={classroomName}
 						class="w-full {EDU_FIELD_CLASS}"
 						placeholder={$i18n.t('Example: Grade 8 Writing')}
 					/>
-					<div class="mt-2 text-sm text-gray-500">
+					<div class="mt-2 text-sm text-gray-500 dark:text-gray-400">
 						{$i18n.t('Create your first classroom now. You can add more classrooms later from Teaching.')}
 					</div>
 				</div>
 			{:else}
 				<div>
-					<div class="mb-2 text-sm font-semibold text-gray-900">
+					<div class="mb-2 text-sm font-semibold text-gray-900 dark:text-gray-100">
 						{$i18n.t('Classroom Invite Code')}
 					</div>
 					<input
@@ -127,7 +127,7 @@
 						class="w-full {EDU_FIELD_CLASS}"
 						placeholder={$i18n.t('Enter invite code now, or leave blank and join later')}
 					/>
-					<div class="mt-2 text-sm text-gray-500">
+					<div class="mt-2 text-sm text-gray-500 dark:text-gray-400">
 						{$i18n.t('You can skip this now. The invite code can also be entered later in Writing.')}
 					</div>
 				</div>

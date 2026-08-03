@@ -143,7 +143,7 @@
 
 <TeacherPageShell title="Assignments">
 	{#if loading}
-		<div class="mx-auto max-w-6xl px-4 py-8 text-sm text-gray-500">{$i18n.t('Loading assignment...')}</div>
+		<div class="mx-auto max-w-6xl px-4 py-8 text-sm text-gray-500 dark:text-gray-400">{$i18n.t('Loading assignment...')}</div>
 	{:else if loadError}
 		<div class="mx-auto max-w-3xl px-4 py-16">
 			<EduStateCard tone="error">{loadError}</EduStateCard>
@@ -154,9 +154,9 @@
 
 			<div class="mb-6 flex flex-wrap items-end justify-between gap-3">
 				<div>
-					<div class="mb-2 text-sm text-gray-500">{$i18n.t('Teaching')} / {$i18n.t('Assignments')}</div>
+					<div class="mb-2 text-sm text-gray-500 dark:text-gray-400">{$i18n.t('Teaching')} / {$i18n.t('Assignments')}</div>
 					<h1 class="text-3xl font-semibold">{item.assignment.title}</h1>
-					<div class="mt-2 text-sm text-gray-500">
+					<div class="mt-2 text-sm text-gray-500 dark:text-gray-400">
 						{item.classroom ? getClassroomDisplayName(item.classroom.name, t) : t('Unknown classroom')}
 					</div>
 				</div>
@@ -177,14 +177,14 @@
 				<EduStatCard label="Students" value={item.student_count} />
 				<EduStatCard label="Submissions" value={item.submission_count} />
 				<EduCard>
-					<div class="text-xs uppercase tracking-[0.16em] text-gray-500">{$i18n.t('Status')}</div>
-					<div class="mt-2 text-sm font-medium {isPastDue ? 'text-rose-600' : 'text-gray-900'}">
+					<div class="text-xs uppercase tracking-[0.16em] text-gray-500 dark:text-gray-400">{$i18n.t('Status')}</div>
+					<div class="mt-2 text-sm font-medium {isPastDue ? 'text-rose-600 dark:text-rose-400' : 'text-gray-900 dark:text-gray-100'}">
 						{isPastDue ? $i18n.t('Past Due') : getAssignmentStatusLabel(item.assignment.status, t)}
 					</div>
 				</EduCard>
 				<EduCard>
-					<div class="text-xs uppercase tracking-[0.16em] text-gray-500">{$i18n.t('Due At')}</div>
-					<div class="mt-2 text-sm font-medium text-gray-900">
+					<div class="text-xs uppercase tracking-[0.16em] text-gray-500 dark:text-gray-400">{$i18n.t('Due At')}</div>
+					<div class="mt-2 text-sm font-medium text-gray-900 dark:text-gray-100">
 						{item.assignment.due_at ? new Date(item.assignment.due_at * 1000).toLocaleString() : t('Not set')}
 					</div>
 				</EduCard>
@@ -245,7 +245,7 @@
 						on:click={() => goto(`/teacher/assignments/${item.assignment.id}/submissions`)}
 					>
 						<div class="text-lg font-semibold">{$i18n.t('Submissions')}</div>
-						<div class="mt-2 text-sm text-gray-500">
+						<div class="mt-2 text-sm text-gray-500 dark:text-gray-400">
 							{$i18n.t('Review each student submission for this assignment.')}
 						</div>
 					</EduCard>
@@ -254,7 +254,7 @@
 						on:click={() => goto(`/teacher/assignments/${item.assignment.id}/dashboard`)}
 					>
 						<div class="text-lg font-semibold">{$i18n.t('Dashboard')}</div>
-						<div class="mt-2 text-sm text-gray-500">
+						<div class="mt-2 text-sm text-gray-500 dark:text-gray-400">
 							{$i18n.t('Inspect writing-source analytics and reflection coverage.')}
 						</div>
 					</EduCard>
@@ -263,7 +263,7 @@
 						on:click={() => goto(`/teacher/classrooms/${item.assignment.classroom_id}`)}
 					>
 						<div class="text-lg font-semibold">{$i18n.t('Open Classroom')}</div>
-						<div class="mt-2 text-sm text-gray-500">
+						<div class="mt-2 text-sm text-gray-500 dark:text-gray-400">
 							{$i18n.t('Return to the classroom that owns this assignment.')}
 						</div>
 					</EduCard>

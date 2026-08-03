@@ -57,7 +57,7 @@
 
 <TeacherPageShell title="Classrooms">
 	{#if loading}
-		<div class="mx-auto max-w-6xl px-4 py-8 text-sm text-gray-500">
+		<div class="mx-auto max-w-6xl px-4 py-8 text-sm text-gray-500 dark:text-gray-400">
 			{$i18n.t('Loading student performance...')}
 		</div>
 	{:else if loadError}
@@ -70,13 +70,13 @@
 
 			<div class="mb-6 flex flex-wrap items-end justify-between gap-3">
 				<div>
-					<div class="mb-2 text-sm text-gray-500">
+					<div class="mb-2 text-sm text-gray-500 dark:text-gray-400">
 						{$i18n.t('Teaching')} / {$i18n.t('Classrooms')} /
 						{getClassroomDisplayName(performance.classroom.name, t)} / {$i18n.t('Students')}
 					</div>
 					<h1 class="text-3xl font-semibold">{performance.student_name}</h1>
 					{#if performance.student_email}
-						<div class="mt-1 text-sm text-gray-500">{performance.student_email}</div>
+						<div class="mt-1 text-sm text-gray-500 dark:text-gray-400">{performance.student_email}</div>
 					{/if}
 				</div>
 				<EduButton
@@ -107,7 +107,7 @@
 							<EduTile>
 								<div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
 									<div>
-										<div class="font-medium text-gray-900">{item.assignment.title}</div>
+										<div class="font-medium text-gray-900 dark:text-gray-100">{item.assignment.title}</div>
 										<div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
 											<EduBadge tone={statusTone(item.review_status)}>
 												{getReviewStatusLabel(item.review_status)}
@@ -119,13 +119,13 @@
 												<EduBadge>{$i18n.t('Round {{round}}', { round: item.round_no })}</EduBadge>
 											{/if}
 											{#if item.submitted_at}
-												<span class="text-gray-500">
+												<span class="text-gray-500 dark:text-gray-400">
 													{new Date(item.submitted_at * 1000).toLocaleString()}
 												</span>
 											{/if}
 										</div>
 										{#if item.submission_id}
-											<div class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500">
+											<div class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500 dark:text-gray-400">
 												<div>{$i18n.t('Typed')}: {item.source_stats?.user_typed_chars ?? 0}</div>
 												<div>{$i18n.t('AI inserted')}: {item.source_stats?.ai_inserted_chars ?? 0}</div>
 												<div>{$i18n.t('AI pasted')}: {item.source_stats?.ai_pasted_chars ?? 0}</div>

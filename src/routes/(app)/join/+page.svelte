@@ -54,7 +54,7 @@
 		<h1 class="mt-1 text-2xl font-semibold">{$i18n.t('Join Classroom')}</h1>
 
 		{#if !isStudent}
-			<EduTile tone="amber" class="mt-6 text-amber-700">
+			<EduTile tone="amber" class="mt-6 text-amber-700 dark:text-amber-300">
 				{$i18n.t('Only students can join classrooms with an invite code.')}
 			</EduTile>
 			<EduButton
@@ -65,7 +65,7 @@
 			</EduButton>
 		{:else}
 			<div class="mt-6">
-				<label class="mb-2 block text-sm font-medium text-gray-700">
+				<label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
 					{$i18n.t('Invite Code')}
 				</label>
 				<input

@@ -60,12 +60,17 @@ const isLowSignalTypedSegment = (segment: SourceSegment) => {
 };
 
 const colorClass = (sourceType: string) => {
-	if (sourceType === 'ai_inserted') return 'bg-amber-100 text-amber-950';
-	if (sourceType === 'ai_pasted') return 'bg-sky-100 text-sky-950';
-	if (sourceType === 'external_paste') return 'bg-rose-100 text-rose-950';
-	if (sourceType === 'suspected_unmarked_import') return 'bg-rose-100 text-rose-950';
-	if (sourceType === 'unknown') return 'bg-gray-100 text-gray-700';
-	return 'bg-emerald-100 text-emerald-950';
+	if (sourceType === 'ai_inserted')
+		return 'bg-amber-100 text-amber-950 dark:bg-amber-900/60 dark:text-amber-50';
+	if (sourceType === 'ai_pasted')
+		return 'bg-sky-100 text-sky-950 dark:bg-sky-900/60 dark:text-sky-50';
+	if (sourceType === 'external_paste')
+		return 'bg-rose-100 text-rose-950 dark:bg-rose-900/60 dark:text-rose-50';
+	if (sourceType === 'suspected_unmarked_import')
+		return 'bg-rose-100 text-rose-950 dark:bg-rose-900/60 dark:text-rose-50';
+	if (sourceType === 'unknown')
+		return 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200';
+	return 'bg-emerald-100 text-emerald-950 dark:bg-emerald-900/60 dark:text-emerald-50';
 };
 
 const overlaps = (range: HighlightRange, ranges: HighlightRange[]) => {
@@ -133,7 +138,7 @@ export const buildSourceHighlightedHtml = ({
 
 		const segmentId = range.segment.segment_id ?? '';
 		const activeClass =
-			activeSegmentId && activeSegmentId === segmentId ? ' ring-2 ring-black/40' : '';
+			activeSegmentId && activeSegmentId === segmentId ? ' ring-2 ring-black/40 dark:ring-white/50' : '';
 		html += `<mark data-segment-id="${escapeAttribute(segmentId)}" class="rounded px-1 ${colorClass(
 			range.segment.source_type
 		)}${activeClass}">${escapeHtml(text.slice(range.start, range.end))}</mark>`;
@@ -249,7 +254,7 @@ const markHtml = ({
 }) => {
 	const segmentId = segment.segment_id ?? '';
 	const activeClass =
-		activeSegmentId && activeSegmentId === segmentId ? ' ring-2 ring-black/40' : '';
+		activeSegmentId && activeSegmentId === segmentId ? ' ring-2 ring-black/40 dark:ring-white/50' : '';
 	return `<mark data-segment-id="${escapeAttribute(segmentId)}" class="rounded px-1 ${colorClass(
 		segment.source_type
 	)}${activeClass}">${content}</mark>`;
