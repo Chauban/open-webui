@@ -24,9 +24,11 @@ from open_webui.models.chats import Chat
 from open_webui.models.chat_messages import ChatMessage
 from open_webui.models.shared_chats import SharedChat
 from open_webui.models.education import (
+    AnalysisResult,
     Assignment,
     Classroom,
     ClassroomMember,
+    EditorOperation,
     EducationNotification,
     MicroReflection,
     ProvenanceSegment,
@@ -417,15 +419,14 @@ def education_client():
             WritingSession.__table__,
             WritingVersion.__table__,
             ProvenanceSegment.__table__,
+            EditorOperation.__table__,
+            AnalysisResult.__table__,
             MicroReflection.__table__,
             Submission.__table__,
             SubmissionReview.__table__,
             EducationNotification.__table__,
         ]:
             table.create(bind=engine, checkfirst=True)
-
-        with engine.begin() as connection:
-            connection.exec_driver_sql("DROP INDEX IF EXISTS classroom_member_user_idx")
 
         # The education router (open_webui/routers/education.py) still takes a
         # sync `db: Session = Depends(get_session)`, but forwards it as `db=db`

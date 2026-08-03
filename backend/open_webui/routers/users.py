@@ -501,7 +501,6 @@ async def _get_admin_classroom_items(db) -> list[AdminClassroomListItem]:
 async def get_admin_classrooms(
     user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)
 ):
-    Education._ensure_classroom_tables(db)
     return await _get_admin_classroom_items(db)
 
 
@@ -512,7 +511,6 @@ async def get_admin_classrooms(
 async def get_user_classroom_assignment(
     user_id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)
 ):
-    Education._ensure_classroom_tables(db)
     target_user = await Users.get_user_by_id(user_id, db=db)
     if target_user is None:
         raise HTTPException(
@@ -668,7 +666,6 @@ async def update_user_by_id(
     session_user: UserModel = Depends(get_admin_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    Education._ensure_classroom_tables(db)
     # Prevent modification of the primary admin user by other admins
     try:
         first_user = await Users.get_first_user(db=db)

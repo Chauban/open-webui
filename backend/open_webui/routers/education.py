@@ -1982,20 +1982,38 @@ async def get_teacher_overview(
         )
 
         for assignment in assignments:
-            assignment_item = await _build_teacher_assignment_list_item(assignment, db)
-            assignment_items.append(assignment_item)
             submissions = Education.get_submissions_by_assignment(assignment.id, db=db)
             unsubmitted_count += max(student_count - len(submissions), 0)
+            # 作业维度的风险汇总直接由提交项累加,不再走
+            # _build_teacher_assignment_list_item 把每份提交的分析重算一遍。
+            assignment_risk_summary = _empty_risk_summary()
             for submission in submissions:
                 submission_item = await _build_submission_list_item(
                     submission, assignment, db
                 )
                 submission_items.append(submission_item)
                 _accumulate_risk_summary(
+                    assignment_risk_summary, submission_item.analysis_summary or {}
+                )
+                _accumulate_risk_summary(
                     classroom_risk_summary, submission_item.analysis_summary or {}
                 )
                 if submission_item.review_status == "pending":
                     pending_review_items.append(submission_item)
+
+            assignment_items.append(
+                TeacherAssignmentListItem(
+                    assignment=assignment,
+                    classroom=classroom,
+                    student_count=student_count,
+                    submission_count=len(submissions),
+                    latest_submission_at=max(
+                        (submission.submitted_at for submission in submissions),
+                        default=None,
+                    ),
+                    risk_summary=_finalize_risk_summary(assignment_risk_summary),
+                )
+            )
 
         classroom_items[-1].risk_summary = _finalize_risk_summary(
             classroom_risk_summary
@@ -2078,23 +2096,49 @@ async def get_teacher_review(
             if assignment.classroom_id == classroom_id
         ]
 
-    items = []
-    for assignment in assignments:
-        submissions = Education.get_submissions_by_assignment(assignment.id, db=db)
-        for submission in submissions:
-            if review_status:
-                review = Education.get_submission_review_by_submission_id(
-                    submission.id, db=db
-                )
-                item_status = review.review_status if review else "pending"
-                if item_status != review_status:
-                    continue
-            items.append(await _build_submission_list_item(submission, assignment, db))
+    candidates = [
+        (submission, assignment)
+        for assignment in assignments
+        for submission in Education.get_submissions_by_assignment(assignment.id, db=db)
+    ]
 
-    items.sort(key=lambda item: _review_sort_key(item, sort), reverse=True)
-    total = len(items)
+    if review_status:
+        reviews = Education.get_submission_reviews_by_submission_ids(
+            [submission.id for submission, _ in candidates], db=db
+        )
+        candidates = [
+            (submission, assignment)
+            for submission, assignment in candidates
+            if (
+                reviews[submission.id].review_status
+                if submission.id in reviews
+                else "pending"
+            )
+            == review_status
+        ]
+
+    total = len(candidates)
     limit = max(1, min(limit, REVIEW_QUEUE_MAX_LIMIT))
     offset = max(offset, 0)
+
+    if sort not in ("suspected", "burst", "rewrite"):
+        # 默认按提交时间排序,排序键不依赖分析结果:先分页再构建,
+        # 整个队列只为当前这一页构建分析。
+        candidates.sort(key=lambda pair: pair[0].submitted_at, reverse=True)
+        return TeacherReviewResponse(
+            items=[
+                await _build_submission_list_item(submission, assignment, db)
+                for submission, assignment in candidates[offset : offset + limit]
+            ],
+            total=total,
+        )
+
+    # 按疑似导入/爆发/改写率排序的排序键来自分析摘要,只能全量构建后再分页。
+    items = [
+        await _build_submission_list_item(submission, assignment, db)
+        for submission, assignment in candidates
+    ]
+    items.sort(key=lambda item: _review_sort_key(item, sort), reverse=True)
     return TeacherReviewResponse(items=items[offset : offset + limit], total=total)
 
 
@@ -2524,21 +2568,33 @@ async def export_classroom_progress(
         ]
     )
 
+    # 每份作业的提交只查一次并按学生建索引,避免学生 × 作业的嵌套全表扫描。
+    submissions_by_assignment = {
+        assignment.id: {
+            submission.student_id: submission
+            for submission in Education.get_submissions_by_assignment(
+                assignment.id, db=db
+            )
+        }
+        for assignment in assignments
+    }
+    reviews_by_submission = Education.get_submission_reviews_by_submission_ids(
+        [
+            submission.id
+            for submissions in submissions_by_assignment.values()
+            for submission in submissions.values()
+        ],
+        db=db,
+    )
+
     for student_member in students:
         student_detail = await _build_classroom_member_detail(student_member, db)
         for assignment in assignments:
-            submissions = [
-                submission
-                for submission in Education.get_submissions_by_assignment(
-                    assignment.id, db=db
-                )
-                if submission.student_id == student_member.user_id
-            ]
-            if submissions:
-                latest_submission = submissions[0]
-                review = Education.get_submission_review_by_submission_id(
-                    latest_submission.id, db=db
-                )
+            latest_submission = submissions_by_assignment[assignment.id].get(
+                student_member.user_id
+            )
+            if latest_submission is not None:
+                review = reviews_by_submission.get(latest_submission.id)
                 writer.writerow(
                     [
                         student_detail.user_name,
@@ -3905,34 +3961,6 @@ async def get_student_dashboard(
         .limit(MAX_DASHBOARD_ITEMS)
         .all()
     )
-    items = [
-        DashboardItem(
-            submission_id=row.id,
-            student_id=row.student_id,
-            student_name=user.name,
-            source_stats=row.stats_json,
-            prompt_count=row.stats_json.get("prompt_count", 0),
-            has_reflection=(
-                Education.get_micro_reflection_by_id(row.micro_reflection_id, db=db)
-                is not None
-                if row.micro_reflection_id
-                else False
-            ),
-            submitted_at=row.submitted_at,
-            risk_summary=(
-                (
-                    await _get_or_build_submission_analysis(
-                        row,
-                        Education.get_writing_session_by_id(
-                            row.writing_session_id, db=db
-                        ),
-                        db,
-                    )
-                ).get("summary", {})
-            ),
-        )
-        for row in rows
-    ]
     summary = _empty_risk_summary()
     rewrite_distribution = {
         "unchanged": 0,
@@ -3940,18 +3968,32 @@ async def get_student_dashboard(
         "moderately_rewritten": 0,
         "deeply_rewritten": 0,
     }
-    for item in items:
-        _accumulate_risk_summary(summary, item.risk_summary or {})
+    items = []
+    for row in rows:
         analysis = await _get_or_build_submission_analysis(
-            Education.get_submission_by_id(item.submission_id, db=db),
-            Education.get_writing_session_by_id(
-                Education.get_submission_by_id(
-                    item.submission_id, db=db
-                ).writing_session_id,
-                db=db,
-            ),
+            row,
+            Education.get_writing_session_by_id(row.writing_session_id, db=db),
             db,
         )
+        risk_summary = analysis.get("summary", {})
+        items.append(
+            DashboardItem(
+                submission_id=row.id,
+                student_id=row.student_id,
+                student_name=user.name,
+                source_stats=row.stats_json,
+                prompt_count=row.stats_json.get("prompt_count", 0),
+                has_reflection=(
+                    Education.get_micro_reflection_by_id(row.micro_reflection_id, db=db)
+                    is not None
+                    if row.micro_reflection_id
+                    else False
+                ),
+                submitted_at=row.submitted_at,
+                risk_summary=risk_summary,
+            )
+        )
+        _accumulate_risk_summary(summary, risk_summary or {})
         for segment in analysis.get("segments", []):
             rewrite_level = segment.get("rewrite_level")
             if rewrite_level in rewrite_distribution:

@@ -1,11 +1,9 @@
 import time
 import uuid
-from contextlib import nullcontext
 from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy.exc import OperationalError
-from sqlalchemy import BigInteger, Column, Text, UniqueConstraint, text
+from sqlalchemy import BigInteger, Column, Text, UniqueConstraint
 from sqlalchemy.orm import Session
 
 from open_webui.internal.db import Base, JSONField, get_db_context
@@ -43,6 +41,11 @@ class Classroom(Base):
 
 class ClassroomMember(Base):
     __tablename__ = "classroom_member"
+    __table_args__ = (
+        UniqueConstraint(
+            "classroom_id", "user_id", name="classroom_member_classroom_user_idx"
+        ),
+    )
 
     id = Column(Text, primary_key=True, unique=True)
     classroom_id = Column(Text, nullable=False)
@@ -54,6 +57,14 @@ class ClassroomMember(Base):
 
 class WritingSession(Base):
     __tablename__ = "writing_session"
+    __table_args__ = (
+        UniqueConstraint(
+            "assignment_id",
+            "owner_user_id",
+            "scope",
+            name="writing_session_assignment_owner_scope_idx",
+        ),
+    )
 
     id = Column(Text, primary_key=True, unique=True)
     assignment_id = Column(Text, nullable=True)
@@ -756,108 +767,6 @@ class ClassroomProgressResponse(BaseModel):
 
 class EducationTable:
     @staticmethod
-    def _ensure_submission_review_table(db: Session = None):
-        if not isinstance(db, Session):
-            with get_db_context() as _sync_db:
-                Education._ensure_submission_review_table(_sync_db)
-            return
-        bind = db.get_bind()
-        SubmissionReview.__table__.create(bind=bind, checkfirst=True)
-
-    @staticmethod
-    def _ensure_classroom_tables(db: Session = None):
-        if not isinstance(db, Session):
-            with get_db_context() as _sync_db:
-                Education._ensure_classroom_tables(_sync_db)
-            return
-        bind = db.get_bind()
-        Classroom.__table__.create(bind=bind, checkfirst=True)
-        ClassroomMember.__table__.create(bind=bind, checkfirst=True)
-        # Earlier classroom migrations used overly strict unique indexes that limited
-        # a teacher/user to a single classroom. Drop them to match the current model.
-        transaction = db.begin() if not db.in_transaction() else None
-        with transaction or nullcontext():
-            db.execute(text("DROP INDEX IF EXISTS classroom_teacher_idx"))
-            db.execute(text("DROP INDEX IF EXISTS classroom_member_user_idx"))
-            db.execute(
-                text(
-                    "CREATE UNIQUE INDEX IF NOT EXISTS classroom_member_classroom_user_idx "
-                    "ON classroom_member (classroom_id, user_id)"
-                )
-            )
-            db.execute(
-                text(
-                    "CREATE UNIQUE INDEX IF NOT EXISTS classroom_invite_code_idx "
-                    "ON classroom (invite_code)"
-                )
-            )
-
-    def _sqlite_add_missing_columns(
-        self, db: Session, table_name: str, columns: dict[str, str]
-    ) -> None:
-        # PRAGMA table_info 是 SQLite 专有语法;非 SQLite(如 PostgreSQL)
-        # 部署的列补齐由 Alembic 迁移负责,这里直接跳过。
-        if db.get_bind().dialect.name != "sqlite":
-            return
-        try:
-            rows = db.execute(text(f'PRAGMA table_info("{table_name}")')).fetchall()
-        except OperationalError:
-            return
-        if not rows:
-            return
-        existing = {row[1] for row in rows}
-        changed = False
-        for name, ddl in columns.items():
-            if name not in existing:
-                db.execute(text(f'ALTER TABLE "{table_name}" ADD COLUMN {name} {ddl}'))
-                changed = True
-        if changed:
-            db.commit()
-
-    def _ensure_writing_tables(self, db: Session = None):
-        if not isinstance(db, Session):
-            with get_db_context() as _sync_db:
-                Education._ensure_writing_tables(_sync_db)
-            return
-        bind = db.get_bind()
-        self._sqlite_add_missing_columns(
-            db,
-            "submission",
-            {
-                "round_no": "BIGINT NOT NULL DEFAULT 1",
-                "is_current": "BIGINT NOT NULL DEFAULT 1",
-            },
-        )
-        self._sqlite_add_missing_columns(
-            db, "submission_review", {"resubmit_due_at": "BIGINT"}
-        )
-
-        for table in [
-            WritingSession.__table__,
-            WritingVersion.__table__,
-            ProvenanceSegment.__table__,
-            EditorOperation.__table__,
-            AnalysisResult.__table__,
-            MicroReflection.__table__,
-            Submission.__table__,
-            SubmissionReview.__table__,
-            EducationNotification.__table__,
-        ]:
-            table.create(bind=bind, checkfirst=True)
-
-        transaction = db.begin() if not db.in_transaction() else None
-        with transaction or nullcontext():
-            db.execute(
-                text("DROP INDEX IF EXISTS writing_session_assignment_student_idx")
-            )
-            db.execute(
-                text(
-                    "CREATE UNIQUE INDEX IF NOT EXISTS writing_session_assignment_owner_scope_idx "
-                    "ON writing_session (assignment_id, owner_user_id, scope)"
-                )
-            )
-
-    @staticmethod
     def _generate_invite_code() -> str:
         return uuid.uuid4().hex[:8].upper()
 
@@ -868,7 +777,6 @@ class EducationTable:
         db: Optional[Session] = None,
     ) -> ClassroomModel:
         with get_db_context(db) as db:
-            self._ensure_classroom_tables(db)
             classroom_name = form_data.name.strip()
             if not classroom_name:
                 raise ValueError("Classroom name is required")
@@ -902,7 +810,6 @@ class EducationTable:
         self, classroom_id: str, db: Optional[Session] = None
     ) -> Optional[ClassroomModel]:
         with get_db_context(db) as db:
-            self._ensure_classroom_tables(db)
             classroom = db.get(Classroom, classroom_id)
             return ClassroomModel.model_validate(classroom) if classroom else None
 
@@ -910,7 +817,6 @@ class EducationTable:
         self, teacher_id: str, db: Optional[Session] = None
     ) -> list[ClassroomModel]:
         with get_db_context(db) as db:
-            self._ensure_classroom_tables(db)
             classrooms = (
                 db.query(Classroom)
                 .filter(Classroom.teacher_id == teacher_id)
@@ -923,7 +829,6 @@ class EducationTable:
 
     def get_all_classrooms(self, db: Optional[Session] = None) -> list[ClassroomModel]:
         with get_db_context(db) as db:
-            self._ensure_classroom_tables(db)
             classrooms = (
                 db.query(Classroom)
                 .order_by(Classroom.updated_at.desc(), Classroom.created_at.desc())
@@ -937,7 +842,6 @@ class EducationTable:
         self, invite_code: str, db: Optional[Session] = None
     ) -> Optional[ClassroomModel]:
         with get_db_context(db) as db:
-            self._ensure_classroom_tables(db)
             classroom = (
                 db.query(Classroom)
                 .filter(Classroom.invite_code == invite_code.strip().upper())
@@ -949,7 +853,6 @@ class EducationTable:
         self, classroom_id: str, db: Optional[Session] = None
     ) -> Optional[ClassroomModel]:
         with get_db_context(db) as db:
-            self._ensure_classroom_tables(db)
             classroom = db.get(Classroom, classroom_id)
             if classroom is None:
                 return None
@@ -968,7 +871,6 @@ class EducationTable:
         db: Optional[Session] = None,
     ) -> ClassroomMemberModel:
         with get_db_context(db) as db:
-            self._ensure_classroom_tables(db)
             member = (
                 db.query(ClassroomMember)
                 .filter(
@@ -999,7 +901,6 @@ class EducationTable:
         self, classroom_id: str, user_id: str, db: Optional[Session] = None
     ) -> Optional[ClassroomMemberModel]:
         with get_db_context(db) as db:
-            self._ensure_classroom_tables(db)
             member = (
                 db.query(ClassroomMember)
                 .filter(
@@ -1017,7 +918,6 @@ class EducationTable:
         db: Optional[Session] = None,
     ) -> list[ClassroomMemberModel]:
         with get_db_context(db) as db:
-            self._ensure_classroom_tables(db)
             query = db.query(ClassroomMember).filter(
                 ClassroomMember.classroom_id == classroom_id
             )
@@ -1033,7 +933,6 @@ class EducationTable:
         self, user_id: str, db: Optional[Session] = None
     ) -> Optional[ClassroomMemberModel]:
         with get_db_context(db) as db:
-            self._ensure_classroom_tables(db)
             member = (
                 db.query(ClassroomMember)
                 .filter(ClassroomMember.user_id == user_id)
@@ -1046,7 +945,6 @@ class EducationTable:
         self, classroom_id: str, user_id: str, db: Optional[Session] = None
     ) -> bool:
         with get_db_context(db) as db:
-            self._ensure_classroom_tables(db)
             deleted = (
                 db.query(ClassroomMember)
                 .filter(
@@ -1171,7 +1069,6 @@ class EducationTable:
         self, assignment_id: str, db: Optional[Session] = None
     ) -> list[WritingSessionModel]:
         with get_db_context(db) as db:
-            self._ensure_writing_tables(db)
             sessions = (
                 db.query(WritingSession)
                 .filter(WritingSession.assignment_id == assignment_id)
@@ -1194,7 +1091,6 @@ class EducationTable:
         self, assignment_id: str, db: Optional[Session] = None
     ) -> int:
         with get_db_context(db) as db:
-            self._ensure_writing_tables(db)
             rows = (
                 db.query(EducationNotification)
                 .filter(
@@ -1268,7 +1164,6 @@ class EducationTable:
         self, session_id: str, db: Optional[Session] = None
     ) -> Optional[WritingSessionModel]:
         with get_db_context(db) as db:
-            self._ensure_writing_tables(db)
             session = db.get(WritingSession, session_id)
             return WritingSessionModel.model_validate(session) if session else None
 
@@ -1276,7 +1171,6 @@ class EducationTable:
         self, assignment_id: str, owner_user_id: str, db: Optional[Session] = None
     ) -> Optional[WritingSessionModel]:
         with get_db_context(db) as db:
-            self._ensure_writing_tables(db)
             session = (
                 db.query(WritingSession)
                 .filter(
@@ -1292,7 +1186,6 @@ class EducationTable:
         self, session_id: str, owner_user_id: str, db: Optional[Session] = None
     ) -> Optional[WritingSessionModel]:
         with get_db_context(db) as db:
-            self._ensure_writing_tables(db)
             session = (
                 db.query(WritingSession)
                 .filter(
@@ -1308,7 +1201,6 @@ class EducationTable:
         self, chat_id: str, db: Optional[Session] = None
     ) -> Optional[WritingSessionModel]:
         with get_db_context(db) as db:
-            self._ensure_writing_tables(db)
             session = (
                 db.query(WritingSession)
                 .filter(
@@ -1323,7 +1215,6 @@ class EducationTable:
         self, folder_id: str, db: Optional[Session] = None
     ) -> Optional[WritingSessionModel]:
         with get_db_context(db) as db:
-            self._ensure_writing_tables(db)
             session = (
                 db.query(WritingSession)
                 .filter(WritingSession.folder_id == folder_id)
@@ -1335,7 +1226,6 @@ class EducationTable:
         self, owner_user_id: str, db: Optional[Session] = None
     ) -> list[WritingSessionModel]:
         with get_db_context(db) as db:
-            self._ensure_writing_tables(db)
             sessions = (
                 db.query(WritingSession)
                 .filter(WritingSession.owner_user_id == owner_user_id)
@@ -1360,7 +1250,6 @@ class EducationTable:
         db: Optional[Session] = None,
     ) -> WritingSessionModel:
         with get_db_context(db) as db:
-            self._ensure_writing_tables(db)
             now = int(time.time())
             session = WritingSession(
                 id=session_id or str(uuid.uuid4()),
@@ -1391,7 +1280,6 @@ class EducationTable:
         db: Optional[Session] = None,
     ) -> Optional[WritingSessionModel]:
         with get_db_context(db) as db:
-            self._ensure_writing_tables(db)
             session = db.get(WritingSession, session_id)
             if session is None:
                 return None
@@ -1412,7 +1300,6 @@ class EducationTable:
         db: Optional[Session] = None,
     ) -> Optional[WritingSessionModel]:
         with get_db_context(db) as db:
-            self._ensure_writing_tables(db)
             session = db.get(WritingSession, session_id)
             if session is None:
                 return None
@@ -1435,7 +1322,6 @@ class EducationTable:
         # ("database is locked") and their deletes silently do nothing.
         related_folder_ids: list[str] = []
         with get_db_context(db) as sync_db:
-            self._ensure_writing_tables(sync_db)
             session = (
                 sync_db.query(WritingSession)
                 .filter(
@@ -1538,7 +1424,6 @@ class EducationTable:
         db: Optional[Session] = None,
     ) -> WritingVersionModel:
         with get_db_context(db) as db:
-            self._ensure_writing_tables(db)
             version_count = (
                 db.query(WritingVersion)
                 .filter(WritingVersion.writing_session_id == session_id)
@@ -1562,7 +1447,6 @@ class EducationTable:
         self, session_id: str, db: Optional[Session] = None
     ) -> list[WritingVersionModel]:
         with get_db_context(db) as db:
-            self._ensure_writing_tables(db)
             versions = (
                 db.query(WritingVersion)
                 .filter(WritingVersion.writing_session_id == session_id)
@@ -1575,7 +1459,6 @@ class EducationTable:
         self, version_id: str, db: Optional[Session] = None
     ) -> Optional[WritingVersionModel]:
         with get_db_context(db) as db:
-            self._ensure_writing_tables(db)
             version = db.get(WritingVersion, version_id)
             return WritingVersionModel.model_validate(version) if version else None
 
@@ -1588,7 +1471,6 @@ class EducationTable:
         db: Optional[Session] = None,
     ) -> list[ProvenanceSegmentModel]:
         with get_db_context(db) as db:
-            self._ensure_writing_tables(db)
             if replace_existing:
                 db.query(ProvenanceSegment).filter(
                     ProvenanceSegment.writing_session_id == session_id
@@ -1639,7 +1521,6 @@ class EducationTable:
         self, session_id: str, db: Optional[Session] = None
     ) -> list[ProvenanceSegmentModel]:
         with get_db_context(db) as db:
-            self._ensure_writing_tables(db)
             segments = (
                 db.query(ProvenanceSegment)
                 .filter(ProvenanceSegment.writing_session_id == session_id)
@@ -1658,7 +1539,6 @@ class EducationTable:
         db: Optional[Session] = None,
     ) -> list[EditorOperationModel]:
         with get_db_context(db) as db:
-            self._ensure_writing_tables(db)
             records = []
             now = int(time.time())
             for operation in operations:
@@ -1686,7 +1566,6 @@ class EducationTable:
         self, session_id: str, db: Optional[Session] = None
     ) -> list[EditorOperationModel]:
         with get_db_context(db) as db:
-            self._ensure_writing_tables(db)
             operations = (
                 db.query(EditorOperation)
                 .filter(EditorOperation.writing_session_id == session_id)
@@ -1707,7 +1586,6 @@ class EducationTable:
         db: Optional[Session] = None,
     ) -> AnalysisResultModel:
         with get_db_context(db) as db:
-            self._ensure_writing_tables(db)
             query = db.query(AnalysisResult).filter(
                 AnalysisResult.writing_session_id == session_id,
                 AnalysisResult.result_type == result_type,
@@ -1744,7 +1622,6 @@ class EducationTable:
         db: Optional[Session] = None,
     ) -> Optional[AnalysisResultModel]:
         with get_db_context(db) as db:
-            self._ensure_writing_tables(db)
             query = db.query(AnalysisResult).filter(
                 AnalysisResult.writing_session_id == session_id,
                 AnalysisResult.result_type == result_type,
@@ -1764,7 +1641,6 @@ class EducationTable:
         db: Optional[Session] = None,
     ) -> MicroReflectionModel:
         with get_db_context(db) as db:
-            self._ensure_writing_tables(db)
             reflection = MicroReflection(
                 id=str(uuid.uuid4()),
                 assignment_id=assignment_id,
@@ -1783,7 +1659,6 @@ class EducationTable:
         self, reflection_id: str, db: Optional[Session] = None
     ) -> Optional[MicroReflectionModel]:
         with get_db_context(db) as db:
-            self._ensure_writing_tables(db)
             reflection = db.get(MicroReflection, reflection_id)
             return (
                 MicroReflectionModel.model_validate(reflection) if reflection else None
@@ -1800,7 +1675,6 @@ class EducationTable:
         db: Optional[Session] = None,
     ) -> SubmissionModel:
         with get_db_context(db) as db:
-            self._ensure_writing_tables(db)
             now = int(time.time())
             current = (
                 db.query(Submission)
@@ -1874,7 +1748,6 @@ class EducationTable:
         self, submission_id: str, db: Optional[Session] = None
     ) -> Optional[SubmissionModel]:
         with get_db_context(db) as db:
-            self._ensure_writing_tables(db)
             submission = db.get(Submission, submission_id)
             return SubmissionModel.model_validate(submission) if submission else None
 
@@ -1882,7 +1755,6 @@ class EducationTable:
         self, assignment_id: str, student_id: str, db: Optional[Session] = None
     ) -> Optional[SubmissionModel]:
         with get_db_context(db) as db:
-            self._ensure_writing_tables(db)
             submission = (
                 db.query(Submission)
                 .filter(
@@ -1899,7 +1771,6 @@ class EducationTable:
         self, assignment_id: str, student_id: str, db: Optional[Session] = None
     ) -> list[SubmissionModel]:
         with get_db_context(db) as db:
-            self._ensure_writing_tables(db)
             submissions = (
                 db.query(Submission)
                 .filter(
@@ -1915,7 +1786,6 @@ class EducationTable:
         self, session_id: str, status: str, db: Optional[Session] = None
     ) -> None:
         with get_db_context(db) as db:
-            self._ensure_writing_tables(db)
             session = db.get(WritingSession, session_id)
             if session is not None:
                 session.status = status
@@ -1926,20 +1796,11 @@ class EducationTable:
         self, submission_id: str, db: Optional[Session] = None
     ) -> Optional[SubmissionReviewModel]:
         with get_db_context(db) as db:
-            self._ensure_writing_tables(db)
-            try:
-                review = (
-                    db.query(SubmissionReview)
-                    .filter(SubmissionReview.submission_id == submission_id)
-                    .first()
-                )
-            except OperationalError:
-                self._ensure_submission_review_table(db)
-                review = (
-                    db.query(SubmissionReview)
-                    .filter(SubmissionReview.submission_id == submission_id)
-                    .first()
-                )
+            review = (
+                db.query(SubmissionReview)
+                .filter(SubmissionReview.submission_id == submission_id)
+                .first()
+            )
             return SubmissionReviewModel.model_validate(review) if review else None
 
     def get_submission_reviews_by_submission_ids(
@@ -1948,7 +1809,6 @@ class EducationTable:
         if not submission_ids:
             return {}
         with get_db_context(db) as db:
-            self._ensure_writing_tables(db)
             reviews = (
                 db.query(SubmissionReview)
                 .filter(SubmissionReview.submission_id.in_(submission_ids))
@@ -1968,21 +1828,12 @@ class EducationTable:
         db: Optional[Session] = None,
     ) -> SubmissionReviewModel:
         with get_db_context(db) as db:
-            self._ensure_writing_tables(db)
             now = int(time.time())
-            try:
-                review = (
-                    db.query(SubmissionReview)
-                    .filter(SubmissionReview.submission_id == submission_id)
-                    .first()
-                )
-            except OperationalError:
-                self._ensure_submission_review_table(db)
-                review = (
-                    db.query(SubmissionReview)
-                    .filter(SubmissionReview.submission_id == submission_id)
-                    .first()
-                )
+            review = (
+                db.query(SubmissionReview)
+                .filter(SubmissionReview.submission_id == submission_id)
+                .first()
+            )
             if review is None:
                 review = SubmissionReview(
                     id=str(uuid.uuid4()),
@@ -2021,7 +1872,6 @@ class EducationTable:
         self, assignment_id: str, db: Optional[Session] = None
     ) -> list[SubmissionModel]:
         with get_db_context(db) as db:
-            self._ensure_writing_tables(db)
             submissions = (
                 db.query(Submission)
                 .filter(
@@ -2045,7 +1895,6 @@ class EducationTable:
         if not user_ids:
             return 0
         with get_db_context(db) as db:
-            self._ensure_writing_tables(db)
             now = int(time.time())
             for user_id in user_ids:
                 db.add(
@@ -2065,7 +1914,6 @@ class EducationTable:
         self, user_id: str, db: Optional[Session] = None
     ) -> dict:
         with get_db_context(db) as db:
-            self._ensure_writing_tables(db)
             rows = (
                 db.query(EducationNotification)
                 .filter(
@@ -2087,7 +1935,6 @@ class EducationTable:
         db: Optional[Session] = None,
     ) -> int:
         with get_db_context(db) as db:
-            self._ensure_writing_tables(db)
             query = db.query(EducationNotification).filter(
                 EducationNotification.user_id == user_id,
                 EducationNotification.read_at.is_(None),
