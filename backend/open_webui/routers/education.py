@@ -5,7 +5,7 @@ import re
 import time
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import NamedTuple, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import Response
@@ -35,6 +35,7 @@ from open_webui.models.education import (
     ClassroomMembersActionForm,
     ClassroomMembersActionResult,
     ClassroomMemberTransferForm,
+    ClassroomModel,
     ClassroomProgressAssignmentItem,
     ClassroomProgressResponse,
     ClassroomResponse,
@@ -54,6 +55,7 @@ from open_webui.models.education import (
     SubmissionCreateForm,
     SubmissionDetailResponse,
     SubmissionListItem,
+    SubmissionModel,
     SubmissionReviewForm,
     StudentAssignmentListItem,
     StudentPerformanceItem,
@@ -67,6 +69,7 @@ from open_webui.models.education import (
     VersionCreateForm,
     WritingHomeResponse,
     WritingRecentItem,
+    WritingSessionModel,
     WritingVersionSummaryModel,
 )
 from open_webui.models.notes import NoteForm, Notes
@@ -294,6 +297,24 @@ def _get_assignment_or_404(assignment_id: str, db: Session) -> AssignmentModel:
             status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found"
         )
     return assignment
+
+
+def _get_classroom_or_404(classroom_id: str, db: Session) -> ClassroomModel:
+    classroom = Education.get_classroom_by_id(classroom_id, db=db)
+    if classroom is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Classroom not found"
+        )
+    return classroom
+
+
+def _get_submission_or_404(submission_id: str, db: Session) -> SubmissionModel:
+    submission = Education.get_submission_by_id(submission_id, db=db)
+    if submission is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found"
+        )
+    return submission
 
 
 def _load_submission_rounds_with_reviews(
@@ -555,6 +576,59 @@ def _ensure_assignment_access(
         )
 
     return member.member_role
+
+
+class TeacherSubmissionScope(NamedTuple):
+    submission: SubmissionModel
+    assignment: AssignmentModel
+
+
+def require_teacher_classroom(
+    classroom_id: str,
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+) -> ClassroomModel:
+    """路径含 {classroom_id} 的教师端接口:校验教学身份 + 班级教师权限。"""
+    _ensure_teacher_identity(user)
+    classroom = _get_classroom_or_404(classroom_id, db)
+    _ensure_classroom_access(user, classroom, db, require_teacher=True)
+    return classroom
+
+
+def require_teacher_assignment(
+    assignment_id: str,
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+) -> AssignmentModel:
+    """路径含 {assignment_id} 的教师端接口:校验教学身份 + 作业教师权限。"""
+    _ensure_teacher_identity(user)
+    assignment = _get_assignment_or_404(assignment_id, db)
+    _ensure_assignment_access(user, assignment, db, require_teacher=True)
+    return assignment
+
+
+def require_teacher_submission(
+    submission_id: str,
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+) -> TeacherSubmissionScope:
+    """路径含 {submission_id} 的教师端接口:提交所属作业需具备教师权限。"""
+    _ensure_teacher_identity(user)
+    submission = _get_submission_or_404(submission_id, db)
+    assignment = _get_assignment_or_404(submission.assignment_id, db)
+    _ensure_assignment_access(user, assignment, db, require_teacher=True)
+    return TeacherSubmissionScope(submission=submission, assignment=assignment)
+
+
+def require_owned_writing_session(
+    session_id: str,
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+) -> WritingSessionModel:
+    """路径含 {session_id} 的写作接口:会话必须属于当前用户。"""
+    session = _get_workspace_session_or_404(session_id, db)
+    _ensure_workspace_session_owner(user, session)
+    return session
 
 
 # Bump whenever the provenance/highlight analysis logic changes so cached
@@ -1581,13 +1655,10 @@ async def create_assignment(
 async def update_assignment(
     assignment_id: str,
     form_data: AssignmentUpdateForm,
+    assignment: AssignmentModel = Depends(require_teacher_assignment),
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
-    _ensure_teacher_identity(user)
-    assignment = _get_assignment_or_404(assignment_id, db)
-    _ensure_assignment_access(user, assignment, db, require_teacher=True)
-
     next_status = (
         form_data.status
         if "status" in form_data.model_fields_set
@@ -1605,12 +1676,7 @@ async def update_assignment(
         )
 
     if form_data.classroom_id is not None:
-        classroom = Education.get_classroom_by_id(form_data.classroom_id, db=db)
-        if classroom is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Classroom not found",
-            )
+        classroom = _get_classroom_or_404(form_data.classroom_id, db)
         _ensure_classroom_access(user, classroom, db, require_teacher=True)
         if form_data.classroom_id != assignment.classroom_id and Education.get_submissions_by_assignment(
             assignment.id, db=db
@@ -1662,14 +1728,10 @@ async def update_assignment(
 
 @router.post("/assignments/{assignment_id}/archive", response_model=AssignmentModel)
 async def archive_assignment(
-    assignment_id: str,
-    user=Depends(get_verified_user),
+    assignment: AssignmentModel = Depends(require_teacher_assignment),
     db: Session = Depends(get_session),
 ):
-    _ensure_teacher_identity(user)
-    assignment = _get_assignment_or_404(assignment_id, db)
-    _ensure_assignment_access(user, assignment, db, require_teacher=True)
-    archived_assignment = Education.archive_assignment(assignment_id, db=db)
+    archived_assignment = Education.archive_assignment(assignment.id, db=db)
     if archived_assignment is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1680,25 +1742,21 @@ async def archive_assignment(
 
 @router.delete("/assignments/{assignment_id}")
 async def delete_assignment(
-    assignment_id: str,
-    user=Depends(get_verified_user),
+    assignment: AssignmentModel = Depends(require_teacher_assignment),
     db: Session = Depends(get_session),
 ):
-    _ensure_teacher_identity(user)
-    assignment = _get_assignment_or_404(assignment_id, db)
-    _ensure_assignment_access(user, assignment, db, require_teacher=True)
-    if Education.get_submissions_by_assignment(assignment_id, db=db):
+    if Education.get_submissions_by_assignment(assignment.id, db=db):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Assignments with submissions cannot be deleted; archive instead",
         )
-    if Education.get_writing_sessions_by_assignment(assignment_id, db=db):
+    if Education.get_writing_sessions_by_assignment(assignment.id, db=db):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Assignments with student writing activity cannot be deleted; archive instead",
         )
-    Education.delete_assignment_notifications(assignment_id, db=db)
-    Education.delete_assignment(assignment_id, db=db)
+    Education.delete_assignment_notifications(assignment.id, db=db)
+    Education.delete_assignment(assignment.id, db=db)
     return {"ok": True}
 
 
@@ -1720,14 +1778,9 @@ def _get_unsubmitted_members(assignment, db: Session):
     response_model=list[UnsubmittedStudentItem],
 )
 async def get_assignment_unsubmitted_students(
-    assignment_id: str,
-    user=Depends(get_verified_user),
+    assignment: AssignmentModel = Depends(require_teacher_assignment),
     db: Session = Depends(get_session),
 ):
-    _ensure_teacher_identity(user)
-    assignment = _get_assignment_or_404(assignment_id, db)
-    _ensure_assignment_access(user, assignment, db, require_teacher=True)
-
     items = []
     for member in _get_unsubmitted_members(assignment, db):
         member_user = await Users.get_user_by_id(member.user_id, db=db)
@@ -1746,15 +1799,10 @@ async def get_assignment_unsubmitted_students(
     response_model=AssignmentRemindResult,
 )
 async def remind_unsubmitted_students(
-    assignment_id: str,
     form_data: AssignmentRemindForm,
-    user=Depends(get_verified_user),
+    assignment: AssignmentModel = Depends(require_teacher_assignment),
     db: Session = Depends(get_session),
 ):
-    _ensure_teacher_identity(user)
-    assignment = _get_assignment_or_404(assignment_id, db)
-    _ensure_assignment_access(user, assignment, db, require_teacher=True)
-
     unsubmitted_ids = [
         member.user_id for member in _get_unsubmitted_members(assignment, db)
     ]
@@ -1873,20 +1921,11 @@ async def join_classroom(
     response_model=ClassroomResponse,
 )
 async def regenerate_classroom_invite_code(
-    classroom_id: str,
+    classroom: ClassroomModel = Depends(require_teacher_classroom),
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
-    _ensure_teacher_identity(user)
-    classroom = Education.get_classroom_by_id(classroom_id, db=db)
-    if classroom is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Classroom not found",
-        )
-    _ensure_classroom_access(user, classroom, db, require_teacher=True)
-
-    classroom = Education.regenerate_classroom_invite_code(classroom_id, db=db)
+    classroom = Education.regenerate_classroom_invite_code(classroom.id, db=db)
     membership = Education.get_classroom_member(classroom.id, user.id, db=db)
     return ClassroomResponse(classroom=classroom, membership=membership)
 
@@ -1944,13 +1983,9 @@ async def get_teacher_assignments(
     "/teacher/assignments/{assignment_id}", response_model=TeacherAssignmentListItem
 )
 async def get_teacher_assignment(
-    assignment_id: str,
-    user=Depends(get_verified_user),
+    assignment: AssignmentModel = Depends(require_teacher_assignment),
     db: Session = Depends(get_session),
 ):
-    _ensure_teacher_identity(user)
-    assignment = _get_assignment_or_404(assignment_id, db)
-    _ensure_assignment_access(user, assignment, db, require_teacher=True)
     return await _build_teacher_assignment_list_item(assignment, db)
 
 
@@ -2158,18 +2193,10 @@ async def get_teacher_review(
 
 @router.get("/teacher/classrooms/{classroom_id}", response_model=ClassroomResponse)
 async def get_teacher_classroom(
-    classroom_id: str,
+    classroom: ClassroomModel = Depends(require_teacher_classroom),
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
-    _ensure_teacher_identity(user)
-    classroom = Education.get_classroom_by_id(classroom_id, db=db)
-    if classroom is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Classroom not found",
-        )
-    _ensure_classroom_access(user, classroom, db, require_teacher=True)
     membership = Education.get_classroom_member(classroom.id, user.id, db=db)
     return ClassroomResponse(classroom=classroom, membership=membership)
 
@@ -2179,18 +2206,9 @@ async def get_teacher_classroom(
     response_model=list[ClassroomMemberDetail],
 )
 async def get_classroom_members(
-    classroom_id: str,
-    user=Depends(get_verified_user),
+    classroom: ClassroomModel = Depends(require_teacher_classroom),
     db: Session = Depends(get_session),
 ):
-    _ensure_teacher_identity(user)
-    classroom = Education.get_classroom_by_id(classroom_id, db=db)
-    if classroom is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Classroom not found",
-        )
-    _ensure_classroom_access(user, classroom, db, require_teacher=True)
     members = Education.get_classroom_members(
         classroom.id, member_role="student", db=db
     )
@@ -2202,19 +2220,10 @@ async def get_classroom_members(
     response_model=ClassroomMemberDetail,
 )
 async def add_classroom_member(
-    classroom_id: str,
     form_data: ClassroomMemberCreateForm,
-    user=Depends(get_verified_user),
+    classroom: ClassroomModel = Depends(require_teacher_classroom),
     db: Session = Depends(get_session),
 ):
-    _ensure_teacher_identity(user)
-    classroom = Education.get_classroom_by_id(classroom_id, db=db)
-    if classroom is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Classroom not found",
-        )
-    _ensure_classroom_access(user, classroom, db, require_teacher=True)
     member_user = await Users.get_user_by_id(form_data.user_id, db=db)
     if member_user is None:
         raise HTTPException(
@@ -2251,20 +2260,10 @@ async def add_classroom_member(
 
 @router.delete("/teacher/classrooms/{classroom_id}/members/{member_user_id}")
 async def delete_classroom_member(
-    classroom_id: str,
     member_user_id: str,
-    user=Depends(get_verified_user),
+    classroom: ClassroomModel = Depends(require_teacher_classroom),
     db: Session = Depends(get_session),
 ):
-    _ensure_teacher_identity(user)
-    classroom = Education.get_classroom_by_id(classroom_id, db=db)
-    if classroom is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Classroom not found",
-        )
-    _ensure_classroom_access(user, classroom, db, require_teacher=True)
-
     if classroom.teacher_id == member_user_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -2286,20 +2285,10 @@ async def delete_classroom_member(
     response_model=ClassroomBulkImportResult,
 )
 async def bulk_import_classroom_members(
-    classroom_id: str,
     form_data: ClassroomBulkImportForm,
-    user=Depends(get_verified_user),
+    classroom: ClassroomModel = Depends(require_teacher_classroom),
     db: Session = Depends(get_session),
 ):
-    _ensure_teacher_identity(user)
-    classroom = Education.get_classroom_by_id(classroom_id, db=db)
-    if classroom is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Classroom not found",
-        )
-    _ensure_classroom_access(user, classroom, db, require_teacher=True)
-
     result = ClassroomBulkImportResult()
     candidate_ids = {
         item.strip() for item in form_data.user_ids if item and item.strip()
@@ -2369,20 +2358,10 @@ async def bulk_import_classroom_members(
     response_model=ClassroomMembersActionResult,
 )
 async def bulk_remove_classroom_members(
-    classroom_id: str,
     form_data: ClassroomMembersActionForm,
-    user=Depends(get_verified_user),
+    classroom: ClassroomModel = Depends(require_teacher_classroom),
     db: Session = Depends(get_session),
 ):
-    _ensure_teacher_identity(user)
-    classroom = Education.get_classroom_by_id(classroom_id, db=db)
-    if classroom is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Classroom not found",
-        )
-    _ensure_classroom_access(user, classroom, db, require_teacher=True)
-
     result = ClassroomMembersActionResult()
     for user_id in dict.fromkeys(form_data.user_ids):
         if not user_id or classroom.teacher_id == user_id:
@@ -2400,20 +2379,11 @@ async def bulk_remove_classroom_members(
     response_model=ClassroomMembersActionResult,
 )
 async def transfer_classroom_members(
-    classroom_id: str,
     form_data: ClassroomMemberTransferForm,
+    classroom: ClassroomModel = Depends(require_teacher_classroom),
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
-    _ensure_teacher_identity(user)
-    classroom = Education.get_classroom_by_id(classroom_id, db=db)
-    if classroom is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Classroom not found",
-        )
-    _ensure_classroom_access(user, classroom, db, require_teacher=True)
-
     target_classroom = Education.get_classroom_by_id(
         form_data.target_classroom_id.strip(), db=db
     )
@@ -2450,19 +2420,9 @@ async def transfer_classroom_members(
     response_model=ClassroomProgressResponse,
 )
 async def get_classroom_progress(
-    classroom_id: str,
-    user=Depends(get_verified_user),
+    classroom: ClassroomModel = Depends(require_teacher_classroom),
     db: Session = Depends(get_session),
 ):
-    _ensure_teacher_identity(user)
-    classroom = Education.get_classroom_by_id(classroom_id, db=db)
-    if classroom is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Classroom not found",
-        )
-    _ensure_classroom_access(user, classroom, db, require_teacher=True)
-
     students = Education.get_classroom_members(
         classroom.id, member_role="student", db=db
     )
@@ -2551,19 +2511,9 @@ async def get_classroom_progress(
 
 @router.get("/teacher/classrooms/{classroom_id}/export")
 async def export_classroom_progress(
-    classroom_id: str,
-    user=Depends(get_verified_user),
+    classroom: ClassroomModel = Depends(require_teacher_classroom),
     db: Session = Depends(get_session),
 ):
-    _ensure_teacher_identity(user)
-    classroom = Education.get_classroom_by_id(classroom_id, db=db)
-    if classroom is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Classroom not found",
-        )
-    _ensure_classroom_access(user, classroom, db, require_teacher=True)
-
     students = Education.get_classroom_members(
         classroom.id, member_role="student", db=db
     )
@@ -2647,20 +2597,10 @@ async def export_classroom_progress(
     response_model=StudentPerformanceResponse,
 )
 async def get_student_performance(
-    classroom_id: str,
     student_user_id: str,
-    user=Depends(get_verified_user),
+    classroom: ClassroomModel = Depends(require_teacher_classroom),
     db: Session = Depends(get_session),
 ):
-    _ensure_teacher_identity(user)
-    classroom = Education.get_classroom_by_id(classroom_id, db=db)
-    if classroom is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Classroom not found",
-        )
-    _ensure_classroom_access(user, classroom, db, require_teacher=True)
-
     member = Education.get_classroom_member(classroom.id, student_user_id, db=db)
     if member is None or member.member_role != "student":
         raise HTTPException(
@@ -2734,18 +2674,9 @@ async def get_student_performance(
     response_model=list[TeacherAssignmentListItem],
 )
 async def get_teacher_classroom_assignments(
-    classroom_id: str,
-    user=Depends(get_verified_user),
+    classroom: ClassroomModel = Depends(require_teacher_classroom),
     db: Session = Depends(get_session),
 ):
-    _ensure_teacher_identity(user)
-    classroom = Education.get_classroom_by_id(classroom_id, db=db)
-    if classroom is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Classroom not found",
-        )
-    _ensure_classroom_access(user, classroom, db, require_teacher=True)
     assignments = Education.get_assignments_by_classroom(classroom.id, db=db)
     return [
         await _build_teacher_assignment_list_item(assignment, db)
@@ -3012,13 +2943,10 @@ async def create_personal_writing(
     "/writing/{session_id}/workspace", response_model=UnifiedWritingWorkspaceResponse
 )
 async def get_writing_workspace(
-    session_id: str,
+    session: WritingSessionModel = Depends(require_owned_writing_session),
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
-    session = _get_workspace_session_or_404(session_id, db)
-    _ensure_workspace_session_owner(user, session)
-
     note = await Notes.get_note_by_id(session.note_id, db=db)
     if note is None:
         raise HTTPException(
@@ -3070,18 +2998,16 @@ async def get_writing_workspace(
 
 @router.delete("/me/writing/personal/{session_id}", response_model=dict)
 async def delete_personal_writing(
-    session_id: str,
+    session: WritingSessionModel = Depends(require_owned_writing_session),
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
-    session = _get_workspace_session_or_404(session_id, db)
-    _ensure_workspace_session_owner(user, session)
     if session.scope != "personal":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid writing scope"
         )
 
-    deleted = await Education.delete_personal_writing_session(session_id, user.id, db=db)
+    deleted = await Education.delete_personal_writing_session(session.id, user.id, db=db)
     if deleted is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Writing session not found"
@@ -3144,14 +3070,10 @@ async def get_student_assignment_workspaces(
 
 @router.post("/writing-sessions/{session_id}/autosave")
 async def autosave_writing_session(
-    session_id: str,
     form_data: AutosaveForm,
-    user=Depends(get_verified_user),
+    session: WritingSessionModel = Depends(require_owned_writing_session),
     db: Session = Depends(get_session),
 ):
-    session = _get_workspace_session_or_404(session_id, db)
-    _ensure_workspace_session_owner(user, session)
-
     note = await Notes.get_note_by_id(session.note_id, db=db)
     if note is None:
         raise HTTPException(
@@ -3173,43 +3095,35 @@ async def autosave_writing_session(
         ),
         db=db,
     )
-    Education.touch_writing_session(session_id, db=db)
+    Education.touch_writing_session(session.id, db=db)
     return {"ok": True, "saved_at": int(time.time())}
 
 
 @router.post("/writing-sessions/{session_id}/versions")
 async def create_writing_version(
-    session_id: str,
     form_data: VersionCreateForm,
-    user=Depends(get_verified_user),
+    session: WritingSessionModel = Depends(require_owned_writing_session),
     db: Session = Depends(get_session),
 ):
-    session = _get_workspace_session_or_404(session_id, db)
-    _ensure_workspace_session_owner(user, session)
-
     version = Education.insert_version(
-        session_id,
+        session.id,
         form_data.trigger_type,
         form_data.content_json,
         form_data.content_text,
         db=db,
     )
-    Education.touch_writing_session(session_id, db=db)
+    Education.touch_writing_session(session.id, db=db)
     return version
 
 
 @router.post("/writing-sessions/{session_id}/provenance")
 async def create_provenance_segments(
-    session_id: str,
     form_data: ProvenanceCreateForm,
-    user=Depends(get_verified_user),
+    session: WritingSessionModel = Depends(require_owned_writing_session),
     db: Session = Depends(get_session),
 ):
-    session = _get_workspace_session_or_404(session_id, db)
-    _ensure_workspace_session_owner(user, session)
-
     return Education.insert_provenance_segments(
-        session_id,
+        session.id,
         form_data.segments,
         version_id=form_data.version_id,
         replace_existing=form_data.replace_existing,
@@ -3219,15 +3133,13 @@ async def create_provenance_segments(
 
 @router.post("/writing-sessions/{session_id}/operations")
 async def create_editor_operations(
-    session_id: str,
     form_data: EditorOperationCreateForm,
+    session: WritingSessionModel = Depends(require_owned_writing_session),
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
-    session = _get_workspace_session_or_404(session_id, db)
-    _ensure_workspace_session_owner(user, session)
     return Education.insert_editor_operations(
-        session_id,
+        session.id,
         user.id,
         form_data.operations,
         db=db,
@@ -3236,15 +3148,12 @@ async def create_editor_operations(
 
 @router.post("/writing-sessions/{session_id}/chat/messages/{message_id}")
 async def upsert_writing_chat_message(
-    session_id: str,
     message_id: str,
     form_data: ChatMessageUpsertForm,
+    session: WritingSessionModel = Depends(require_owned_writing_session),
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
-    session = _get_workspace_session_or_404(session_id, db)
-    _ensure_workspace_session_owner(user, session)
-
     active_chat_id = session.active_chat_id or session.chat_id
     if active_chat_id is None:
         prompt_preview = (form_data.message or {}).get("content", "")[
@@ -3533,14 +3442,10 @@ async def get_my_assignment_submissions(
     response_model=list[SubmissionListItem],
 )
 async def get_assignment_submissions(
-    assignment_id: str,
-    user=Depends(get_verified_user),
+    assignment: AssignmentModel = Depends(require_teacher_assignment),
     db: Session = Depends(get_session),
 ):
-    _ensure_teacher_identity(user)
-    assignment = _get_assignment_or_404(assignment_id, db)
-    _ensure_assignment_access(user, assignment, db, require_teacher=True)
-    submissions = Education.get_submissions_by_assignment(assignment_id, db=db)
+    submissions = Education.get_submissions_by_assignment(assignment.id, db=db)
 
     return [
         await _build_submission_list_item(submission, assignment, db)
@@ -3552,19 +3457,10 @@ async def get_assignment_submissions(
     "/teacher/submissions/{submission_id}", response_model=SubmissionDetailResponse
 )
 async def get_submission_detail(
-    submission_id: str,
-    user=Depends(get_verified_user),
+    scope: TeacherSubmissionScope = Depends(require_teacher_submission),
     db: Session = Depends(get_session),
 ):
-    _ensure_teacher_identity(user)
-    submission = Education.get_submission_by_id(submission_id, db=db)
-    if submission is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found"
-        )
-
-    assignment = _get_assignment_or_404(submission.assignment_id, db)
-    _ensure_assignment_access(user, assignment, db, require_teacher=True)
+    submission, assignment = scope
     session = _get_workspace_session_or_404(submission.writing_session_id, db)
     versions = Education.get_versions(session.id, db=db)
     analysis = await _get_or_build_submission_analysis(submission, session, db)
@@ -3637,19 +3533,10 @@ async def get_submission_detail(
     response_model=list[WritingVersionSummaryModel],
 )
 async def get_submission_versions(
-    submission_id: str,
-    user=Depends(get_verified_user),
+    scope: TeacherSubmissionScope = Depends(require_teacher_submission),
     db: Session = Depends(get_session),
 ):
-    _ensure_teacher_identity(user)
-    submission = Education.get_submission_by_id(submission_id, db=db)
-    if submission is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found"
-        )
-    assignment = _get_assignment_or_404(submission.assignment_id, db)
-    _ensure_assignment_access(user, assignment, db, require_teacher=True)
-    session = _get_workspace_session_or_404(submission.writing_session_id, db)
+    session = _get_workspace_session_or_404(scope.submission.writing_session_id, db)
     return [
         WritingVersionSummaryModel.model_validate(version)
         for version in Education.get_versions(session.id, db=db)
@@ -3658,19 +3545,10 @@ async def get_submission_versions(
 
 @router.get("/teacher/submissions/{submission_id}/diff")
 async def get_submission_round_diff(
-    submission_id: str,
-    user=Depends(get_verified_user),
+    scope: TeacherSubmissionScope = Depends(require_teacher_submission),
     db: Session = Depends(get_session),
 ):
-    _ensure_teacher_identity(user)
-    submission = Education.get_submission_by_id(submission_id, db=db)
-    if submission is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found"
-        )
-    assignment = _get_assignment_or_404(submission.assignment_id, db)
-    _ensure_assignment_access(user, assignment, db, require_teacher=True)
-
+    submission = scope.submission
     previous = next(
         (
             item
@@ -3706,18 +3584,10 @@ async def get_submission_round_diff(
 
 @router.post("/teacher/submissions/{submission_id}/analysis")
 async def recompute_submission_analysis(
-    submission_id: str,
-    user=Depends(get_verified_user),
+    scope: TeacherSubmissionScope = Depends(require_teacher_submission),
     db: Session = Depends(get_session),
 ):
-    _ensure_teacher_identity(user)
-    submission = Education.get_submission_by_id(submission_id, db=db)
-    if submission is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found"
-        )
-    assignment = _get_assignment_or_404(submission.assignment_id, db)
-    _ensure_assignment_access(user, assignment, db, require_teacher=True)
+    submission = scope.submission
     if submission.is_current != 1:
         # 历史轮只读:重算会用当前会话数据覆盖该轮的 analysis_result
         raise HTTPException(
@@ -3745,72 +3615,64 @@ async def recompute_submission_analysis(
     return payload
 
 
+async def _load_submission_analysis(
+    scope: TeacherSubmissionScope, db: Session
+) -> dict:
+    session = _get_workspace_session_or_404(scope.submission.writing_session_id, db)
+    return await _get_or_build_submission_analysis(scope.submission, session, db)
+
+
 @router.get("/teacher/submissions/{submission_id}/analysis")
 async def get_submission_analysis(
-    submission_id: str,
-    user=Depends(get_verified_user),
+    scope: TeacherSubmissionScope = Depends(require_teacher_submission),
     db: Session = Depends(get_session),
 ):
-    _ensure_teacher_identity(user)
-    submission = Education.get_submission_by_id(submission_id, db=db)
-    if submission is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found"
-        )
-    assignment = _get_assignment_or_404(submission.assignment_id, db)
-    _ensure_assignment_access(user, assignment, db, require_teacher=True)
-    session = _get_workspace_session_or_404(submission.writing_session_id, db)
-    return await _get_or_build_submission_analysis(submission, session, db)
+    return await _load_submission_analysis(scope, db)
 
 
 @router.get("/teacher/submissions/{submission_id}/analysis/summary")
 async def get_submission_analysis_summary(
-    submission_id: str,
-    user=Depends(get_verified_user),
+    scope: TeacherSubmissionScope = Depends(require_teacher_submission),
     db: Session = Depends(get_session),
 ):
-    analysis = await get_submission_analysis(submission_id, user=user, db=db)
+    analysis = await _load_submission_analysis(scope, db)
     return analysis.get("summary", {})
 
 
 @router.get("/teacher/submissions/{submission_id}/analysis/timeline")
 async def get_submission_analysis_timeline(
-    submission_id: str,
-    user=Depends(get_verified_user),
+    scope: TeacherSubmissionScope = Depends(require_teacher_submission),
     db: Session = Depends(get_session),
 ):
-    analysis = await get_submission_analysis(submission_id, user=user, db=db)
+    analysis = await _load_submission_analysis(scope, db)
     return analysis.get("timeline", [])
 
 
 @router.get("/teacher/submissions/{submission_id}/analysis/highlights")
 async def get_submission_analysis_highlights(
-    submission_id: str,
-    user=Depends(get_verified_user),
+    scope: TeacherSubmissionScope = Depends(require_teacher_submission),
     db: Session = Depends(get_session),
 ):
-    analysis = await get_submission_analysis(submission_id, user=user, db=db)
+    analysis = await _load_submission_analysis(scope, db)
     return analysis.get("highlights", [])
 
 
 @router.get("/teacher/submissions/{submission_id}/analysis/segments")
 async def get_submission_analysis_segments(
-    submission_id: str,
-    user=Depends(get_verified_user),
+    scope: TeacherSubmissionScope = Depends(require_teacher_submission),
     db: Session = Depends(get_session),
 ):
-    analysis = await get_submission_analysis(submission_id, user=user, db=db)
+    analysis = await _load_submission_analysis(scope, db)
     return analysis.get("segments", [])
 
 
 @router.get("/teacher/submissions/{submission_id}/analysis/segments/{segment_id}")
 async def get_submission_analysis_segment_detail(
-    submission_id: str,
     segment_id: str,
-    user=Depends(get_verified_user),
+    scope: TeacherSubmissionScope = Depends(require_teacher_submission),
     db: Session = Depends(get_session),
 ):
-    analysis = await get_submission_analysis(submission_id, user=user, db=db)
+    analysis = await _load_submission_analysis(scope, db)
     segment = next(
         (
             item
@@ -3828,18 +3690,10 @@ async def get_submission_analysis_segment_detail(
 
 @router.get("/teacher/submissions/{submission_id}/review")
 async def get_submission_review(
-    submission_id: str,
-    user=Depends(get_verified_user),
+    scope: TeacherSubmissionScope = Depends(require_teacher_submission),
     db: Session = Depends(get_session),
 ):
-    _ensure_teacher_identity(user)
-    submission = Education.get_submission_by_id(submission_id, db=db)
-    if submission is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found"
-        )
-    assignment = _get_assignment_or_404(submission.assignment_id, db)
-    _ensure_assignment_access(user, assignment, db, require_teacher=True)
+    submission = scope.submission
     review = Education.get_submission_review_by_submission_id(submission.id, db=db)
     return (
         review.model_dump()
@@ -3850,20 +3704,12 @@ async def get_submission_review(
 
 @router.post("/teacher/submissions/{submission_id}/review")
 async def save_submission_review(
-    submission_id: str,
     form_data: SubmissionReviewForm,
+    scope: TeacherSubmissionScope = Depends(require_teacher_submission),
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
-    _ensure_teacher_identity(user)
-    submission = Education.get_submission_by_id(submission_id, db=db)
-    if submission is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found"
-        )
-    assignment = _get_assignment_or_404(submission.assignment_id, db)
-    _ensure_assignment_access(user, assignment, db, require_teacher=True)
-
+    submission, assignment = scope
     if form_data.review_status not in {"pending", "reviewed", "returned"}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -3926,14 +3772,10 @@ async def save_submission_review(
     "/teacher/assignments/{assignment_id}/dashboard", response_model=DashboardResponse
 )
 async def get_teacher_dashboard(
-    assignment_id: str,
-    user=Depends(get_verified_user),
+    assignment: AssignmentModel = Depends(require_teacher_assignment),
     db: Session = Depends(get_session),
 ):
-    _ensure_teacher_identity(user)
-    assignment = _get_assignment_or_404(assignment_id, db)
-    _ensure_assignment_access(user, assignment, db, require_teacher=True)
-    submissions = Education.get_submissions_by_assignment(assignment_id, db=db)
+    submissions = Education.get_submissions_by_assignment(assignment.id, db=db)
 
     items = []
     rewrite_distribution = {
@@ -4078,14 +3920,11 @@ async def get_student_assignments(
 
 @router.post("/writing-sessions/{session_id}/active-chat", response_model=dict)
 async def update_writing_session_active_chat(
-    session_id: str,
     form_data: ActiveChatUpdateForm,
+    session: WritingSessionModel = Depends(require_owned_writing_session),
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
-    session = _get_workspace_session_or_404(session_id, db)
-    _ensure_workspace_session_owner(user, session)
-
     chat_id = form_data.chat_id
     if chat_id is not None:
         chat = await Chats.get_chat_by_id_and_user_id(chat_id, user.id, db=db)
