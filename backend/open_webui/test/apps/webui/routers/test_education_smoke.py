@@ -1881,6 +1881,17 @@ def test_returned_submission_opens_new_round_and_keeps_history(education_client)
     )
     assert historic_save.status_code == 400, historic_save.text
 
+    # 历史轮禁止重算分析:重算会用当前会话数据覆盖该轮的 analysis_result
+    historic_recompute = client.post(
+        f"/api/v1/teacher/submissions/{submission_id}/analysis"
+    )
+    assert historic_recompute.status_code == 409, historic_recompute.text
+
+    current_recompute = client.post(
+        f"/api/v1/teacher/submissions/{new_submission_id}/analysis"
+    )
+    assert current_recompute.status_code == 200, current_recompute.text
+
 
 def test_effective_due_uses_resubmit_due_after_return(education_client):
     client, teacher, _, student, _, _ = education_client
@@ -2124,3 +2135,245 @@ def test_my_assignment_submissions_missing_assignment_returns_404(education_clie
     UserContext.current_user = student
     res = client.get("/api/v1/assignments/does-not-exist/me/submissions")
     assert res.status_code == 404, res.text
+
+
+def test_submit_requires_current_classroom_membership(education_client):
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id, _ = _setup_submitted_assignment(
+        client, teacher, student, "Membership Guard"
+    )
+
+    # 退班后,学生手里的旧写作会话不应再能提交到原班级的作业
+    UserContext.current_user = teacher
+    classroom_id = client.get(f"/api/v1/teacher/assignments/{assignment['id']}").json()[
+        "classroom"
+    ]["id"]
+    remove_res = client.delete(
+        f"/api/v1/teacher/classrooms/{classroom_id}/members/{student.id}"
+    )
+    assert remove_res.status_code == 200, remove_res.text
+
+    UserContext.current_user = student
+    submit_res = client.post(
+        f"/api/v1/assignments/{assignment['id']}/submit",
+        json=_submit_body(session_id, "draft submitted after leaving the classroom"),
+    )
+    assert submit_res.status_code == 403, submit_res.text
+
+
+def test_submit_rejected_for_archived_assignment(education_client):
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id, _ = _setup_submitted_assignment(
+        client, teacher, student, "Archived Guard"
+    )
+
+    UserContext.current_user = teacher
+    archive_res = client.post(f"/api/v1/assignments/{assignment['id']}/archive")
+    assert archive_res.status_code == 200, archive_res.text
+
+    UserContext.current_user = student
+    submit_res = client.post(
+        f"/api/v1/assignments/{assignment['id']}/submit",
+        json=_submit_body(session_id, "draft submitted after the assignment archived"),
+    )
+    assert submit_res.status_code == 400, submit_res.text
+    assert submit_res.json()["detail"] == "Assignment is not open for submission"
+
+
+def test_update_assignment_rejects_null_and_unknown_status(education_client):
+    client, teacher, _, _, _, _ = education_client
+
+    UserContext.current_user = teacher
+    classroom = client.post("/api/v1/classrooms", json={"name": "Patch Guard"}).json()[
+        "classroom"
+    ]
+    assignment = client.post(
+        "/api/v1/assignments",
+        json={
+            "title": "Patch Essay",
+            "classroom_ids": [classroom["id"]],
+            "due_at": 2000000000,
+        },
+    ).json()[0]
+
+    for payload in ({"title": None}, {"classroom_id": None}, {"status": "deleted"}):
+        res = client.patch(f"/api/v1/assignments/{assignment['id']}", json=payload)
+        assert res.status_code == 400, f"{payload} -> {res.status_code} {res.text}"
+
+    # description 允许清空
+    res = client.patch(
+        f"/api/v1/assignments/{assignment['id']}", json={"description": None}
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["description"] is None
+
+
+def test_unsubmitted_listing_and_reminder_targets_only_unsubmitted(education_client):
+    client, teacher, _, student, outsider, _ = education_client
+
+    UserContext.current_user = teacher
+    classroom = client.post("/api/v1/classrooms", json={"name": "Remind CR"}).json()[
+        "classroom"
+    ]
+    assignment = client.post(
+        "/api/v1/assignments",
+        json={
+            "title": "Remind Essay",
+            "classroom_ids": [classroom["id"]],
+            "due_at": 2000000000,
+        },
+    ).json()[0]
+
+    for member in (student, outsider):
+        UserContext.current_user = member
+        join = client.post(
+            "/api/v1/classrooms/join", json={"invite_code": classroom["invite_code"]}
+        )
+        assert join.status_code == 200, join.text
+
+    # student 提交,outsider 未提交
+    UserContext.current_user = student
+    session_id = client.get(
+        f"/api/v1/assignments/{assignment['id']}/workspace"
+    ).json()["writing_session"]["id"]
+    submit_res = client.post(
+        f"/api/v1/assignments/{assignment['id']}/submit",
+        json=_submit_body(session_id, "submitted draft for the reminder test"),
+    )
+    assert submit_res.status_code == 200, submit_res.text
+
+    UserContext.current_user = teacher
+    unsubmitted = client.get(
+        f"/api/v1/teacher/assignments/{assignment['id']}/unsubmitted"
+    )
+    assert unsubmitted.status_code == 200, unsubmitted.text
+    assert [item["user_id"] for item in unsubmitted.json()] == [outsider.id]
+
+    # 指定名单要和未提交名单取交集,已提交的学生不该收到催交
+    remind = client.post(
+        f"/api/v1/teacher/assignments/{assignment['id']}/remind",
+        json={"user_ids": [student.id, outsider.id]},
+    )
+    assert remind.status_code == 200, remind.text
+    assert remind.json()["user_ids"] == [outsider.id]
+    assert remind.json()["reminded_count"] == 1
+
+    UserContext.current_user = student
+    student_summary = client.get("/api/v1/me/notifications/summary").json()
+    assert student_summary["by_type"].get("assignment_reminder") is None
+    UserContext.current_user = outsider
+    outsider_summary = client.get("/api/v1/me/notifications/summary").json()
+    assert outsider_summary["by_type"].get("assignment_reminder") == 1
+
+
+def test_transfer_classroom_members_between_classrooms(education_client):
+    client, teacher, other_teacher, student, outsider, _ = education_client
+
+    UserContext.current_user = teacher
+    source = client.post("/api/v1/classrooms", json={"name": "Transfer From"}).json()[
+        "classroom"
+    ]
+    target = client.post("/api/v1/classrooms", json={"name": "Transfer To"}).json()[
+        "classroom"
+    ]
+
+    UserContext.current_user = student
+    client.post("/api/v1/classrooms/join", json={"invite_code": source["invite_code"]})
+
+    UserContext.current_user = other_teacher
+    foreign = client.post("/api/v1/classrooms", json={"name": "Foreign CR"}).json()[
+        "classroom"
+    ]
+
+    UserContext.current_user = teacher
+    # 目标班不属于自己
+    forbidden = client.post(
+        f"/api/v1/teacher/classrooms/{source['id']}/members/transfer",
+        json={"user_ids": [student.id], "target_classroom_id": foreign["id"]},
+    )
+    assert forbidden.status_code == 403, forbidden.text
+
+    # 目标班不能是自己
+    same = client.post(
+        f"/api/v1/teacher/classrooms/{source['id']}/members/transfer",
+        json={"user_ids": [student.id], "target_classroom_id": source["id"]},
+    )
+    assert same.status_code == 400, same.text
+
+    # 非本班成员跳过,不计入 affected_count
+    res = client.post(
+        f"/api/v1/teacher/classrooms/{source['id']}/members/transfer",
+        json={
+            "user_ids": [student.id, outsider.id],
+            "target_classroom_id": target["id"],
+        },
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["affected_count"] == 1
+    assert res.json()["skipped_users"] == [outsider.id]
+
+    source_members = client.get(
+        f"/api/v1/teacher/classrooms/{source['id']}/members"
+    ).json()
+    target_members = client.get(
+        f"/api/v1/teacher/classrooms/{target['id']}/members"
+    ).json()
+    assert [item["member"]["user_id"] for item in source_members] == []
+    assert [item["member"]["user_id"] for item in target_members] == [student.id]
+
+
+def test_delete_assignment_guards_and_notification_cleanup(education_client):
+    client, teacher, _, student, _, _ = education_client
+
+    UserContext.current_user = teacher
+    classroom = client.post("/api/v1/classrooms", json={"name": "Delete CR"}).json()[
+        "classroom"
+    ]
+    assignment = client.post(
+        "/api/v1/assignments",
+        json={
+            "title": "Deletable Essay",
+            "classroom_ids": [classroom["id"]],
+            "due_at": 2000000000,
+        },
+    ).json()[0]
+
+    UserContext.current_user = student
+    join = client.post(
+        "/api/v1/classrooms/join", json={"invite_code": classroom["invite_code"]}
+    )
+    assert join.status_code == 200, join.text
+
+    # 学生打开工作区后产生写作会话 → 不允许删除
+    workspace = client.get(f"/api/v1/assignments/{assignment['id']}/workspace")
+    assert workspace.status_code == 200, workspace.text
+
+    UserContext.current_user = teacher
+    blocked = client.delete(f"/api/v1/assignments/{assignment['id']}")
+    assert blocked.status_code == 400, blocked.text
+
+    # 没有任何学生活动的作业可以删除,并清掉相关通知
+    clean_assignment = client.post(
+        "/api/v1/assignments",
+        json={
+            "title": "Untouched Essay",
+            "classroom_ids": [classroom["id"]],
+            "due_at": 2000000000,
+        },
+    ).json()[0]
+
+    UserContext.current_user = student
+    before = client.get("/api/v1/me/notifications/summary").json()["total"]
+    assert before >= 1
+
+    UserContext.current_user = teacher
+    deleted = client.delete(f"/api/v1/assignments/{clean_assignment['id']}")
+    assert deleted.status_code == 200, deleted.text
+    assert (
+        client.get(f"/api/v1/teacher/assignments/{clean_assignment['id']}").status_code
+        == 404
+    )
+
+    UserContext.current_user = student
+    after = client.get("/api/v1/me/notifications/summary").json()["total"]
+    assert after == before - 1
