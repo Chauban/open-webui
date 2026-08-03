@@ -10,6 +10,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import Response
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from open_webui.internal.db import get_session
@@ -3083,6 +3084,10 @@ async def autosave_writing_session(
     _ensure_workspace_session_owner(user, session)
 
     note = await Notes.get_note_by_id(session.note_id, db=db)
+    if note is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Writing note is missing"
+        )
     await Notes.update_note_by_id(
         session.note_id,
         NoteForm(
@@ -3259,6 +3264,10 @@ async def submit_assignment(
         )
 
     note = await Notes.get_note_by_id(session.note_id, db=db)
+    if note is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Writing note is missing"
+        )
     await Notes.update_note_by_id(
         session.note_id,
         NoteForm(
@@ -3325,15 +3334,22 @@ async def submit_assignment(
         form_data.reflection_text,
         db=db,
     )
-    submission = Education.insert_submission(
-        assignment.id,
-        session.owner_user_id,
-        session.id,
-        final_version.id,
-        stats,
-        reflection.id,
-        db=db,
-    )
+    try:
+        submission = Education.insert_submission(
+            assignment.id,
+            session.owner_user_id,
+            session.id,
+            final_version.id,
+            stats,
+            reflection.id,
+            db=db,
+        )
+    except IntegrityError:
+        # 唯一约束 (assignment_id, student_id, round_no):同一轮已被并发请求写入。
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A submission for this round is already being processed",
+        )
     analysis_payload = _build_submission_analysis(
         submission,
         session,
@@ -3477,9 +3493,19 @@ async def get_submission_detail(
     prompt_timeline = await _get_prompt_timeline(session, db)
     student = await Users.get_user_by_id(submission.student_id, db=db)
     note = await Notes.get_note_by_id(session.note_id, db=db)
+    if note is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Writing note is missing"
+        )
     final_version = next(
-        version for version in versions if version.id == submission.final_version_id
+        (version for version in versions if version.id == submission.final_version_id),
+        None,
     )
+    if final_version is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Submission final version not found",
+        )
 
     rounds = []
     for item in Education.get_submission_rounds(

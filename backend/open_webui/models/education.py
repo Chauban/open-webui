@@ -5,10 +5,13 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import OperationalError
-from sqlalchemy import BigInteger, Column, Text, text
+from sqlalchemy import BigInteger, Column, Text, UniqueConstraint, text
 from sqlalchemy.orm import Session
 
 from open_webui.internal.db import Base, JSONField, get_db_context
+
+
+ASSIGNMENT_STATUSES = ("active", "archived")
 
 
 class Assignment(Base):
@@ -160,6 +163,15 @@ class MicroReflection(Base):
 
 class Submission(Base):
     __tablename__ = "submission"
+    __table_args__ = (
+        # 重复点击提交会并发走「先查当前轮再插入」,靠唯一约束兜住。
+        UniqueConstraint(
+            "assignment_id",
+            "student_id",
+            "round_no",
+            name="submission_assignment_student_round_idx",
+        ),
+    )
 
     id = Column(Text, primary_key=True, unique=True)
     assignment_id = Column(Text, nullable=False)
@@ -1118,12 +1130,20 @@ class EducationTable:
                 return None
 
             if "title" in form_data.model_fields_set:
-                assignment.title = form_data.title.strip()
+                title = (form_data.title or "").strip()
+                if not title:
+                    raise ValueError("Assignment title is required")
+                assignment.title = title
             if "description" in form_data.model_fields_set:
-                assignment.description = form_data.description.strip() or None
+                assignment.description = (form_data.description or "").strip() or None
             if "classroom_id" in form_data.model_fields_set:
-                assignment.classroom_id = form_data.classroom_id.strip() or None
+                classroom_id = (form_data.classroom_id or "").strip()
+                if not classroom_id:
+                    raise ValueError("classroom_id is required")
+                assignment.classroom_id = classroom_id
             if "status" in form_data.model_fields_set:
+                if form_data.status not in ASSIGNMENT_STATUSES:
+                    raise ValueError("Invalid assignment status")
                 assignment.status = form_data.status
                 assignment.archived_at = (
                     int(time.time()) if form_data.status == "archived" else None
