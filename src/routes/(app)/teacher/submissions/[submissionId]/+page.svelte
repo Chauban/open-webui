@@ -922,7 +922,9 @@
 													</div>
 													<div class="whitespace-pre-wrap break-words text-gray-800 {isExpanded ? '' : 'line-clamp-3'}">{item.label}</div>
 													{#if item.inserted_length}
-														<div class="mt-1 text-xs text-gray-400">+{item.inserted_length} chars</div>
+														<div class="mt-1 text-xs text-gray-400">
+														{$i18n.t('+{{count}} chars', { count: item.inserted_length })}
+													</div>
 													{/if}
 													{#if isLong}
 														<button
