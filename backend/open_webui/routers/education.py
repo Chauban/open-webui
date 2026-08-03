@@ -3227,11 +3227,16 @@ async def submit_assignment(
         )
 
     assignment = _get_assignment_or_404(assignment_id, db)
-    effective_due_at = _get_effective_due_at(assignment, user.id, db)
-    if effective_due_at is not None and effective_due_at <= int(time.time()):
+    role = _ensure_assignment_access(user, assignment, db)
+    if role not in ("student", "admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only students can submit assignments",
+        )
+    if assignment.status != "active":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Assignment due time has passed",
+            detail="Assignment is not open for submission",
         )
 
     session = _get_workspace_session_or_404(form_data.writing_session_id, db)
@@ -3244,6 +3249,14 @@ async def submit_assignment(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Mismatched session"
         )
     _ensure_workspace_session_owner(user, session)
+
+    # 截止时间按会话归属人算:管理员代提交时不应套用管理员自己的轮次。
+    effective_due_at = _get_effective_due_at(assignment, session.owner_user_id, db)
+    if effective_due_at is not None and effective_due_at <= int(time.time()):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Assignment due time has passed",
+        )
 
     note = await Notes.get_note_by_id(session.note_id, db=db)
     await Notes.update_note_by_id(

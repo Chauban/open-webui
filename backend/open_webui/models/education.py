@@ -5,7 +5,7 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import OperationalError
-from sqlalchemy import BigInteger, Column, Text, inspect, text
+from sqlalchemy import BigInteger, Column, Text, text
 from sqlalchemy.orm import Session
 
 from open_webui.internal.db import Base, JSONField, get_db_context
@@ -854,8 +854,6 @@ class EducationTable:
                 Education._ensure_writing_tables(_sync_db)
             return
         bind = db.get_bind()
-        inspector = inspect(bind)
-        existing_tables = set(inspector.get_table_names())
         self._sqlite_add_missing_columns(
             db,
             "submission",
@@ -867,34 +865,6 @@ class EducationTable:
         self._sqlite_add_missing_columns(
             db, "submission_review", {"resubmit_due_at": "BIGINT"}
         )
-        if "writing_session" in existing_tables:
-            columns = {
-                column["name"] for column in inspector.get_columns("writing_session")
-            }
-            expected_columns = {
-                "id",
-                "assignment_id",
-                "owner_user_id",
-                "scope",
-                "note_id",
-                "folder_id",
-                "chat_id",
-                "active_chat_id",
-                "status",
-                "submitted_submission_id",
-                "created_at",
-                "updated_at",
-            }
-            if columns != expected_columns:
-                for table in [
-                    SubmissionReview.__table__,
-                    Submission.__table__,
-                    MicroReflection.__table__,
-                    ProvenanceSegment.__table__,
-                    WritingVersion.__table__,
-                    WritingSession.__table__,
-                ]:
-                    table.drop(bind=bind, checkfirst=True)
 
         for table in [
             WritingSession.__table__,
