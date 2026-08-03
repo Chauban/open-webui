@@ -9,11 +9,10 @@
 	import { getStudentPerformance } from '$lib/apis/education';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
+	import { getClassroomDisplayName } from '$lib/utils/education';
 
 	const i18n = getContext('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
-	const getClassroomDisplayName = (name: string) =>
-		name?.trim() === 'Default Classroom' ? t('Default Classroom') : name;
 	const getReviewStatusLabel = (value: string) =>
 		({
 			unsubmitted: t('Unsubmitted'),
@@ -68,7 +67,7 @@
 				<div>
 					<div class="mb-2 text-sm text-gray-500">
 						{$i18n.t('Teaching')} / {$i18n.t('Classrooms')} /
-						{getClassroomDisplayName(performance.classroom.name)} / {$i18n.t('Students')}
+						{getClassroomDisplayName(performance.classroom.name, t)} / {$i18n.t('Students')}
 					</div>
 					<h1 class="text-3xl font-semibold">{performance.student_name}</h1>
 					{#if performance.student_email}

@@ -8,11 +8,10 @@
 	import { createClassroom, getTeacherClassrooms } from '$lib/apis/education';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
+	import { getClassroomDisplayName } from '$lib/utils/education';
 
 	const i18n = getContext('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
-	const getClassroomDisplayName = (name: string) =>
-		name?.trim() === 'Default Classroom' ? t('Default Classroom') : name;
 
 	const copyInviteCode = async (inviteCode: string) => {
 		try {
@@ -115,7 +114,7 @@
 					<div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
 						<div>
 							<div class="text-lg font-semibold text-gray-900">
-								{getClassroomDisplayName(item.classroom.name)}
+								{getClassroomDisplayName(item.classroom.name, t)}
 							</div>
 							<div class="mt-3 flex flex-wrap items-center gap-3 text-xs text-gray-500">
 								<div>{$i18n.t('Invite Code')}: {item.classroom.invite_code}</div>

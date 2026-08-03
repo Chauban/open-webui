@@ -8,16 +8,10 @@
 	import { getTeacherAssignments } from '$lib/apis/education';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
+	import { getAssignmentStatusLabel, getClassroomDisplayName } from '$lib/utils/education';
 
 	const i18n = getContext('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
-	const getClassroomDisplayName = (name: string) =>
-		name?.trim() === 'Default Classroom' ? t('Default Classroom') : name;
-	const getAssignmentStatusLabel = (value: string) =>
-		({
-			active: t('Active'),
-			archived: t('Archived')
-		})[value] || value;
 	const isPastDue = (item) =>
 		item.assignment.status === 'active' &&
 		item.assignment.due_at &&
@@ -39,7 +33,7 @@
 			.filter((item, index, list) => item.classroom && list.findIndex((entry) => entry.classroom?.id === item.classroom.id) === index)
 			.map((item) => ({
 				value: item.classroom.id,
-				label: getClassroomDisplayName(item.classroom.name)
+				label: getClassroomDisplayName(item.classroom.name, t)
 			}))
 	];
 
@@ -188,7 +182,7 @@
 								<div class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500">
 									<div>
 										{$i18n.t('Classroom')}:
-										{item.classroom ? getClassroomDisplayName(item.classroom.name) : t('Unknown')}
+										{item.classroom ? getClassroomDisplayName(item.classroom.name, t) : t('Unknown')}
 									</div>
 									<div>{$i18n.t('Students')}: {item.student_count}</div>
 									<div>{$i18n.t('Submissions')}: {item.submission_count}</div>
@@ -197,7 +191,7 @@
 										{#if isPastDue(item)}
 											<span class="text-rose-600">{$i18n.t('Past Due')}</span>
 										{:else}
-											{getAssignmentStatusLabel(item.assignment.status)}
+											{getAssignmentStatusLabel(item.assignment.status, t)}
 										{/if}
 									</div>
 									{#if item.assignment.due_at}

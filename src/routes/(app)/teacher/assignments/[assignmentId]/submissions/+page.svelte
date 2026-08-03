@@ -16,30 +16,10 @@
 	import { educationNotificationSummary } from '$lib/stores';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
+	import { getAiHelpTypeLabel, getReviewStatusLabel } from '$lib/utils/education';
 
 	const i18n = getContext('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
-	const getReviewStatusLabel = (value: string) =>
-		({
-			pending: t('Pending Review'),
-			reviewed: t('Reviewed'),
-			returned: t('Returned')
-		})[value] || value;
-	const getAiHelpTypeLabel = (value: string) =>
-		(
-			{
-				'Understand Assignment': t('Understand Assignment'),
-				Outline: t('Outline'),
-				Examples: t('Examples'),
-				'Explain Concepts': t('Explain Concepts'),
-				'Revise Structure': t('Revise Structure'),
-				Polish: t('Polish'),
-				'Check Errors': t('Check Errors'),
-				"Help Break Through Writer's Block": t("Help Break Through Writer's Block"),
-				'Strengthen Reasoning': t('Strengthen Reasoning'),
-				Other: t('Other')
-			} as Record<string, string>
-		)[value] || value;
 
 	let items = [];
 	let unsubmitted = [];
@@ -290,7 +270,7 @@
 										? item.reflection.ai_help_types.map(getAiHelpTypeLabel).join(' / ')
 										: '-'}
 								</td>
-								<td class="px-4 py-4">{getReviewStatusLabel(item.review_status)}</td>
+								<td class="px-4 py-4">{getReviewStatusLabel(item.review_status, t)}</td>
 								<td class="px-4 py-4">
 									<button
 										class="rounded-full bg-black px-3 py-1.5 text-white"

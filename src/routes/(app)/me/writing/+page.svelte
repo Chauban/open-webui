@@ -24,6 +24,9 @@
 		getWritingHome,
 		joinClassroom
 	} from '$lib/apis/education';
+	import { getClassroomDisplayName } from '$lib/utils/education';
+	import LoadingState from '$lib/components/education/LoadingState.svelte';
+	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 
 	const i18n = getContext('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
@@ -37,16 +40,12 @@
 	let activeTab = 'personal';
 	let deletingPersonalIds = new Set<string>();
 	let homeLoading = false;
+	let pendingDeleteSessionId = '';
+	let showDeleteConfirm = false;
 	let unsubscribeNotifications;
 	let notificationsInitialized = false;
 
 	const DAY_SECONDS = 24 * 60 * 60;
-
-	const LEGACY_DEFAULT_CLASSROOM_NAMES = new Set(['Default Classroom', '默认班级']);
-	const getClassroomNameForDisplay = (name: string) => {
-		const normalizedName = name?.trim();
-		return LEGACY_DEFAULT_CLASSROOM_NAMES.has(normalizedName) ? t('Default Classroom') : name;
-	};
 
 	const getAssignmentStatusLabel = (status: string) => {
 		if (status === 'submitted') return t('Submitted');
@@ -156,6 +155,20 @@
 
 	const isPersonalWritingAlreadyDeleted = (error: unknown) => {
 		return error?.status === 404 || error?.detail === 'Writing session not found';
+	};
+
+	// 删除会连带清掉对应的项目文件夹与对话，且不可撤销，所以先确认。
+	const requestRemovePersonalWriting = (sessionId: string) => {
+		pendingDeleteSessionId = sessionId;
+		showDeleteConfirm = true;
+	};
+
+	const confirmRemovePersonalWriting = async () => {
+		const sessionId = pendingDeleteSessionId;
+		pendingDeleteSessionId = '';
+		if (sessionId) {
+			await removePersonalWriting(sessionId);
+		}
 	};
 
 	const removePersonalWriting = async (sessionId: string) => {
@@ -409,7 +422,7 @@
 								{#if home?.classroom}
 									<div class="text-sm text-gray-600">
 										{$i18n.t('You are connected to {{name}}.', {
-											name: getClassroomNameForDisplay(home.classroom.name)
+											name: getClassroomDisplayName(home.classroom.name, t)
 										})}
 									</div>
 								{:else}
@@ -544,7 +557,7 @@
 											<div class="flex gap-2">
 												<button
 													class="rounded-full border border-gray-300 px-4 py-2 text-sm text-gray-700"
-													on:click={() => removePersonalWriting(item.writing_session.id)}
+													on:click={() => requestRemovePersonalWriting(item.writing_session.id)}
 													disabled={deletingPersonalIds.has(item.writing_session.id)}
 												>
 													{deletingPersonalIds.has(item.writing_session.id)
@@ -574,4 +587,15 @@
 			{loadError}
 		</div>
 	</div>
+{:else}
+	<LoadingState messageKey="Loading writing home..." />
 {/if}
+
+<ConfirmDialog
+	bind:show={showDeleteConfirm}
+	title={$i18n.t('Delete Personal Writing')}
+	message={$i18n.t(
+		'Delete this personal writing? Its project folder and chats are removed as well, and this cannot be undone.'
+	)}
+	on:confirm={confirmRemovePersonalWriting}
+/>

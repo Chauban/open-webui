@@ -10,6 +10,7 @@
 	import { educationNotificationSummary } from '$lib/stores';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
+	import LoadingState from '$lib/components/education/LoadingState.svelte';
 
 	const i18n = getContext('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
@@ -190,5 +191,7 @@
 				{loadError}
 			</div>
 		</div>
+	{:else}
+		<LoadingState messageKey="Loading dashboard..." />
 	{/if}
 </TeacherPageShell>

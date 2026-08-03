@@ -16,16 +16,10 @@
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
+	import { getAssignmentStatusLabel, getClassroomDisplayName, toLocalDateTimeInput } from '$lib/utils/education';
 
 	const i18n = getContext('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
-	const getClassroomDisplayName = (name: string) =>
-		name?.trim() === 'Default Classroom' ? t('Default Classroom') : name;
-	const getAssignmentStatusLabel = (value: string) =>
-		({
-			active: t('Active'),
-			archived: t('Archived')
-		})[value] || value;
 
 	let item = null;
 	let classrooms = [];
@@ -48,11 +42,6 @@
 		item.assignment.due_at * 1000 < Date.now();
 
 	// datetime-local expects a LOCAL "YYYY-MM-DDTHH:mm" string; toISOString() would shift to UTC.
-	const toLocalDateTimeInput = (epoch: number) => {
-		const d = new Date(epoch * 1000);
-		const pad = (n: number) => String(n).padStart(2, '0');
-		return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-	};
 
 	const copyWriteLink = async () => {
 		const link = `${window.location.origin}/assignments/${assignmentId()}/write`;
@@ -165,7 +154,7 @@
 					<div class="mb-2 text-sm text-gray-500">{$i18n.t('Teaching')} / {$i18n.t('Assignments')}</div>
 					<h1 class="text-3xl font-semibold">{item.assignment.title}</h1>
 					<div class="mt-2 text-sm text-gray-500">
-						{item.classroom ? getClassroomDisplayName(item.classroom.name) : t('Unknown classroom')}
+						{item.classroom ? getClassroomDisplayName(item.classroom.name, t) : t('Unknown classroom')}
 					</div>
 				</div>
 				<div class="flex flex-wrap gap-2">
@@ -199,7 +188,7 @@
 				<div class="rounded-3xl border border-gray-200 bg-white p-5">
 					<div class="text-xs uppercase tracking-[0.16em] text-gray-500">{$i18n.t('Status')}</div>
 					<div class="mt-2 text-sm font-medium {isPastDue ? 'text-rose-600' : 'text-gray-900'}">
-						{isPastDue ? $i18n.t('Past Due') : getAssignmentStatusLabel(item.assignment.status)}
+						{isPastDue ? $i18n.t('Past Due') : getAssignmentStatusLabel(item.assignment.status, t)}
 					</div>
 				</div>
 				<div class="rounded-3xl border border-gray-200 bg-white p-5">
@@ -227,7 +216,7 @@
 								<div class="mb-2 text-sm font-medium">{$i18n.t('Classroom')}</div>
 								<select bind:value={classroomId} class="w-full rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none">
 									{#each classrooms as classroom}
-										<option value={classroom.classroom.id}>{getClassroomDisplayName(classroom.classroom.name)}</option>
+										<option value={classroom.classroom.id}>{getClassroomDisplayName(classroom.classroom.name, t)}</option>
 									{/each}
 								</select>
 							</div>

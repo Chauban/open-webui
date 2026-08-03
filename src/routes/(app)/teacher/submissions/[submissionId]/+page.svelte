@@ -19,6 +19,8 @@
 	import SourceHighlightedText from '$lib/components/education/SourceHighlightedText.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
 	import { buildSubmissionReviewOverview } from '$lib/utils/submission-review';
+	import { getAiHelpTypeLabel, toLocalDateTimeInput } from '$lib/utils/education';
+	import LoadingState from '$lib/components/education/LoadingState.svelte';
 
 	const i18n = getContext('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
@@ -29,21 +31,6 @@
 				autosave: t('Autosave'),
 				submit: t('Submit'),
 				submit_preflight: t('Submit Preflight')
-			}) as Record<string, string>
-		)[value] || value;
-	const getAiHelpTypeLabel = (value: string) =>
-		(
-			({
-				'Understand Assignment': t('Understand Assignment'),
-				Outline: t('Outline'),
-				Examples: t('Examples'),
-				'Explain Concepts': t('Explain Concepts'),
-				'Revise Structure': t('Revise Structure'),
-				Polish: t('Polish'),
-				'Check Errors': t('Check Errors'),
-				"Help Break Through Writer's Block": t("Help Break Through Writer's Block"),
-				'Strengthen Reasoning': t('Strengthen Reasoning'),
-				Other: t('Other')
 			}) as Record<string, string>
 		)[value] || value;
 	const getTimelineRoleLabel = (value: string) =>
@@ -99,11 +86,6 @@
 
 	const toEpoch = (v: string) => (v ? Math.floor(new Date(v).getTime() / 1000) : null);
 	// datetime-local expects a LOCAL "YYYY-MM-DDTHH:mm" string; toISOString() would shift to UTC.
-	const toLocalDateTimeInput = (epoch: number) => {
-		const d = new Date(epoch * 1000);
-		const pad = (n: number) => String(n).padStart(2, '0');
-		return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-	};
 
 	$: submissionId = $page.params.submissionId;
 	$: isHistoricalRound = detail ? !detail.submission.is_current : false;
@@ -980,7 +962,7 @@
 									<div class="flex flex-wrap gap-2">
 										{#each detail.micro_reflection.ai_help_types as item}
 											<span class="rounded-full border border-gray-200 bg-white px-3 py-1 text-xs text-gray-700">
-												{getAiHelpTypeLabel(item)}
+												{getAiHelpTypeLabel(item, t)}
 											</span>
 										{/each}
 									</div>
@@ -1063,5 +1045,7 @@
 				{loadError}
 			</div>
 		</div>
+	{:else}
+		<LoadingState messageKey="Loading submission..." />
 	{/if}
 </TeacherPageShell>

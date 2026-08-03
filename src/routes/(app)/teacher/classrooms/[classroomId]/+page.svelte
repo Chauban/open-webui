@@ -16,11 +16,10 @@
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
+	import { getClassroomDisplayName } from '$lib/utils/education';
 
 	const i18n = getContext('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
-	const getClassroomDisplayName = (name: string) =>
-		name?.trim() === 'Default Classroom' ? t('Default Classroom') : name;
 
 	let classroom = null;
 	let assignments = [];
@@ -113,7 +112,7 @@
 		<div class="mb-6 flex flex-wrap items-center justify-between gap-3">
 			<div>
 				<div class="mb-2 text-sm text-gray-500">{$i18n.t('Teaching')} / {$i18n.t('Classrooms')}</div>
-				<h1 class="text-3xl font-semibold">{getClassroomDisplayName(classroom.name)}</h1>
+				<h1 class="text-3xl font-semibold">{getClassroomDisplayName(classroom.name, t)}</h1>
 			</div>
 			<div class="flex flex-wrap gap-2">
 				<button class="rounded-full border border-gray-300 px-4 py-2 text-sm" on:click={() => goto('/teacher/classrooms')}>

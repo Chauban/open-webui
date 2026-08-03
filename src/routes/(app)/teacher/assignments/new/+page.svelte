@@ -9,11 +9,10 @@
 	import { createAssignment, getTeacherAssignment, getTeacherClassrooms } from '$lib/apis/education';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
+	import { getClassroomDisplayName } from '$lib/utils/education';
 
 	const i18n = getContext('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
-	const getClassroomDisplayName = (name: string) =>
-		name?.trim() === 'Default Classroom' ? t('Default Classroom') : name;
 
 	let classrooms = [];
 	let selectedClassroomIds = new Set();
@@ -154,7 +153,7 @@
 								}`}
 								on:click={() => toggleClassroom(item.classroom.id)}
 							>
-								{getClassroomDisplayName(item.classroom.name)}
+								{getClassroomDisplayName(item.classroom.name, t)}
 							</button>
 						{/each}
 					</div>

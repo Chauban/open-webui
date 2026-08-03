@@ -11,6 +11,7 @@
 	import { educationNotificationSummary } from '$lib/stores';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
+	import { getClassroomDisplayName } from '$lib/utils/education';
 
 	dayjs.extend(relativeTime);
 
@@ -25,8 +26,6 @@
 	let unsubscribeNotifications;
 	let notificationsInitialized = false;
 
-	const getClassroomDisplayName = (name: string) =>
-		name?.trim() === 'Default Classroom' ? t('Default Classroom') : name;
 
 	const formatRelative = (timestamp: number) => dayjs(timestamp * 1000).fromNow();
 	const formatAbsolute = (timestamp: number) => new Date(timestamp * 1000).toLocaleString();
@@ -120,7 +119,7 @@
 									<div class="font-medium text-gray-900">{item.student_name}</div>
 									<div class="mt-1 text-gray-500">{item.assignment.title}</div>
 									<div class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500">
-										<div>{item.classroom ? getClassroomDisplayName(item.classroom.name) : t('Unknown')}</div>
+										<div>{item.classroom ? getClassroomDisplayName(item.classroom.name, t) : t('Unknown')}</div>
 										<div title={formatAbsolute(item.submission.submitted_at)}>
 											{formatRelative(item.submission.submitted_at)}
 										</div>
@@ -199,7 +198,7 @@
 							>
 								<div class="font-medium text-gray-900">{item.assignment.title}</div>
 								<div class="mt-1 text-gray-500">
-									{item.classroom ? getClassroomDisplayName(item.classroom.name) : t('Unassigned classroom')}
+									{item.classroom ? getClassroomDisplayName(item.classroom.name, t) : t('Unassigned classroom')}
 								</div>
 								<div class="mt-3 flex flex-wrap items-center gap-2 text-xs">
 									<div
@@ -242,7 +241,7 @@
 							>
 								<div class="font-medium text-gray-900">{item.assignment.title}</div>
 								<div class="mt-1 text-gray-500">
-									{item.classroom ? getClassroomDisplayName(item.classroom.name) : t('Unassigned classroom')}
+									{item.classroom ? getClassroomDisplayName(item.classroom.name, t) : t('Unassigned classroom')}
 								</div>
 								<div class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500">
 									<div>{$i18n.t('Students')}: {item.student_count}</div>
@@ -281,7 +280,7 @@
 								on:click={() => goto(`/teacher/classrooms/${item.classroom.id}`)}
 							>
 								<div class="font-medium text-gray-900">
-									{getClassroomDisplayName(item.classroom.name)}
+									{getClassroomDisplayName(item.classroom.name, t)}
 								</div>
 								<div class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500">
 									<div>{$i18n.t('Students')}: {item.student_count}</div>

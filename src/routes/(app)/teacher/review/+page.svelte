@@ -17,19 +17,12 @@
 	import { educationNotificationSummary } from '$lib/stores';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
+	import { getClassroomDisplayName, getReviewStatusLabel } from '$lib/utils/education';
 
 	dayjs.extend(relativeTime);
 
 	const i18n = getContext('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
-	const getClassroomDisplayName = (name: string) =>
-		name?.trim() === 'Default Classroom' ? t('Default Classroom') : name;
-	const getReviewStatusLabel = (value: string) =>
-		({
-			pending: t('Pending Review'),
-			reviewed: t('Reviewed'),
-			returned: t('Returned')
-		})[value] || value;
 	const getRiskTone = (item) => {
 		if ((item.analysis_summary?.suspected_unmarked_import_count ?? 0) > 0) return 'rose';
 		if ((item.analysis_summary?.burst_count ?? 0) > 0) return 'amber';
@@ -59,7 +52,7 @@
 		{ value: 'all', label: t('All Classrooms') },
 		...classrooms.map((item) => ({
 			value: item.classroom.id,
-			label: getClassroomDisplayName(item.classroom.name)
+			label: getClassroomDisplayName(item.classroom.name, t)
 		}))
 	];
 
@@ -71,18 +64,13 @@
 		}))
 	];
 
-	$: displayedItems = items.filter((item) => {
-		const matchesSuspected =
-			!onlySuspected || (item.analysis_summary?.suspected_unmarked_import_count ?? 0) > 0;
-		const matchesBursts = !onlyBursts || (item.analysis_summary?.burst_count ?? 0) > 0;
-		return matchesSuspected && matchesBursts;
-	});
-
 	const buildQueryParams = (offset: number) => ({
 		review_status: selectedStatus === 'all' ? undefined : selectedStatus,
 		classroom_id: selectedClassroom === 'all' ? undefined : selectedClassroom,
 		assignment_id: selectedAssignment === 'all' ? undefined : selectedAssignment,
 		sort: sortBy,
+		only_suspected: onlySuspected ? true : undefined,
+		only_bursts: onlyBursts ? true : undefined,
 		limit: PAGE_SIZE,
 		offset
 	});
@@ -116,9 +104,12 @@
 			items = [...items, ...(res.items ?? [])];
 			total = res.total ?? total;
 		} catch (error) {
+			if (seq !== loadSeq) return;
 			toast.error(`${error?.detail ?? error}`);
 		} finally {
-			loadingMore = false;
+			if (seq === loadSeq) {
+				loadingMore = false;
+			}
 		}
 	};
 
@@ -235,7 +226,7 @@
 				{/each}
 			</select>
 			<div class="flex items-center rounded-2xl border border-gray-200 px-4 py-3 text-sm text-gray-600">
-				{$i18n.t('Results')}: {displayedItems.length} / {total}
+				{$i18n.t('Results')}: {items.length} / {total}
 			</div>
 			<select class="rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none" bind:value={sortBy} on:change={() => loadQueue()}>
 				<option value="latest">{$i18n.t('Sort by Latest')}</option>
@@ -249,7 +240,7 @@
 				class={`rounded-full border px-4 py-2 text-sm transition ${
 					onlySuspected ? 'border-rose-300 bg-rose-50 text-rose-700' : 'border-gray-300 bg-white text-gray-700'
 				}`}
-				on:click={() => (onlySuspected = !onlySuspected)}
+				on:click={() => { onlySuspected = !onlySuspected; loadQueue(); }}
 			>
 				{$i18n.t('Only Suspected Imports')}
 			</button>
@@ -257,7 +248,7 @@
 				class={`rounded-full border px-4 py-2 text-sm transition ${
 					onlyBursts ? 'border-amber-300 bg-amber-50 text-amber-700' : 'border-gray-300 bg-white text-gray-700'
 				}`}
-				on:click={() => (onlyBursts = !onlyBursts)}
+				on:click={() => { onlyBursts = !onlyBursts; loadQueue(); }}
 			>
 				{$i18n.t('Only Large Bursts')}
 			</button>
@@ -271,13 +262,13 @@
 			<div class="rounded-3xl border border-gray-200 bg-white p-6 text-sm text-gray-500">
 				{$i18n.t('Loading review queue...')}
 			</div>
-		{:else if displayedItems.length === 0}
+		{:else if items.length === 0}
 			<div class="rounded-3xl border border-gray-200 bg-white p-6 text-sm text-gray-500">
 				{$i18n.t('No submissions match the current filters.')}
 			</div>
 		{:else}
 			<div class="grid gap-4">
-				{#each displayedItems as item}
+				{#each items as item}
 					<div class="rounded-3xl border border-gray-200 bg-white p-5">
 						<div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
 							<div>
@@ -286,9 +277,9 @@
 								<div class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500">
 									<div>
 										{$i18n.t('Classroom')}:
-										{item.classroom ? getClassroomDisplayName(item.classroom.name) : t('Unknown')}
+										{item.classroom ? getClassroomDisplayName(item.classroom.name, t) : t('Unknown')}
 									</div>
-									<div>{$i18n.t('Status')}: {getReviewStatusLabel(item.review_status)}</div>
+									<div>{$i18n.t('Status')}: {getReviewStatusLabel(item.review_status, t)}</div>
 									<div title={new Date(item.submission.submitted_at * 1000).toLocaleString()}>
 										{dayjs(item.submission.submitted_at * 1000).fromNow()}
 									</div>

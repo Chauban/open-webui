@@ -20,11 +20,10 @@
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
+	import { getClassroomDisplayName } from '$lib/utils/education';
 
 	const i18n = getContext('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
-	const getClassroomDisplayName = (name: string) =>
-		name?.trim() === 'Default Classroom' ? t('Default Classroom') : name;
 
 	let classroom = null;
 	let members = [];
@@ -38,6 +37,9 @@
 	let selectedIds = new Set();
 	let transferTargetId = '';
 	let pendingRemoveId = '';
+	let searching = false;
+	let addingStudentId = '';
+	let importing = false;
 	let showRemoveConfirm = false;
 	let showBulkRemoveConfirm = false;
 	let showTransferConfirm = false;
@@ -87,7 +89,9 @@
 			searchResults = [];
 			return;
 		}
+		if (searching) return;
 
+		searching = true;
 		try {
 			const result = await searchUsers(localStorage.token, query, 'name', 'asc', 1);
 			const existingMemberIds = new Set(members.map((item) => item.member.user_id));
@@ -100,10 +104,15 @@
 			);
 		} catch (error) {
 			toast.error(`${error?.detail ?? error}`);
+		} finally {
+			searching = false;
 		}
 	};
 
 	const addStudent = async (studentId: string) => {
+		if (addingStudentId) return;
+
+		addingStudentId = studentId;
 		try {
 			await addClassroomMember(localStorage.token, classroomId(), {
 				user_id: studentId,
@@ -115,6 +124,8 @@
 			toast.success(t('Student added.'));
 		} catch (error) {
 			toast.error(`${error?.detail ?? error}`);
+		} finally {
+			addingStudentId = '';
 		}
 	};
 
@@ -172,7 +183,9 @@
 			toast.error(t('Please enter at least one student email or ID.'));
 			return;
 		}
+		if (importing) return;
 
+		importing = true;
 		try {
 			const result = await bulkImportClassroomMembers(localStorage.token, classroomId(), {
 				emails: lines.filter((item) => item.includes('@')),
@@ -190,6 +203,8 @@
 			);
 		} catch (error) {
 			toast.error(`${error?.detail ?? error}`);
+		} finally {
+			importing = false;
 		}
 	};
 
@@ -220,7 +235,7 @@
 		<div class="mb-6 flex flex-wrap items-end justify-between gap-3">
 			<div>
 				<div class="mb-2 text-sm text-gray-500">
-					{$i18n.t('Teaching')} / {$i18n.t('Classrooms')} / {getClassroomDisplayName(classroom.name)}
+					{$i18n.t('Teaching')} / {$i18n.t('Classrooms')} / {getClassroomDisplayName(classroom.name, t)}
 				</div>
 				<h1 class="text-3xl font-semibold">{$i18n.t('Manage Students')}</h1>
 			</div>
@@ -240,8 +255,12 @@
 					class="flex-1 rounded-2xl border border-gray-300 px-4 py-3 text-sm outline-none"
 					placeholder={$i18n.t('Search by student name or email')}
 				/>
-				<button class="rounded-full bg-black px-4 py-2 text-sm text-white" on:click={searchStudents}>
-					{$i18n.t('Search')}
+				<button
+					class="rounded-full bg-black px-4 py-2 text-sm text-white disabled:opacity-60"
+					disabled={searching}
+					on:click={searchStudents}
+				>
+					{searching ? $i18n.t('Searching...') : $i18n.t('Search')}
 				</button>
 			</div>
 
@@ -254,10 +273,11 @@
 								<div class="text-xs text-gray-500">{candidate.email}</div>
 							</div>
 							<button
-								class="rounded-full border border-gray-300 px-3 py-1.5 text-sm"
+								class="rounded-full border border-gray-300 px-3 py-1.5 text-sm disabled:opacity-60"
+								disabled={addingStudentId !== ''}
 								on:click={() => addStudent(candidate.id)}
 							>
-								{$i18n.t('Add')}
+								{addingStudentId === candidate.id ? $i18n.t('Adding...') : $i18n.t('Add')}
 							</button>
 						</div>
 					{/each}
@@ -273,8 +293,12 @@
 				placeholder={$i18n.t('Enter one student email or user ID per line')}
 			></textarea>
 			<div class="mt-3 flex justify-end">
-				<button class="rounded-full bg-black px-4 py-2 text-sm text-white" on:click={bulkImportStudents}>
-					{$i18n.t('Import')}
+				<button
+					class="rounded-full bg-black px-4 py-2 text-sm text-white disabled:opacity-60"
+					disabled={importing}
+					on:click={bulkImportStudents}
+				>
+					{importing ? $i18n.t('Importing...') : $i18n.t('Import')}
 				</button>
 			</div>
 			{#if bulkImportResult && (bulkImportResult.failed_users?.length || bulkImportResult.skipped_users?.length)}
@@ -332,7 +356,7 @@
 								>
 									{#each otherClassrooms as item}
 										<option value={item.classroom.id}>
-											{getClassroomDisplayName(item.classroom.name)}
+											{getClassroomDisplayName(item.classroom.name, t)}
 										</option>
 									{/each}
 								</select>

@@ -2078,6 +2078,8 @@ async def get_teacher_review(
     classroom_id: Optional[str] = None,
     assignment_id: Optional[str] = None,
     sort: str = "latest",
+    only_suspected: bool = False,
+    only_bursts: bool = False,
     limit: int = 50,
     offset: int = 0,
     user=Depends(get_verified_user),
@@ -2117,29 +2119,40 @@ async def get_teacher_review(
             == review_status
         ]
 
-    total = len(candidates)
     limit = max(1, min(limit, REVIEW_QUEUE_MAX_LIMIT))
     offset = max(offset, 0)
 
-    if sort not in ("suspected", "burst", "rewrite"):
-        # 默认按提交时间排序,排序键不依赖分析结果:先分页再构建,
-        # 整个队列只为当前这一页构建分析。
+    if sort not in ("suspected", "burst", "rewrite") and not (
+        only_suspected or only_bursts
+    ):
+        # 排序与筛选都不依赖分析结果:先分页再构建,整个队列只为当前这一页构建分析。
         candidates.sort(key=lambda pair: pair[0].submitted_at, reverse=True)
         return TeacherReviewResponse(
             items=[
                 await _build_submission_list_item(submission, assignment, db)
                 for submission, assignment in candidates[offset : offset + limit]
             ],
-            total=total,
+            total=len(candidates),
         )
 
-    # 按疑似导入/爆发/改写率排序的排序键来自分析摘要,只能全量构建后再分页。
+    # 疑似导入/爆发/改写率的筛选与排序键都来自分析摘要,只能全量构建后再分页。
     items = [
         await _build_submission_list_item(submission, assignment, db)
         for submission, assignment in candidates
     ]
+    if only_suspected:
+        items = [
+            item
+            for item in items
+            if (item.analysis_summary or {}).get("suspected_unmarked_import_count", 0)
+            > 0
+        ]
+    if only_bursts:
+        items = [
+            item for item in items if (item.analysis_summary or {}).get("burst_count", 0) > 0
+        ]
     items.sort(key=lambda item: _review_sort_key(item, sort), reverse=True)
-    return TeacherReviewResponse(items=items[offset : offset + limit], total=total)
+    return TeacherReviewResponse(items=items[offset : offset + limit], total=len(items))
 
 
 @router.get("/teacher/classrooms/{classroom_id}", response_model=ClassroomResponse)

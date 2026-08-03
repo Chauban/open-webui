@@ -7,6 +7,7 @@
 
 	import { user } from '$lib/stores';
 	import { createClassroom, getMyClassroom, getTeacherClassrooms, joinClassroom } from '$lib/apis/education';
+	import LoadingState from '$lib/components/education/LoadingState.svelte';
 
 	const i18n = getContext('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
@@ -140,4 +141,6 @@
 			</div>
 		</div>
 	</div>
+{:else}
+	<LoadingState messageKey="Loading..." />
 {/if}

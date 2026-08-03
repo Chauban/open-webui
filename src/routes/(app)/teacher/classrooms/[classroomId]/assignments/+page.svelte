@@ -9,11 +9,10 @@
 	import { getTeacherClassroomAssignments, getTeacherClassrooms } from '$lib/apis/education';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
+	import { getClassroomDisplayName } from '$lib/utils/education';
 
 	const i18n = getContext('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
-	const getClassroomDisplayName = (name: string) =>
-		name?.trim() === 'Default Classroom' ? t('Default Classroom') : name;
 
 	let classroom = null;
 	let assignments = [];
@@ -65,7 +64,7 @@
 		<div class="mb-6 flex flex-wrap items-end justify-between gap-3">
 			<div>
 				<div class="mb-2 text-sm text-gray-500">
-					{$i18n.t('Teaching')} / {$i18n.t('Classrooms')} / {getClassroomDisplayName(classroom.name)}
+					{$i18n.t('Teaching')} / {$i18n.t('Classrooms')} / {getClassroomDisplayName(classroom.name, t)}
 				</div>
 				<h1 class="text-3xl font-semibold">{$i18n.t('Classroom Assignments')}</h1>
 			</div>
