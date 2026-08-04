@@ -955,7 +955,7 @@ def test_teacher_review_lifecycle_assignment_update_and_classroom_progress(
     assert assignments[0]["risk_summary"]["suspected_unmarked_import_count"] >= 1
 
 
-def test_student_assignment_and_dashboard_views(education_client):
+def test_student_assignment_and_profile_views(education_client):
     client, teacher, _, student, _, _session_local = education_client
     flow = _prepare_assignment_flow(client, teacher, student)
     assignment = flow["assignment"]
@@ -1005,14 +1005,23 @@ def test_student_assignment_and_dashboard_views(education_client):
         == flow["workspace"]["writing_session"]["id"]
     )
 
-    dashboard_res = client.get("/api/v1/me/writing/dashboard")
-    assert dashboard_res.status_code == 200, dashboard_res.text
-    dashboard = dashboard_res.json()
-    assert len(dashboard["items"]) == 1
-    assert dashboard["items"][0]["submission_id"] == submission_id
-    assert dashboard["items"][0]["student_id"] == student.id
-    assert dashboard["items"][0]["student_name"] == "Student One"
-    assert dashboard["items"][0]["has_reflection"] is True
+    profile_res = client.get("/api/v1/me/writing/profile")
+    assert profile_res.status_code == 200, profile_res.text
+    profile = profile_res.json()
+    assert profile["student_id"] == student.id
+    assert profile["submitted_count"] == 1
+    assert len(profile["timeline"]) == 1
+    point = profile["timeline"][0]
+    assert point["submission_id"] == submission_id
+    assert point["assignment_id"] == assignment["id"]
+    assert point["ai_help_types"] == ["Outline"]
+    assert point["reflection_quality"] > 0
+    assert 0 <= point["process_index"] <= 100
+    assert 0 <= point["collaboration_index"] <= 100
+    # 一次提交看不出趋势,画像要如实说「数据不够」而不是编一条曲线。
+    assert profile["trends"] == []
+    assert [insight["code"] for insight in profile["insights"]] == ["not_enough_data"]
+    assert profile["index_formula"]["process_index"]["revision_depth"]["target"] > 0
 
     blank_invite_res = client.post(
         "/api/v1/classrooms/join", json={"invite_code": "   "}
@@ -2431,3 +2440,263 @@ def test_delete_assignment_guards_and_notification_cleanup(education_client):
     UserContext.current_user = student
     after = client.get("/api/v1/me/notifications/summary").json()["total"]
     assert after == before - 1
+
+
+def test_active_writing_seconds_ignores_idle_gaps():
+    # 两块写作(各 60s),中间隔了一小时 —— 空档不该被算成写作时长。
+    marks = [0, 30, 60, 3660, 3690, 3720]
+
+    assert education_router_module._estimate_active_writing_seconds(marks) == 120
+    # 单次操作没有跨度,按一个最小块计,而不是 0。
+    assert education_router_module._estimate_active_writing_seconds([100]) == 30
+    assert education_router_module._estimate_active_writing_seconds([]) == 0
+
+
+def test_last_minute_ratio_counts_only_the_final_tenth():
+    diffs = [
+        {"created_at": 0, "inserted_length": 100},
+        {"created_at": 950, "inserted_length": 300},
+    ]
+
+    ratio = education_router_module._compute_last_minute_ratio(diffs, 0, 1000)
+
+    assert ratio == 0.75
+
+
+def test_reflection_score_separates_concrete_from_generic():
+    generic = education_router_module._score_reflection("我用了 AI，写得还不错。")
+    concrete = education_router_module._score_reflection(
+        "AI 给的第二段论据我觉得不够准确，所以删掉重写了，"
+        "并且把结尾的论点换成了自己的例子。"
+    )
+
+    assert concrete["score"] > generic["score"]
+    assert concrete["score"] >= 60
+    assert education_router_module._score_reflection("")["score"] == 0
+
+
+def test_collaboration_index_falls_back_to_reflection_without_ai():
+    # 完全没用 AI 的提交不该被「消化度 0」拖成低分。
+    without_ai = education_router_module._compute_collaboration_index(
+        digestion_ratio=0, prompt_count=0, reflection_quality=80, ai_ratio=0.0
+    )
+    with_ai = education_router_module._compute_collaboration_index(
+        digestion_ratio=0, prompt_count=0, reflection_quality=80, ai_ratio=0.5
+    )
+
+    assert without_ai == 80
+    assert with_ai < without_ai
+
+
+def test_versions_up_to_stops_at_the_round_final_version():
+    versions = [
+        SimpleNamespace(id="v1"),
+        SimpleNamespace(id="v2"),
+        SimpleNamespace(id="v3"),
+    ]
+
+    assert [
+        version.id
+        for version in education_router_module._versions_up_to(versions, "v2")
+    ] == ["v1", "v2"]
+    # 找不到定稿版本时退回全量,不要静默丢数据。
+    assert len(education_router_module._versions_up_to(versions, "missing")) == 3
+
+
+def test_student_profile_tracks_round_progress_and_trends(education_client):
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id, first_submission_id = _setup_submitted_assignment(
+        client, teacher, student, "Growth Essay"
+    )
+
+    UserContext.current_user = teacher
+    returned = client.post(
+        f"/api/v1/teacher/submissions/{first_submission_id}/review",
+        json={
+            "review_status": "returned",
+            "score": 70,
+            "returned_comment": "Add evidence to the second paragraph",
+            "resubmit_due_at": 2100000000,
+            "rubric_json": {"ideas": 24, "structure": 23, "evidence": 23},
+        },
+    )
+    assert returned.status_code == 200, returned.text
+
+    UserContext.current_user = student
+    resubmit = client.post(
+        f"/api/v1/assignments/{assignment['id']}/submit",
+        json=_submit_body(
+            session_id,
+            "a substantially longer revised draft that adds the evidence"
+            " the teacher asked for",
+        ),
+    )
+    assert resubmit.status_code == 200, resubmit.text
+    second_submission_id = resubmit.json()["submission_id"]
+
+    UserContext.current_user = teacher
+    reviewed = client.post(
+        f"/api/v1/teacher/submissions/{second_submission_id}/review",
+        json={
+            "review_status": "reviewed",
+            "score": 88,
+            "overall_comment": "Much stronger evidence",
+            "rubric_json": {"ideas": 30, "structure": 29, "evidence": 29},
+        },
+    )
+    assert reviewed.status_code == 200, reviewed.text
+
+    classroom_id = client.get("/api/v1/teacher/classrooms").json()[0]["classroom"]["id"]
+    profile_res = client.get(
+        f"/api/v1/teacher/classrooms/{classroom_id}/students/{student.id}/profile"
+    )
+    assert profile_res.status_code == 200, profile_res.text
+    profile = profile_res.json()
+
+    # 两轮都进时间线:成长看的是轮次之间的变化,历史轮不能丢。
+    assert [point["round_no"] for point in profile["timeline"]] == [1, 2]
+    assert [point["score"] for point in profile["timeline"]] == [70, 88]
+    assert profile["timeline"][0]["is_current"] is False
+    assert profile["timeline"][1]["is_current"] is True
+    # 当前轮才计入作业统计与平均分
+    assert profile["submitted_count"] == 1
+    assert profile["average_score"] == 88
+
+    assert len(profile["round_progress"]) == 1
+    progress = profile["round_progress"][0]
+    assert progress["from_round"] == 1
+    assert progress["to_round"] == 2
+    assert progress["score_delta"] == 18
+    assert progress["char_delta"] > 0
+    assert progress["revision_ratio"] > 0
+    assert progress["turnaround_seconds"] is not None
+
+    trends = {trend["key"]: trend for trend in profile["trends"]}
+    assert trends["score"]["direction"] == "up"
+    assert trends["total_chars"]["direction"] == "up"
+
+    codes = [insight["code"] for insight in profile["insights"]]
+    assert "round_improvement" in codes
+    assert "not_enough_data" not in codes
+
+    # 历史轮的分析必须停在自己那一版正文上,不能读到第二轮的字数
+    assert profile["timeline"][0]["total_chars"] < profile["timeline"][1]["total_chars"]
+
+
+def test_student_profile_requires_classroom_membership(education_client):
+    client, teacher, _, student, outsider, _ = education_client
+    _setup_submitted_assignment(client, teacher, student, "Membership Guard")
+
+    UserContext.current_user = teacher
+    classroom_id = client.get("/api/v1/teacher/classrooms").json()[0]["classroom"]["id"]
+
+    missing = client.get(
+        f"/api/v1/teacher/classrooms/{classroom_id}/students/{outsider.id}/profile"
+    )
+    assert missing.status_code == 404, missing.text
+
+    UserContext.current_user = outsider
+    forbidden = client.get(
+        f"/api/v1/teacher/classrooms/{classroom_id}/students/{student.id}/profile"
+    )
+    assert forbidden.status_code == 403, forbidden.text
+
+
+def test_analysis_payload_usability_treats_history_as_immutable():
+    stale = {"logic_version": "ancient", "summary": {}}
+    current_round = SimpleNamespace(is_current=1)
+    historical_round = SimpleNamespace(is_current=0)
+
+    # 当前轮跟着 logic_version 走:数据还在,重算是对的。
+    assert (
+        education_router_module._is_analysis_payload_usable(current_round, stale)
+        is False
+    )
+    # 历史轮的 provenance 已被后续轮次覆盖,重算只会算错,存档一律直接用。
+    assert (
+        education_router_module._is_analysis_payload_usable(historical_round, stale)
+        is True
+    )
+    # 没有存档只能重算,不管是哪一轮。
+    assert (
+        education_router_module._is_analysis_payload_usable(historical_round, None)
+        is False
+    )
+
+
+def test_historical_round_analysis_survives_logic_version_bump(education_client):
+    client, teacher, _, student, _, session_local = education_client
+    assignment, session_id, first_submission_id = _setup_submitted_assignment(
+        client, teacher, student, "Immutable History"
+    )
+
+    UserContext.current_user = teacher
+    returned = client.post(
+        f"/api/v1/teacher/submissions/{first_submission_id}/review",
+        json={
+            "review_status": "returned",
+            "returned_comment": "Revise",
+            "resubmit_due_at": 2100000000,
+        },
+    )
+    assert returned.status_code == 200, returned.text
+
+    UserContext.current_user = student
+    resubmit = client.post(
+        f"/api/v1/assignments/{assignment['id']}/submit",
+        json=_submit_body(
+            session_id, "a much longer second round draft with new evidence"
+        ),
+    )
+    assert resubmit.status_code == 200, resubmit.text
+
+    UserContext.current_user = teacher
+    stored_first = client.get(
+        f"/api/v1/teacher/submissions/{first_submission_id}/analysis/summary"
+    ).json()
+
+    # 模拟逻辑版本升级:当前轮该重算,历史轮必须原样返回存档。
+    original_version = education_router_module._ANALYSIS_LOGIC_VERSION
+    education_router_module._ANALYSIS_LOGIC_VERSION = f"{original_version}-next"
+    try:
+        after_bump = client.get(
+            f"/api/v1/teacher/submissions/{first_submission_id}/analysis/summary"
+        ).json()
+    finally:
+        education_router_module._ANALYSIS_LOGIC_VERSION = original_version
+
+    assert after_bump["total_chars"] == stored_first["total_chars"]
+
+    with session_local() as session:
+        rows = (
+            session.query(AnalysisResult)
+            .filter(AnalysisResult.submission_id == first_submission_id)
+            .all()
+        )
+        assert len(rows) == 1
+        assert rows[0].payload_json["logic_version"] == original_version
+
+
+def test_revision_depth_measures_rework_not_autosave_count():
+    # 一路往下写:写了 1000 字,没回头删过 → 修订深度 0
+    assert education_router_module._compute_revision_depth(0, 1000) == 0
+    # 删改量达到写入量的三成即记满分(目标比例)
+    assert education_router_module._compute_revision_depth(300, 1000) == 100
+    assert education_router_module._compute_revision_depth(150, 1000) == 50
+    # 删改比写入还多也不会超过 100
+    assert education_router_module._compute_revision_depth(2000, 1000) == 100
+    # 没写过东西不该除以零
+    assert education_router_module._compute_revision_depth(0, 0) == 0
+
+
+def test_process_index_ignores_version_count():
+    # 自动保存次数再多,只要没回头改过,过程投入就不该被抬高。
+    steady_typing = education_router_module._compute_process_index(
+        revision_depth=0, writing_span_seconds=0, last_minute_ratio=1.0
+    )
+    reworked = education_router_module._compute_process_index(
+        revision_depth=100, writing_span_seconds=0, last_minute_ratio=1.0
+    )
+
+    assert steady_typing == 0
+    assert reworked == 33

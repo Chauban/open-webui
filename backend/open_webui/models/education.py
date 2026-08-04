@@ -713,30 +713,110 @@ class TeacherReviewResponse(BaseModel):
     total: int = 0
 
 
-class StudentPerformanceItem(BaseModel):
+class StudentProfileAssignmentItem(BaseModel):
+    """作业维度的当前状态；未提交的作业也要出现,否则缺交信息会从画像里消失。"""
+
     assignment: AssignmentModel
     submission_id: Optional[str] = None
     submitted_at: Optional[int] = None
     round_no: Optional[int] = None
     review_status: str = "unsubmitted"
     score: Optional[int] = None
+
+
+class StudentProfileTimelinePoint(BaseModel):
+    """一次提交在成长画像里的三维快照(产出 / 过程 / AI 协作)。"""
+
+    submission_id: str
+    assignment_id: str
+    assignment_title: str
+    round_no: int = 1
+    is_current: bool = True
+    submitted_at: int
+
+    # 产出维:教师评分与 rubric 原值,不做归一化(满分由教师自定,没有统一量纲)。
+    total_chars: int = 0
+    score: Optional[int] = None
+    rubric: Optional[dict] = None
+    review_status: str = "pending"
+
+    # 过程维。不用版本数:一个版本 = 一次 1.2 秒防抖自动保存,衡量的是打字时长
+    # 而不是「改了几版」,拿它当修改投入会被打字速度带偏。
+    inserted_chars: int = 0
+    revised_chars: int = 0
+    revision_depth: int = 0
+    writing_span_seconds: int = 0
+    active_writing_seconds: int = 0
+    lead_time_seconds: Optional[int] = None
+    last_minute_ratio: float = 0.0
+    process_index: int = 0
+
+    # AI 协作维
+    typed_ratio: float = 0.0
+    ai_ratio: float = 0.0
+    unknown_ratio: float = 0.0
     prompt_count: int = 0
-    source_stats: Optional[dict] = None
-    has_reflection: bool = False
+    digestion_ratio: int = 0
+    reflection_char_count: int = 0
+    reflection_quality: int = 0
+    ai_help_types: list[str] = Field(default_factory=list)
+    collaboration_index: int = 0
+
+    # 风险信号:只做展示,不参与任何成长指数。
+    burst_count: int = 0
+    suspected_unmarked_import_count: int = 0
 
 
-class StudentPerformanceResponse(BaseModel):
-    classroom: ClassroomModel
+class StudentProfileRoundProgress(BaseModel):
+    """退回—重交之间的改动幅度,是最直接的「响应反馈」证据。"""
+
+    assignment_id: str
+    assignment_title: str
+    from_round: int
+    to_round: int
+    char_delta: int = 0
+    revision_ratio: int = 0
+    score_delta: Optional[int] = None
+    turnaround_seconds: Optional[int] = None
+
+
+class StudentProfileMetricTrend(BaseModel):
+    key: str
+    first: float
+    last: float
+    delta: float
+    direction: str = "flat"
+    sample_count: int = 0
+
+
+class StudentProfileInsight(BaseModel):
+    """规则生成的结论;文案由前端按 code 走 i18n,后端不产出自然语言。"""
+
+    code: str
+    tone: str = "neutral"
+    params: dict = Field(default_factory=dict)
+
+
+class StudentProfileResponse(BaseModel):
     student_id: str
     student_name: Optional[str] = None
     student_email: Optional[str] = None
+    classroom: Optional[ClassroomModel] = None
     assignment_count: int = 0
     submitted_count: int = 0
     unsubmitted_count: int = 0
     reviewed_count: int = 0
     returned_count: int = 0
     average_score: Optional[float] = None
-    items: list[StudentPerformanceItem] = Field(default_factory=list)
+    assignments: list[StudentProfileAssignmentItem] = Field(default_factory=list)
+    timeline: list[StudentProfileTimelinePoint] = Field(default_factory=list)
+    round_progress: list[StudentProfileRoundProgress] = Field(default_factory=list)
+    trends: list[StudentProfileMetricTrend] = Field(default_factory=list)
+    ai_help_type_distribution: dict = Field(default_factory=dict)
+    ai_help_type_shift: dict = Field(default_factory=dict)
+    reflection_quality: dict = Field(default_factory=dict)
+    index_formula: dict = Field(default_factory=dict)
+    insights: list[StudentProfileInsight] = Field(default_factory=list)
 
 
 class ClassroomBulkImportResult(BaseModel):
@@ -1459,6 +1539,28 @@ class EducationTable:
             )
             return [WritingVersionModel.model_validate(version) for version in versions]
 
+    def get_versions_by_session_ids(
+        self, session_ids: list[str], db: Optional[Session] = None
+    ) -> dict[str, list[WritingVersionModel]]:
+        if not session_ids:
+            return {}
+        with get_db_context(db) as db:
+            versions = (
+                db.query(WritingVersion)
+                .filter(WritingVersion.writing_session_id.in_(session_ids))
+                .order_by(
+                    WritingVersion.writing_session_id.asc(),
+                    WritingVersion.version_no.asc(),
+                )
+                .all()
+            )
+            grouped: dict[str, list[WritingVersionModel]] = {}
+            for version in versions:
+                grouped.setdefault(version.writing_session_id, []).append(
+                    WritingVersionModel.model_validate(version)
+                )
+            return grouped
+
     def get_version_by_id(
         self, version_id: str, db: Optional[Session] = None
     ) -> Optional[WritingVersionModel]:
@@ -1581,6 +1683,24 @@ class EducationTable:
                 for operation in operations
             ]
 
+    def get_editor_operation_marks_by_session_ids(
+        self, session_ids: list[str], db: Optional[Session] = None
+    ) -> dict[str, list[int]]:
+        """只取操作时间戳:画像的「有效写作时长」只需要时间轴,不需要正文。"""
+        if not session_ids:
+            return {}
+        with get_db_context(db) as db:
+            rows = (
+                db.query(EditorOperation.writing_session_id, EditorOperation.created_at)
+                .filter(EditorOperation.writing_session_id.in_(session_ids))
+                .order_by(EditorOperation.created_at.asc())
+                .all()
+            )
+            grouped: dict[str, list[int]] = {}
+            for session_id, created_at in rows:
+                grouped.setdefault(session_id, []).append(created_at)
+            return grouped
+
     def upsert_analysis_result(
         self,
         session_id: str,
@@ -1667,6 +1787,41 @@ class EducationTable:
             return (
                 MicroReflectionModel.model_validate(reflection) if reflection else None
             )
+
+    def get_analysis_results_by_submission_ids(
+        self,
+        submission_ids: list[str],
+        result_type: str,
+        db: Optional[Session] = None,
+    ) -> dict[str, dict]:
+        ids = [submission_id for submission_id in submission_ids if submission_id]
+        if not ids:
+            return {}
+        with get_db_context(db) as db:
+            rows = (
+                db.query(AnalysisResult)
+                .filter(
+                    AnalysisResult.submission_id.in_(ids),
+                    AnalysisResult.result_type == result_type,
+                )
+                .all()
+            )
+            return {row.submission_id: row.payload_json for row in rows}
+
+    def get_micro_reflections_by_ids(
+        self, reflection_ids: list[str], db: Optional[Session] = None
+    ) -> dict[str, MicroReflectionModel]:
+        ids = [reflection_id for reflection_id in reflection_ids if reflection_id]
+        if not ids:
+            return {}
+        with get_db_context(db) as db:
+            reflections = (
+                db.query(MicroReflection).filter(MicroReflection.id.in_(ids)).all()
+            )
+            return {
+                reflection.id: MicroReflectionModel.model_validate(reflection)
+                for reflection in reflections
+            }
 
     def insert_submission(
         self,
@@ -1792,6 +1947,39 @@ class EducationTable:
                 .all()
             )
             return [SubmissionModel.model_validate(s) for s in submissions]
+
+    def get_submissions_by_student(
+        self,
+        student_id: str,
+        assignment_ids: Optional[list[str]] = None,
+        db: Optional[Session] = None,
+    ) -> list[SubmissionModel]:
+        """该学生的全部提交,含历史轮次 —— 画像要的正是轮次之间的变化。"""
+        if assignment_ids is not None and not assignment_ids:
+            return []
+        with get_db_context(db) as db:
+            query = db.query(Submission).filter(Submission.student_id == student_id)
+            if assignment_ids is not None:
+                query = query.filter(Submission.assignment_id.in_(assignment_ids))
+            submissions = query.order_by(
+                Submission.submitted_at.asc(), Submission.round_no.asc()
+            ).all()
+            return [
+                SubmissionModel.model_validate(submission) for submission in submissions
+            ]
+
+    def get_writing_sessions_by_ids(
+        self, session_ids: list[str], db: Optional[Session] = None
+    ) -> dict[str, WritingSessionModel]:
+        ids = [session_id for session_id in session_ids if session_id]
+        if not ids:
+            return {}
+        with get_db_context(db) as db:
+            sessions = db.query(WritingSession).filter(WritingSession.id.in_(ids)).all()
+            return {
+                session.id: WritingSessionModel.model_validate(session)
+                for session in sessions
+            }
 
     def set_writing_session_status(
         self, session_id: str, status: str, db: Optional[Session] = None

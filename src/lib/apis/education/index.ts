@@ -506,13 +506,13 @@ export const bulkImportClassroomMembers = async (
 	}).then(handleJson);
 };
 
-export const getStudentPerformance = async (
+export const getStudentProfile = async (
 	token: string,
 	classroomId: string,
 	studentUserId: string
 ) => {
 	return fetch(
-		`${WEBUI_API_BASE_URL}/teacher/classrooms/${classroomId}/students/${studentUserId}/performance`,
+		`${WEBUI_API_BASE_URL}/teacher/classrooms/${classroomId}/students/${studentUserId}/profile`,
 		{
 			method: 'GET',
 			headers: withAuth(token)
@@ -558,8 +558,8 @@ export const exportClassroomProgress = async (token: string, classroomId: string
 	return res.text();
 };
 
-export const getStudentDashboard = async (token: string) => {
-	return fetch(`${WEBUI_API_BASE_URL}/me/writing/dashboard`, {
+export const getMyWritingProfile = async (token: string) => {
+	return fetch(`${WEBUI_API_BASE_URL}/me/writing/profile`, {
 		method: 'GET',
 		headers: withAuth(token)
 	}).then(handleJson);

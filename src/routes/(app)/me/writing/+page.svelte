@@ -362,6 +362,9 @@
 						<div class="text-xs uppercase tracking-[0.2em] text-gray-500 dark:text-gray-400">{$i18n.t('Writing')}</div>
 						<h1 class="text-2xl font-semibold">{$i18n.t('Writing')}</h1>
 					</div>
+					<EduButton on:click={() => goto('/me/writing/growth')}>
+						{$i18n.t('My Growth')}
+					</EduButton>
 				</div>
 			</div>
 		</nav>

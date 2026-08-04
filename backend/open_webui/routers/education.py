@@ -50,7 +50,6 @@ from open_webui.models.education import (
     PersonalWritingCreateForm,
     PersonalWorkspaceListItem,
     ProvenanceCreateForm,
-    Submission,
     SubmissionAlreadyReviewedError,
     SubmissionCreateForm,
     SubmissionDetailResponse,
@@ -58,8 +57,12 @@ from open_webui.models.education import (
     SubmissionModel,
     SubmissionReviewForm,
     StudentAssignmentListItem,
-    StudentPerformanceItem,
-    StudentPerformanceResponse,
+    StudentProfileAssignmentItem,
+    StudentProfileInsight,
+    StudentProfileMetricTrend,
+    StudentProfileResponse,
+    StudentProfileRoundProgress,
+    StudentProfileTimelinePoint,
     TeacherAssignmentListItem,
     TeacherClassroomListItem,
     TeacherOverviewResponse,
@@ -80,7 +83,6 @@ from open_webui.utils.auth import get_verified_user
 router = APIRouter()
 
 MAX_STUDENT_ASSIGNMENTS = 100
-MAX_DASHBOARD_ITEMS = 50
 SUBMISSION_DETAIL_VERSION_LIMIT = 20
 PROJECT_MODE_GENERAL = "general"
 PROJECT_MODE_PERSONAL_WRITING = "personal_writing"
@@ -170,11 +172,12 @@ async def _build_teacher_assignment_list_item(assignment, db: Session):
         (submission.submitted_at for submission in submissions), default=None
     )
     risk_summary = _empty_risk_summary()
+    sessions = Education.get_writing_sessions_by_ids(
+        [submission.writing_session_id for submission in submissions], db=db
+    )
+    analyses = await _get_or_build_submission_analyses(submissions, sessions, db)
     for submission in submissions:
-        session = Education.get_writing_session_by_id(
-            submission.writing_session_id, db=db
-        )
-        analysis = await _get_or_build_submission_analysis(submission, session, db)
+        analysis = analyses.get(submission.id) or {}
         _accumulate_risk_summary(risk_summary, analysis.get("summary"))
 
     return TeacherAssignmentListItem(
@@ -1012,9 +1015,9 @@ def _diff_text(previous_text: str, current_text: str) -> Optional[dict]:
     }
 
 
-def _build_version_diffs(versions) -> list[dict]:
+def _build_version_diffs(versions, baseline_text: str = "") -> list[dict]:
     diffs: list[dict] = []
-    previous_text = ""
+    previous_text = baseline_text
     for version in versions:
         diff = _diff_text(previous_text, version.note_snapshot_text or "")
         if diff is not None:
@@ -1404,18 +1407,58 @@ def _build_submission_analysis(
     }
 
 
-async def _get_or_build_submission_analysis(submission, session, db: Session) -> dict:
-    cached = Education.get_analysis_result(
-        session.id, "submission_analysis", submission_id=submission.id, db=db
-    )
-    if (
-        cached is not None
-        and cached.payload_json
-        and cached.payload_json.get("logic_version") == _ANALYSIS_LOGIC_VERSION
-    ):
-        return cached.payload_json
+def _versions_up_to(versions, final_version_id: Optional[str]) -> list:
+    for index, version in enumerate(versions):
+        if version.id == final_version_id:
+            return versions[: index + 1]
+    return versions
 
-    versions = Education.get_versions(session.id, db=db)
+
+def _is_analysis_payload_usable(submission, payload: Optional[dict]) -> bool:
+    """存档的分析结果还能不能直接用。
+
+    历史轮是一条记录,不是一个派生视图:它依赖的 provenance(source map 按会话
+    整体覆盖)已经被后续轮次改写,重算只会算错。所以只要历史轮有存档就一律直接
+    返回,哪怕 logic_version 已经升级 —— payload 里带着 logic_version,调用方
+    自己知道这份结果由哪一版逻辑算出。当前轮才跟着 logic_version 走。
+
+    (真要对历史轮做追溯重算,payload 里的 highlights 已经是那一轮终稿的完整
+    分段来源,不需要再回头找 provenance_segment 表。)
+    """
+    if not payload:
+        return False
+    if submission.is_current != 1:
+        return True
+    return payload.get("logic_version") == _ANALYSIS_LOGIC_VERSION
+
+
+async def _get_or_build_submission_analysis(
+    submission,
+    session,
+    db: Session,
+    cached_payloads: Optional[dict] = None,
+) -> dict:
+    """取一份提交的分析结果。
+
+    ``cached_payloads`` 由调用方批量预取(见 ``_get_or_build_submission_analyses``);
+    传 None 表示这里自己查一次。
+    """
+    if cached_payloads is None:
+        cached = Education.get_analysis_result(
+            session.id, "submission_analysis", submission_id=submission.id, db=db
+        )
+        payload = cached.payload_json if cached is not None else None
+    else:
+        payload = cached_payloads.get(submission.id)
+
+    if _is_analysis_payload_usable(submission, payload):
+        return payload
+
+    # 分析的终稿必须停在本轮的定稿版本上:重交会往同一个会话继续追加版本,
+    # 拿 versions[-1] 会让历史轮的分析读到后面几轮的正文。
+    versions = _versions_up_to(
+        Education.get_versions(session.id, db=db), submission.final_version_id
+    )
     provenance_segments = Education.get_provenance_segments(session.id, db=db)
     operations = Education.get_editor_operations(session.id, db=db)
     prompt_timeline = await _get_prompt_timeline(session, db)
@@ -1435,6 +1478,29 @@ async def _get_or_build_submission_analysis(submission, session, db: Session) ->
         db=db,
     )
     return payload
+
+
+async def _get_or_build_submission_analyses(
+    submissions: list, sessions: dict, db: Session
+) -> dict[str, dict]:
+    """批量版本:存档一次查完,只有缺失/过期的那几份才真正重算。
+
+    看板、班级进度、学生画像都要对几十份提交取分析,逐份查缓存就是 N 次查询。
+    """
+    cached_payloads = Education.get_analysis_results_by_submission_ids(
+        [submission.id for submission in submissions],
+        "submission_analysis",
+        db=db,
+    )
+    analyses: dict[str, dict] = {}
+    for submission in submissions:
+        session = sessions.get(submission.writing_session_id)
+        if session is None:
+            continue
+        analyses[submission.id] = await _get_or_build_submission_analysis(
+            submission, session, db, cached_payloads=cached_payloads
+        )
+    return analyses
 
 
 def _empty_risk_summary() -> dict:
@@ -1473,6 +1539,680 @@ def _finalize_risk_summary(summary: dict) -> dict:
         **summary,
         "average_rewrite_ratio": average_rewrite_ratio,
     }
+
+
+# ---------------------------------------------------------------------------
+# 学生成长画像
+#
+# 画像只由可解释的比率型指标构成:每一维的构成公式随响应一起返回(index_formula),
+# 教师能逐项核对,也能向学生解释。教师给的 score 没有统一满分,所以产出维只呈现
+# 原值与趋势,不参与任何合成指数。风险信号(突发插入、疑似未标注导入)照旧展示,
+# 但不进成长指数 —— 防作弊和成长是两件事。
+# ---------------------------------------------------------------------------
+
+_ACTIVE_WRITING_GAP_SECONDS = 300
+_ACTIVE_WRITING_MIN_BLOCK_SECONDS = 30
+_LAST_MINUTE_WINDOW_RATIO = 0.1
+# 回头删改的字符量达到写入量的三成,就算把稿子认真打磨过一遍。
+_PROCESS_TARGET_REVISION_RATIO = 0.3
+_PROCESS_TARGET_SPAN_SECONDS = 3 * 24 * 3600
+_COLLABORATION_TARGET_PROMPTS = 10
+_REFLECTION_TARGET_CHARS = 150
+_PROFILE_MAX_INSIGHTS = 5
+_TREND_FLAT_TOLERANCE = 0.05
+
+# 学生自报的 AI 用途分两类:让 AI「生成」内容,和让 AI「打磨」自己的内容。
+# 从前者迁移到后者是很强的成长信号。
+_AI_HELP_GENERATIVE_TYPES = {
+    "Understand Assignment",
+    "Outline",
+    "Examples",
+    "Explain Concepts",
+    "Help Break Through Writer's Block",
+}
+_AI_HELP_REFINING_TYPES = {
+    "Revise Structure",
+    "Polish",
+    "Check Errors",
+    "Strengthen Reasoning",
+}
+
+_PROFILE_TREND_KEYS = (
+    "total_chars",
+    "score",
+    "process_index",
+    "collaboration_index",
+    "revision_depth",
+    "active_writing_seconds",
+    "last_minute_ratio",
+    "ai_ratio",
+    "digestion_ratio",
+    "prompt_count",
+    "reflection_quality",
+)
+
+# 反思质量的启发式:只看「有没有写出具体做了什么」,不做语义理解。
+# 中英各一组模式,命中即得分,便于向学生解释为什么这条反思被判为空泛。
+_REFLECTION_ACTION_PATTERNS = (
+    r"删|改写|重写|补充|替换|调整|重组|拆分|合并|换成|加了|去掉|润色",
+    r"\b(delete|rewrote|rewrite|revis|replac|restructur)",
+    r"\b(added|removed|merged|split|polish)",
+)
+_REFLECTION_LOCATOR_PATTERNS = (
+    r"第[一二三四五六七八九十\d]+(段|句|部分|章)|开头|结尾|结论|论点|论据|例子|标题",
+    r"\b(paragraph|sentence|intro|conclusion|thesis|evidence|example|section|title)",
+)
+_REFLECTION_JUDGEMENT_PATTERNS = (
+    r"但是|不过|其实|发现|意识到|不够|更好|不合适|不准确|不认同|没有采用|自己判断",
+    r"\b(but|however|realiz|noticed|inaccurate|disagree|better|instead|rejected)",
+)
+
+
+def _profile_index_formula() -> dict:
+    """把两个合成指数的构成如实返回,前端可展开查看,避免出现黑箱分数。"""
+    return {
+        "process_index": {
+            "revision_depth": {
+                "metric": "revised_chars / inserted_chars",
+                "target": _PROCESS_TARGET_REVISION_RATIO,
+                "weight": 1 / 3,
+            },
+            "span_effort": {
+                "metric": "writing_span_seconds",
+                "target": _PROCESS_TARGET_SPAN_SECONDS,
+                "weight": 1 / 3,
+            },
+            "pacing": {
+                "metric": "last_minute_ratio",
+                "inverted": True,
+                "weight": 1 / 3,
+            },
+        },
+        "collaboration_index": {
+            "digestion": {"metric": "digestion_ratio", "weight": 1 / 3},
+            "inquiry": {
+                "metric": "prompt_count",
+                "target": _COLLABORATION_TARGET_PROMPTS,
+                "weight": 1 / 3,
+            },
+            "reflection": {"metric": "reflection_quality", "weight": 1 / 3},
+            "note": "no_ai_usage_falls_back_to_reflection_only",
+        },
+        "reflection_quality": {
+            "length": {"target_chars": _REFLECTION_TARGET_CHARS, "max": 40},
+            "action": {"max": 20},
+            "locator": {"max": 20},
+            "judgement": {"max": 20},
+        },
+    }
+
+
+def _estimate_active_writing_seconds(marks: list[int]) -> int:
+    """把编辑操作的时间戳聚成写作块,块内累计时长,块间空档不计。"""
+    sorted_marks = sorted({mark for mark in marks if mark is not None})
+    if not sorted_marks:
+        return 0
+
+    total = 0
+    block_start = sorted_marks[0]
+    previous = sorted_marks[0]
+    for mark in sorted_marks[1:]:
+        if mark - previous > _ACTIVE_WRITING_GAP_SECONDS:
+            total += max(previous - block_start, _ACTIVE_WRITING_MIN_BLOCK_SECONDS)
+            block_start = mark
+        previous = mark
+    total += max(previous - block_start, _ACTIVE_WRITING_MIN_BLOCK_SECONDS)
+    return total
+
+
+def _compute_last_minute_ratio(
+    version_diffs: list[dict], start_at: int, end_at: int
+) -> float:
+    """最后一成时间里写下的字数占比 —— 越高越像临交前突击。"""
+    total_inserted = sum(diff.get("inserted_length", 0) for diff in version_diffs)
+    if total_inserted <= 0 or end_at <= start_at:
+        return 0.0
+
+    threshold = end_at - (end_at - start_at) * _LAST_MINUTE_WINDOW_RATIO
+    late_inserted = sum(
+        diff.get("inserted_length", 0)
+        for diff in version_diffs
+        if (diff.get("created_at") or 0) >= threshold
+    )
+    return round(late_inserted / total_inserted, 4)
+
+
+def _score_reflection(text: str) -> dict:
+    content = (text or "").strip()
+    if not content:
+        return {"char_count": 0, "score": 0}
+
+    def _hits(patterns) -> bool:
+        return any(re.search(pattern, content, re.IGNORECASE) for pattern in patterns)
+
+    length_score = min(len(content) / _REFLECTION_TARGET_CHARS, 1.0) * 40
+    action_score = 20 if _hits(_REFLECTION_ACTION_PATTERNS) else 0
+    locator_score = 20 if _hits(_REFLECTION_LOCATOR_PATTERNS) else 0
+    judgement_score = 20 if _hits(_REFLECTION_JUDGEMENT_PATTERNS) else 0
+    return {
+        "char_count": len(content),
+        "score": int(
+            round(length_score + action_score + locator_score + judgement_score)
+        ),
+    }
+
+
+def _compute_revision_depth(revised_chars: int, inserted_chars: int) -> int:
+    """回头删改的字符量占写入量的比例,折算成 0-100。
+
+    刻意不用版本数:一个版本 = 编辑器停顿 1.2 秒后的一次自动保存,数量只反映打字
+    时长(实测一篇稿子能有 200 多个版本),拿它当「改了几版」会被打字速度带偏。
+    删改字符量才真正区分「一路往下写」和「回头反复打磨」。
+    """
+    if inserted_chars <= 0:
+        return 0
+    ratio = revised_chars / inserted_chars
+    return int(round(min(ratio / _PROCESS_TARGET_REVISION_RATIO, 1.0) * 100))
+
+
+def _compute_process_index(
+    revision_depth: int, writing_span_seconds: int, last_minute_ratio: float
+) -> int:
+    span_effort = min(writing_span_seconds / _PROCESS_TARGET_SPAN_SECONDS, 1.0) * 100
+    pacing = (1 - min(max(last_minute_ratio, 0.0), 1.0)) * 100
+    return int(round((revision_depth + span_effort + pacing) / 3))
+
+
+def _compute_collaboration_index(
+    digestion_ratio: int,
+    prompt_count: int,
+    reflection_quality: int,
+    ai_ratio: float,
+) -> int:
+    # 没用 AI 的提交不该被「消化度 0」拖成低分,这一维退化为只看反思质量。
+    if ai_ratio <= 0 and prompt_count <= 0:
+        return int(round(reflection_quality))
+
+    inquiry = min(prompt_count / _COLLABORATION_TARGET_PROMPTS, 1.0) * 100
+    return int(round((digestion_ratio + inquiry + reflection_quality) / 3))
+
+
+def _slice_round_versions(versions, previous_final_version_id, final_version_id):
+    """截出本轮写作窗口内的版本:上一轮定稿之后 → 本轮定稿。"""
+    version_ids = [version.id for version in versions]
+    try:
+        end_index = version_ids.index(final_version_id)
+    except ValueError:
+        end_index = len(versions) - 1
+    start_index = 0
+    if previous_final_version_id in version_ids:
+        start_index = version_ids.index(previous_final_version_id) + 1
+    if start_index > end_index:
+        start_index = end_index
+    return versions[start_index : end_index + 1]
+
+
+def _build_trend(key: str, values: list[float]) -> Optional[StudentProfileMetricTrend]:
+    samples = [value for value in values if value is not None]
+    if len(samples) < 2:
+        return None
+
+    first = float(samples[0])
+    last = float(samples[-1])
+    delta = last - first
+    tolerance = max(abs(first), 1.0) * _TREND_FLAT_TOLERANCE
+    if delta > tolerance:
+        direction = "up"
+    elif delta < -tolerance:
+        direction = "down"
+    else:
+        direction = "flat"
+    return StudentProfileMetricTrend(
+        key=key,
+        first=round(first, 4),
+        last=round(last, 4),
+        delta=round(delta, 4),
+        direction=direction,
+        sample_count=len(samples),
+    )
+
+
+def _summarize_help_types(points: list) -> dict:
+    generative = 0
+    refining = 0
+    for point in points:
+        for help_type in point.ai_help_types:
+            if help_type in _AI_HELP_GENERATIVE_TYPES:
+                generative += 1
+            elif help_type in _AI_HELP_REFINING_TYPES:
+                refining += 1
+    total = generative + refining
+    return {
+        "generative": generative,
+        "refining": refining,
+        "refining_ratio": round(refining / total, 4) if total else 0.0,
+    }
+
+
+def _build_profile_insights(
+    timeline: list,
+    round_progress: list,
+    trends: dict,
+    help_shift: dict,
+    reflection_quality: dict,
+) -> list[StudentProfileInsight]:
+    if len(timeline) < 2:
+        return [StudentProfileInsight(code="not_enough_data", tone="neutral")]
+
+    latest = timeline[-1]
+    candidates: list[StudentProfileInsight] = []
+
+    digestion = trends.get("digestion_ratio")
+    if digestion is not None and digestion.direction == "up":
+        candidates.append(
+            StudentProfileInsight(
+                code="digestion_up",
+                tone="positive",
+                params={"delta": digestion.delta, "last": digestion.last},
+            )
+        )
+    elif latest.ai_ratio >= 0.3 and latest.digestion_ratio < 20:
+        candidates.append(
+            StudentProfileInsight(
+                code="digestion_low",
+                tone="warning",
+                params={
+                    "digestion_ratio": latest.digestion_ratio,
+                    "ai_ratio": latest.ai_ratio,
+                },
+            )
+        )
+
+    ai_ratio = trends.get("ai_ratio")
+    if ai_ratio is not None and ai_ratio.delta <= -0.15:
+        candidates.append(
+            StudentProfileInsight(
+                code="ai_reliance_down",
+                tone="positive",
+                params={"delta": ai_ratio.delta, "last": ai_ratio.last},
+            )
+        )
+    elif ai_ratio is not None and ai_ratio.delta >= 0.15:
+        candidates.append(
+            StudentProfileInsight(
+                code="ai_reliance_up",
+                tone="warning",
+                params={"delta": ai_ratio.delta, "last": ai_ratio.last},
+            )
+        )
+
+    improved_rounds = [
+        item
+        for item in round_progress
+        if item.score_delta is not None and item.score_delta > 0
+    ]
+    if improved_rounds:
+        candidates.append(
+            StudentProfileInsight(
+                code="round_improvement",
+                tone="positive",
+                params={
+                    "count": len(improved_rounds),
+                    "best_delta": max(item.score_delta for item in improved_rounds),
+                },
+            )
+        )
+    elif round_progress and all(item.revision_ratio < 10 for item in round_progress):
+        candidates.append(
+            StudentProfileInsight(
+                code="round_revision_thin",
+                tone="warning",
+                params={
+                    "revision_ratio": max(
+                        item.revision_ratio for item in round_progress
+                    )
+                },
+            )
+        )
+
+    if help_shift.get("refining_ratio_delta", 0) >= 0.2:
+        candidates.append(
+            StudentProfileInsight(
+                code="help_type_shift_refining",
+                tone="positive",
+                params={"delta": help_shift.get("refining_ratio_delta", 0)},
+            )
+        )
+
+    if latest.last_minute_ratio >= 0.6:
+        candidates.append(
+            StudentProfileInsight(
+                code="last_minute_writing",
+                tone="warning",
+                params={"ratio": latest.last_minute_ratio},
+            )
+        )
+
+    process = trends.get("process_index")
+    if process is not None and process.direction == "up":
+        candidates.append(
+            StudentProfileInsight(
+                code="process_up",
+                tone="positive",
+                params={"delta": process.delta, "last": process.last},
+            )
+        )
+
+    if reflection_quality.get("average_score", 0) < 40:
+        candidates.append(
+            StudentProfileInsight(
+                code="reflection_thin",
+                tone="warning",
+                params={"average_score": reflection_quality.get("average_score", 0)},
+            )
+        )
+
+    return candidates[:_PROFILE_MAX_INSIGHTS]
+
+
+async def _build_student_profile(
+    student,
+    student_id: str,
+    classroom,
+    assignments: list,
+    db: Session,
+) -> StudentProfileResponse:
+    assignment_by_id = {assignment.id: assignment for assignment in assignments}
+    submissions = Education.get_submissions_by_student(
+        student_id, list(assignment_by_id.keys()), db=db
+    )
+    reviews = Education.get_submission_reviews_by_submission_ids(
+        [submission.id for submission in submissions], db=db
+    )
+    sessions = Education.get_writing_sessions_by_ids(
+        [submission.writing_session_id for submission in submissions], db=db
+    )
+    versions_by_session = Education.get_versions_by_session_ids(
+        list(sessions.keys()), db=db
+    )
+    operation_marks = Education.get_editor_operation_marks_by_session_ids(
+        list(sessions.keys()), db=db
+    )
+    reflections = Education.get_micro_reflections_by_ids(
+        [submission.micro_reflection_id for submission in submissions], db=db
+    )
+    analyses = await _get_or_build_submission_analyses(submissions, sessions, db)
+
+    rounds_by_assignment: dict[str, list] = {}
+    for submission in submissions:
+        rounds_by_assignment.setdefault(submission.assignment_id, []).append(submission)
+    for assignment_rounds in rounds_by_assignment.values():
+        assignment_rounds.sort(key=lambda item: item.round_no)
+
+    timeline: list[StudentProfileTimelinePoint] = []
+    round_progress: list[StudentProfileRoundProgress] = []
+
+    for assignment_id, assignment_rounds in rounds_by_assignment.items():
+        assignment = assignment_by_id.get(assignment_id)
+        if assignment is None:
+            continue
+
+        previous_submission = None
+        previous_final_text = ""
+        for submission in assignment_rounds:
+            session = sessions.get(submission.writing_session_id)
+            if session is None:
+                continue
+
+            previous_review = (
+                reviews.get(previous_submission.id) if previous_submission else None
+            )
+            # 第 2 轮起的截止时间是退回时设的重交截止,拿作业原始截止算提前量会失真。
+            round_due_at = (
+                previous_review.resubmit_due_at
+                if previous_review and previous_review.resubmit_due_at
+                else assignment.due_at
+            )
+
+            summary = (analyses.get(submission.id) or {}).get("summary") or {}
+            review = reviews.get(submission.id)
+            reflection = reflections.get(submission.micro_reflection_id)
+            reflection_score = _score_reflection(
+                reflection.reflection_text if reflection else ""
+            )
+
+            all_versions = versions_by_session.get(submission.writing_session_id, [])
+            round_versions = _slice_round_versions(
+                all_versions,
+                previous_submission.final_version_id if previous_submission else None,
+                submission.final_version_id,
+            )
+            window_start_at = (
+                round_versions[0].created_at
+                if round_versions
+                else submission.submitted_at
+            )
+            version_diffs = _build_version_diffs(round_versions, previous_final_text)
+            inserted_chars = sum(
+                diff.get("inserted_length", 0) for diff in version_diffs
+            )
+            revised_chars = sum(diff.get("deleted_length", 0) for diff in version_diffs)
+            revision_depth = _compute_revision_depth(revised_chars, inserted_chars)
+            writing_span_seconds = max(submission.submitted_at - window_start_at, 0)
+            active_writing_seconds = _estimate_active_writing_seconds(
+                [
+                    mark
+                    for mark in operation_marks.get(submission.writing_session_id, [])
+                    if window_start_at <= mark <= submission.submitted_at
+                ]
+            )
+            last_minute_ratio = _compute_last_minute_ratio(
+                version_diffs, window_start_at, submission.submitted_at
+            )
+
+            ai_ratio = round(
+                summary.get("ai_inserted_ratio", 0) + summary.get("ai_pasted_ratio", 0),
+                4,
+            )
+            digestion_ratio = summary.get("average_rewrite_ratio", 0)
+            prompt_count = summary.get("prompt_count", 0)
+
+            timeline.append(
+                StudentProfileTimelinePoint(
+                    submission_id=submission.id,
+                    assignment_id=assignment.id,
+                    assignment_title=assignment.title,
+                    round_no=submission.round_no,
+                    is_current=submission.is_current == 1,
+                    submitted_at=submission.submitted_at,
+                    total_chars=summary.get("total_chars", 0),
+                    score=review.score if review else None,
+                    rubric=review.rubric_json if review else None,
+                    review_status=review.review_status if review else "pending",
+                    inserted_chars=inserted_chars,
+                    revised_chars=revised_chars,
+                    revision_depth=revision_depth,
+                    writing_span_seconds=writing_span_seconds,
+                    active_writing_seconds=active_writing_seconds,
+                    lead_time_seconds=(
+                        round_due_at - window_start_at
+                        if round_due_at is not None
+                        else None
+                    ),
+                    last_minute_ratio=last_minute_ratio,
+                    process_index=_compute_process_index(
+                        revision_depth, writing_span_seconds, last_minute_ratio
+                    ),
+                    typed_ratio=summary.get("typed_ratio", 0),
+                    ai_ratio=ai_ratio,
+                    unknown_ratio=summary.get("unknown_ratio", 0),
+                    prompt_count=prompt_count,
+                    digestion_ratio=digestion_ratio,
+                    reflection_char_count=reflection_score["char_count"],
+                    reflection_quality=reflection_score["score"],
+                    ai_help_types=list(reflection.ai_help_types) if reflection else [],
+                    collaboration_index=_compute_collaboration_index(
+                        digestion_ratio,
+                        prompt_count,
+                        reflection_score["score"],
+                        ai_ratio,
+                    ),
+                    burst_count=summary.get("burst_count", 0),
+                    suspected_unmarked_import_count=summary.get(
+                        "suspected_unmarked_import_count", 0
+                    ),
+                )
+            )
+
+            final_version = next(
+                (
+                    version
+                    for version in all_versions
+                    if version.id == submission.final_version_id
+                ),
+                None,
+            )
+            final_text = (
+                final_version.note_snapshot_text if final_version else ""
+            ) or ""
+
+            if previous_submission is not None:
+                similarity = difflib.SequenceMatcher(
+                    None, previous_final_text, final_text
+                ).ratio()
+                round_progress.append(
+                    StudentProfileRoundProgress(
+                        assignment_id=assignment.id,
+                        assignment_title=assignment.title,
+                        from_round=previous_submission.round_no,
+                        to_round=submission.round_no,
+                        char_delta=len(final_text) - len(previous_final_text),
+                        revision_ratio=int(round((1 - similarity) * 100)),
+                        score_delta=(
+                            review.score - previous_review.score
+                            if review
+                            and review.score is not None
+                            and previous_review
+                            and previous_review.score is not None
+                            else None
+                        ),
+                        turnaround_seconds=(
+                            submission.submitted_at - previous_review.reviewed_at
+                            if previous_review and previous_review.reviewed_at
+                            else None
+                        ),
+                    )
+                )
+
+            previous_submission = submission
+            previous_final_text = final_text
+
+    timeline.sort(key=lambda point: (point.submitted_at, point.round_no))
+    round_progress.sort(key=lambda item: (item.assignment_title, item.to_round))
+
+    trends = {}
+    for key in _PROFILE_TREND_KEYS:
+        trend = _build_trend(key, [getattr(point, key) for point in timeline])
+        if trend is not None:
+            trends[key] = trend
+
+    half = len(timeline) // 2
+    early_points = timeline[:half] if half else []
+    recent_points = timeline[half:] if half else timeline
+    early_help = _summarize_help_types(early_points)
+    recent_help = _summarize_help_types(recent_points)
+    help_shift = {
+        "early": early_help,
+        "recent": recent_help,
+        "refining_ratio_delta": round(
+            recent_help["refining_ratio"] - early_help["refining_ratio"], 4
+        ),
+    }
+
+    help_distribution: dict[str, int] = {}
+    for point in timeline:
+        for help_type in point.ai_help_types:
+            help_distribution[help_type] = help_distribution.get(help_type, 0) + 1
+
+    reflection_scores = [point.reflection_quality for point in timeline]
+    reflection_quality = {
+        "count": len(reflection_scores),
+        "average_score": (
+            int(round(sum(reflection_scores) / len(reflection_scores)))
+            if reflection_scores
+            else 0
+        ),
+        "average_chars": (
+            int(
+                round(
+                    sum(point.reflection_char_count for point in timeline)
+                    / len(timeline)
+                )
+            )
+            if timeline
+            else 0
+        ),
+    }
+
+    profile_assignments: list[StudentProfileAssignmentItem] = []
+    submitted_count = 0
+    reviewed_count = 0
+    returned_count = 0
+    scores: list[int] = []
+    for assignment in assignments:
+        assignment_rounds = rounds_by_assignment.get(assignment.id, [])
+        current = next(
+            (item for item in reversed(assignment_rounds) if item.is_current == 1), None
+        )
+        if current is None:
+            profile_assignments.append(
+                StudentProfileAssignmentItem(assignment=assignment)
+            )
+            continue
+
+        review = reviews.get(current.id)
+        review_status = review.review_status if review else "pending"
+        submitted_count += 1
+        if review_status == "reviewed":
+            reviewed_count += 1
+        elif review_status == "returned":
+            returned_count += 1
+        if review and review.score is not None:
+            scores.append(review.score)
+        profile_assignments.append(
+            StudentProfileAssignmentItem(
+                assignment=assignment,
+                submission_id=current.id,
+                submitted_at=current.submitted_at,
+                round_no=current.round_no,
+                review_status=review_status,
+                score=review.score if review else None,
+            )
+        )
+
+    return StudentProfileResponse(
+        student_id=student_id,
+        student_name=student.name if student else student_id,
+        student_email=student.email if student else None,
+        classroom=classroom,
+        assignment_count=len(assignments),
+        submitted_count=submitted_count,
+        unsubmitted_count=len(assignments) - submitted_count,
+        reviewed_count=reviewed_count,
+        returned_count=returned_count,
+        average_score=round(sum(scores) / len(scores), 1) if scores else None,
+        assignments=profile_assignments,
+        timeline=timeline,
+        round_progress=round_progress,
+        trends=list(trends.values()),
+        ai_help_type_distribution=help_distribution,
+        ai_help_type_shift=help_shift,
+        reflection_quality=reflection_quality,
+        index_formula=_profile_index_formula(),
+        insights=_build_profile_insights(
+            timeline, round_progress, trends, help_shift, reflection_quality
+        ),
+    )
 
 
 async def _build_personal_workspace_item(
@@ -1945,15 +2685,20 @@ async def get_teacher_classrooms(
             Education.get_classroom_members(classroom.id, member_role="student", db=db)
         )
         risk_summary = _empty_risk_summary()
-        for assignment in assignments:
+        submissions = [
+            submission
+            for assignment in assignments
             for submission in Education.get_submissions_by_assignment(
                 assignment.id, db=db
-            ):
-                session = Education.get_writing_session_by_id(
-                    submission.writing_session_id, db=db
-                )
-                analysis = await _get_or_build_submission_analysis(submission, session, db)
-                _accumulate_risk_summary(risk_summary, analysis.get("summary"))
+            )
+        ]
+        sessions = Education.get_writing_sessions_by_ids(
+            [submission.writing_session_id for submission in submissions], db=db
+        )
+        analyses = await _get_or_build_submission_analyses(submissions, sessions, db)
+        for submission in submissions:
+            analysis = analyses.get(submission.id) or {}
+            _accumulate_risk_summary(risk_summary, analysis.get("summary"))
         items.append(
             TeacherClassroomListItem(
                 classroom=classroom,
@@ -2432,25 +3177,38 @@ async def get_classroom_progress(
     reviewed_total = 0
     pending_total = 0
 
+    # 提交、批改、写作会话都先一次性取回,避免「作业 × 提交」两层循环里逐条查库。
+    submissions_by_assignment = {
+        assignment.id: Education.get_submissions_by_assignment(assignment.id, db=db)
+        for assignment in assignments
+    }
+    all_submissions = [
+        submission
+        for submissions in submissions_by_assignment.values()
+        for submission in submissions
+    ]
+    reviews = Education.get_submission_reviews_by_submission_ids(
+        [submission.id for submission in all_submissions], db=db
+    )
+    sessions = Education.get_writing_sessions_by_ids(
+        [submission.writing_session_id for submission in all_submissions], db=db
+    )
+    analyses = await _get_or_build_submission_analyses(all_submissions, sessions, db)
+
     for assignment in assignments:
-        submissions = Education.get_submissions_by_assignment(assignment.id, db=db)
+        submissions = submissions_by_assignment[assignment.id]
         submitted_count = len(submissions)
         unsubmitted_count = max(len(students) - submitted_count, 0)
         reviewed_count = 0
         pending_count = 0
         risk_summary = _empty_risk_summary()
         for submission in submissions:
-            review = Education.get_submission_review_by_submission_id(
-                submission.id, db=db
-            )
+            review = reviews.get(submission.id)
             if review and review.review_status in {"reviewed", "returned"}:
                 reviewed_count += 1
             else:
                 pending_count += 1
-            session = Education.get_writing_session_by_id(
-                submission.writing_session_id, db=db
-            )
-            analysis = await _get_or_build_submission_analysis(submission, session, db)
+            analysis = analyses.get(submission.id) or {}
             _accumulate_risk_summary(risk_summary, analysis.get("summary"))
 
         progress_items.append(
@@ -2592,10 +3350,10 @@ async def export_classroom_progress(
 
 
 @router.get(
-    "/teacher/classrooms/{classroom_id}/students/{student_user_id}/performance",
-    response_model=StudentPerformanceResponse,
+    "/teacher/classrooms/{classroom_id}/students/{student_user_id}/profile",
+    response_model=StudentProfileResponse,
 )
-async def get_student_performance(
+async def get_student_profile(
     student_user_id: str,
     classroom: ClassroomModel = Depends(require_teacher_classroom),
     db: Session = Depends(get_session),
@@ -2609,62 +3367,8 @@ async def get_student_performance(
 
     student = await Users.get_user_by_id(student_user_id, db=db)
     assignments = Education.get_assignments_by_classroom(classroom.id, db=db)
-
-    items = []
-    submitted_count = 0
-    reviewed_count = 0
-    returned_count = 0
-    for assignment in assignments:
-        submission = Education.get_current_submission(
-            assignment.id, student_user_id, db=db
-        )
-        if submission is None:
-            items.append(StudentPerformanceItem(assignment=assignment))
-            continue
-
-        review = Education.get_submission_review_by_submission_id(
-            submission.id, db=db
-        )
-        review_status = review.review_status if review else "pending"
-        submitted_count += 1
-        if review_status == "reviewed":
-            reviewed_count += 1
-        elif review_status == "returned":
-            returned_count += 1
-        items.append(
-            StudentPerformanceItem(
-                assignment=assignment,
-                submission_id=submission.id,
-                submitted_at=submission.submitted_at,
-                round_no=submission.round_no,
-                review_status=review_status,
-                score=review.score if review else None,
-                prompt_count=submission.stats_json.get("prompt_count", 0),
-                source_stats=submission.stats_json,
-                has_reflection=(
-                    Education.get_micro_reflection_by_id(
-                        submission.micro_reflection_id, db=db
-                    )
-                    is not None
-                    if submission.micro_reflection_id
-                    else False
-                ),
-            )
-        )
-
-    scores = [item.score for item in items if item.score is not None]
-    return StudentPerformanceResponse(
-        classroom=classroom,
-        student_id=student_user_id,
-        student_name=student.name if student else student_user_id,
-        student_email=student.email if student else None,
-        assignment_count=len(assignments),
-        submitted_count=submitted_count,
-        unsubmitted_count=len(assignments) - submitted_count,
-        reviewed_count=reviewed_count,
-        returned_count=returned_count,
-        average_score=round(sum(scores) / len(scores), 1) if scores else None,
-        items=items,
+    return await _build_student_profile(
+        student, student_user_id, classroom, assignments, db
     )
 
 
@@ -3784,12 +4488,23 @@ async def get_teacher_dashboard(
         "deeply_rewritten": 0,
     }
     summary = _empty_risk_summary()
-    for submission in submissions:
-        student = await Users.get_user_by_id(submission.student_id, db=db)
-        session = Education.get_writing_session_by_id(
-            submission.writing_session_id, db=db
+    # 学生、写作会话、微反思都按批取回,班级规模变大时看板不再是 N+1。
+    students = {
+        student.id: student
+        for student in await Users.get_users_by_user_ids(
+            list({submission.student_id for submission in submissions}), db=db
         )
-        analysis = await _get_or_build_submission_analysis(submission, session, db)
+    }
+    sessions = Education.get_writing_sessions_by_ids(
+        [submission.writing_session_id for submission in submissions], db=db
+    )
+    reflections = Education.get_micro_reflections_by_ids(
+        [submission.micro_reflection_id for submission in submissions], db=db
+    )
+    analyses = await _get_or_build_submission_analyses(submissions, sessions, db)
+    for submission in submissions:
+        student = students.get(submission.student_id)
+        analysis = analyses.get(submission.id) or {}
         _accumulate_risk_summary(summary, analysis.get("summary"))
         for segment in analysis.get("segments", []):
             rewrite_level = segment.get("rewrite_level")
@@ -3802,14 +4517,7 @@ async def get_teacher_dashboard(
                 student_name=student.name if student else submission.student_id,
                 source_stats=submission.stats_json,
                 prompt_count=submission.stats_json.get("prompt_count", 0),
-                has_reflection=(
-                    Education.get_micro_reflection_by_id(
-                        submission.micro_reflection_id, db=db
-                    )
-                    is not None
-                    if submission.micro_reflection_id
-                    else False
-                ),
+                has_reflection=submission.micro_reflection_id in reflections,
                 submitted_at=submission.submitted_at,
                 risk_summary=analysis.get("summary", {}),
             )
@@ -3824,63 +4532,21 @@ async def get_teacher_dashboard(
     )
 
 
-@router.get("/me/writing/dashboard", response_model=DashboardResponse)
-async def get_student_dashboard(
+@router.get("/me/writing/profile", response_model=StudentProfileResponse)
+async def get_my_writing_profile(
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
-    rows = (
-        db.query(Submission)
-        .filter(Submission.student_id == user.id, Submission.is_current == 1)
-        .order_by(Submission.submitted_at.desc())
-        .limit(MAX_DASHBOARD_ITEMS)
-        .all()
+    membership = Education.get_classroom_member_by_user_id(user.id, db=db)
+    classroom = (
+        Education.get_classroom_by_id(membership.classroom_id, db=db)
+        if membership
+        else None
     )
-    summary = _empty_risk_summary()
-    rewrite_distribution = {
-        "unchanged": 0,
-        "lightly_edited": 0,
-        "moderately_rewritten": 0,
-        "deeply_rewritten": 0,
-    }
-    items = []
-    for row in rows:
-        analysis = await _get_or_build_submission_analysis(
-            row,
-            Education.get_writing_session_by_id(row.writing_session_id, db=db),
-            db,
-        )
-        risk_summary = analysis.get("summary", {})
-        items.append(
-            DashboardItem(
-                submission_id=row.id,
-                student_id=row.student_id,
-                student_name=user.name,
-                source_stats=row.stats_json,
-                prompt_count=row.stats_json.get("prompt_count", 0),
-                has_reflection=(
-                    Education.get_micro_reflection_by_id(row.micro_reflection_id, db=db)
-                    is not None
-                    if row.micro_reflection_id
-                    else False
-                ),
-                submitted_at=row.submitted_at,
-                risk_summary=risk_summary,
-            )
-        )
-        _accumulate_risk_summary(summary, risk_summary or {})
-        for segment in analysis.get("segments", []):
-            rewrite_level = segment.get("rewrite_level")
-            if rewrite_level in rewrite_distribution:
-                rewrite_distribution[rewrite_level] += 1
-    return DashboardResponse(
-        items=items,
-        summary=_finalize_risk_summary(summary),
-        distributions={
-            "rewrite_levels": rewrite_distribution,
-            "submission_count": len(items),
-        },
-    )
+    assignments = Education.get_assignments_by_student(user.id, db=db)[
+        :MAX_STUDENT_ASSIGNMENTS
+    ]
+    return await _build_student_profile(user, user.id, classroom, assignments, db)
 
 
 @router.get("/me/writing/assignments", response_model=list[StudentAssignmentListItem])
