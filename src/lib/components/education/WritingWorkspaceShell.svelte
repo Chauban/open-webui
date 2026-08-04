@@ -81,6 +81,8 @@
 	let reflectionText = '';
 
 	let lastText = '';
+	// 最近一次真正落成版本的正文，用来跳过「内容没变」的自动保存。
+	let lastVersionedText = '';
 	let pendingSource: null | { sourceType: string; sourceMessageId?: string | null; text?: string } =
 		null;
 	let sourceRuns = [];
@@ -327,12 +329,18 @@
 					save_reason: triggerType
 				});
 
-				if (!version) {
+				// 正文没变就不要再存一版。编辑器在选区/格式变化时也会触发 onChange，
+				// 照存的话一篇稿子能攒出两百多个一模一样的版本：既撑大版本历史让老师
+				// 没法看，也让「改了几版」这类过程指标彻底失去意义。
+				// 提交类快照（submit / submit_preflight）必须留痕，不受此限。
+				const isAutosave = triggerType === 'autosave';
+				if (!version && (!isAutosave || noteText !== lastVersionedText)) {
 					version = await createWritingVersion(localStorage.token, writingSession.id, {
 						trigger_type: triggerType,
 						content_json: noteJson,
 						content_text: noteText
 					});
+					lastVersionedText = noteText;
 				}
 
 				if (unsavedOperations.length > 0) {
@@ -342,11 +350,14 @@
 					unsavedOperations = [];
 				}
 
-				await createProvenanceSegments(localStorage.token, writingSession.id, {
-					version_id: version.id,
-					replace_existing: true,
-					segments: sourceRunsToProvenanceSegments(noteText, sourceRuns)
-				});
+				// 正文没变时不会开新版本，来源分布同样没变，不必重写 source map。
+				if (version) {
+					await createProvenanceSegments(localStorage.token, writingSession.id, {
+						version_id: version.id,
+						replace_existing: true,
+						segments: sourceRunsToProvenanceSegments(noteText, sourceRuns)
+					});
+				}
 
 				saveStatusKey = isSubmitted ? 'Submitted' : 'Saved';
 				hasUnsavedFailure = false;
@@ -411,9 +422,19 @@
 
 	const handleContentChange = (content) => {
 		if (isReadOnly) return;
+		const nextText = content.text ?? content.md ?? '';
+
+		// 编辑器重新挂载时会先抛一个空文档（正文还没灌回去），这不是用户删除。
+		// 不拦掉的话：整篇被记成一次删除，source map 被清空，随后内容回填又被
+		// 整体标成 user_typed —— 来源追踪和过程指标会一起失真。
+		// 代价是真的「全选删光」不再留痕，但那远比凭空造出一次万字删除好。
+		if (lastText.length > 0 && nextText.length === 0) {
+			return;
+		}
+
 		noteJson = content.json;
 		noteHtml = content.html;
-		noteText = content.text ?? content.md;
+		noteText = nextText;
 		const diff = extractTextDiff(lastText, noteText);
 		const sourceType = pendingSource?.sourceType ?? 'user_typed';
 		const sourceMessageId = pendingSource?.sourceMessageId ?? null;
@@ -577,6 +598,7 @@
 			noteText = workspace.note?.data?.content?.md ?? '';
 			noteTitle = normalizePersonalTitle(workspace.note?.title);
 			lastText = noteText;
+			lastVersionedText = noteText;
 			sourceRuns = workspace.source_map?.length
 				? provenanceSegmentsToSourceRuns(noteText, workspace.source_map)
 				: normalizeSourceRuns([], noteText.length);
