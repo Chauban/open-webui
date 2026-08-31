@@ -43,9 +43,15 @@ from open_webui.models.groups import Group, GroupMember
 from open_webui.models.notes import Note, PinnedNote
 from open_webui.models.users import User, UserModel
 import open_webui.routers.education as education_router_module
+import open_webui.services.education.analysis as education_analysis_module
+import open_webui.services.education.profile as education_profile_module
 from open_webui.routers.education import router as education_router
 from open_webui.routers.chats import router as chats_router
 from open_webui.routers.notes import router as notes_router
+from open_webui.services.education.analysis import (
+    build_submission_analysis,
+    filter_segments_for_final_text,
+)
 from open_webui.utils.auth import get_verified_user
 
 
@@ -65,9 +71,7 @@ def test_filter_segments_prioritizes_full_ai_insert_over_short_typed_fragments()
         ),
     ]
 
-    filtered = education_router_module._filter_segments_for_final_text(
-        final_text, segments
-    )
+    filtered = filter_segments_for_final_text(final_text, segments)
 
     assert [segment.segment_id for segment in filtered] == ["ai-full"]
 
@@ -86,9 +90,7 @@ def test_filter_segments_removes_low_signal_manual_fragments():
         ),
     ]
 
-    filtered = education_router_module._filter_segments_for_final_text(
-        final_text, segments
-    )
+    filtered = filter_segments_for_final_text(final_text, segments)
 
     assert [segment.segment_id for segment in filtered] == ["typed-laugh"]
 
@@ -200,7 +202,7 @@ def test_submission_analysis_separates_source_map_counts_from_process_events():
         ),
     ]
 
-    analysis = education_router_module._build_submission_analysis(
+    analysis = build_submission_analysis(
         submission,
         SimpleNamespace(id="session-1"),
         [version],
@@ -2446,10 +2448,10 @@ def test_active_writing_seconds_ignores_idle_gaps():
     # 两块写作(各 60s),中间隔了一小时 —— 空档不该被算成写作时长。
     marks = [0, 30, 60, 3660, 3690, 3720]
 
-    assert education_router_module._estimate_active_writing_seconds(marks) == 120
+    assert education_profile_module._estimate_active_writing_seconds(marks) == 120
     # 单次操作没有跨度,按一个最小块计,而不是 0。
-    assert education_router_module._estimate_active_writing_seconds([100]) == 30
-    assert education_router_module._estimate_active_writing_seconds([]) == 0
+    assert education_profile_module._estimate_active_writing_seconds([100]) == 30
+    assert education_profile_module._estimate_active_writing_seconds([]) == 0
 
 
 def test_last_minute_ratio_counts_only_the_final_tenth():
@@ -2458,29 +2460,29 @@ def test_last_minute_ratio_counts_only_the_final_tenth():
         {"created_at": 950, "inserted_length": 300},
     ]
 
-    ratio = education_router_module._compute_last_minute_ratio(diffs, 0, 1000)
+    ratio = education_profile_module._compute_last_minute_ratio(diffs, 0, 1000)
 
     assert ratio == 0.75
 
 
 def test_reflection_score_separates_concrete_from_generic():
-    generic = education_router_module._score_reflection("我用了 AI，写得还不错。")
-    concrete = education_router_module._score_reflection(
+    generic = education_profile_module._score_reflection("我用了 AI，写得还不错。")
+    concrete = education_profile_module._score_reflection(
         "AI 给的第二段论据我觉得不够准确，所以删掉重写了，"
         "并且把结尾的论点换成了自己的例子。"
     )
 
     assert concrete["score"] > generic["score"]
     assert concrete["score"] >= 60
-    assert education_router_module._score_reflection("")["score"] == 0
+    assert education_profile_module._score_reflection("")["score"] == 0
 
 
 def test_collaboration_index_falls_back_to_reflection_without_ai():
     # 完全没用 AI 的提交不该被「消化度 0」拖成低分。
-    without_ai = education_router_module._compute_collaboration_index(
+    without_ai = education_profile_module._compute_collaboration_index(
         digestion_ratio=0, prompt_count=0, reflection_quality=80, ai_ratio=0.0
     )
-    with_ai = education_router_module._compute_collaboration_index(
+    with_ai = education_profile_module._compute_collaboration_index(
         digestion_ratio=0, prompt_count=0, reflection_quality=80, ai_ratio=0.5
     )
 
@@ -2497,10 +2499,10 @@ def test_versions_up_to_stops_at_the_round_final_version():
 
     assert [
         version.id
-        for version in education_router_module._versions_up_to(versions, "v2")
+        for version in education_analysis_module._versions_up_to(versions, "v2")
     ] == ["v1", "v2"]
     # 找不到定稿版本时退回全量,不要静默丢数据。
-    assert len(education_router_module._versions_up_to(versions, "missing")) == 3
+    assert len(education_analysis_module._versions_up_to(versions, "missing")) == 3
 
 
 def test_student_profile_tracks_round_progress_and_trends(education_client):
@@ -2609,17 +2611,17 @@ def test_analysis_payload_usability_treats_history_as_immutable():
 
     # 当前轮跟着 logic_version 走:数据还在,重算是对的。
     assert (
-        education_router_module._is_analysis_payload_usable(current_round, stale)
+        education_analysis_module._is_analysis_payload_usable(current_round, stale)
         is False
     )
     # 历史轮的 provenance 已被后续轮次覆盖,重算只会算错,存档一律直接用。
     assert (
-        education_router_module._is_analysis_payload_usable(historical_round, stale)
+        education_analysis_module._is_analysis_payload_usable(historical_round, stale)
         is True
     )
     # 没有存档只能重算,不管是哪一轮。
     assert (
-        education_router_module._is_analysis_payload_usable(historical_round, None)
+        education_analysis_module._is_analysis_payload_usable(historical_round, None)
         is False
     )
 
@@ -2656,14 +2658,14 @@ def test_historical_round_analysis_survives_logic_version_bump(education_client)
     ).json()
 
     # 模拟逻辑版本升级:当前轮该重算,历史轮必须原样返回存档。
-    original_version = education_router_module._ANALYSIS_LOGIC_VERSION
-    education_router_module._ANALYSIS_LOGIC_VERSION = f"{original_version}-next"
+    original_version = education_analysis_module._ANALYSIS_LOGIC_VERSION
+    education_analysis_module._ANALYSIS_LOGIC_VERSION = f"{original_version}-next"
     try:
         after_bump = client.get(
             f"/api/v1/teacher/submissions/{first_submission_id}/analysis/summary"
         ).json()
     finally:
-        education_router_module._ANALYSIS_LOGIC_VERSION = original_version
+        education_analysis_module._ANALYSIS_LOGIC_VERSION = original_version
 
     assert after_bump["total_chars"] == stored_first["total_chars"]
 
@@ -2679,22 +2681,22 @@ def test_historical_round_analysis_survives_logic_version_bump(education_client)
 
 def test_revision_depth_measures_rework_not_autosave_count():
     # 一路往下写:写了 1000 字,没回头删过 → 修订深度 0
-    assert education_router_module._compute_revision_depth(0, 1000) == 0
+    assert education_profile_module._compute_revision_depth(0, 1000) == 0
     # 删改量达到写入量的三成即记满分(目标比例)
-    assert education_router_module._compute_revision_depth(300, 1000) == 100
-    assert education_router_module._compute_revision_depth(150, 1000) == 50
+    assert education_profile_module._compute_revision_depth(300, 1000) == 100
+    assert education_profile_module._compute_revision_depth(150, 1000) == 50
     # 删改比写入还多也不会超过 100
-    assert education_router_module._compute_revision_depth(2000, 1000) == 100
+    assert education_profile_module._compute_revision_depth(2000, 1000) == 100
     # 没写过东西不该除以零
-    assert education_router_module._compute_revision_depth(0, 0) == 0
+    assert education_profile_module._compute_revision_depth(0, 0) == 0
 
 
 def test_process_index_ignores_version_count():
     # 自动保存次数再多,只要没回头改过,过程投入就不该被抬高。
-    steady_typing = education_router_module._compute_process_index(
+    steady_typing = education_profile_module._compute_process_index(
         revision_depth=0, writing_span_seconds=0, last_minute_ratio=1.0
     )
-    reworked = education_router_module._compute_process_index(
+    reworked = education_profile_module._compute_process_index(
         revision_depth=100, writing_span_seconds=0, last_minute_ratio=1.0
     )
 
