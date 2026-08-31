@@ -46,7 +46,19 @@ def test_fresh_database_upgrades_to_head(tmp_path, monkeypatch):
         } <= {column["name"] for column in schema.get_columns("writing_session")}
         assert {"round_no", "is_current"} <= {column["name"] for column in schema.get_columns("submission")}
         assert "resubmit_due_at" in {column["name"] for column in schema.get_columns("submission_review")}
-        assert "ai_help_types" in {column["name"] for column in schema.get_columns("micro_reflection")}
-        assert "score_max" in {column["name"] for column in schema.get_columns("assignment")}
+        reflection_columns = {
+            column["name"] for column in schema.get_columns("micro_reflection")
+        }
+        assert {"ai_used", "ai_help_types", "reflection_json"} <= reflection_columns
+        assert "reflection_text" not in reflection_columns
+        assignment_columns = {
+            column["name"] for column in schema.get_columns("assignment")
+        }
+        assert {"score_max", "rubric_schema"} <= assignment_columns
+        review_columns = {
+            column["name"] for column in schema.get_columns("submission_review")
+        }
+        assert "rubric_scores" in review_columns
+        assert "rubric_json" not in review_columns
     finally:
         engine.dispose()

@@ -1,5 +1,4 @@
 import difflib
-import re
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -35,7 +34,12 @@ _DEADLINE_WINDOW_SECONDS = 24 * 3600
 _PROCESS_TARGET_REVISION_RATIO = 0.3
 _PROCESS_TARGET_SPAN_SECONDS = 3 * 24 * 3600
 _COLLABORATION_TARGET_PROMPTS = 10
-_REFLECTION_TARGET_CHARS = 150
+_REFLECTION_EVIDENCE_TARGETS = {
+    "action": (60, 30),
+    "location": (20, 20),
+    "judgement": (60, 30),
+    "next_step": (40, 20),
+}
 _PROFILE_MAX_INSIGHTS = 5
 _TREND_FLAT_TOLERANCE = 0.05
 _TREND_MIN_SAMPLES = 3
@@ -72,23 +76,6 @@ _PROFILE_TREND_KEYS = (
     "reflection_quality",
 )
 
-# 反思质量的启发式:只看「有没有写出具体做了什么」,不做语义理解。
-# 中英各一组模式,命中即得分,便于向学生解释为什么这条反思被判为空泛。
-_REFLECTION_ACTION_PATTERNS = (
-    r"删|改写|重写|补充|替换|调整|重组|拆分|合并|换成|加了|去掉|润色",
-    r"\b(delete|rewrote|rewrite|revis|replac|restructur)",
-    r"\b(added|removed|merged|split|polish)",
-)
-_REFLECTION_LOCATOR_PATTERNS = (
-    r"第[一二三四五六七八九十\d]+(段|句|部分|章)|开头|结尾|结论|论点|论据|例子|标题",
-    r"\b(paragraph|sentence|intro|conclusion|thesis|evidence|example|section|title)",
-)
-_REFLECTION_JUDGEMENT_PATTERNS = (
-    r"但是|不过|其实|发现|意识到|不够|更好|不合适|不准确|不认同|没有采用|自己判断",
-    r"\b(but|however|realiz|noticed|inaccurate|disagree|better|instead|rejected)",
-)
-
-
 def _profile_index_formula() -> dict:
     """把两个合成指数的构成如实返回,前端可展开查看,避免出现黑箱分数。"""
     return {
@@ -120,10 +107,8 @@ def _profile_index_formula() -> dict:
             "note": "no_ai_usage_falls_back_to_reflection_only",
         },
         "reflection_quality": {
-            "length": {"target_chars": _REFLECTION_TARGET_CHARS, "max": 40},
-            "action": {"max": 20},
-            "locator": {"max": 20},
-            "judgement": {"max": 20},
+            key: {"target_chars": target, "max": weight}
+            for key, (target, weight) in _REFLECTION_EVIDENCE_TARGETS.items()
         },
     }
 
@@ -177,21 +162,26 @@ def _compute_deadline_window_ratio(
     return round(deadline_window_inserted / total_inserted, 4)
 
 
-def _score_reflection(text: str) -> dict:
-    content = (text or "").strip()
-    if not content:
+def _score_reflection(reflection) -> dict:
+    if reflection is None:
         return {"char_count": 0, "score": 0}
 
-    def _hits(patterns) -> bool:
-        return any(re.search(pattern, content, re.IGNORECASE) for pattern in patterns)
+    def _value(key: str) -> str:
+        value = (
+            reflection.get(key, "")
+            if isinstance(reflection, dict)
+            else getattr(reflection, key, "")
+        )
+        return (value or "").strip()
 
-    length_score = min(len(content) / _REFLECTION_TARGET_CHARS, 1.0) * 40
-    action_score = 20 if _hits(_REFLECTION_ACTION_PATTERNS) else 0
-    locator_score = 20 if _hits(_REFLECTION_LOCATOR_PATTERNS) else 0
-    judgement_score = 20 if _hits(_REFLECTION_JUDGEMENT_PATTERNS) else 0
+    sections = {key: _value(key) for key in _REFLECTION_EVIDENCE_TARGETS}
+    score = sum(
+        min(len(sections[key]) / target, 1.0) * weight
+        for key, (target, weight) in _REFLECTION_EVIDENCE_TARGETS.items()
+    )
     return {
-        "char_count": len(content),
-        "score": int(round(length_score + action_score + locator_score + judgement_score)),
+        "char_count": sum(len(value) for value in sections.values()),
+        "score": int(round(score)),
     }
 
 
@@ -303,7 +293,13 @@ def _build_profile_insights(
 ) -> list[StudentProfileInsight]:
     candidates: list[StudentProfileInsight] = []
     if len(timeline) < _TREND_MIN_SAMPLES:
-        candidates.append(StudentProfileInsight(code="not_enough_data", tone="neutral"))
+        candidates.append(
+            StudentProfileInsight(
+                code="not_enough_data",
+                tone="neutral",
+                action_code="complete_more_submissions",
+            )
+        )
     if not timeline:
         return candidates
 
@@ -316,6 +312,7 @@ def _build_profile_insights(
                 code="digestion_up",
                 tone="positive",
                 params={"delta": digestion.delta, "last": digestion.last},
+                action_code="keep_rewriting_ai_text",
             )
         )
     elif latest.ai_ratio >= 0.3 and latest.digestion_ratio < 20:
@@ -327,6 +324,8 @@ def _build_profile_insights(
                     "digestion_ratio": latest.digestion_ratio,
                     "ai_ratio": latest.ai_ratio,
                 },
+                action_code="rewrite_one_ai_section",
+                submission_id=latest.submission_id,
             )
         )
 
@@ -337,6 +336,8 @@ def _build_profile_insights(
                 code="ai_share_changed",
                 tone="neutral",
                 params={"delta": ai_ratio.delta, "last": ai_ratio.last},
+                action_code="review_ai_use_pattern",
+                submission_id=latest.submission_id,
             )
         )
 
@@ -350,6 +351,7 @@ def _build_profile_insights(
                     "count": len(improved_rounds),
                     "best_delta": max(item.score_delta for item in improved_rounds),
                 },
+                action_code="reuse_successful_revision",
             )
         )
     elif round_progress and all(item.revision_ratio < 10 for item in round_progress):
@@ -358,6 +360,8 @@ def _build_profile_insights(
                 code="round_revision_thin",
                 tone="warning",
                 params={"revision_ratio": max(item.revision_ratio for item in round_progress)},
+                action_code="revise_feedback_deeply",
+                submission_id=latest.submission_id,
             )
         )
 
@@ -367,6 +371,7 @@ def _build_profile_insights(
                 code="help_type_shift_refining",
                 tone="positive",
                 params={"delta": help_shift.get("refining_ratio_delta", 0)},
+                action_code="continue_refining_own_writing",
             )
         )
 
@@ -379,6 +384,8 @@ def _build_profile_insights(
                 code="deadline_rush",
                 tone="warning",
                 params={"ratio": latest.deadline_window_ratio},
+                action_code="start_next_assignment_earlier",
+                submission_id=latest.submission_id,
             )
         )
 
@@ -389,6 +396,7 @@ def _build_profile_insights(
                 code="process_up",
                 tone="positive",
                 params={"delta": process.delta, "last": process.last},
+                action_code="keep_current_process",
             )
         )
 
@@ -398,6 +406,8 @@ def _build_profile_insights(
                 code="reflection_thin",
                 tone="warning",
                 params={"average_score": reflection_quality.get("average_score", 0)},
+                action_code="add_specific_reflection_evidence",
+                submission_id=latest.submission_id,
             )
         )
 
@@ -456,7 +466,9 @@ async def build_student_profile(
             summary = (analyses.get(submission.id) or {}).get("summary") or {}
             review = reviews.get(submission.id)
             reflection = reflections.get(submission.micro_reflection_id)
-            reflection_score = _score_reflection(reflection.reflection_text if reflection else "")
+            reflection_score = _score_reflection(
+                reflection.reflection_json if reflection else None
+            )
 
             all_versions = versions_by_session.get(submission.writing_session_id, [])
             round_versions = _slice_round_versions(
@@ -507,7 +519,7 @@ async def build_student_profile(
                         if review and review.score is not None
                         else None
                     ),
-                    rubric=review.rubric_json if review else None,
+                    rubric=review.rubric_scores if review else None,
                     review_status=review.review_status if review else "pending",
                     inserted_chars=inserted_chars,
                     revised_chars=revised_chars,

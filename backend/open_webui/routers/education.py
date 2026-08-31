@@ -379,7 +379,7 @@ def _build_student_review_view(
             {
                 "score": review.score,
                 "overall_comment": review.overall_comment,
-                "rubric": review.rubric_json,
+                "rubric": review.rubric_scores,
                 "reviewed_at": review.reviewed_at,
             }
         )
@@ -784,13 +784,26 @@ async def update_assignment(
         )
 
     if (
-        "score_max" in form_data.model_fields_set
-        and form_data.score_max != assignment.score_max
-        and Education.get_submissions_by_assignment(assignment.id, db=db)
-    ):
+        (
+            "score_max" in form_data.model_fields_set
+            and form_data.score_max != assignment.score_max
+        )
+        or (
+            "rubric_schema" in form_data.model_fields_set
+            and form_data.rubric_schema != assignment.rubric_schema
+        )
+    ) and Education.get_submissions_by_assignment(assignment.id, db=db):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Maximum score cannot change after submissions exist",
+            detail="Scoring configuration cannot change after submissions exist",
+        )
+
+    next_score_max = form_data.score_max or assignment.score_max
+    next_rubric = form_data.rubric_schema or assignment.rubric_schema
+    if next_rubric.total_score != next_score_max:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Rubric maximum scores must add up to assignment maximum score",
         )
 
     if form_data.classroom_id is not None:
@@ -2284,12 +2297,6 @@ async def submit_assignment(
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
-    if len(form_data.reflection_text.strip()) < 30:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Reflection text must be at least 30 characters",
-        )
-
     assignment = _get_assignment_or_404(assignment_id, db)
     role = _ensure_assignment_access(user, assignment, db)
     if role not in ("student", "admin"):
@@ -2403,8 +2410,9 @@ async def submit_assignment(
         assignment.id,
         session.owner_user_id,
         session.id,
+        form_data.ai_used,
         form_data.ai_help_types,
-        form_data.reflection_text,
+        form_data.reflection,
         db=db,
     )
     try:
@@ -2503,7 +2511,7 @@ async def get_my_assignment_submissions(
                     MySubmissionRoundReview(
                         review_status=review.review_status,
                         score=review.score,
-                        rubric=review.rubric_json,
+                        rubric=review.rubric_scores,
                         overall_comment=review.overall_comment,
                         returned_comment=review.returned_comment,
                         resubmit_due_at=review.resubmit_due_at,
@@ -2800,6 +2808,34 @@ async def save_submission_review(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Score must be between 0 and {assignment.score_max}",
+        )
+    rubric_criteria = {
+        criterion.key: criterion for criterion in assignment.rubric_schema.criteria
+    }
+    if form_data.rubric_scores is not None:
+        if set(form_data.rubric_scores) != set(rubric_criteria):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Rubric scores must include every configured criterion exactly once",
+            )
+        for key, value in form_data.rubric_scores.items():
+            if value < 0 or value > rubric_criteria[key].max_score:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Rubric score for {key} must be between 0 and {rubric_criteria[key].max_score}",
+                )
+        rubric_total = sum(form_data.rubric_scores.values())
+        if form_data.score is not None and rubric_total != form_data.score:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Total score must equal the sum of rubric scores",
+            )
+    if form_data.review_status == "reviewed" and (
+        form_data.score is None or form_data.rubric_scores is None
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Reviewed submissions require a total score and complete rubric scores",
         )
     if not submission.is_current:
         raise HTTPException(

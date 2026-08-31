@@ -78,7 +78,10 @@
 	let aiUsage: 'used' | 'none' | null = null;
 	let aiHelpTypes = [];
 	let otherAiHelpText = '';
-	let reflectionText = '';
+	let reflectionAction = '';
+	let reflectionLocation = '';
+	let reflectionJudgement = '';
+	let reflectionNextStep = '';
 
 	let lastText = '';
 	// 最近一次真正落成版本的正文，用来跳过「内容没变」的自动保存。
@@ -178,21 +181,11 @@
 		aiHelpTypes = [];
 	}
 
-	const getSubmitReflectionText = () => {
-		const baseReflection = reflectionText.trim();
-		if (!aiHelpTypes.includes('Other')) {
-			return baseReflection;
-		}
-
-		const otherDetail = otherAiHelpText.trim();
-		return `${$i18n.t('Other help: {{detail}}', { detail: otherDetail })}\n\n${baseReflection}`.trim();
-	};
-
 	const toggleAiHelpType = (helpType: string) => {
 		aiHelpTypes = aiHelpTypes.includes(helpType)
 			? aiHelpTypes.filter((item) => item !== helpType)
 			: [...aiHelpTypes, helpType];
-		saveReflectionDraft(reflectionText, otherAiHelpText);
+		saveReflectionDraft();
 	};
 
 	const selectAiUsage = (value: 'used' | 'none') => {
@@ -201,7 +194,7 @@
 			aiHelpTypes = [];
 			otherAiHelpText = '';
 		}
-		saveReflectionDraft(reflectionText, otherAiHelpText);
+		saveReflectionDraft();
 	};
 
 	const getReflectionDraftKey = () => `education:reflection-draft:${assignment?.id ?? ''}`;
@@ -212,7 +205,10 @@
 			const raw = localStorage.getItem(getReflectionDraftKey());
 			if (!raw) return;
 			const draft = JSON.parse(raw);
-			reflectionText = draft?.reflectionText ?? reflectionText;
+			reflectionAction = draft?.reflectionAction ?? '';
+			reflectionLocation = draft?.reflectionLocation ?? '';
+			reflectionJudgement = draft?.reflectionJudgement ?? '';
+			reflectionNextStep = draft?.reflectionNextStep ?? '';
 			otherAiHelpText = draft?.otherAiHelpText ?? otherAiHelpText;
 			aiUsage = draft?.aiUsage === 'used' || draft?.aiUsage === 'none' ? draft.aiUsage : null;
 			aiHelpTypes = Array.isArray(draft?.aiHelpTypes) ? draft.aiHelpTypes : [];
@@ -222,12 +218,20 @@
 		}
 	};
 
-	const saveReflectionDraft = (reflection: string, otherHelp: string) => {
+	const saveReflectionDraft = () => {
 		if (!isAssignment || !assignment?.id) return;
 		try {
 			localStorage.setItem(
 				getReflectionDraftKey(),
-				JSON.stringify({ reflectionText: reflection, otherAiHelpText: otherHelp, aiUsage, aiHelpTypes })
+				JSON.stringify({
+					reflectionAction,
+					reflectionLocation,
+					reflectionJudgement,
+					reflectionNextStep,
+					otherAiHelpText,
+					aiUsage,
+					aiHelpTypes
+				})
 			);
 		} catch (error) {
 			console.error(error);
@@ -569,9 +573,20 @@
 			return;
 		}
 
-		const submitReflectionText = getSubmitReflectionText();
-		if (submitReflectionText.length < 30) {
-			toast.error($i18n.t('Reflection must be at least 30 characters.'));
+		if (reflectionAction.trim().length < 10) {
+			toast.error($i18n.t('Describe what you changed in at least 10 characters.'));
+			return;
+		}
+		if (reflectionLocation.trim().length < 2) {
+			toast.error($i18n.t('Name where you made the change.'));
+			return;
+		}
+		if (reflectionJudgement.trim().length < 10) {
+			toast.error($i18n.t('Explain your judgement in at least 10 characters.'));
+			return;
+		}
+		if (reflectionNextStep.trim().length < 5) {
+			toast.error($i18n.t('Describe your next step in at least 5 characters.'));
 			return;
 		}
 
@@ -584,8 +599,15 @@
 				final_content_json: noteJson,
 				final_content_html: noteHtml,
 				final_content_text: noteText,
+				ai_used: aiUsage === 'used',
 				ai_help_types: aiHelpTypes,
-				reflection_text: submitReflectionText
+				reflection: {
+					action: reflectionAction.trim(),
+					location: reflectionLocation.trim(),
+					judgement: reflectionJudgement.trim(),
+					next_step: reflectionNextStep.trim(),
+					other_ai_help: aiHelpTypes.includes('Other') ? otherAiHelpText.trim() : null
+				}
 			});
 			clearReflectionDraft();
 			await load();
@@ -996,23 +1018,16 @@
 					{/if}
 				</div>
 
-				<div class="mt-4">
-					<label for="reflection-text" class="mb-2 block text-sm font-medium text-gray-800 dark:text-gray-200">
-						{$i18n.t(
-							aiUsage === 'used'
-								? 'How did you judge, revise, or reject AI suggestions?'
-								: 'What did you revise, learn, or decide while writing?'
-						)}
-					</label>
+				<div class="mt-4 space-y-4">
 					{#if aiHelpTypes.includes('Other')}
-						<div class="mb-3">
+						<div>
 							<label for="other-ai-help-text" class="mb-2 block text-sm font-medium text-gray-800 dark:text-gray-200">
 								{$i18n.t('Please briefly describe what else AI helped with.')}
 							</label>
 							<input
 								id="other-ai-help-text"
 								bind:value={otherAiHelpText}
-								on:input={() => saveReflectionDraft(reflectionText, otherAiHelpText)}
+								on:input={saveReflectionDraft}
 								class="w-full {EDU_FIELD_CLASS}"
 								placeholder={$i18n.t(
 									'For example: helping me understand the topic or organize evidence.'
@@ -1025,22 +1040,53 @@
 							{/if}
 						</div>
 					{/if}
-					<textarea
-						id="reflection-text"
-						bind:value={reflectionText}
-						on:input={() => saveReflectionDraft(reflectionText, otherAiHelpText)}
-						class="min-h-40 w-full {EDU_FIELD_CLASS}"
-						placeholder={$i18n.t('Recommended 50-100 characters. Minimum 30.')}
-					></textarea>
-					<div
-						class="mt-1 flex justify-end text-xs {reflectionText.trim().length < 30
-							? 'text-rose-600 dark:text-rose-400'
-							: 'text-gray-400'}"
-					>
-						{$i18n.t('{{count}} / {{min}} characters (minimum)', {
-							count: reflectionText.trim().length,
-							min: 30
-						})}
+					<div>
+						<label for="reflection-action" class="mb-2 block text-sm font-medium text-gray-800 dark:text-gray-200">
+							{$i18n.t('What did you change?')}
+						</label>
+						<textarea
+							id="reflection-action"
+							bind:value={reflectionAction}
+							on:input={saveReflectionDraft}
+							class="min-h-20 w-full {EDU_FIELD_CLASS}"
+							placeholder={$i18n.t('Describe the concrete revision you made.')}
+						></textarea>
+					</div>
+					<div>
+						<label for="reflection-location" class="mb-2 block text-sm font-medium text-gray-800 dark:text-gray-200">
+							{$i18n.t('Where did you make this change?')}
+						</label>
+						<input
+							id="reflection-location"
+							bind:value={reflectionLocation}
+							on:input={saveReflectionDraft}
+							class="w-full {EDU_FIELD_CLASS}"
+							placeholder={$i18n.t('For example: paragraph 2, the conclusion, or the evidence section.')}
+						/>
+					</div>
+					<div>
+						<label for="reflection-judgement" class="mb-2 block text-sm font-medium text-gray-800 dark:text-gray-200">
+							{$i18n.t('Why did you make this judgement?')}
+						</label>
+						<textarea
+							id="reflection-judgement"
+							bind:value={reflectionJudgement}
+							on:input={saveReflectionDraft}
+							class="min-h-20 w-full {EDU_FIELD_CLASS}"
+							placeholder={$i18n.t('Explain why you accepted, rejected, or changed the suggestion or feedback.')}
+						></textarea>
+					</div>
+					<div>
+						<label for="reflection-next-step" class="mb-2 block text-sm font-medium text-gray-800 dark:text-gray-200">
+							{$i18n.t('What will you do next time?')}
+						</label>
+						<textarea
+							id="reflection-next-step"
+							bind:value={reflectionNextStep}
+							on:input={saveReflectionDraft}
+							class="min-h-20 w-full {EDU_FIELD_CLASS}"
+							placeholder={$i18n.t('Write one concrete action for your next assignment.')}
+						></textarea>
 					</div>
 				</div>
 

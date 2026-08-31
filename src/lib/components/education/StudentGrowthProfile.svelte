@@ -77,6 +77,18 @@
 	};
 
 	const INSIGHT_TONES = { positive: 'emerald', warning: 'amber', neutral: 'gray' };
+	const INSIGHT_ACTION_TEXT = {
+		complete_more_submissions: 'Next: complete at least three submissions before judging a trend.',
+		keep_rewriting_ai_text: 'Next: keep rewriting AI-sourced text in your own reasoning and voice.',
+		rewrite_one_ai_section: 'Next: choose one AI-sourced section and rebuild it with your own evidence.',
+		review_ai_use_pattern: 'Next: compare AI share with digestion and reflection before drawing a conclusion.',
+		reuse_successful_revision: 'Next: reuse the revision method that produced the strongest score improvement.',
+		revise_feedback_deeply: 'Next: make one structural or evidence-level revision before resubmitting.',
+		continue_refining_own_writing: 'Next: continue using AI to question and refine your own draft.',
+		start_next_assignment_earlier: 'Next: create the outline at least two days before the deadline.',
+		keep_current_process: 'Next: keep the current revision and pacing routine.',
+		add_specific_reflection_evidence: 'Next: name the exact change, location, reason, and next step.'
+	};
 
 	const renderInsight = (insight) => {
 		const builder = INSIGHT_TEXT[insight.code];
@@ -98,6 +110,22 @@
 					.filter(([, value]) => typeof value === 'number')
 					.map(([key]) => key)
 			)
+		)
+	);
+	$: rubricCriteriaByAssignment = Object.fromEntries(
+		(profile?.assignments ?? []).map((item) => [
+			item.assignment.id,
+			Object.fromEntries(
+				(item.assignment.rubric_schema?.criteria ?? []).map((criterion) => [criterion.key, criterion])
+			)
+		])
+	);
+	$: rubricLabels = Object.fromEntries(
+		(profile?.assignments ?? []).flatMap((item) =>
+			(item.assignment.rubric_schema?.criteria ?? []).map((criterion) => [
+				criterion.key,
+				criterion.label
+			])
 		)
 	);
 	const RUBRIC_TONES = ['sky', 'emerald', 'violet', 'amber', 'rose'];
@@ -155,7 +183,23 @@
 											: 'Info'
 								)}
 							</EduBadge>
-							<span class="text-gray-700 dark:text-gray-300">{renderInsight(insight)}</span>
+							<div class="min-w-0 flex-1">
+								<div class="text-gray-700 dark:text-gray-300">{renderInsight(insight)}</div>
+								{#if insight.action_code && INSIGHT_ACTION_TEXT[insight.action_code]}
+									<div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+										{$i18n.t(INSIGHT_ACTION_TEXT[insight.action_code])}
+									</div>
+								{/if}
+								{#if variant === 'teacher' && insight.submission_id}
+									<EduButton
+										size="sm"
+										class="mt-2"
+										on:click={() => dispatch('open', { submissionId: insight.submission_id })}
+									>
+										{$i18n.t('View evidence')}
+									</EduButton>
+								{/if}
+							</div>
 						</li>
 					{/each}
 				</ul>
@@ -221,15 +265,19 @@
 					</div>
 					<EduTrendChart
 						{labels}
+						min={0}
+						max={100}
 						series={rubricKeys.map((key, index) => ({
 							key,
-							label: $i18n.t(key.charAt(0).toUpperCase() + key.slice(1)),
+							label: rubricLabels[key] ?? key,
 							tone: RUBRIC_TONES[index % RUBRIC_TONES.length],
-							values: timeline.map((point) =>
-								typeof point.rubric?.[key] === 'number' ? point.rubric[key] : null
-							)
+							values: timeline.map((point) => {
+								const score = point.rubric?.[key];
+								const maximum = rubricCriteriaByAssignment[point.assignment_id]?.[key]?.max_score;
+								return typeof score === 'number' && maximum ? (score / maximum) * 100 : null;
+							})
 						}))}
-						formatValue={(value) => `${Math.round(value)}`}
+						formatValue={(value) => `${Math.round(value)}%`}
 					/>
 				</div>
 			{/if}
@@ -343,7 +391,7 @@
 				/>
 				<EduTrendStat
 					label="Reflection Quality"
-					hint="Heuristic score from reflection length, concrete actions, locations, and self-judgement."
+					hint="Structured evidence score from the action, location, judgement, and next step."
 					value={latest?.reflection_quality ?? null}
 					delta={trendOf('reflection_quality')?.delta ?? null}
 					direction={trendOf('reflection_quality')?.direction ?? null}
@@ -535,7 +583,7 @@
 					</p>
 					<p>
 						{$i18n.t(
-							'Reflection quality = length (up to 40) + concrete action (20) + concrete location (20) + self-judgement (20).'
+							'Reflection quality = concrete action (30) + location (20) + judgement (30) + next step (20). Each part grows with detail up to its target.'
 						)}
 					</p>
 					<p class="text-gray-500 dark:text-gray-500">

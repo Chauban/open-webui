@@ -56,6 +56,34 @@ from open_webui.services.education.analysis import (
 from open_webui.utils.auth import get_verified_user
 
 
+def _reflection_payload(
+    action="I rewrote the claim and replaced weak evidence with a clearer example.",
+    location="The second paragraph and conclusion",
+    judgement="The original reasoning was vague, so the revision better supports my own conclusion.",
+    next_step="I will verify the evidence before writing the final draft.",
+    other_ai_help=None,
+):
+    return {
+        "action": action,
+        "location": location,
+        "judgement": judgement,
+        "next_step": next_step,
+        "other_ai_help": other_ai_help,
+    }
+
+
+def _rubric_schema(score_max=100):
+    base, remainder = divmod(score_max, 3)
+    maxima = [base + (1 if index < remainder else 0) for index in range(3)]
+    return {
+        "criteria": [
+            {"key": "ideas", "label": "Ideas", "max_score": maxima[0]},
+            {"key": "structure", "label": "Structure", "max_score": maxima[1]},
+            {"key": "evidence", "label": "Evidence", "max_score": maxima[2]},
+        ]
+    }
+
+
 def test_filter_segments_prioritizes_full_ai_insert_over_short_typed_fragments():
     final_text = "明白了，你是在追问 Claude 4 的情况。"
     segments = [
@@ -291,6 +319,7 @@ def _prepare_assignment_flow(client, teacher, student):
             "description": "Write a short argument essay.",
             "classroom_ids": [classroom["id"]],
             "score_max": 100,
+            "rubric_schema": _rubric_schema(),
             "due_at": 2000000000,
         },
     )
@@ -372,8 +401,9 @@ def _prepare_assignment_flow(client, teacher, student):
             "final_content_json": None,
             "final_content_html": "<p>AI outline draft. My final draft. This looks like a very large typed burst that should be treated as suspicious imported text for teacher review.</p>",
             "final_content_text": "AI outline draft. My final draft. This looks like a very large typed burst that should be treated as suspicious imported text for teacher review.",
+            "ai_used": True,
             "ai_help_types": ["Outline"],
-            "reflection_text": "I used AI to create a first outline and then rewrote the ideas myself.",
+            "reflection": _reflection_payload(),
         },
     )
     assert submit_res.status_code == 200, submit_res.text
@@ -554,7 +584,9 @@ def test_education_classroom_main_flow(education_client):
     assert detail_res.status_code == 200, detail_res.text
     detail = detail_res.json()
     assert detail["submission"]["id"] == submission_payload["submission_id"]
+    assert detail["micro_reflection"]["ai_used"] is True
     assert detail["micro_reflection"]["ai_help_types"] == ["Outline"]
+    assert "action" in detail["micro_reflection"]["reflection_json"]
     assert detail["final_version"]["trigger_type"] == "submit"
     assert len(detail["versions"]) >= 1
     assert detail["analysis"]["summary"]["ai_inserted_chars"] >= 1
@@ -619,6 +651,7 @@ def test_submission_accepts_multiple_ai_help_types(education_client):
             "description": "Write and reflect on AI help.",
             "classroom_ids": [classroom["id"]],
             "score_max": 100,
+            "rubric_schema": _rubric_schema(),
             "due_at": 2000000000,
         },
     )
@@ -643,8 +676,9 @@ def test_submission_accepts_multiple_ai_help_types(education_client):
             "final_content_json": None,
             "final_content_html": "<p>I revised the essay after reviewing AI suggestions.</p>",
             "final_content_text": "I revised the essay after reviewing AI suggestions.",
+            "ai_used": True,
             "ai_help_types": ["Outline", "Examples", "Strengthen Reasoning"],
-            "reflection_text": "I used AI for planning and examples, then rejected weak claims and rewrote the reasoning.",
+            "reflection": _reflection_payload(),
         },
     )
     assert submit_res.status_code == 200, submit_res.text
@@ -675,8 +709,9 @@ def test_student_resubmission_overwrites_previous_submission(education_client):
             "final_content_json": {"type": "doc", "content": []},
             "final_content_html": "<p>Second final draft with substantial revisions.</p>",
             "final_content_text": "Second final draft with substantial revisions.",
+            "ai_used": True,
             "ai_help_types": ["Polish"],
-            "reflection_text": "I revised the final answer again before the deadline and replaced my earlier submission.",
+            "reflection": _reflection_payload(),
         },
     )
     assert second_submit_res.status_code == 200, second_submit_res.text
@@ -731,6 +766,7 @@ def test_student_cannot_submit_after_assignment_due_time(education_client):
             "description": "This assignment is closed.",
             "classroom_ids": [classroom["id"]],
             "score_max": 100,
+            "rubric_schema": _rubric_schema(),
             "due_at": 1,
         },
     )
@@ -755,8 +791,9 @@ def test_student_cannot_submit_after_assignment_due_time(education_client):
             "final_content_json": None,
             "final_content_html": "<p>Late submission.</p>",
             "final_content_text": "Late submission.",
+            "ai_used": True,
             "ai_help_types": ["Outline"],
-            "reflection_text": "I tried to submit this after the assignment due time had already passed.",
+            "reflection": _reflection_payload(),
         },
     )
     assert submit_res.status_code == 400, submit_res.text
@@ -807,6 +844,7 @@ def test_assignment_requires_due_time_on_create_and_update(education_client):
             "description": "Write a short argument essay.",
             "classroom_ids": [classroom["id"]],
             "score_max": 100,
+            "rubric_schema": _rubric_schema(),
         },
     )
     assert missing_due_res.status_code == 400, missing_due_res.text
@@ -874,7 +912,7 @@ def test_teacher_review_lifecycle_assignment_update_and_classroom_progress(
             "review_status": "reviewed",
             "score": 92,
             "overall_comment": "Strong revision and clear structure.",
-            "rubric_json": {"ideas": 30, "structure": 31, "evidence": 31},
+            "rubric_scores": {"ideas": 30, "structure": 31, "evidence": 31},
         },
     )
     assert review_save_res.status_code == 200, review_save_res.text
@@ -1029,7 +1067,8 @@ def test_student_assignment_and_profile_views(education_client):
     assert profile["trends"] == []
     insight_codes = [insight["code"] for insight in profile["insights"]]
     assert insight_codes[0] == "not_enough_data"
-    assert "reflection_thin" in insight_codes
+    assert "reflection_thin" not in insight_codes
+    assert profile["insights"][0]["action_code"] == "complete_more_submissions"
     assert profile["index_formula"]["process_index"]["revision_depth"]["target"] > 0
 
     blank_invite_res = client.post(
@@ -1064,6 +1103,7 @@ def test_teacher_classroom_listing_and_member_management(education_client):
             "description": "Write a short narrative essay.",
             "classroom_ids": [first_classroom["id"]],
             "score_max": 100,
+            "rubric_schema": _rubric_schema(),
             "due_at": 2000000000,
         },
     )
@@ -1229,11 +1269,12 @@ def test_workspace_editing_and_submission_validation(education_client):
             "final_content_json": None,
             "final_content_html": "<p>Too short reflection test.</p>",
             "final_content_text": "Too short reflection test.",
+            "ai_used": True,
             "ai_help_types": ["Outline"],
-            "reflection_text": "Too short",
+            "reflection": _reflection_payload(action="Too short"),
         },
     )
-    assert short_reflection_res.status_code == 400, short_reflection_res.text
+    assert short_reflection_res.status_code == 422, short_reflection_res.text
 
     UserContext.current_user = outsider
     forbidden_autosave_res = client.post(
@@ -1290,7 +1331,7 @@ def test_invite_regeneration_and_assignment_errors(education_client):
 
     blank_assignment_res = client.post(
         "/api/v1/assignments",
-        json={"title": "   ", "description": "x", "classroom_ids": [classroom["id"]], "score_max": 100},
+        json={"title": "   ", "description": "x", "classroom_ids": [classroom["id"]], "score_max": 100, "rubric_schema": _rubric_schema()},
     )
     assert blank_assignment_res.status_code == 400, blank_assignment_res.text
 
@@ -1328,6 +1369,7 @@ def test_invite_regeneration_and_assignment_errors(education_client):
             "description": "No teacher access",
             "classroom_ids": [classroom["id"]],
             "score_max": 100,
+            "rubric_schema": _rubric_schema(),
         },
     )
     assert (
@@ -1352,6 +1394,7 @@ def test_assignment_workspace_returns_assignment_project(education_client):
             "description": "Write a short argument essay.",
             "classroom_ids": [classroom["id"]],
             "score_max": 100,
+            "rubric_schema": _rubric_schema(),
             "due_at": 2000000000,
         },
     )
@@ -1390,6 +1433,7 @@ def test_assignment_workspace_clears_missing_active_chat(education_client):
             "description": "Write a short argument essay.",
             "classroom_ids": [classroom["id"]],
             "score_max": 100,
+            "rubric_schema": _rubric_schema(),
             "due_at": 2000000000,
         },
     )
@@ -1527,6 +1571,7 @@ def test_workspace_project_creation_failure_returns_409(education_client, monkey
             "description": "Write a short argument essay.",
             "classroom_ids": [classroom["id"]],
             "score_max": 100,
+            "rubric_schema": _rubric_schema(),
             "due_at": 2000000000,
         },
     )
@@ -1729,8 +1774,9 @@ def _submit_body(session_id: str, text: str):
         "final_content_json": None,
         "final_content_html": f"<p>{text}</p>",
         "final_content_text": text,
+        "ai_used": True,
         "ai_help_types": ["Outline"],
-        "reflection_text": "I used AI for outlining then rewrote every paragraph in my own words.",
+        "reflection": _reflection_payload(),
     }
 
 
@@ -1745,7 +1791,7 @@ def _setup_submitted_assignment(client, teacher, student, title="Round Essay", s
     UserContext.current_user = teacher
     assignment = client.post(
         "/api/v1/assignments",
-        json={"title": title, "classroom_ids": [classroom["id"]], "due_at": 2000000000, "score_max": score_max},
+        json={"title": title, "classroom_ids": [classroom["id"]], "due_at": 2000000000, "score_max": score_max, "rubric_schema": _rubric_schema(score_max)},
     ).json()[0]
 
     UserContext.current_user = student
@@ -1779,7 +1825,7 @@ def test_student_workspace_exposes_review_after_grading(education_client):
             "review_status": "reviewed",
             "score": 88,
             "overall_comment": "Strong structure",
-            "rubric_json": {"ideas": 30, "structure": 29, "evidence": 29},
+            "rubric_scores": {"ideas": 30, "structure": 29, "evidence": 29},
         },
     )
 
@@ -1925,7 +1971,11 @@ def test_reviewed_submission_cannot_be_resubmitted(education_client):
     UserContext.current_user = teacher
     graded = client.post(
         f"/api/v1/teacher/submissions/{submission_id}/review",
-        json={"review_status": "reviewed", "score": 85},
+        json={
+            "review_status": "reviewed",
+            "score": 85,
+            "rubric_scores": {"ideas": 29, "structure": 28, "evidence": 28},
+        },
     )
     assert graded.status_code == 200, graded.text
 
@@ -2071,7 +2121,11 @@ def test_notifications_flow(education_client):
 
     client.post(
         f"/api/v1/teacher/submissions/{submission_id}/review",
-        json={"review_status": "reviewed", "score": 90},
+        json={
+            "review_status": "reviewed",
+            "score": 90,
+            "rubric_scores": {"ideas": 30, "structure": 30, "evidence": 30},
+        },
     )
 
     # 学生:批改完成收到 review_completed
@@ -2270,6 +2324,7 @@ def test_update_assignment_rejects_null_and_unknown_status(education_client):
             "title": "Patch Essay",
             "classroom_ids": [classroom["id"]],
             "score_max": 100,
+            "rubric_schema": _rubric_schema(),
             "due_at": 2000000000,
         },
     ).json()[0]
@@ -2299,6 +2354,7 @@ def test_unsubmitted_listing_and_reminder_targets_only_unsubmitted(education_cli
             "title": "Remind Essay",
             "classroom_ids": [classroom["id"]],
             "score_max": 100,
+            "rubric_schema": _rubric_schema(),
             "due_at": 2000000000,
         },
     ).json()[0]
@@ -2414,6 +2470,7 @@ def test_delete_assignment_guards_and_notification_cleanup(education_client):
             "title": "Deletable Essay",
             "classroom_ids": [classroom["id"]],
             "score_max": 100,
+            "rubric_schema": _rubric_schema(),
             "due_at": 2000000000,
         },
     ).json()[0]
@@ -2439,6 +2496,7 @@ def test_delete_assignment_guards_and_notification_cleanup(education_client):
             "title": "Untouched Essay",
             "classroom_ids": [classroom["id"]],
             "score_max": 100,
+            "rubric_schema": _rubric_schema(),
             "due_at": 2000000000,
         },
     ).json()[0]
@@ -2492,15 +2550,19 @@ def test_deadline_window_ratio_uses_the_final_24_hours():
 
 
 def test_reflection_score_separates_concrete_from_generic():
-    generic = education_profile_module._score_reflection("我用了 AI，写得还不错。")
-    concrete = education_profile_module._score_reflection(
-        "AI 给的第二段论据我觉得不够准确，所以删掉重写了，"
-        "并且把结尾的论点换成了自己的例子。"
+    generic = education_profile_module._score_reflection(
+        _reflection_payload(
+            action="改了部分内容",
+            location="第二段",
+            judgement="感觉这样会更好一些",
+            next_step="继续改进",
+        )
     )
+    concrete = education_profile_module._score_reflection(_reflection_payload())
 
     assert concrete["score"] > generic["score"]
     assert concrete["score"] >= 60
-    assert education_profile_module._score_reflection("")["score"] == 0
+    assert education_profile_module._score_reflection(None)["score"] == 0
 
 
 def test_collaboration_index_falls_back_to_reflection_without_ai():
@@ -2520,16 +2582,18 @@ def test_submission_form_allows_no_ai_and_rejects_unknown_help_types():
     form = SubmissionCreateForm(
         writing_session_id="session",
         final_content_text="student draft",
+        ai_used=False,
         ai_help_types=[],
-        reflection_text="I revised the conclusion and clarified my reasoning.",
+        reflection=_reflection_payload(),
     )
     assert form.ai_help_types == []
     with pytest.raises(ValueError):
         SubmissionCreateForm(
             writing_session_id="session",
             final_content_text="draft",
+            ai_used=True,
             ai_help_types=["Magic answer generator"],
-            reflection_text="I revised the conclusion and clarified my reasoning.",
+            reflection=_reflection_payload(),
         )
 
 
@@ -2544,9 +2608,22 @@ def test_profile_normalizes_scores_by_assignment_maximum(education_client):
         json={"review_status": "reviewed", "score": 51},
     )
     assert too_high.status_code == 400
+    invalid_rubric = client.post(
+        f"/api/v1/teacher/submissions/{submission_id}/review",
+        json={
+            "review_status": "reviewed",
+            "score": 40,
+            "rubric_scores": {"ideas": 40, "structure": 0, "evidence": 0},
+        },
+    )
+    assert invalid_rubric.status_code == 400
     reviewed = client.post(
         f"/api/v1/teacher/submissions/{submission_id}/review",
-        json={"review_status": "reviewed", "score": 40},
+        json={
+            "review_status": "reviewed",
+            "score": 40,
+            "rubric_scores": {"ideas": 14, "structure": 13, "evidence": 13},
+        },
     )
     assert reviewed.status_code == 200
     profile = client.get(
@@ -2586,7 +2663,7 @@ def test_student_profile_tracks_round_progress_and_trends(education_client):
             "score": 70,
             "returned_comment": "Add evidence to the second paragraph",
             "resubmit_due_at": 2100000000,
-            "rubric_json": {"ideas": 24, "structure": 23, "evidence": 23},
+            "rubric_scores": {"ideas": 24, "structure": 23, "evidence": 23},
         },
     )
     assert returned.status_code == 200, returned.text
@@ -2610,7 +2687,7 @@ def test_student_profile_tracks_round_progress_and_trends(education_client):
             "review_status": "reviewed",
             "score": 88,
             "overall_comment": "Much stronger evidence",
-            "rubric_json": {"ideas": 30, "structure": 29, "evidence": 29},
+            "rubric_scores": {"ideas": 30, "structure": 29, "evidence": 29},
         },
     )
     assert reviewed.status_code == 200, reviewed.text

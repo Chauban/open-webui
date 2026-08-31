@@ -36,10 +36,18 @@
 	let status = 'active';
 	let dueAt = '';
 	let scoreMax = '';
+	let rubricCriteria = [];
 	let showArchiveConfirm = false;
 	let showDeleteConfirm = false;
 
 	const assignmentId = () => $page.params.assignmentId;
+	const addCriterion = () => {
+		rubricCriteria = [...rubricCriteria, { key: '', label: '', maxScore: '' }];
+	};
+	const removeCriterion = (index: number) => {
+		if (rubricCriteria.length <= 1) return;
+		rubricCriteria = rubricCriteria.filter((_, itemIndex) => itemIndex !== index);
+	};
 
 	$: isPastDue =
 		item?.assignment?.status === 'active' &&
@@ -66,6 +74,11 @@
 		status = item.assignment.status || 'active';
 		dueAt = item.assignment.due_at ? toLocalDateTimeInput(item.assignment.due_at) : '';
 		scoreMax = String(item.assignment.score_max);
+		rubricCriteria = item.assignment.rubric_schema.criteria.map((criterion) => ({
+			key: criterion.key,
+			label: criterion.label,
+			maxScore: String(criterion.max_score)
+		}));
 	};
 
 	const loadData = async () => {
@@ -96,6 +109,31 @@
 			toast.error(t('Maximum score must be a positive whole number.'));
 			return;
 		}
+		const parsedCriteria = rubricCriteria.map((criterion) => ({
+			key: criterion.key.trim(),
+			label: criterion.label.trim(),
+			max_score: Number(criterion.maxScore)
+		}));
+		if (
+			parsedCriteria.some(
+				(criterion) =>
+					!/^[a-z][a-z0-9_]{0,39}$/.test(criterion.key) ||
+					!criterion.label ||
+					!Number.isInteger(criterion.max_score) ||
+					criterion.max_score <= 0
+			)
+		) {
+			toast.error(t('Every rubric criterion needs a valid key, label, and positive whole-number maximum.'));
+			return;
+		}
+		if (new Set(parsedCriteria.map((criterion) => criterion.key)).size !== parsedCriteria.length) {
+			toast.error(t('Rubric criterion keys must be unique.'));
+			return;
+		}
+		if (parsedCriteria.reduce((sum, criterion) => sum + criterion.max_score, 0) !== parsedScoreMax) {
+			toast.error(t('Rubric maximum scores must add up to the assignment maximum.'));
+			return;
+		}
 
 		saving = true;
 		try {
@@ -105,7 +143,8 @@
 				classroom_id: classroomId,
 				status,
 				due_at: Math.floor(new Date(dueAt).getTime() / 1000),
-				score_max: parsedScoreMax
+				score_max: parsedScoreMax,
+				rubric_schema: { criteria: parsedCriteria }
 			});
 			await loadData();
 			toast.success(t('Assignment updated.'));
@@ -244,6 +283,34 @@
 										{$i18n.t('Maximum score is locked after the first submission.')}
 									</div>
 								{/if}
+							</div>
+						</div>
+						<div>
+							<div class="mb-2 flex items-center justify-between gap-3">
+								<div class="text-sm font-medium">{$i18n.t('Rubric Criteria')}</div>
+								<EduButton size="sm" disabled={item.submission_count > 0} on:click={addCriterion}>
+									{$i18n.t('Add Criterion')}
+								</EduButton>
+							</div>
+							<div class="space-y-2">
+								{#each rubricCriteria as criterion, index}
+									<div class="grid gap-2 md:grid-cols-[1fr_1.5fr_0.75fr_auto]">
+										<input bind:value={criterion.key} disabled={item.submission_count > 0} class="w-full {EDU_FIELD_CLASS} disabled:opacity-60" />
+										<input bind:value={criterion.label} disabled={item.submission_count > 0} class="w-full {EDU_FIELD_CLASS} disabled:opacity-60" />
+										<input bind:value={criterion.maxScore} type="number" min="1" step="1" disabled={item.submission_count > 0} class="w-full {EDU_FIELD_CLASS} disabled:opacity-60" />
+										<EduButton
+											variant="danger"
+											size="sm"
+											disabled={item.submission_count > 0 || rubricCriteria.length <= 1}
+											on:click={() => removeCriterion(index)}
+										>
+											{$i18n.t('Remove')}
+										</EduButton>
+									</div>
+								{/each}
+							</div>
+							<div class="mt-2 text-xs text-gray-400">
+								{$i18n.t('Rubric maximum scores must add up to the assignment maximum.')}
 							</div>
 						</div>
 						<div class="flex flex-wrap justify-between gap-2">

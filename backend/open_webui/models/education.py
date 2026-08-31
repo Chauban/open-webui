@@ -2,8 +2,8 @@ import time
 import uuid
 from typing import Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import BigInteger, Column, Integer, Text, UniqueConstraint
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from sqlalchemy import BigInteger, Boolean, Column, Integer, Text, UniqueConstraint
 from sqlalchemy.orm import Session
 
 from open_webui.internal.db import Base, JSONField, get_db_context
@@ -39,6 +39,7 @@ class Assignment(Base):
     status = Column(Text, nullable=False, default="active")
     due_at = Column(BigInteger, nullable=True)
     score_max = Column(Integer, nullable=False)
+    rubric_schema = Column(JSONField, nullable=False)
     archived_at = Column(BigInteger, nullable=True)
     created_at = Column(BigInteger, nullable=False)
     updated_at = Column(BigInteger, nullable=False)
@@ -161,8 +162,9 @@ class MicroReflection(Base):
     assignment_id = Column(Text, nullable=False)
     student_id = Column(Text, nullable=False)
     writing_session_id = Column(Text, nullable=False)
+    ai_used = Column(Boolean, nullable=False)
     ai_help_types = Column(JSONField, nullable=False, default=[])
-    reflection_text = Column(Text, nullable=False)
+    reflection_json = Column(JSONField, nullable=False)
     created_at = Column(BigInteger, nullable=False)
 
 
@@ -200,7 +202,7 @@ class SubmissionReview(Base):
     review_status = Column(Text, nullable=False, default="pending")
     score = Column(BigInteger, nullable=True)
     overall_comment = Column(Text, nullable=True)
-    rubric_json = Column(JSONField, nullable=True)
+    rubric_scores = Column(JSONField, nullable=True)
     returned_comment = Column(Text, nullable=True)
     resubmit_due_at = Column(BigInteger, nullable=True)
     reviewed_at = Column(BigInteger, nullable=True)
@@ -219,6 +221,32 @@ class EducationNotification(Base):
     read_at = Column(BigInteger, nullable=True)
 
 
+class RubricCriterion(BaseModel):
+    key: str = Field(pattern=r"^[a-z][a-z0-9_]{0,39}$")
+    label: str = Field(min_length=1, max_length=80)
+    max_score: int = Field(gt=0, le=10000)
+
+    @field_validator("key", "label", mode="before")
+    @classmethod
+    def strip_rubric_text(cls, value: str) -> str:
+        return value.strip()
+
+
+class RubricSchema(BaseModel):
+    criteria: list[RubricCriterion] = Field(min_length=1, max_length=8)
+
+    @model_validator(mode="after")
+    def validate_unique_keys(self):
+        keys = [criterion.key for criterion in self.criteria]
+        if len(keys) != len(set(keys)):
+            raise ValueError("Rubric criterion keys must be unique")
+        return self
+
+    @property
+    def total_score(self) -> int:
+        return sum(criterion.max_score for criterion in self.criteria)
+
+
 class AssignmentModel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -230,6 +258,7 @@ class AssignmentModel(BaseModel):
     status: str
     due_at: Optional[int] = None
     score_max: int
+    rubric_schema: RubricSchema
     archived_at: Optional[int] = None
     created_at: int
     updated_at: int
@@ -342,6 +371,21 @@ class AnalysisResultModel(BaseModel):
     updated_at: int
 
 
+class StructuredReflection(BaseModel):
+    action: str = Field(min_length=10, max_length=1000)
+    location: str = Field(min_length=2, max_length=300)
+    judgement: str = Field(min_length=10, max_length=1000)
+    next_step: str = Field(min_length=5, max_length=500)
+    other_ai_help: Optional[str] = Field(default=None, max_length=300)
+
+    @field_validator(
+        "action", "location", "judgement", "next_step", "other_ai_help", mode="before"
+    )
+    @classmethod
+    def strip_text(cls, value: Optional[str]) -> Optional[str]:
+        return value.strip() if value is not None else None
+
+
 class MicroReflectionModel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -349,8 +393,9 @@ class MicroReflectionModel(BaseModel):
     assignment_id: str
     student_id: str
     writing_session_id: str
+    ai_used: bool
     ai_help_types: list[str] = Field(default_factory=list)
-    reflection_text: str
+    reflection_json: StructuredReflection
     created_at: int
 
 
@@ -379,7 +424,7 @@ class SubmissionReviewModel(BaseModel):
     review_status: str
     score: Optional[int] = None
     overall_comment: Optional[str] = None
-    rubric_json: Optional[dict] = None
+    rubric_scores: Optional[dict[str, int]] = None
     returned_comment: Optional[str] = None
     resubmit_due_at: Optional[int] = None
     reviewed_at: Optional[int] = None
@@ -404,6 +449,13 @@ class AssignmentCreateForm(BaseModel):
     classroom_ids: list[str] = Field(default_factory=list)
     due_at: Optional[int] = None
     score_max: int = Field(gt=0, le=10000)
+    rubric_schema: RubricSchema
+
+    @model_validator(mode="after")
+    def validate_rubric_total(self):
+        if self.rubric_schema.total_score != self.score_max:
+            raise ValueError("Rubric maximum scores must add up to assignment maximum score")
+        return self
 
 
 class AssignmentUpdateForm(BaseModel):
@@ -413,6 +465,17 @@ class AssignmentUpdateForm(BaseModel):
     status: Optional[str] = None
     due_at: Optional[int] = None
     score_max: Optional[int] = Field(default=None, gt=0, le=10000)
+    rubric_schema: Optional[RubricSchema] = None
+
+    @model_validator(mode="after")
+    def validate_updated_rubric_total(self):
+        if (
+            self.score_max is not None
+            and self.rubric_schema is not None
+            and self.rubric_schema.total_score != self.score_max
+        ):
+            raise ValueError("Rubric maximum scores must add up to assignment maximum score")
+        return self
 
 
 class ClassroomCreateForm(BaseModel):
@@ -586,15 +649,28 @@ class SubmissionCreateForm(BaseModel):
     final_content_json: Optional[dict] = None
     final_content_html: Optional[str] = None
     final_content_text: str
+    ai_used: bool
     ai_help_types: list[AIHelpType] = Field(default_factory=list)
-    reflection_text: str
+    reflection: StructuredReflection
+
+    @model_validator(mode="after")
+    def validate_ai_reflection(self):
+        if self.ai_used and not self.ai_help_types:
+            raise ValueError("At least one AI help type is required when AI was used")
+        if not self.ai_used and self.ai_help_types:
+            raise ValueError("AI help types must be empty when AI was not used")
+        if "Other" in self.ai_help_types and not self.reflection.other_ai_help:
+            raise ValueError("Other AI help requires a description")
+        if "Other" not in self.ai_help_types and self.reflection.other_ai_help:
+            raise ValueError("Other AI help description requires the Other help type")
+        return self
 
 
 class SubmissionReviewForm(BaseModel):
     review_status: str = "reviewed"
     score: Optional[int] = Field(default=None, ge=0)
     overall_comment: Optional[str] = None
-    rubric_json: Optional[dict] = None
+    rubric_scores: Optional[dict[str, int]] = None
     returned_comment: Optional[str] = None
     resubmit_due_at: Optional[int] = None
 
@@ -814,6 +890,8 @@ class StudentProfileInsight(BaseModel):
     code: str
     tone: str = "neutral"
     params: dict = Field(default_factory=dict)
+    action_code: Optional[str] = None
+    submission_id: Optional[str] = None
 
 
 class StudentProfileResponse(BaseModel):
@@ -1110,6 +1188,10 @@ class EducationTable:
                 if form_data.score_max is None or form_data.score_max <= 0:
                     raise ValueError("Assignment maximum score is required")
                 assignment.score_max = form_data.score_max
+            if "rubric_schema" in form_data.model_fields_set:
+                if form_data.rubric_schema is None:
+                    raise ValueError("Assignment rubric is required")
+                assignment.rubric_schema = form_data.rubric_schema.model_dump()
 
             assignment.updated_at = int(time.time())
             db.commit()
@@ -1157,6 +1239,7 @@ class EducationTable:
                 status="active",
                 due_at=form_data.due_at,
                 score_max=form_data.score_max,
+                rubric_schema=form_data.rubric_schema.model_dump(),
                 archived_at=None,
                 created_at=now,
                 updated_at=now,
@@ -1784,8 +1867,9 @@ class EducationTable:
         assignment_id: str,
         student_id: str,
         writing_session_id: str,
+        ai_used: bool,
         ai_help_types: list[str],
-        reflection_text: str,
+        reflection: StructuredReflection,
         db: Optional[Session] = None,
     ) -> MicroReflectionModel:
         with get_db_context(db) as db:
@@ -1794,8 +1878,9 @@ class EducationTable:
                 assignment_id=assignment_id,
                 student_id=student_id,
                 writing_session_id=writing_session_id,
+                ai_used=ai_used,
                 ai_help_types=ai_help_types,
-                reflection_text=reflection_text,
+                reflection_json=reflection.model_dump(),
                 created_at=int(time.time()),
             )
             db.add(reflection)
@@ -2066,7 +2151,7 @@ class EducationTable:
                     review_status=form_data.review_status,
                     score=form_data.score,
                     overall_comment=form_data.overall_comment,
-                    rubric_json=form_data.rubric_json,
+                    rubric_scores=form_data.rubric_scores,
                     returned_comment=form_data.returned_comment,
                     resubmit_due_at=form_data.resubmit_due_at,
                     reviewed_at=now if form_data.review_status != "pending" else None,
@@ -2079,7 +2164,7 @@ class EducationTable:
                 review.review_status = form_data.review_status
                 review.score = form_data.score
                 review.overall_comment = form_data.overall_comment
-                review.rubric_json = form_data.rubric_json
+                review.rubric_scores = form_data.rubric_scores
                 review.returned_comment = form_data.returned_comment
                 review.resubmit_due_at = form_data.resubmit_due_at
                 review.reviewed_at = (

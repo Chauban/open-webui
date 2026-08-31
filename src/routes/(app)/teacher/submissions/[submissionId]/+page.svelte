@@ -56,9 +56,7 @@
 	let reviewStatus = 'pending';
 	let score = '';
 	let overallComment = '';
-	let rubricIdeas = '';
-	let rubricStructure = '';
-	let rubricEvidence = '';
+	let rubricScores = {};
 	let returnedComment = '';
 	let saving = false;
 	let showAllVersions = false;
@@ -177,11 +175,14 @@
 		reviewStatus = review?.review_status || 'pending';
 		score = review?.score != null ? String(review.score) : '';
 		overallComment = review?.overall_comment || '';
-		rubricIdeas = review?.rubric_json?.ideas != null ? String(review.rubric_json.ideas) : '';
-		rubricStructure =
-			review?.rubric_json?.structure != null ? String(review.rubric_json.structure) : '';
-		rubricEvidence =
-			review?.rubric_json?.evidence != null ? String(review.rubric_json.evidence) : '';
+		rubricScores = Object.fromEntries(
+			(detail?.assignment?.rubric_schema?.criteria ?? []).map((criterion) => [
+				criterion.key,
+				review?.rubric_scores?.[criterion.key] != null
+					? String(review.rubric_scores[criterion.key])
+					: ''
+			])
+		);
 		returnedComment = review?.returned_comment || '';
 		resubmitDueLocal = review?.resubmit_due_at ? toLocalDateTimeInput(review.resubmit_due_at) : '';
 	};
@@ -201,6 +202,42 @@
 			);
 			return false;
 		}
+		const criteria = detail.assignment.rubric_schema.criteria;
+		const hasAnyRubricScore = criteria.some((criterion) => rubricScores[criterion.key] !== '');
+		let parsedRubricScores: Record<string, number> | null = null;
+		if (hasAnyRubricScore) {
+			parsedRubricScores = {};
+			for (const criterion of criteria) {
+				const value = Number(rubricScores[criterion.key]);
+				if (
+					rubricScores[criterion.key] === '' ||
+					!Number.isInteger(value) ||
+					value < 0 ||
+					value > criterion.max_score
+				) {
+					toast.error(
+						t('Rubric score for {{label}} must be between 0 and {{max}}.', {
+							label: criterion.label,
+							max: criterion.max_score
+						})
+					);
+					return false;
+				}
+				parsedRubricScores[criterion.key] = value;
+			}
+		}
+		if (effectiveStatus === 'reviewed' && (parsedScore == null || parsedRubricScores == null)) {
+			toast.error(t('Reviewed submissions require a total score and complete rubric scores.'));
+			return false;
+		}
+		if (
+			parsedScore != null &&
+			parsedRubricScores != null &&
+			Object.values(parsedRubricScores).reduce((sum, value) => sum + value, 0) !== parsedScore
+		) {
+			toast.error(t('Total score must equal the sum of rubric scores.'));
+			return false;
+		}
 		let resubmitDueAt: number | null = null;
 		if (effectiveStatus === 'returned') {
 			resubmitDueAt = toEpoch(resubmitDueLocal);
@@ -216,11 +253,7 @@
 				review_status: effectiveStatus,
 				score: parsedScore,
 				overall_comment: overallComment.trim(),
-				rubric_json: {
-					ideas: rubricIdeas ? Number(rubricIdeas) : null,
-					structure: rubricStructure ? Number(rubricStructure) : null,
-					evidence: rubricEvidence ? Number(rubricEvidence) : null
-				},
+				rubric_scores: parsedRubricScores,
 				returned_comment: returnedComment.trim(),
 				resubmit_due_at: resubmitDueAt
 			});
@@ -675,39 +708,28 @@
 										{$i18n.t('Rubric')}
 									</div>
 									<div class="divide-y divide-gray-100 dark:divide-gray-800 rounded-2xl border border-gray-200 dark:border-gray-800 overflow-hidden">
-										<div class="flex items-center gap-3 px-4 py-3 bg-white dark:bg-gray-850 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
-											<span class="flex-1 text-sm text-gray-700 dark:text-gray-300">{$i18n.t('Ideas')}</span>
-											<input
-												bind:value={rubricIdeas}
-												type="number"
-												min="0"
-												disabled={isHistoricalRound}
-												class="w-20 rounded-xl border border-gray-200 dark:border-gray-800 px-3 py-1.5 text-right text-sm outline-none focus:border-gray-400 transition-colors disabled:opacity-50"
-												placeholder="—"
-											/>
-										</div>
-										<div class="flex items-center gap-3 px-4 py-3 bg-white dark:bg-gray-850 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
-											<span class="flex-1 text-sm text-gray-700 dark:text-gray-300">{$i18n.t('Structure')}</span>
-											<input
-												bind:value={rubricStructure}
-												type="number"
-												min="0"
-												disabled={isHistoricalRound}
-												class="w-20 rounded-xl border border-gray-200 dark:border-gray-800 px-3 py-1.5 text-right text-sm outline-none focus:border-gray-400 transition-colors disabled:opacity-50"
-												placeholder="—"
-											/>
-										</div>
-										<div class="flex items-center gap-3 px-4 py-3 bg-white dark:bg-gray-850 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
-											<span class="flex-1 text-sm text-gray-700 dark:text-gray-300">{$i18n.t('Evidence')}</span>
-											<input
-												bind:value={rubricEvidence}
-												type="number"
-												min="0"
-												disabled={isHistoricalRound}
-												class="w-20 rounded-xl border border-gray-200 dark:border-gray-800 px-3 py-1.5 text-right text-sm outline-none focus:border-gray-400 transition-colors disabled:opacity-50"
-												placeholder="—"
-											/>
-										</div>
+										{#each detail.assignment.rubric_schema.criteria as criterion}
+											<div class="flex items-center gap-3 px-4 py-3 bg-white dark:bg-gray-850 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+												<span class="flex-1 text-sm text-gray-700 dark:text-gray-300">
+													{criterion.label} / {criterion.max_score}
+												</span>
+												<input
+													value={rubricScores[criterion.key] ?? ''}
+													on:input={(event) =>
+														(rubricScores = {
+															...rubricScores,
+															[criterion.key]: event.currentTarget.value
+														})}
+													type="number"
+													min="0"
+													max={criterion.max_score}
+													step="1"
+													disabled={isHistoricalRound}
+													class="w-20 rounded-xl border border-gray-200 dark:border-gray-800 px-3 py-1.5 text-right text-sm outline-none focus:border-gray-400 transition-colors disabled:opacity-50"
+													placeholder="—"
+												/>
+											</div>
+										{/each}
 									</div>
 								</div>
 
@@ -970,22 +992,37 @@
 										{$i18n.t('AI Help Types')}
 									</div>
 									<div class="flex flex-wrap gap-2">
-										{#each detail.micro_reflection.ai_help_types as item}
+										{#if !detail.micro_reflection.ai_used}
 											<span class="rounded-full border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-3 py-1 text-xs text-gray-700 dark:text-gray-300">
-												{getAiHelpTypeLabel(item, t)}
+												{$i18n.t('Did not use AI')}
 											</span>
-										{/each}
+										{:else}
+											{#each detail.micro_reflection.ai_help_types as item}
+												<span class="rounded-full border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-3 py-1 text-xs text-gray-700 dark:text-gray-300">
+													{getAiHelpTypeLabel(item, t)}
+												</span>
+											{/each}
+										{/if}
 									</div>
 								</div>
 
-								<!-- Reflection text -->
-								<div class="rounded-2xl bg-gray-50 dark:bg-gray-800 px-4 py-4">
-									<div class="mb-2 text-[11px] uppercase tracking-[0.14em] text-gray-400">
-										{$i18n.t('Reflection Text')}
-									</div>
-									<div class="whitespace-pre-wrap text-sm leading-7 text-gray-700 dark:text-gray-300">
-										{detail.micro_reflection.reflection_text}
-									</div>
+								<!-- Structured reflection evidence -->
+								<div class="grid gap-3 md:grid-cols-2">
+									{#each [
+										['What did you change?', detail.micro_reflection.reflection_json.action],
+										['Where did you make this change?', detail.micro_reflection.reflection_json.location],
+										['Why did you make this judgement?', detail.micro_reflection.reflection_json.judgement],
+										['What will you do next time?', detail.micro_reflection.reflection_json.next_step]
+									] as [label, value]}
+										<div class="rounded-2xl bg-gray-50 dark:bg-gray-800 px-4 py-4">
+											<div class="mb-2 text-[11px] uppercase tracking-[0.14em] text-gray-400">
+												{$i18n.t(label)}
+											</div>
+											<div class="whitespace-pre-wrap text-sm leading-7 text-gray-700 dark:text-gray-300">
+												{value}
+											</div>
+										</div>
+									{/each}
 								</div>
 
 								<!-- Version history -->

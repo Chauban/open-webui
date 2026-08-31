@@ -165,6 +165,9 @@ export const createAssignment = async (
 		classroom_ids: string[];
 		due_at: number;
 		score_max: number;
+		rubric_schema: {
+			criteria: Array<{ key: string; label: string; max_score: number }>;
+		};
 	}
 ) => {
 	return fetch(`${WEBUI_API_BASE_URL}/assignments`, {
@@ -217,6 +220,9 @@ export const updateAssignment = async (
 		status?: string;
 		due_at?: number;
 		score_max?: number;
+		rubric_schema?: {
+			criteria: Array<{ key: string; label: string; max_score: number }>;
+		};
 	}
 ) => {
 	return fetch(`${WEBUI_API_BASE_URL}/assignments/${assignmentId}`, {
@@ -391,8 +397,15 @@ export const submitAssignment = async (
 		final_content_json: object | null;
 		final_content_html?: string;
 		final_content_text: string;
+		ai_used: boolean;
 		ai_help_types: string[];
-		reflection_text: string;
+		reflection: {
+			action: string;
+			location: string;
+			judgement: string;
+			next_step: string;
+			other_ai_help?: string | null;
+		};
 	}
 ) => {
 	return fetch(`${WEBUI_API_BASE_URL}/assignments/${assignmentId}/submit`, {
@@ -430,7 +443,7 @@ export const saveSubmissionReview = async (
 		review_status: string;
 		score?: number | null;
 		overall_comment?: string;
-		rubric_json?: Record<string, unknown> | null;
+		rubric_scores?: Record<string, number> | null;
 		returned_comment?: string;
 		resubmit_due_at?: number | null;
 	}
