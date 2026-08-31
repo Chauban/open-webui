@@ -1,78 +1,108 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
 	import { v4 as uuidv4 } from 'uuid';
+	import Sortable from 'sortablejs';
 
 	import { goto } from '$app/navigation';
+	import { page } from '$app/stores';
 	import {
 		user,
 		chats,
 		settings,
-		showSettings,
 		chatId,
 		tags,
-		folders as projectStore,
+		folders as _folders,
 		showSidebar,
 		showSearch,
 		mobile,
-		showArchivedChats,
 		pinnedChats,
-		scrollPaginationEnabled,
-		currentChatPage,
+		pinnedNotes,
 		temporaryChatEnabled,
 		channels,
 		socket,
 		config,
 		isApp,
 		models,
-		selectedFolder as selectedProject,
+		selectedFolder,
 		WEBUI_NAME,
 		sidebarWidth,
-		activeChatIds,
 		educationNotificationSummary
 	} from '$lib/stores';
+	import {
+		loadNextChatListPage,
+		refreshChatList,
+		registerFolderRefreshHandler,
+		setAllChatsRead,
+		setChatActive,
+		setChatReadAt
+	} from '$lib/stores/chatList';
 	import { onMount, getContext, tick, onDestroy } from 'svelte';
 
 	const i18n = getContext('i18n');
 
+	$: canImportChats = $user?.role === 'admin' || ($user?.permissions?.chat?.import ?? true);
+
 	import {
-		getChatList,
 		getAllTags,
-		getPinnedChatList,
 		toggleChatPinnedStatusById,
 		getChatById,
 		updateChatFolderIdById,
-		importChats
+		importChats,
+		deleteAllChats,
+		getChatListBySearchText,
+		markChatsRead
 	} from '$lib/apis/chats';
 	import {
 		createNewFolder,
 		getFolders,
+		getSharedFolders,
 		updateFolderById,
 		updateFolderParentIdById
 	} from '$lib/apis/folders';
-	import { checkActiveChats } from '$lib/apis/tasks';
+	import { createNewNote, getPinnedNoteList, toggleNotePinnedStatusById } from '$lib/apis/notes';
+	import { updateUserSettings } from '$lib/apis/users';
+	import { createNoteHandler } from '$lib/components/notes/utils';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 
-	import ArchivedChatsModal from './ArchivedChatsModal.svelte';
 	import UserMenu from './Sidebar/UserMenu.svelte';
 	import ChatItem from './Sidebar/ChatItem.svelte';
 	import Spinner from '../common/Spinner.svelte';
 	import Loader from '../common/Loader.svelte';
 	import Folder from '../common/Folder.svelte';
+	import SidebarSection from './Sidebar/Section.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
 	import Folders from './Sidebar/Folders.svelte';
+	import SharedFolderItem from './Sidebar/SharedFolderItem.svelte';
 	import { getChannels, createNewChannel } from '$lib/apis/channels';
 	import ChannelModal from './Sidebar/ChannelModal.svelte';
 	import ChannelItem from './Sidebar/ChannelItem.svelte';
-	import PencilSquare from '../icons/PencilSquare.svelte';
-	import Search from '../icons/Search.svelte';
 	import SearchModal from './SearchModal.svelte';
 	import FolderModal from './Sidebar/Folders/FolderModal.svelte';
-	import Sidebar from '../icons/Sidebar.svelte';
 	import PinnedModelList from './Sidebar/PinnedModelList.svelte';
-	import Note from '../icons/Note.svelte';
+	import PinnedNoteList from './Sidebar/PinnedNoteList.svelte';
+	import CalendarIcon from './Sidebar/icons/Calendar.svelte';
+	import ClockIcon from './Sidebar/icons/Clock.svelte';
+	import CodeIcon from './Sidebar/icons/Code.svelte';
+	import EditPencilIcon from './Sidebar/icons/EditPencil.svelte';
+	import NotesIcon from './Sidebar/icons/Notes.svelte';
+	import SearchIcon from './Sidebar/icons/Search.svelte';
+	import Sidebar from '../icons/Sidebar.svelte';
+	import WorkspaceIcon from './Sidebar/icons/Workspace.svelte';
 	import { slide } from 'svelte/transition';
 	import HotkeyHint from '../common/HotkeyHint.svelte';
+	import Dropdown from '../common/Dropdown.svelte';
+	import DropdownMenu from '../common/DropdownMenu.svelte';
+	import CheckIcon from '../icons/Check.svelte';
+	import MoreHorizontalIcon from './Sidebar/icons/MoreHorizontal.svelte';
+
 	const BREAKPOINT = 768;
+	const DEFAULT_PINNED_ITEMS = ['notes', 'workspace', 'writing', 'teaching'];
+
+	// RightWrite: unread counts drive the badges on the teaching entries.
+	$: educationByType = $educationNotificationSummary?.by_type ?? {};
+	$: studentUnread =
+		(educationByType['review_completed'] ?? 0) + (educationByType['submission_returned'] ?? 0);
+	$: teacherUnread = educationByType['submission_created'] ?? 0;
 
 	let scrollTop = 0;
 
@@ -80,158 +110,99 @@
 	let shiftKey = false;
 
 	let selectedChatId = null;
+
+	// Keep the optimistic sidebar highlight in sync with the active chat. Leaving the
+	// chat view (e.g. navigating to an admin page) clears chatId, and programmatic
+	// navigation such as cloning moves chatId to a different chat — in both cases the
+	// previously-selected item must not stay highlighted. The optimistic on-click
+	// highlight is preserved because a click sets selectedChatId without changing
+	// chatId, so this reactive only re-runs once chatId catches up to the same value.
+	$: selectedChatId = $chatId || null;
+
 	let showCreateChannel = false;
 
 	// Pagination variables
 	let chatListLoading = false;
+	let chatListReady = false;
 	let allChatsLoaded = false;
 
-	let showCreateProjectModal = false;
+	let showCreateFolderModal = false;
 
 	let pinnedModels = [];
 
 	let showPinnedModels = false;
+	let showPinnedNotes = false;
 	let showChannels = false;
-	let showProjects = false;
+	let showFolders = false;
 	let showWriting = true;
 
-	let projects = {};
+	// RightWrite: writing projects are folders too, but they live in their own
+	// section and open the writing workspace instead of a plain chat.
 	let writingProjects = {};
-	let projectRegistry = {};
 	let writingProjectRegistry = {};
-
-	let newProjectId = null;
-
-	$: educationByType = $educationNotificationSummary?.by_type ?? {};
-	$: studentUnread =
-		(educationByType['assignment_published'] ?? 0) +
-		(educationByType['assignment_updated'] ?? 0) +
-		(educationByType['assignment_reminder'] ?? 0) +
-		(educationByType['review_completed'] ?? 0) +
-		(educationByType['submission_returned'] ?? 0);
-	$: teacherUnread = educationByType['submission_created'] ?? 0;
 
 	const getProjectMode = (folder) => {
 		const explicitMode = folder?.meta?.mode;
 		if (explicitMode) {
 			return explicitMode;
 		}
-
 		if (folder?.meta?.category === 'assignment_project' || folder?.meta?.assignment_id) {
 			return 'assignment_writing';
 		}
-
 		if (folder?.meta?.category === 'personal_writing') {
 			return 'personal_writing';
 		}
-
 		return 'general';
 	};
 
 	const isAssignmentProject = (folder) => getProjectMode(folder) === 'assignment_writing';
-
 	const isPersonalWritingProject = (folder) => getProjectMode(folder) === 'personal_writing';
-
-	const isWritingProject = (folder) => isAssignmentProject(folder) || isPersonalWritingProject(folder);
+	const isWritingProject = (folder) =>
+		isAssignmentProject(folder) || isPersonalWritingProject(folder);
 	const isSidebarClosedWriting = (folder) => Boolean(folder?.meta?.hidden_from_sidebar);
 
-	const dedupeAssignmentProjects = (folders) => {
+	// One assignment can leave several folders behind; keep the most recent.
+	const dedupeAssignmentProjects = (folderList) => {
 		const deduped = new Map();
-
-		for (const folder of folders) {
-			const assignmentId = folder?.meta?.assignment_id;
-			const key = assignmentId || folder.id;
+		for (const folder of folderList) {
+			const key = folder?.meta?.assignment_id || folder.id;
 			const existing = deduped.get(key);
-
 			if (!existing || (folder.updated_at ?? 0) > (existing.updated_at ?? 0)) {
 				deduped.set(key, folder);
 			}
 		}
-
 		return Array.from(deduped.values());
 	};
 
-	const rebuildProjectMaps = (folderList) => {
-		const visibleFolderList = folderList.filter((folder) => !isWritingProject(folder));
-		const dedupedAssignmentFolderList = dedupeAssignmentProjects(
-			folderList.filter((folder) => isAssignmentProject(folder))
-		);
-		const personalWritingFolderList = folderList.filter((folder) => isPersonalWritingProject(folder));
-		const allWritingFolderList = [...dedupedAssignmentFolderList, ...personalWritingFolderList];
-		const writingFolderList = allWritingFolderList.filter((folder) => !isSidebarClosedWriting(folder));
+	const buildWritingProjects = (folderList) => {
+		const writingFolderList = [
+			...dedupeAssignmentProjects(folderList.filter(isAssignmentProject)),
+			...folderList.filter(isPersonalWritingProject)
+		].filter((folder) => !isSidebarClosedWriting(folder));
 
-		projects = {};
-		writingProjects = {};
-
-		for (const folder of visibleFolderList) {
-			projects[folder.id] = { ...(projects[folder.id] || {}), ...folder };
-
-			if (newProjectId && folder.id === newProjectId) {
-				projects[folder.id].new = true;
-				newProjectId = null;
-			}
-		}
-
+		const next = {};
 		for (const folder of writingFolderList) {
-			writingProjects[folder.id] = { ...(writingProjects[folder.id] || {}), ...folder };
+			next[folder.id] = { ...(next[folder.id] || {}), ...folder };
 		}
-
-		for (const folder of visibleFolderList) {
-			if (folder.parent_id) {
-				if (!projects[folder.parent_id]) {
-					projects[folder.parent_id] = {};
-				}
-
-				projects[folder.parent_id].childrenIds = projects[folder.parent_id].childrenIds
-					? [...projects[folder.parent_id].childrenIds, folder.id]
-					: [folder.id];
-
-				projects[folder.parent_id].childrenIds.sort((a, b) => {
-					return projects[b].updated_at - projects[a].updated_at;
-				});
-			}
-		}
-
 		for (const folder of writingFolderList) {
-			if (folder.parent_id) {
-				if (!writingProjects[folder.parent_id]) {
-					writingProjects[folder.parent_id] = {};
-				}
-
-				writingProjects[folder.parent_id].childrenIds = writingProjects[folder.parent_id]
-					.childrenIds
-					? [...writingProjects[folder.parent_id].childrenIds, folder.id]
+			if (folder.parent_id && next[folder.parent_id]) {
+				next[folder.parent_id].childrenIds = next[folder.parent_id].childrenIds
+					? [...next[folder.parent_id].childrenIds, folder.id]
 					: [folder.id];
-
-				writingProjects[folder.parent_id].childrenIds.sort((a, b) => {
-					return writingProjects[b].updated_at - writingProjects[a].updated_at;
-				});
+				next[folder.parent_id].childrenIds.sort(
+					(a, b) => next[b].updated_at - next[a].updated_at
+				);
 			}
 		}
-	};
-
-	$: rebuildProjectMaps($projectStore ?? []);
-
-	$: if ($selectedProject) {
-		initProjects();
-	}
-
-	const initProjects = async () => {
-		if ($config?.features?.enable_folders === false) {
-			return;
-		}
-
-		const folderList = await getFolders(localStorage.token).catch((error) => {
-			return [];
-		});
-		projectStore.set(folderList.sort((a, b) => b.updated_at - a.updated_at));
-		rebuildProjectMaps(folderList);
+		writingProjects = next;
 	};
 
 	const toggleWritingFolderVisibility = async (folder) => {
 		if (!folder?.id) return;
-		const isClosed = Boolean(folder?.meta?.hidden_from_sidebar);
-		const nextMeta = { ...(folder.meta || {}), hidden_from_sidebar: !isClosed };
+		const nextMeta = {
+			...(folder.meta || {}),
+			hidden_from_sidebar: !Boolean(folder?.meta?.hidden_from_sidebar)
+		};
 		const updated = await updateFolderById(localStorage.token, folder.id, {
 			name: folder.name,
 			meta: nextMeta,
@@ -240,30 +211,217 @@
 			toast.error(`${error}`);
 			return null;
 		});
-
 		if (!updated) return;
-
-		if ($selectedProject?.id === folder.id) {
-			selectedProject.set(null);
+		if ($selectedFolder?.id === folder.id) {
+			selectedFolder.set(null);
 		}
+		await initFolders();
+	};
+	let showSharedFolders = false;
+	let showChatsMenu = false;
 
-		await initProjects();
-		toast.success($i18n.t(isClosed ? 'Show in Sidebar' : 'Hide from Sidebar'));
+	let folders = {};
+	let folderRegistry: Record<
+		string,
+		{
+			setFolderItems?: () => unknown;
+			upsertChat?: (chat: Record<string, unknown>) => unknown;
+			setChatActive?: (chatId: string, active: boolean) => boolean;
+			setChatReadAt?: (chatId: string, lastReadAt: number) => boolean;
+			setAllChatsRead?: () => unknown;
+		}
+	> = {};
+
+	let newFolderId = null;
+
+	let sharedFolders: any[] = [];
+
+	$: pinnedItems = $settings?.pinnedMenuItems ?? DEFAULT_PINNED_ITEMS;
+
+	const isMenuItemVisible = (id) => {
+		switch (id) {
+			case 'notes':
+				return (
+					($config?.features?.enable_notes ?? false) &&
+					($user?.role === 'admin' || ($user?.permissions?.features?.notes ?? true))
+				);
+			case 'workspace':
+				return (
+					$user?.role === 'admin' ||
+					$user?.permissions?.workspace?.models ||
+					$user?.permissions?.workspace?.knowledge ||
+					$user?.permissions?.workspace?.prompts ||
+					$user?.permissions?.workspace?.tools ||
+					$user?.permissions?.workspace?.skills
+				);
+			case 'automations':
+				return (
+					$config?.features?.enable_automations &&
+					($user?.role === 'admin' || $user?.permissions?.features?.automations)
+				);
+			case 'calendar':
+				return (
+					$config?.features?.enable_calendar &&
+					($user?.role === 'admin' || $user?.permissions?.features?.calendar)
+				);
+			case 'writing':
+				return (
+					$user?.education_role === 'student' ||
+					$user?.education_role === 'teacher' ||
+					$user?.role === 'admin'
+				);
+			case 'teaching':
+				return $user?.education_role === 'teacher' || $user?.role === 'admin';
+			case 'playground':
+				return $user?.role === 'admin';
+			default:
+				return false;
+		}
 	};
 
-	const createProject = async ({ name, data }) => {
-		name = name?.trim();
-		if (!name) {
-			toast.error($i18n.t('Project name cannot be empty.'));
+	const getMenuItemMeta = (id) => {
+		const items = {
+			notes: { label: 'Notes', href: '/notes', iconType: 'note' },
+			workspace: { label: 'Workspace', href: '/workspace', iconType: 'workspace' },
+			automations: { label: 'Automations', href: '/automations', iconType: 'automations' },
+			calendar: { label: 'Calendar', href: '/calendar', iconType: 'calendar' },
+			playground: { label: 'Playground', href: '/playground', iconType: 'playground' },
+			writing: { label: 'Writing', href: '/me/writing', iconType: 'writing' },
+			teaching: { label: 'Teaching', href: '/teacher', iconType: 'teaching' }
+		};
+		return items[id];
+	};
+
+	const menuItemPathPrefixes = {
+		notes: '/notes',
+		workspace: '/workspace',
+		calendar: '/calendar',
+		automations: '/automations',
+		playground: '/playground',
+		writing: '/me/writing',
+		teaching: '/teacher'
+	};
+
+	const getActiveMenuItemId = (pathname) => {
+		for (const [id, pathPrefix] of Object.entries(menuItemPathPrefixes)) {
+			if (pathname === pathPrefix || pathname.startsWith(`${pathPrefix}/`)) {
+				return id;
+			}
+		}
+
+		return null;
+	};
+
+	$: activeMenuItemId = getActiveMenuItemId($page.url.pathname);
+
+	const initPinnedMenuSortable = () => {
+		const el = document.getElementById('pinned-menu-items-list');
+		if (el && !$mobile) {
+			new Sortable(el, {
+				animation: 150,
+				onUpdate: async (event) => {
+					const itemId = event.item.dataset.id;
+					const newIndex = event.newIndex;
+					const current = [...pinnedItems];
+					const oldIndex = current.indexOf(itemId);
+					current.splice(oldIndex, 1);
+					current.splice(newIndex, 0, itemId);
+					settings.set({ ...$settings, pinnedMenuItems: current });
+					await updateUserSettings(localStorage.token, { ui: $settings });
+				}
+			});
+		}
+	};
+
+	$: if ($selectedFolder) {
+		initFolders();
+	}
+
+	const initFolders = async () => {
+		if ($config?.features?.enable_folders === false) {
 			return;
 		}
 
-		const rootProjects = Object.values(projects).filter((project) => project.parent_id === null);
-		if (rootProjects.find((project) => project.name.toLowerCase() === name.toLowerCase())) {
+		const folderList = await getFolders(localStorage.token).catch((error) => {
+			return [];
+		});
+		_folders.set(folderList.sort((a, b) => b.updated_at - a.updated_at));
+
+		buildWritingProjects(folderList);
+
+		folders = {};
+
+		// First pass: Initialize all folder entries
+		for (const folder of folderList.filter((folder) => !isWritingProject(folder))) {
+			// Ensure folder is added to folders with its data
+			folders[folder.id] = { ...(folders[folder.id] || {}), ...folder };
+
+			if (newFolderId && folder.id === newFolderId) {
+				folders[folder.id].new = true;
+				newFolderId = null;
+			}
+		}
+
+		// Second pass: Tie child folders to their parents
+		for (const folder of folderList.filter((folder) => !isWritingProject(folder))) {
+			if (folder.parent_id) {
+				// Ensure the parent folder is initialized if it doesn't exist
+				if (!folders[folder.parent_id]) {
+					folders[folder.parent_id] = {}; // Create a placeholder if not already present
+				}
+
+				// Initialize childrenIds array if it doesn't exist and add the current folder id
+				folders[folder.parent_id].childrenIds = folders[folder.parent_id].childrenIds
+					? [...folders[folder.parent_id].childrenIds, folder.id]
+					: [folder.id];
+
+				// Sort the children by updated_at field
+				folders[folder.parent_id].childrenIds.sort((a, b) => {
+					return folders[b].updated_at - folders[a].updated_at;
+				});
+			}
+		}
+
+		// Merge shared folders into the same structure
+		try {
+			sharedFolders = await getSharedFolders(localStorage.token);
+		} catch (e) {
+			sharedFolders = [];
+		}
+
+		for (const sf of sharedFolders) {
+			if (folders[sf.id]) continue; // Already owned by user
+			folders[sf.id] = { ...sf, shared: true };
+		}
+
+		// Build parent-child relationships for shared folders
+		for (const sf of sharedFolders) {
+			if (folders[sf.id]?.shared && sf.parent_id && folders[sf.parent_id]) {
+				folders[sf.parent_id].childrenIds = folders[sf.parent_id].childrenIds
+					? [...new Set([...folders[sf.parent_id].childrenIds, sf.id])]
+					: [sf.id];
+			}
+		}
+	};
+
+	const initSharedFolders = async () => {
+		await initFolders();
+	};
+
+	const createFolder = async ({ name, data, parent_id }) => {
+		name = name?.trim();
+		if (!name) {
+			toast.error($i18n.t('Folder name cannot be empty.'));
+			return;
+		}
+
+		// Check for duplicate names in the same parent
+		const siblings = Object.values(folders).filter((folder) => folder.parent_id === parent_id);
+		if (siblings.find((folder) => folder.name.toLowerCase() === name.toLowerCase())) {
 			// If a folder with the same name already exists, append a number to the name
 			let i = 1;
 			while (
-				rootProjects.find((project) => project.name.toLowerCase() === `${name} ${i}`.toLowerCase())
+				siblings.find((folder) => folder.name.toLowerCase() === `${name} ${i}`.toLowerCase())
 			) {
 				i++;
 			}
@@ -273,11 +431,12 @@
 
 		// Add a dummy folder to the list to show the user that the folder is being created
 		const tempId = uuidv4();
-		projects = {
-			...projects,
-			tempId: {
+		folders = {
+			...folders,
+			[tempId]: {
 				id: tempId,
 				name: name,
+				parent_id: parent_id,
 				created_at: Date.now(),
 				updated_at: Date.now()
 			}
@@ -285,16 +444,17 @@
 
 		const res = await createNewFolder(localStorage.token, {
 			name,
-			data
+			data,
+			parent_id
 		}).catch((error) => {
 			toast.error(`${error}`);
 			return null;
 		});
 
 		if (res) {
-			// newProjectId = res.id;
-			await initProjects();
-			showProjects = true;
+			// newFolderId = res.id;
+			await initFolders();
+			showFolders = true;
 		}
 	};
 
@@ -317,58 +477,105 @@
 	const initChatList = async () => {
 		// Reset pagination variables
 		console.log('initChatList');
-		currentChatPage.set(1);
 		allChatsLoaded = false;
-		scrollPaginationEnabled.set(false);
+		chatListReady = false;
 
-		initProjects();
-		try {
-			console.log('Init tags');
-			const _tags = await getAllTags(localStorage.token).catch((error) => {
-				console.error('Failed to load tags', error);
-				return [];
-			});
-			tags.set(_tags ?? []);
+		initFolders();
+		initSharedFolders();
+		await Promise.all([
+			(async () => {
+				console.log('Init tags');
+				const _tags = await getAllTags(localStorage.token);
+				tags.set(_tags);
+			})(),
+			(async () => {
+				if (
+					$config?.features?.enable_notes &&
+					($user?.role === 'admin' || ($user?.permissions?.features?.notes ?? true))
+				) {
+					console.log('Init pinned notes');
+					const _pinnedNotes = await getPinnedNoteList(localStorage.token).catch(() => []);
+					pinnedNotes.set(_pinnedNotes);
+				}
+			})(),
+			(async () => {
+				console.log('Init chat list');
+				await refreshChatRows();
+			})()
+		]);
+	};
 
-			console.log('Init pinned chats');
-			const _pinnedChats = await getPinnedChatList(localStorage.token).catch((error) => {
-				console.error('Failed to load pinned chats', error);
-				return [];
-			});
-			pinnedChats.set(_pinnedChats ?? []);
-
-			console.log('Init chat list');
-			const _chats = await getChatList(localStorage.token, $currentChatPage).catch((error) => {
-				console.error('Failed to load chat list', error);
-				return [];
-			});
-			await chats.set(_chats ?? []);
-		} finally {
-			// Enable pagination
-			scrollPaginationEnabled.set(true);
+	const refreshChatRows = async () => {
+		const result = await refreshChatList(localStorage.token, { refreshPinned: true });
+		if (result.accepted) {
+			await initFolders();
+			await Promise.all(Object.values(folderRegistry).map((folder) => folder?.setFolderItems?.()));
+			allChatsLoaded = result.allLoaded;
+			chatListReady = true;
 		}
 	};
 
 	const loadMoreChats = async () => {
 		chatListLoading = true;
 
-		currentChatPage.set($currentChatPage + 1);
-
-		let newChatList = [];
-
-		newChatList = await getChatList(localStorage.token, $currentChatPage).catch((error) => {
-			console.error('Failed to load more chats', error);
-			return [];
-		});
-
-		// once the bottom of the list has been reached (no results) there is no need to continue querying
-		allChatsLoaded = newChatList.length === 0;
-		await chats.set([...($chats ? $chats : []), ...newChatList]);
+		const result = await loadNextChatListPage(localStorage.token);
+		allChatsLoaded = result.allLoaded;
 
 		chatListLoading = false;
 	};
 
+	const applyFolderUnreadCounts = (folderUnreadCounts: Record<string, number>) => {
+		folders = Object.fromEntries(
+			Object.entries(folders).map(([id, folder]) => [
+				id,
+				id in folderUnreadCounts ? { ...folder, unread_count: folderUnreadCounts[id] } : folder
+			])
+		);
+		_folders.update((folderList) =>
+			folderList.map((folder) =>
+				folder.id in folderUnreadCounts
+					? { ...folder, unread_count: folderUnreadCounts[folder.id] }
+					: folder
+			)
+		);
+	};
+
+	const applyChatReadState = (data) => {
+		if (data?.folder_unread_counts) {
+			applyFolderUnreadCounts(data.folder_unread_counts);
+		}
+
+		if (data?.chat_id && typeof data?.last_read_at === 'number') {
+			setChatReadAt(data.chat_id, data.last_read_at);
+			for (const folder of Object.values(folderRegistry)) {
+				folder?.setChatReadAt?.(data.chat_id, data.last_read_at);
+			}
+		}
+	};
+
+	const markAllChatsReadHandler = async () => {
+		const res = await markChatsRead(localStorage.token).catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
+		if (!res) return;
+
+		showChatsMenu = false;
+		if (res.folder_unread_counts) {
+			applyFolderUnreadCounts(res.folder_unread_counts);
+		}
+		setAllChatsRead();
+		for (const folder of Object.values(folderRegistry)) {
+			folder?.setAllChatsRead?.();
+		}
+	};
+
 	const importChatHandler = async (items, pinned = false, folderId = null) => {
+		if (!canImportChats) {
+			toast.error($i18n.t('Access prohibited'));
+			return;
+		}
+
 		console.log('importChatHandler', items, pinned, folderId);
 		for (const item of items) {
 			console.log(item);
@@ -510,7 +717,7 @@
 		isResizing = true;
 
 		startClientX = e.clientX;
-		startWidth = $sidebarWidth ?? 260;
+		startWidth = $sidebarWidth ?? 245;
 
 		document.body.style.userSelect = 'none';
 	};
@@ -531,8 +738,6 @@
 		document.documentElement.style.setProperty('--sidebar-width', `${newSidebarWidth}px`);
 	};
 
-	let unsubscribers = [];
-
 	onMount(async () => {
 		try {
 			const width = Number(localStorage.getItem('sidebarWidth'));
@@ -546,9 +751,9 @@
 			document.documentElement.style.setProperty('--sidebar-width', `${w}px`);
 		});
 
-		await showSidebar.set(!$mobile ? localStorage.sidebar === 'true' : false);
+		showSidebar.set(!$mobile ? localStorage.sidebar === 'true' : false);
 
-		unsubscribers = [
+		const unsubscribers = [
 			mobile.subscribe((value) => {
 				if ($showSidebar && value) {
 					showSidebar.set(false);
@@ -588,17 +793,6 @@
 						await initChannels();
 					}
 					await initChatList();
-
-					// Check which chats have active tasks
-					const allChatIds = [...$chats.map((c) => c.id), ...$pinnedChats.map((c) => c.id)];
-					if (allChatIds.length > 0) {
-						try {
-							const res = await checkActiveChats(localStorage.token, allChatIds);
-							activeChatIds.set(new Set(res.active_chat_ids || []));
-						} catch (e) {
-							console.debug('Failed to check active chats:', e);
-						}
-					}
 				}
 			}),
 			settings.subscribe((value) => {
@@ -619,67 +813,109 @@
 		window.addEventListener('blur', onBlur);
 
 		const dropZone = document.getElementById('sidebar');
+		if (dropZone) {
+			dropZone.addEventListener('dragover', onDragOver);
+			dropZone.addEventListener('drop', onDrop);
+			dropZone.addEventListener('dragleave', onDragLeave);
+		}
 
-		dropZone?.addEventListener('dragover', onDragOver);
-		dropZone?.addEventListener('drop', onDrop);
-		dropZone?.addEventListener('dragleave', onDragLeave);
+		const socketInstance = $socket;
+		socketInstance?.on('events', chatActiveEventHandler);
+		socketInstance?.on('connect', refreshChatRows);
 
-		// Listen for real-time chat:active events via the events channel
-		$socket?.off('events', chatActiveEventHandler);
-		$socket?.on('events', chatActiveEventHandler);
+		const unregisterFolderRefreshHandler = registerFolderRefreshHandler((folderId, chat) => {
+			if (folderId) {
+				if (chat) {
+					return folderRegistry[folderId]?.upsertChat?.(chat);
+				}
+
+				return folderRegistry[folderId]?.setFolderItems?.();
+			}
+
+			return Promise.all(Object.values(folderRegistry).map((folder) => folder?.setFolderItems?.()));
+		});
+
+		await tick();
+		initPinnedMenuSortable();
+
+		return () => {
+			unsubscribers.forEach((unsubscriber) => unsubscriber());
+
+			window.removeEventListener('keydown', onKeyDown);
+			window.removeEventListener('keyup', onKeyUp);
+
+			window.removeEventListener('touchstart', onTouchStart);
+			window.removeEventListener('touchend', onTouchEnd);
+
+			window.removeEventListener('focus', onFocus);
+			window.removeEventListener('blur', onBlur);
+
+			if (dropZone) {
+				dropZone.removeEventListener('dragover', onDragOver);
+				dropZone.removeEventListener('drop', onDrop);
+				dropZone.removeEventListener('dragleave', onDragLeave);
+			}
+
+			socketInstance?.off('events', chatActiveEventHandler);
+			socketInstance?.off('connect', refreshChatRows);
+
+			unregisterFolderRefreshHandler();
+		};
 	});
 
-	// Handler for chat:active events (defined outside onMount for proper cleanup)
-	const chatActiveEventHandler = (event: {
+	// Handler for chat events (defined outside onMount for proper cleanup)
+	const chatActiveEventHandler = async (event: {
 		chat_id: string;
 		message_id: string;
-		data: { type: string; data: any };
+		data: {
+			type: string;
+			data: {
+				active?: boolean;
+				folder_id?: string | null;
+				last_read_at?: number;
+				folder_unread_counts?: Record<string, number>;
+			};
+		};
 	}) => {
 		if (event.data?.type === 'chat:active') {
-			const { active } = event.data.data;
-			activeChatIds.update((ids) => {
-				const newSet = new Set(ids);
-				if (active) {
-					newSet.add(event.chat_id);
-				} else {
-					newSet.delete(event.chat_id);
+			const eventData = event.data.data ?? {};
+			const active = eventData.active ?? false;
+			const found = setChatActive(event.chat_id, active);
+			let foundInFolder = false;
+			for (const folder of Object.values(folderRegistry)) {
+				foundInFolder = folder?.setChatActive?.(event.chat_id, active) || foundInFolder;
+			}
+			if (!foundInFolder && active && eventData.folder_id) {
+				await folderRegistry[eventData.folder_id]?.setFolderItems?.();
+			}
+			if (!found && active) {
+				await refreshChatRows();
+			}
+		} else if (event.data?.type === 'chat:list') {
+			const eventData = event.data.data ?? {};
+			const folderUnreadCounts = eventData.folder_unread_counts;
+			if (folderUnreadCounts) {
+				applyFolderUnreadCounts(folderUnreadCounts);
+			}
+
+			if (typeof eventData.last_read_at === 'number') {
+				setChatReadAt(event.chat_id, eventData.last_read_at);
+				for (const folder of Object.values(folderRegistry)) {
+					folder?.setChatReadAt?.(event.chat_id, eventData.last_read_at);
 				}
-				return newSet;
-			});
+				return;
+			}
+
+			await refreshChatRows();
+			if (eventData.folder_id) {
+				await folderRegistry[eventData.folder_id]?.setFolderItems?.();
+			}
 		}
 	};
 
-	onDestroy(() => {
-		if (unsubscribers && unsubscribers.length > 0) {
-			unsubscribers.forEach((unsubscriber) => {
-				if (unsubscriber) {
-					unsubscriber();
-				}
-			});
-		}
-
-		window.removeEventListener('keydown', onKeyDown);
-		window.removeEventListener('keyup', onKeyUp);
-
-		window.removeEventListener('touchstart', onTouchStart);
-		window.removeEventListener('touchend', onTouchEnd);
-
-		window.removeEventListener('focus', onFocus);
-		window.removeEventListener('blur', onBlur);
-
-		const dropZone = document.getElementById('sidebar');
-
-		dropZone?.removeEventListener('dragover', onDragOver);
-		dropZone?.removeEventListener('drop', onDrop);
-		dropZone?.removeEventListener('dragleave', onDragLeave);
-
-		// Clean up socket listener
-		$socket?.off('events', chatActiveEventHandler);
-	});
-
 	const newChatHandler = async () => {
 		selectedChatId = null;
-		selectedProject.set(null);
+		selectedFolder.set(null);
 
 		if ($user?.role !== 'admin' && $user?.permissions?.chat?.temporary_enforced) {
 			await temporaryChatEnabled.set(true);
@@ -707,13 +943,6 @@
 
 	const isWindows = /Windows/i.test(navigator.userAgent);
 </script>
-
-<ArchivedChatsModal
-	bind:show={$showArchivedChats}
-	onUpdate={async () => {
-		await initChatList();
-	}}
-/>
 
 <ChannelModal
 	bind:show={showCreateChannel}
@@ -756,10 +985,10 @@
 />
 
 <FolderModal
-	bind:show={showCreateProjectModal}
+	bind:show={showCreateFolderModal}
 	onSubmit={async (folder) => {
-		await createProject(folder);
-		showCreateProjectModal = false;
+		await createFolder(folder);
+		showCreateFolderModal = false;
 	}}
 />
 
@@ -806,8 +1035,10 @@
 
 {#if !$mobile && !$showSidebar}
 	<div
-		class=" pt-[7px] pb-2 px-2 flex flex-col justify-between text-black dark:text-white hover:bg-gray-50/30 dark:hover:bg-gray-950/30 h-full z-10 transition-all border-e-[0.5px] border-gray-50 dark:border-gray-850/30"
+		class=" w-[42px] shrink-0 py-1 px-1 flex flex-col justify-between text-gray-700 dark:text-gray-300 hover:bg-gray-50/30 dark:hover:bg-gray-800/30 h-full z-10 transition-all border-e-[0.5px] border-gray-50 dark:border-gray-850/30"
 		id="sidebar"
+		role="navigation"
+		aria-label={$i18n.t('Chat history')}
 	>
 		<button
 			class="flex flex-col flex-1 {isWindows ? 'cursor-pointer' : 'cursor-[e-resize]'}"
@@ -815,35 +1046,37 @@
 				showSidebar.set(!$showSidebar);
 			}}
 		>
-			<div class="pb-1.5">
+			<div class="pb-1">
 				<Tooltip
 					content={$showSidebar ? $i18n.t('Close Sidebar') : $i18n.t('Open Sidebar')}
 					placement="right"
 				>
 					<button
-						class="flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group {isWindows
+						class="flex size-8.5 items-center justify-center transition group {isWindows
 							? 'cursor-pointer'
 							: 'cursor-[e-resize]'}"
 						aria-label={$showSidebar ? $i18n.t('Close Sidebar') : $i18n.t('Open Sidebar')}
 					>
-						<div class=" self-center flex items-center justify-center size-9">
+						<div
+							class=" self-center flex size-[30px] items-center justify-center rounded-lg transition group-hover:bg-gray-50 dark:group-hover:bg-gray-900"
+						>
 							<img
-								src="{WEBUI_BASE_URL}/static/logo.png"
-								class="sidebar-new-chat-icon size-6 rounded-md group-hover:hidden"
+								src="{WEBUI_BASE_URL}/static/favicon.png"
+								class="sidebar-new-chat-icon size-5 rounded-full group-hover:hidden"
 								alt=""
 							/>
 
-							<Sidebar className="size-5 hidden group-hover:flex" />
+							<Sidebar className="size-4 hidden group-hover:flex" />
 						</div>
 					</button>
 				</Tooltip>
 			</div>
 
-			<div class="-mt-[0.5px]">
+			<div class="-gap-0.5">
 				<div class="">
 					<Tooltip content={$i18n.t('New Chat')} placement="right">
 						<a
-							class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group"
+							class=" cursor-pointer flex size-8 items-center justify-center transition group"
 							href="/"
 							draggable="false"
 							on:click={async (e) => {
@@ -855,8 +1088,10 @@
 							}}
 							aria-label={$i18n.t('New Chat')}
 						>
-							<div class=" self-center flex items-center justify-center size-9">
-								<PencilSquare className="size-4.5" />
+							<div
+								class=" self-center flex size-[30px] items-center justify-center rounded-lg transition group-hover:bg-gray-50 dark:group-hover:bg-gray-900"
+							>
+								<EditPencilIcon className="size-4" strokeWidth="1.5" />
 							</div>
 						</a>
 					</Tooltip>
@@ -865,7 +1100,7 @@
 				<div>
 					<Tooltip content={$i18n.t('Search')} placement="right">
 						<button
-							class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group"
+							class=" cursor-pointer flex size-8 items-center justify-center transition group"
 							on:click={(e) => {
 								e.stopImmediatePropagation();
 								e.preventDefault();
@@ -875,99 +1110,106 @@
 							draggable="false"
 							aria-label={$i18n.t('Search')}
 						>
-							<div class=" self-center flex items-center justify-center size-9">
-								<Search className="size-4.5" />
+							<div
+								class=" self-center flex size-[30px] items-center justify-center rounded-lg transition group-hover:bg-gray-50 dark:group-hover:bg-gray-900"
+							>
+								<SearchIcon className="size-4" strokeWidth="1.5" />
 							</div>
 						</button>
 					</Tooltip>
 				</div>
 
-				{#if ($config?.features?.enable_notes ?? false) && ($user?.role === 'admin' || ($user?.permissions?.features?.notes ?? true))}
-					<div class="">
-						<Tooltip content={$i18n.t('Notes')} placement="right">
-							<a
-								class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group"
-								href="/notes"
-								on:click={async (e) => {
-									e.stopImmediatePropagation();
-									e.preventDefault();
-
-									goto('/notes');
-									itemClickHandler();
-								}}
-								draggable="false"
-								aria-label={$i18n.t('Notes')}
-							>
-								<div class=" self-center flex items-center justify-center size-9">
-									<Note className="size-4.5" />
-								</div>
-							</a>
-						</Tooltip>
-					</div>
-				{/if}
-
-				{#if $user?.role === 'admin' || $user?.permissions?.workspace?.models || $user?.permissions?.workspace?.knowledge || $user?.permissions?.workspace?.prompts || $user?.permissions?.workspace?.tools}
-					<div class="">
-						<Tooltip content={$i18n.t('Workspace')} placement="right">
-							<a
-								class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group"
-								href="/workspace"
-								on:click={async (e) => {
-									e.stopImmediatePropagation();
-									e.preventDefault();
-
-									goto('/workspace');
-									itemClickHandler();
-								}}
-								aria-label={$i18n.t('Workspace')}
-								draggable="false"
-							>
-								<div class=" self-center flex items-center justify-center size-9">
-									<svg
-										xmlns="http://www.w3.org/2000/svg"
-										fill="none"
-										viewBox="0 0 24 24"
-										stroke-width="1.5"
-										stroke="currentColor"
-										class="size-4.5"
+				{#each pinnedItems as itemId (itemId)}
+					{@const meta = getMenuItemMeta(itemId)}
+					{#if meta && isMenuItemVisible(itemId)}
+						<div class="">
+							<Tooltip content={$i18n.t(meta.label)} placement="right">
+								<a
+									class=" cursor-pointer flex size-8 items-center justify-center transition group"
+									href={meta.href}
+									on:click={async (e) => {
+										e.stopImmediatePropagation();
+										e.preventDefault();
+										goto(meta.href);
+										itemClickHandler();
+									}}
+									draggable="false"
+									aria-label={$i18n.t(meta.label)}
+								>
+									<div
+										class=" relative self-center flex size-[30px] items-center justify-center rounded-lg transition {itemId ===
+										activeMenuItemId
+											? ($settings?.highContrastMode ?? false)
+												? 'bg-black/[0.035] dark:bg-white/[0.06]'
+												: 'bg-black/[0.035] dark:bg-white/[0.045]'
+											: 'group-hover:bg-gray-50 dark:group-hover:bg-gray-900'}"
 									>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											d="M13.5 16.875h3.375m0 0h3.375m-3.375 0V13.5m0 3.375v3.375M6 10.5h2.25a2.25 2.25 0 0 0 2.25-2.25V6a2.25 2.25 0 0 0-2.25-2.25H6A2.25 2.25 0 0 0 3.75 6v2.25A2.25 2.25 0 0 0 6 10.5Zm0 9.75h2.25A2.25 2.25 0 0 0 10.5 18v-2.25a2.25 2.25 0 0 0-2.25-2.25H6a2.25 2.25 0 0 0-2.25 2.25V18A2.25 2.25 0 0 0 6 20.25Zm9.75-9.75H18a2.25 2.25 0 0 0 2.25-2.25V6A2.25 2.25 0 0 0 18 3.75h-2.25A2.25 2.25 0 0 0 13.5 6v2.25a2.25 2.25 0 0 0 2.25 2.25Z"
-										/>
-									</svg>
-								</div>
-							</a>
-						</Tooltip>
-					</div>
-				{/if}
+										{#if itemId === 'notes'}
+											<NotesIcon className="size-4" strokeWidth="1.5" />
+										{:else if itemId === 'workspace'}
+											<WorkspaceIcon className="size-4" strokeWidth="1.5" />
+										{:else if itemId === 'automations'}
+											<ClockIcon className="size-4" strokeWidth="1.5" />
+										{:else if itemId === 'calendar'}
+											<CalendarIcon className="size-4" strokeWidth="1.5" />
+										{:else if itemId === 'playground'}
+											<CodeIcon className="size-4" strokeWidth="1.5" />
+										{:else if itemId === 'writing'}
+											<svg
+												xmlns="http://www.w3.org/2000/svg"
+												fill="none"
+												viewBox="0 0 24 24"
+												stroke-width="1.5"
+												stroke="currentColor"
+												class="size-4"
+											>
+												<path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487 18.549 2.8a1.875 1.875 0 1 1 2.652 2.652L7.832 18.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.862 4.487ZM19.5 7.125 16.875 4.5" />
+											</svg>
+										{:else if itemId === 'teaching'}
+											<svg
+												xmlns="http://www.w3.org/2000/svg"
+												fill="none"
+												viewBox="0 0 24 24"
+												stroke-width="1.5"
+												stroke="currentColor"
+												class="size-4"
+											>
+												<path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5 4.462 5 2 6.462 2 8.267v7.466C2 17.538 4.462 19 7.5 19c1.746 0 3.332-.477 4.5-1.253m0-11.494C13.168 5.477 14.754 5 16.5 5 19.538 5 22 6.462 22 8.267v7.466C22 17.538 19.538 19 16.5 19c-1.746 0-3.332-.477-4.5-1.253" />
+											</svg>
+										{/if}
+										{#if (itemId === 'writing' && studentUnread > 0) || (itemId === 'teaching' && teacherUnread > 0)}
+											{@const unread = itemId === 'writing' ? studentUnread : teacherUnread}
+											<span
+												class="absolute -top-0.5 -right-0.5 min-w-[1rem] h-4 px-1 rounded-full bg-rose-500 text-white text-[10px] flex items-center justify-center"
+											>
+												{unread > 99 ? '99+' : unread}
+											</span>
+										{/if}
+									</div>
+								</a>
+							</Tooltip>
+						</div>
+					{/if}
+				{/each}
 			</div>
 		</button>
 
 		<div>
 			<div>
-				<div class=" py-2 flex justify-center items-center">
+				<div class=" flex justify-center items-center">
 					{#if $user !== undefined && $user !== null}
-						<UserMenu
-							role={$user?.role}
-							profile={$config?.features?.enable_user_status ?? true}
-							showActiveUsers={false}
-							on:show={(e) => {
-								if (e.detail === 'archived-chat') {
-									showArchivedChats.set(true);
-								}
-							}}
-						>
+						<UserMenu role={$user?.role} profile={$config?.features?.enable_user_status ?? true}>
 							<button
 								type="button"
-								class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group"
+								class=" cursor-pointer flex size-8.5 items-center justify-center transition group"
 								aria-label={$i18n.t('User menu')}
 							>
-								<div class="self-center relative">
+								<div
+									class="self-center relative flex size-[30px] items-center justify-center rounded-lg transition group-hover:bg-gray-50 dark:group-hover:bg-gray-900"
+								>
 									<img
 										src={`${WEBUI_API_BASE_URL}/users/${$user?.id}/profile/image`}
-										class=" size-7 object-cover rounded-full"
+										class="size-5.5 object-cover rounded-full"
 										alt={$i18n.t('Open User Profile Menu')}
 										aria-label={$i18n.t('Open User Profile Menu')}
 									/>
@@ -1000,41 +1242,43 @@
 	<div
 		bind:this={navElement}
 		id="sidebar"
+		role="navigation"
+		aria-label={$i18n.t('Chat history')}
 		class="h-screen max-h-[100dvh] min-h-screen select-none {$showSidebar
 			? `${$mobile ? 'bg-gray-50 dark:bg-gray-950' : 'bg-gray-50/70 dark:bg-gray-950/70'} z-50`
 			: ' bg-transparent z-0 '} {$isApp
 			? `ml-[4.5rem] md:ml-0 `
-			: ' transition-all duration-300 '} shrink-0 text-gray-900 dark:text-gray-200 text-sm fixed top-0 left-0 overflow-x-hidden
+			: ' transition-all duration-300 '} shrink-0 text-gray-700 dark:text-gray-300 text-[13px] leading-5 fixed top-0 left-0 overflow-x-hidden
         "
 		transition:slide={{ duration: 250, axis: 'x' }}
 		data-state={$showSidebar}
 	>
 		<div
-			class=" my-auto flex flex-col justify-between h-screen max-h-[100dvh] w-[var(--sidebar-width)] overflow-x-hidden scrollbar-hidden z-50 {$showSidebar
+			class=" my-auto flex flex-col justify-between h-screen max-h-[100dvh] w-[var(--sidebar-width)] overflow-x-hidden scrollbar-hidden z-50 border-e border-gray-50 dark:border-gray-850/30 {$showSidebar
 				? ''
 				: 'invisible'}"
 		>
 			<div
-				class="sidebar px-[0.5625rem] pt-2 pb-1.5 flex justify-between space-x-1 text-gray-600 dark:text-gray-400 sticky top-0 z-10 -mb-3"
+				class="sidebar px-1 pt-1.5 pb-1 flex justify-between space-x-1 text-gray-600 dark:text-gray-400 sticky top-0 z-10 -mb-2"
 			>
 				<a
-					class="flex items-center rounded-xl size-8.5 h-full justify-center hover:bg-gray-100/50 dark:hover:bg-gray-850/50 transition no-drag-region"
+					class="flex items-center rounded-xl size-8.5 h-full justify-center hover:bg-gray-50 dark:hover:bg-gray-900 transition no-drag-region"
 					href="/"
 					draggable="false"
 					on:click={newChatHandler}
 				>
 					<img
 						crossorigin="anonymous"
-						src="{WEBUI_BASE_URL}/static/logo.png"
-						class="sidebar-new-chat-icon size-6 rounded-md"
+						src="{WEBUI_BASE_URL}/static/favicon.png"
+						class="sidebar-new-chat-icon size-5 rounded-full"
 						alt=""
 					/>
 				</a>
 
-				<a href="/" class="flex flex-1 px-1.5" on:click={newChatHandler}>
+				<a href="/" class="flex flex-1 px-0.5" on:click={newChatHandler}>
 					<div
 						id="sidebar-webui-name"
-						class=" self-center font-medium text-gray-850 dark:text-white font-primary"
+						class=" self-center font-normal text-gray-700 dark:text-gray-200"
 					>
 						{$WEBUI_NAME}
 					</div>
@@ -1044,7 +1288,7 @@
 					placement="bottom"
 				>
 					<button
-						class="flex rounded-xl size-8.5 justify-center items-center hover:bg-gray-100/50 dark:hover:bg-gray-850/50 transition {isWindows
+						class="flex size-[30px] justify-center items-center rounded-lg hover:bg-gray-50 dark:hover:bg-gray-900 transition {isWindows
 							? 'cursor-pointer'
 							: 'cursor-[w-resize]'}"
 						on:click={() => {
@@ -1052,8 +1296,8 @@
 						}}
 						aria-label={$showSidebar ? $i18n.t('Close Sidebar') : $i18n.t('Open Sidebar')}
 					>
-						<div class=" self-center p-1.5">
-							<Sidebar />
+						<div class=" self-center">
+							<Sidebar className="size-4" />
 						</div>
 					</button>
 				</Tooltip>
@@ -1066,7 +1310,7 @@
 			</div>
 
 			<div
-				class="relative flex flex-col flex-1 overflow-y-auto scrollbar-hidden pt-3 pb-3"
+				class="relative flex flex-col flex-1 overflow-y-auto scrollbar-hidden pt-2.5 pb-2.5"
 				on:scroll={(e) => {
 					if (e.target.scrollTop === 0) {
 						scrollTop = 0;
@@ -1075,207 +1319,161 @@
 					}
 				}}
 			>
-				<div class="pb-1.5">
-					<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
+				<div class="pb-1">
+					<div class="px-1 flex justify-center text-gray-700 dark:text-gray-300">
 						<a
 							id="sidebar-new-chat-button"
-							class="group grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition outline-none"
+							class="group grow flex items-center space-x-2 rounded-xl px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-900 transition outline-none"
 							href="/"
 							draggable="false"
 							on:click={newChatHandler}
 							aria-label={$i18n.t('New Chat')}
 						>
-							<div class="self-center">
-								<PencilSquare className=" size-4.5" strokeWidth="2" />
+							<div class="self-center flex size-4 shrink-0 items-center justify-center">
+								<EditPencilIcon className=" size-4" strokeWidth="1.5" />
 							</div>
 
 							<div class="flex flex-1 self-center translate-y-[0.5px]">
-								<div class=" self-center text-sm font-primary">{$i18n.t('New Chat')}</div>
+								<div class=" self-center text-[13px] leading-5">{$i18n.t('New Chat')}</div>
 							</div>
 
 							<HotkeyHint name="newChat" className=" group-hover:visible invisible" />
 						</a>
 					</div>
 
-					<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
+					<div class="px-1 flex justify-center text-gray-700 dark:text-gray-300">
 						<button
 							id="sidebar-search-button"
-							class="group grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition outline-none"
+							class="group grow flex items-center space-x-2 rounded-xl px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-900 transition outline-none"
 							on:click={() => {
 								showSearch.set(true);
 							}}
 							draggable="false"
 							aria-label={$i18n.t('Search')}
 						>
-							<div class="self-center">
-								<Search strokeWidth="2" className="size-4.5" />
+							<div class="self-center flex size-4 shrink-0 items-center justify-center">
+								<SearchIcon strokeWidth="1.5" className="size-4" />
 							</div>
 
 							<div class="flex flex-1 self-center translate-y-[0.5px]">
-								<div class=" self-center text-sm font-primary">{$i18n.t('Search')}</div>
+								<div class=" self-center text-[13px] leading-5">{$i18n.t('Search')}</div>
 							</div>
 							<HotkeyHint name="search" className=" group-hover:visible invisible" />
 						</button>
 					</div>
 
-					{#if ($config?.features?.enable_notes ?? false) && ($user?.role === 'admin' || ($user?.permissions?.features?.notes ?? true))}
-						<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
-							<a
-								id="sidebar-notes-button"
-								class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
-								href="/notes"
-								on:click={itemClickHandler}
-								draggable="false"
-								aria-label={$i18n.t('Notes')}
-							>
-								<div class="self-center">
-									<Note className="size-4.5" strokeWidth="2" />
-								</div>
-
-								<div class="flex self-center translate-y-[0.5px]">
-									<div class=" self-center text-sm font-primary">{$i18n.t('Notes')}</div>
-								</div>
-							</a>
-						</div>
-					{/if}
-
-					{#if $user?.education_role === 'student' || $user?.education_role === 'teacher' || $user?.role === 'admin'}
-						<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
-							<a
-								class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
-								href="/me/writing"
-								on:click={itemClickHandler}
-								draggable="false"
-								aria-label={$i18n.t('Writing')}
-							>
-								<div class="self-center">
-									<svg
-										xmlns="http://www.w3.org/2000/svg"
-										fill="none"
-										viewBox="0 0 24 24"
-										stroke-width="2"
-										stroke="currentColor"
-										class="size-4.5"
+					<div id="pinned-menu-items-list">
+						{#each pinnedItems as itemId (itemId)}
+							{@const meta = getMenuItemMeta(itemId)}
+							{#if meta && isMenuItemVisible(itemId)}
+								<div
+									class="px-1 flex justify-center text-gray-700 dark:text-gray-300"
+									data-id={itemId}
+								>
+									<a
+										id="sidebar-{itemId}-button"
+										class="grow flex items-center space-x-2 rounded-xl px-2 py-1.5 transition {itemId ===
+										activeMenuItemId
+											? ($settings?.highContrastMode ?? false)
+												? 'bg-black/[0.035] dark:bg-white/[0.06]'
+												: 'bg-black/[0.035] dark:bg-white/[0.045]'
+											: 'hover:bg-gray-50 dark:hover:bg-gray-900'}"
+										href={meta.href}
+										on:click={itemClickHandler}
+										draggable="false"
+										aria-label={$i18n.t(meta.label)}
 									>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											d="M16.862 4.487 18.549 2.8a1.875 1.875 0 1 1 2.652 2.652L7.832 18.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.862 4.487ZM19.5 7.125 16.875 4.5"
-										/>
-									</svg>
+										<div class="self-center flex size-4 shrink-0 items-center justify-center">
+											{#if itemId === 'notes'}
+												<NotesIcon className="size-4" strokeWidth="1.5" />
+											{:else if itemId === 'workspace'}
+												<WorkspaceIcon className="size-4" strokeWidth="1.5" />
+											{:else if itemId === 'automations'}
+												<ClockIcon className="size-4" strokeWidth="1.5" />
+											{:else if itemId === 'calendar'}
+												<CalendarIcon className="size-4" strokeWidth="1.5" />
+											{:else if itemId === 'playground'}
+												<CodeIcon className="size-4" strokeWidth="1.5" />
+											{:else if itemId === 'writing'}
+												<svg
+													xmlns="http://www.w3.org/2000/svg"
+													fill="none"
+													viewBox="0 0 24 24"
+													stroke-width="1.5"
+													stroke="currentColor"
+													class="size-4"
+												>
+													<path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487 18.549 2.8a1.875 1.875 0 1 1 2.652 2.652L7.832 18.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.862 4.487ZM19.5 7.125 16.875 4.5" />
+												</svg>
+											{:else if itemId === 'teaching'}
+												<svg
+													xmlns="http://www.w3.org/2000/svg"
+													fill="none"
+													viewBox="0 0 24 24"
+													stroke-width="1.5"
+													stroke="currentColor"
+													class="size-4"
+												>
+													<path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5 4.462 5 2 6.462 2 8.267v7.466C2 17.538 4.462 19 7.5 19c1.746 0 3.332-.477 4.5-1.253m0-11.494C13.168 5.477 14.754 5 16.5 5 19.538 5 22 6.462 22 8.267v7.466C22 17.538 19.538 19 16.5 19c-1.746 0-3.332-.477-4.5-1.253" />
+												</svg>
+											{/if}
+											{#if (itemId === 'writing' && studentUnread > 0) || (itemId === 'teaching' && teacherUnread > 0)}
+												{@const unread = itemId === 'writing' ? studentUnread : teacherUnread}
+												<span
+													class="absolute -top-0.5 -right-0.5 min-w-[1rem] h-4 px-1 rounded-full bg-rose-500 text-white text-[10px] flex items-center justify-center"
+												>
+													{unread > 99 ? '99+' : unread}
+												</span>
+											{/if}
+										</div>
+
+										<div class="flex self-center translate-y-[0.5px]">
+											<div class=" self-center text-[13px] leading-5">{$i18n.t(meta.label)}</div>
+										</div>
+									</a>
 								</div>
-
-								<div class="flex flex-1 self-center translate-y-[0.5px]">
-									<div class=" self-center text-sm font-primary">{$i18n.t('Writing')}</div>
-								</div>
-
-								{#if studentUnread > 0}
-									<span
-										class="ml-auto min-w-[1.25rem] h-5 px-1 rounded-full bg-rose-500 text-white text-[11px] flex items-center justify-center"
-									>
-										{studentUnread > 99 ? '99+' : studentUnread}
-									</span>
-								{/if}
-							</a>
-						</div>
-					{/if}
-
-					{#if $user?.education_role === 'teacher' || $user?.role === 'admin'}
-						<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
-							<a
-								class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
-								href="/teacher"
-								on:click={itemClickHandler}
-								draggable="false"
-								aria-label={$i18n.t('Teaching')}
-							>
-								<div class="self-center">
-									<svg
-										xmlns="http://www.w3.org/2000/svg"
-										fill="none"
-										viewBox="0 0 24 24"
-										stroke-width="2"
-										stroke="currentColor"
-										class="size-4.5"
-									>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5 4.462 5 2 6.462 2 8.267v7.466C2 17.538 4.462 19 7.5 19c1.746 0 3.332-.477 4.5-1.253m0-11.494C13.168 5.477 14.754 5 16.5 5 19.538 5 22 6.462 22 8.267v7.466C22 17.538 19.538 19 16.5 19c-1.746 0-3.332-.477-4.5-1.253"
-										/>
-									</svg>
-								</div>
-
-								<div class="flex flex-1 self-center translate-y-[0.5px]">
-									<div class=" self-center text-sm font-primary">{$i18n.t('Teaching')}</div>
-								</div>
-
-								{#if teacherUnread > 0}
-									<span
-										class="ml-auto min-w-[1.25rem] h-5 px-1 rounded-full bg-rose-500 text-white text-[11px] flex items-center justify-center"
-									>
-										{teacherUnread > 99 ? '99+' : teacherUnread}
-									</span>
-								{/if}
-							</a>
-						</div>
-					{/if}
-
-					{#if $user?.role === 'admin' || $user?.permissions?.workspace?.models || $user?.permissions?.workspace?.knowledge || $user?.permissions?.workspace?.prompts || $user?.permissions?.workspace?.tools}
-						<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
-							<a
-								id="sidebar-workspace-button"
-								class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
-								href="/workspace"
-								on:click={itemClickHandler}
-								draggable="false"
-								aria-label={$i18n.t('Workspace')}
-							>
-								<div class="self-center">
-									<svg
-										xmlns="http://www.w3.org/2000/svg"
-										fill="none"
-										viewBox="0 0 24 24"
-										stroke-width="2"
-										stroke="currentColor"
-										class="size-4.5"
-									>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											d="M13.5 16.875h3.375m0 0h3.375m-3.375 0V13.5m0 3.375v3.375M6 10.5h2.25a2.25 2.25 0 0 0 2.25-2.25V6a2.25 2.25 0 0 0-2.25-2.25H6A2.25 2.25 0 0 0 3.75 6v2.25A2.25 2.25 0 0 0 6 10.5Zm0 9.75h2.25A2.25 2.25 0 0 0 10.5 18v-2.25a2.25 2.25 0 0 0-2.25-2.25H6a2.25 2.25 0 0 0-2.25 2.25V18A2.25 2.25 0 0 0 6 20.25Zm9.75-9.75H18a2.25 2.25 0 0 0 2.25-2.25V6A2.25 2.25 0 0 0 18 3.75h-2.25A2.25 2.25 0 0 0 13.5 6v2.25a2.25 2.25 0 0 0 2.25 2.25Z"
-										/>
-									</svg>
-								</div>
-
-								<div class="flex self-center translate-y-[0.5px]">
-									<div class=" self-center text-sm font-primary">{$i18n.t('Workspace')}</div>
-								</div>
-							</a>
-						</div>
-					{/if}
+							{/if}
+						{/each}
+					</div>
 				</div>
 
 				{#if ($models ?? []).length > 0 && (($settings?.pinnedModels ?? []).length > 0 || $config?.default_pinned_models)}
-					<Folder
+					<SidebarSection
 						id="sidebar-models"
 						bind:open={showPinnedModels}
-						className="px-2 mt-0.5"
+						className="mt-0.5"
 						name={$i18n.t('Models')}
-						chevron={false}
 						dragAndDrop={false}
 					>
 						<PinnedModelList bind:selectedChatId {shiftKey} />
-					</Folder>
+					</SidebarSection>
+				{/if}
+
+				{#if ($config?.features?.enable_notes ?? false) && ($user?.role === 'admin' || ($user?.permissions?.features?.notes ?? true)) && $pinnedNotes.length > 0}
+					<SidebarSection
+						id="sidebar-pinned-notes"
+						bind:open={showPinnedNotes}
+						className="mt-0.5"
+						name={$i18n.t('Notes')}
+						dragAndDrop={false}
+						onAdd={async () => {
+							const note = await createNoteHandler('New Note');
+							if (note) {
+								goto(`/notes/${note.id}`);
+							}
+						}}
+						onAddLabel={$i18n.t('New Note')}
+					>
+						<PinnedNoteList bind:selectedChatId />
+					</SidebarSection>
 				{/if}
 
 				{#if $config?.features?.enable_channels && ($user?.role === 'admin' || ($user?.permissions?.features?.channels ?? true))}
-					<Folder
+					<SidebarSection
 						id="sidebar-channels"
 						bind:open={showChannels}
-						className="px-2 mt-0.5"
+						className="mt-0.5"
 						name={$i18n.t('Channels')}
-						chevron={false}
 						dragAndDrop={false}
 						onAdd={$user?.role === 'admin' || ($user?.permissions?.features?.channels ?? true)
 							? async () => {
@@ -1301,25 +1499,24 @@
 								/>
 							{/if}
 						{/each}
-					</Folder>
+					</SidebarSection>
 				{/if}
 
 				{#if $config?.features?.enable_folders && ($user?.role === 'admin' || ($user?.permissions?.features?.folders ?? true))}
-					<Folder
+					<SidebarSection
 						id="sidebar-folders"
-						bind:open={showProjects}
-						className="px-2 mt-0.5"
-						name={$i18n.t('Projects')}
-						chevron={false}
+						bind:open={showFolders}
+						className="mt-0.5"
+						name={$i18n.t('Folders')}
 						onAdd={() => {
-							showCreateProjectModal = true;
+							showCreateFolderModal = true;
 						}}
-						onAddLabel={$i18n.t('New Project')}
+						onAddLabel={$i18n.t('New Folder')}
 						on:drop={async (e) => {
 							const { type, id, item } = e.detail;
 
 							if (type === 'folder') {
-								if (projects[id].parent_id === null) {
+								if (folders[id].parent_id === null) {
 									return;
 								}
 
@@ -1331,17 +1528,18 @@
 								);
 
 								if (res) {
-									await initProjects();
+									await initFolders();
 								}
 							}
 						}}
 					>
 						<Folders
-							bind:folderRegistry={projectRegistry}
-							folders={projects}
+							bind:folderRegistry
+							{folders}
 							{shiftKey}
+							onFolderUnreadCounts={applyFolderUnreadCounts}
 							onDelete={(folderId) => {
-								selectedProject.set(null);
+								selectedFolder.set(null);
 								initChatList();
 							}}
 							on:update={() => {
@@ -1355,16 +1553,16 @@
 								initChatList();
 							}}
 						/>
-					</Folder>
+					</SidebarSection>
 				{/if}
 
 				{#if $user?.education_role === 'student' || $user?.education_role === 'teacher' || $user?.role === 'admin'}
-					<Folder
+					<SidebarSection
 						id="sidebar-writing-projects"
 						bind:open={showWriting}
-						className="px-2 mt-0.5"
+						className="mt-0.5"
 						name={$i18n.t('Writing')}
-						chevron={false}
+						dragAndDrop={false}
 					>
 						<Folders
 							bind:folderRegistry={writingProjectRegistry}
@@ -1378,15 +1576,13 @@
 									? `/assignments/${folder.meta.assignment_id}/write`
 									: folder?.meta?.writing_session_id
 										? `/writing/${folder.meta.writing_session_id}`
-									: '/'
-							}
+										: '/'}
 							chatHrefBuilder={(chat, folder) =>
 								getProjectMode(folder) === 'assignment_writing' && folder?.meta?.assignment_id
 									? `/assignments/${folder.meta.assignment_id}/write?chat=${chat.id}`
 									: folder?.meta?.writing_session_id
 										? `/writing/${folder.meta.writing_session_id}?chat=${chat.id}`
-									: `/c/${chat.id}`
-							}
+										: `/c/${chat.id}`}
 							clearSelectedProjectOnChatClick={false}
 							onDelete={() => {
 								initChatList();
@@ -1398,17 +1594,15 @@
 								initChatList();
 							}}
 						/>
-
-					</Folder>
+					</SidebarSection>
 				{/if}
 
-				<Folder
+				<SidebarSection
 					id="sidebar-chats"
-					className="px-2 mt-0.5"
+					className="mt-0.5"
 					name={$i18n.t('Chats')}
-					chevron={false}
 					on:change={async (e) => {
-						selectedProject.set(null);
+						selectedFolder.set(null);
 					}}
 					on:import={(e) => {
 						importChatHandler(e.detail);
@@ -1421,6 +1615,11 @@
 								return null;
 							});
 							if (!chat && item) {
+								if (!canImportChats) {
+									toast.error($i18n.t('Access prohibited'));
+									return;
+								}
+
 								chat = await importChats(localStorage.token, [
 									{
 										chat: item.chat,
@@ -1443,7 +1642,7 @@
 										}
 									);
 
-									projectRegistry[chat.folder_id]?.setFolderItems();
+									folderRegistry[chat.folder_id]?.setFolderItems();
 								}
 
 								if (chat.pinned) {
@@ -1453,7 +1652,7 @@
 								initChatList();
 							}
 						} else if (type === 'folder') {
-							if (projects[id].parent_id === null) {
+							if (folders[id].parent_id === null) {
 								return;
 							}
 
@@ -1465,11 +1664,38 @@
 							);
 
 							if (res) {
-								await initProjects();
+								await initFolders();
 							}
 						}
 					}}
 				>
+					<svelte:fragment slot="action">
+						<Dropdown bind:show={showChatsMenu} align="end">
+							<Tooltip content={$i18n.t('More')}>
+								<button
+									type="button"
+									class="flex items-center justify-center w-7 h-7 rounded-lg text-gray-300 hover:text-gray-500 dark:text-gray-600 dark:hover:text-gray-400 transition-colors duration-100"
+									aria-label={$i18n.t('More')}
+									on:pointerup|stopPropagation
+								>
+									<MoreHorizontalIcon className="size-3.5" strokeWidth="2" />
+								</button>
+							</Tooltip>
+
+							<div slot="content">
+								<DropdownMenu className="min-w-[170px]">
+									<button
+										class="flex h-[1.6875rem] w-full items-center gap-2 rounded-xl px-2 text-[13px] select-none cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
+										on:click={markAllChatsReadHandler}
+									>
+										<CheckIcon className="size-3.5" />
+										<div class="flex items-center">{$i18n.t('Mark all as read')}</div>
+									</button>
+								</DropdownMenu>
+							</div>
+						</Dropdown>
+					</svelte:fragment>
+
 					{#if $pinnedChats.length > 0}
 						<div class="mb-1">
 							<div class="flex flex-col space-y-1 rounded-xl">
@@ -1487,6 +1713,11 @@
 												return null;
 											});
 											if (!chat && item) {
+												if (!canImportChats) {
+													toast.error($i18n.t('Access prohibited'));
+													return;
+												}
+
 												chat = await importChats(localStorage.token, [
 													{
 														chat: item.chat,
@@ -1523,7 +1754,7 @@
 									name={$i18n.t('Pinned')}
 								>
 									<div
-										class="ml-3 pl-1 mt-[1px] flex flex-col overflow-y-auto scrollbar-hidden border-s border-gray-100 dark:border-gray-900 text-gray-900 dark:text-gray-200"
+										class="ml-3 pl-1 mt-[1px] flex flex-col overflow-y-auto scrollbar-hidden border-s border-gray-100 dark:border-gray-900 text-gray-700 dark:text-gray-300"
 									>
 										{#each $pinnedChats as chat, idx (`pinned-chat-${chat?.id ?? idx}`)}
 											<ChatItem
@@ -1531,6 +1762,9 @@
 												id={chat.id}
 												title={chat.title}
 												createdAt={chat.created_at}
+												updatedAt={chat.updated_at}
+												lastReadAt={chat.last_read_at}
+												active={chat.active ?? false}
 												{shiftKey}
 												selected={selectedChatId === chat.id}
 												on:select={() => {
@@ -1542,6 +1776,7 @@
 												on:change={async () => {
 													initChatList();
 												}}
+												onReadStateChange={applyChatReadState}
 												on:tag={(e) => {
 													const { type, name } = e.detail;
 													tagEventHandler(type, name, chat.id);
@@ -1560,10 +1795,10 @@
 								{#each $chats as chat, idx (`chat-${chat?.id ?? idx}`)}
 									{#if idx === 0 || (idx > 0 && chat.time_range !== $chats[idx - 1].time_range)}
 										<div
-											class="w-full pl-2.5 text-xs text-gray-500 dark:text-gray-500 font-medium {idx ===
+											class="w-full pl-2.5 text-xs text-gray-500 dark:text-gray-500 font-normal {idx ===
 											0
 												? ''
-												: 'pt-5'} pb-1.5"
+												: 'pt-4'} pb-1"
 										>
 											{$i18n.t(chat.time_range)}
 											<!-- localisation keys for time_range to be recognized from the i18next parser (so they don't get automatically removed):
@@ -1592,6 +1827,9 @@
 										id={chat.id}
 										title={chat.title}
 										createdAt={chat.created_at}
+										updatedAt={chat.updated_at}
+										lastReadAt={chat.last_read_at}
+										active={chat.active ?? false}
 										{shiftKey}
 										selected={selectedChatId === chat.id}
 										on:select={() => {
@@ -1603,6 +1841,7 @@
 										on:change={async () => {
 											initChatList();
 										}}
+										onReadStateChange={applyChatReadState}
 										on:tag={(e) => {
 											const { type, name } = e.detail;
 											tagEventHandler(type, name, chat.id);
@@ -1610,7 +1849,7 @@
 									/>
 								{/each}
 
-								{#if $scrollPaginationEnabled && !allChatsLoaded}
+								{#if chatListReady && !allChatsLoaded}
 									<Loader
 										on:visible={(e) => {
 											if (!chatListLoading) {
@@ -1636,34 +1875,29 @@
 							{/if}
 						</div>
 					</div>
-				</Folder>
+				</SidebarSection>
 			</div>
 
-			<div class="px-1.5 pt-1.5 pb-2 sticky bottom-0 z-10 -mt-3 sidebar">
+			<div class="px-1 pt-1 pb-1.5 sticky bottom-0 z-10 -mt-2 sidebar">
 				<div
 					class=" sidebar-bg-gradient-to-t bg-linear-to-t from-gray-50 dark:from-gray-950 to-transparent from-50% pointer-events-none absolute inset-0 -z-10 -mt-6"
 				></div>
-				<div class="flex flex-col font-primary">
+				<div class="flex flex-col">
 					{#if $user !== undefined && $user !== null}
 						<UserMenu
 							role={$user?.role}
 							profile={$config?.features?.enable_user_status ?? true}
-							showActiveUsers={false}
-							on:show={(e) => {
-								if (e.detail === 'archived-chat') {
-									showArchivedChats.set(true);
-								}
-							}}
+							className="w-[calc(var(--sidebar-width)-1rem)]"
 						>
 							<button
 								type="button"
-								class=" flex items-center rounded-2xl py-2 px-1.5 w-full hover:bg-gray-100/50 dark:hover:bg-gray-900/50 transition"
+								class=" flex items-center rounded-xl py-1.5 px-1.5 w-full hover:bg-gray-50 dark:hover:bg-gray-900 transition"
 								aria-label={$i18n.t('User menu')}
 							>
 								<div class=" self-center mr-3 relative flex-shrink-0">
 									<img
 										src={`${WEBUI_API_BASE_URL}/users/${$user?.id}/profile/image`}
-										class=" size-7 object-cover rounded-full"
+										class="size-5.5 object-cover rounded-full"
 										alt={$i18n.t('Open User Profile Menu')}
 										aria-label={$i18n.t('Open User Profile Menu')}
 									/>
@@ -1680,7 +1914,7 @@
 										</div>
 									{/if}
 								</div>
-								<div class=" self-center font-medium truncate">{$user?.name}</div>
+								<div class=" self-center font-normal truncate">{$user?.name}</div>
 							</button>
 						</UserMenu>
 					{/if}

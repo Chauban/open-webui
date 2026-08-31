@@ -22,6 +22,7 @@
 	let title = '';
 	let description = '';
 	let dueAt = '';
+	let scoreMax = '100';
 	let loading = true;
 	let saving = false;
 	let loadError = '';
@@ -48,6 +49,7 @@
 					const source = await getTeacherAssignment(localStorage.token, duplicateFromId);
 					title = source.assignment.title ?? '';
 					description = source.assignment.description ?? '';
+					scoreMax = String(source.assignment.score_max);
 					if (source.assignment.classroom_id) {
 						selectedClassroomIds = new Set([source.assignment.classroom_id]);
 					}
@@ -83,6 +85,11 @@
 			toast.error(t('Assignment due time is required.'));
 			return;
 		}
+		const parsedScoreMax = Number(scoreMax);
+		if (!Number.isInteger(parsedScoreMax) || parsedScoreMax <= 0) {
+			toast.error(t('Maximum score must be a positive whole number.'));
+			return;
+		}
 
 		saving = true;
 		try {
@@ -90,7 +97,8 @@
 				title: title.trim(),
 				description: description.trim() || undefined,
 				classroom_ids: [...selectedClassroomIds],
-				due_at: Math.floor(new Date(dueAt).getTime() / 1000)
+				due_at: Math.floor(new Date(dueAt).getTime() / 1000),
+				score_max: parsedScoreMax
 			});
 			toast.success(
 				assignments.length > 1
@@ -172,6 +180,17 @@
 				<div>
 					<div class="mb-2 text-sm font-semibold">{$i18n.t('Due At')}</div>
 					<input bind:value={dueAt} type="datetime-local" required class="w-full {EDU_FIELD_CLASS}" />
+				</div>
+				<div>
+					<div class="mb-2 text-sm font-semibold">{$i18n.t('Maximum Score')}</div>
+					<input
+						bind:value={scoreMax}
+						type="number"
+						min="1"
+						step="1"
+						required
+						class="w-full {EDU_FIELD_CLASS}"
+					/>
 				</div>
 				<div class="flex justify-end">
 					<EduButton variant="primary" on:click={submit} disabled={saving}>

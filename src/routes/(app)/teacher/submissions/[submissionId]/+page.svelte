@@ -189,6 +189,18 @@
 	const saveReview = async (statusOverride?: string) => {
 		if (isHistoricalRound) return false;
 		const effectiveStatus = statusOverride || reviewStatus;
+		const parsedScore = score === '' ? null : Number(score);
+		if (
+			parsedScore != null &&
+			(!Number.isInteger(parsedScore) ||
+				parsedScore < 0 ||
+				parsedScore > detail.assignment.score_max)
+		) {
+			toast.error(
+				t('Score must be between 0 and {{max}}.', { max: detail.assignment.score_max })
+			);
+			return false;
+		}
 		let resubmitDueAt: number | null = null;
 		if (effectiveStatus === 'returned') {
 			resubmitDueAt = toEpoch(resubmitDueLocal);
@@ -202,7 +214,7 @@
 		try {
 			const response = await saveSubmissionReview(localStorage.token, $page.params.submissionId, {
 				review_status: effectiveStatus,
-				score: score ? Number(score) : null,
+				score: parsedScore,
 				overall_comment: overallComment.trim(),
 				rubric_json: {
 					ideas: rubricIdeas ? Number(rubricIdeas) : null,
@@ -630,11 +642,14 @@
 								<!-- Score -->
 								<div>
 									<label class="mb-1.5 block text-xs font-medium uppercase tracking-[0.12em] text-gray-400">
-										{$i18n.t('Score')}
+										{$i18n.t('Score')} / {detail.assignment.score_max}
 									</label>
 									<input
 										bind:value={score}
 										type="number"
+										min="0"
+										max={detail.assignment.score_max}
+										step="1"
 										disabled={isHistoricalRound}
 										class="w-full rounded-2xl border border-gray-200 dark:border-gray-800 px-4 py-3 text-sm outline-none focus:border-gray-400 transition-colors disabled:opacity-50"
 										placeholder="0"

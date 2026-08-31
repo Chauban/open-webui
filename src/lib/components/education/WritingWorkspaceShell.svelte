@@ -75,7 +75,8 @@
 	let saveRetryTimer: ReturnType<typeof setTimeout> | null = null;
 	let hasUnsavedFailure = false;
 
-	let aiHelpTypes = ["Help Break Through Writer's Block"];
+	let aiUsage: 'used' | 'none' | null = null;
+	let aiHelpTypes = [];
 	let otherAiHelpText = '';
 	let reflectionText = '';
 
@@ -173,6 +174,9 @@
 	$: if (!aiHelpTypes.includes('Other') && otherAiHelpText) {
 		otherAiHelpText = '';
 	}
+	$: if (aiUsage !== 'used' && aiHelpTypes.length > 0) {
+		aiHelpTypes = [];
+	}
 
 	const getSubmitReflectionText = () => {
 		const baseReflection = reflectionText.trim();
@@ -191,6 +195,15 @@
 		saveReflectionDraft(reflectionText, otherAiHelpText);
 	};
 
+	const selectAiUsage = (value: 'used' | 'none') => {
+		aiUsage = value;
+		if (value === 'none') {
+			aiHelpTypes = [];
+			otherAiHelpText = '';
+		}
+		saveReflectionDraft(reflectionText, otherAiHelpText);
+	};
+
 	const getReflectionDraftKey = () => `education:reflection-draft:${assignment?.id ?? ''}`;
 
 	const loadReflectionDraft = () => {
@@ -201,9 +214,9 @@
 			const draft = JSON.parse(raw);
 			reflectionText = draft?.reflectionText ?? reflectionText;
 			otherAiHelpText = draft?.otherAiHelpText ?? otherAiHelpText;
-			if (Array.isArray(draft?.aiHelpTypes) && draft.aiHelpTypes.length > 0) {
-				aiHelpTypes = draft.aiHelpTypes;
-			}
+			aiUsage = draft?.aiUsage === 'used' || draft?.aiUsage === 'none' ? draft.aiUsage : null;
+			aiHelpTypes = Array.isArray(draft?.aiHelpTypes) ? draft.aiHelpTypes : [];
+			if (aiUsage == null && aiHelpTypes.length > 0) aiUsage = 'used';
 		} catch (error) {
 			console.error(error);
 		}
@@ -214,7 +227,7 @@
 		try {
 			localStorage.setItem(
 				getReflectionDraftKey(),
-				JSON.stringify({ reflectionText: reflection, otherAiHelpText: otherHelp, aiHelpTypes })
+				JSON.stringify({ reflectionText: reflection, otherAiHelpText: otherHelp, aiUsage, aiHelpTypes })
 			);
 		} catch (error) {
 			console.error(error);
@@ -543,7 +556,11 @@
 
 	const submit = async () => {
 		if (!canSubmitAssignment || isSubmitting) return;
-		if (aiHelpTypes.length === 0) {
+		if (aiUsage == null) {
+			toast.error($i18n.t('Choose whether AI was used.'));
+			return;
+		}
+		if (aiUsage === 'used' && aiHelpTypes.length === 0) {
 			toast.error($i18n.t('Select at least one AI help type.'));
 			return;
 		}
@@ -677,7 +694,6 @@
 		readOnly={isReadOnly}
 		disableContextActions={false}
 		allowAssignmentWorkspaceChat={isAssignment}
-		showModelSelector={true}
 		showRightPanel={!$mobile}
 		rightPanelDefaultSize={34}
 		rightPanelMinSize={26}
@@ -941,25 +957,52 @@
 
 				<div class="mt-5">
 					<div class="mb-2 block text-sm font-medium text-gray-800 dark:text-gray-200">
-						{$i18n.t('What did AI help you with? Select all that apply.')}
+						{$i18n.t('Did you use AI for this submission?')}
 					</div>
 					<div class="flex flex-wrap gap-2">
-						{#each helpTypes as item}
-							<button
-								type="button"
-								aria-pressed={aiHelpTypes.includes(item)}
-								class={eduSegmentClass(aiHelpTypes.includes(item))}
-								on:click={() => toggleAiHelpType(item)}
-							>
-								{$i18n.t(item)}
-							</button>
-						{/each}
+						<button
+							type="button"
+							aria-pressed={aiUsage === 'used'}
+							class={eduSegmentClass(aiUsage === 'used')}
+							on:click={() => selectAiUsage('used')}
+						>
+							{$i18n.t('Used AI')}
+						</button>
+						<button
+							type="button"
+							aria-pressed={aiUsage === 'none'}
+							class={eduSegmentClass(aiUsage === 'none')}
+							on:click={() => selectAiUsage('none')}
+						>
+							{$i18n.t('Did not use AI')}
+						</button>
 					</div>
+					{#if aiUsage === 'used'}
+						<div class="mb-2 mt-4 block text-sm font-medium text-gray-800 dark:text-gray-200">
+							{$i18n.t('What did AI help you with? Select all that apply.')}
+						</div>
+						<div class="flex flex-wrap gap-2">
+							{#each helpTypes as item}
+								<button
+									type="button"
+									aria-pressed={aiHelpTypes.includes(item)}
+									class={eduSegmentClass(aiHelpTypes.includes(item))}
+									on:click={() => toggleAiHelpType(item)}
+								>
+									{$i18n.t(item)}
+								</button>
+							{/each}
+						</div>
+					{/if}
 				</div>
 
 				<div class="mt-4">
 					<label for="reflection-text" class="mb-2 block text-sm font-medium text-gray-800 dark:text-gray-200">
-						{$i18n.t('How did you judge, revise, or reject AI suggestions?')}
+						{$i18n.t(
+							aiUsage === 'used'
+								? 'How did you judge, revise, or reject AI suggestions?'
+								: 'What did you revise, learn, or decide while writing?'
+						)}
 					</label>
 					{#if aiHelpTypes.includes('Other')}
 						<div class="mb-3">

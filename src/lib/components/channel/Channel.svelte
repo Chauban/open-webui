@@ -12,8 +12,7 @@
 		channelId as _channelId,
 		showSidebar,
 		socket,
-		user,
-		WEBUI_NAME
+		user
 	} from '$lib/stores';
 	import { getChannelById, getChannelMessages, sendMessage } from '$lib/apis/channels';
 
@@ -310,10 +309,10 @@
 					} else {
 						return e.name;
 					}
-				}, '')} • {$WEBUI_NAME}</title
+				}, '')} / Open WebUI</title
 		>
 	{:else}
-		<title>#{channel?.name ?? 'Channel'} • {$WEBUI_NAME}</title>
+		<title>#{channel?.name ?? 'Channel'} / Open WebUI</title>
 	{/if}
 </svelte:head>
 

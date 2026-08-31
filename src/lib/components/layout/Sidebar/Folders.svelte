@@ -4,7 +4,6 @@
 	const dispatch = createEventDispatcher();
 
 	import RecursiveFolder from './RecursiveFolder.svelte';
-	import { chatId, selectedFolder } from '$lib/stores';
 
 	export let folderRegistry = {};
 
@@ -20,7 +19,8 @@
 	export let onCloseFolder = async (folder) => {};
 	export let showVisibilityToggle = false;
 
-	export let onDelete = (folderId) => {};
+	export let onDelete = () => {};
+	export let onFolderUnreadCounts = () => {};
 
 	let ownedList = [];
 	let sharedList = [];
@@ -51,16 +51,6 @@
 			folderRegistry[e.originFolderId]?.setFolderItems();
 		}
 	};
-
-	const loadFolderItems = () => {
-		for (const folderId of Object.keys(folders)) {
-			folderRegistry[folderId]?.setFolderItems();
-		}
-	};
-
-	$: if (folders || ($selectedFolder && $chatId)) {
-		loadFolderItems();
-	}
 </script>
 
 {#each ownedList as folderId (folderId)}
@@ -81,6 +71,7 @@
 		{showVisibilityToggle}
 		{onDelete}
 		{onItemMove}
+		{onFolderUnreadCounts}
 		on:import={(e) => {
 			dispatch('import', e.detail);
 		}}
@@ -106,6 +97,7 @@
 			{shiftKey}
 			{onDelete}
 			{onItemMove}
+			{onFolderUnreadCounts}
 			on:import={(e) => {
 				dispatch('import', e.detail);
 			}}

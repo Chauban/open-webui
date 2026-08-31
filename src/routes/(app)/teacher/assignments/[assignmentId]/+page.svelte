@@ -35,6 +35,7 @@
 	let classroomId = '';
 	let status = 'active';
 	let dueAt = '';
+	let scoreMax = '';
 	let showArchiveConfirm = false;
 	let showDeleteConfirm = false;
 
@@ -64,6 +65,7 @@
 		classroomId = item.assignment.classroom_id || '';
 		status = item.assignment.status || 'active';
 		dueAt = item.assignment.due_at ? toLocalDateTimeInput(item.assignment.due_at) : '';
+		scoreMax = String(item.assignment.score_max);
 	};
 
 	const loadData = async () => {
@@ -89,6 +91,11 @@
 			toast.error(t('Assignment due time is required.'));
 			return;
 		}
+		const parsedScoreMax = Number(scoreMax);
+		if (!Number.isInteger(parsedScoreMax) || parsedScoreMax <= 0) {
+			toast.error(t('Maximum score must be a positive whole number.'));
+			return;
+		}
 
 		saving = true;
 		try {
@@ -97,7 +104,8 @@
 				description: description.trim(),
 				classroom_id: classroomId,
 				status,
-				due_at: Math.floor(new Date(dueAt).getTime() / 1000)
+				due_at: Math.floor(new Date(dueAt).getTime() / 1000),
+				score_max: parsedScoreMax
 			});
 			await loadData();
 			toast.success(t('Assignment updated.'));
@@ -201,7 +209,7 @@
 							<div class="mb-2 text-sm font-medium">{$i18n.t('Description')}</div>
 							<textarea bind:value={description} class="min-h-28 w-full {EDU_FIELD_CLASS}"></textarea>
 						</div>
-						<div class="grid gap-4 md:grid-cols-3">
+						<div class="grid gap-4 md:grid-cols-4">
 							<div>
 								<div class="mb-2 text-sm font-medium">{$i18n.t('Classroom')}</div>
 								<select bind:value={classroomId} class="w-full {EDU_FIELD_CLASS}">
@@ -220,6 +228,22 @@
 							<div>
 								<div class="mb-2 text-sm font-medium">{$i18n.t('Due At')}</div>
 								<input bind:value={dueAt} type="datetime-local" required class="w-full {EDU_FIELD_CLASS}" />
+							</div>
+							<div>
+								<div class="mb-2 text-sm font-medium">{$i18n.t('Maximum Score')}</div>
+								<input
+									bind:value={scoreMax}
+									type="number"
+									min="1"
+									step="1"
+									disabled={item.submission_count > 0}
+									class="w-full {EDU_FIELD_CLASS} disabled:opacity-60"
+								/>
+								{#if item.submission_count > 0}
+									<div class="mt-1 text-xs text-gray-400">
+										{$i18n.t('Maximum score is locked after the first submission.')}
+									</div>
+								{/if}
 							</div>
 						</div>
 						<div class="flex flex-wrap justify-between gap-2">
