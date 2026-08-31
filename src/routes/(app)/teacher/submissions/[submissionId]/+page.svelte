@@ -1,5 +1,4 @@
 <script lang="ts">
-	// @ts-nocheck
 	import { getContext, onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import { page } from '$app/stores';

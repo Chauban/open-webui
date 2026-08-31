@@ -1,5 +1,4 @@
 <script lang="ts">
-	// @ts-nocheck
 	import { getContext, onDestroy, onMount } from 'svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import SidebarIcon from '$lib/components/icons/Sidebar.svelte';

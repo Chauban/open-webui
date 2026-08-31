@@ -235,10 +235,10 @@ describe('buildSourceHighlightedHtml', () => {
 		});
 
 		expect(html).toContain(
-			'data-segment-id="external" class="rounded px-1 bg-rose-100 text-rose-950"'
+			'data-segment-id="external" class="rounded px-1 bg-rose-100 text-rose-950 dark:bg-rose-900/60 dark:text-rose-50"'
 		);
 		expect(html).toContain(
-			'data-segment-id="unknown" class="rounded px-1 bg-gray-100 text-gray-700"'
+			'data-segment-id="unknown" class="rounded px-1 bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200"'
 		);
 	});
 });

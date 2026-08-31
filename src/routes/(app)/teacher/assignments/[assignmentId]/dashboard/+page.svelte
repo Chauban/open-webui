@@ -1,5 +1,4 @@
 <script lang="ts">
-	// @ts-nocheck
 	import { getContext, onDestroy, onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';

@@ -1,5 +1,4 @@
 <script lang="ts">
-	// @ts-nocheck
 	import { buildSourceHighlightedHtml, buildTiptapSnapshotHtml } from '$lib/utils/source-highlights';
 
 	export let text = '';
