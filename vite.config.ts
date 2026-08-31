@@ -3,6 +3,8 @@ import { defineConfig } from 'vite';
 
 import { viteStaticCopy } from 'vite-plugin-static-copy';
 
+const backendTarget = process.env.WEBUI_BACKEND_URL || 'http://localhost:8080';
+
 export default defineConfig({
 	plugins: [
 		sveltekit(),
@@ -23,6 +25,47 @@ export default defineConfig({
 	build: {
 		sourcemap: true
 	},
+	server: {
+		proxy: {
+			'/api': {
+				target: backendTarget,
+				changeOrigin: true,
+				ws: true
+			},
+			'/ollama': {
+				target: backendTarget,
+				changeOrigin: true
+			},
+			'/openai': {
+				target: backendTarget,
+				changeOrigin: true
+			},
+			'/oauth': {
+				target: backendTarget,
+				changeOrigin: true
+			},
+			'/ws': {
+				target: backendTarget,
+				changeOrigin: true,
+				ws: true
+			},
+			'/static': {
+				target: backendTarget,
+				changeOrigin: true
+			},
+			'/audio': {
+				target: backendTarget,
+				changeOrigin: true
+			},
+			'/opensearch.xml': {
+				target: backendTarget,
+				changeOrigin: true
+			}
+		},
+		watch: {
+			ignored: ['**/.tmp/**']
+		}
+	},
 	test: {
 		exclude: [
 			'**/node_modules/**',
@@ -39,36 +82,5 @@ export default defineConfig({
 	},
 	esbuild: {
 		pure: process.env.ENV === 'dev' ? [] : ['console.log', 'console.debug', 'console.error']
-	},
-	server: {
-		watch: {
-			ignored: ['**/.tmp/**']
-		},
-		proxy: {
-			'/api': {
-				target: 'http://localhost:8080',
-				changeOrigin: true
-			},
-			'/ws': {
-				target: 'http://localhost:8080',
-				ws: true
-			},
-			'/openai': {
-				target: 'http://localhost:8080',
-				changeOrigin: true
-			},
-			'/static': {
-				target: 'http://localhost:8080',
-				changeOrigin: true
-			},
-			'/audio': {
-				target: 'http://localhost:8080',
-				changeOrigin: true
-			},
-			'/opensearch.xml': {
-				target: 'http://localhost:8080',
-				changeOrigin: true
-			}
-		}
 	}
 });

@@ -7,7 +7,14 @@
 	import { onMount, onDestroy, getContext, tick } from 'svelte';
 	const i18n = getContext('i18n');
 
-	import { config, models as _models, settings, showSettings, user } from '$lib/stores';
+	import {
+		config,
+		models as _models,
+		pinnedModels,
+		settings,
+		showSettings,
+		user
+	} from '$lib/stores';
 	import {
 		createNewModel,
 		deleteAllModels,
@@ -81,8 +88,8 @@
 	let defaultModelIdSet = new Set<string>();
 	let defaultPinnedModelIdSet = new Set<string>();
 
-	let workspaceModels: ModelListItem[] = [];
 	let baseModels: ModelListItem[] = [];
+	let allModels: ModelListItem[] = [];
 
 	let filteredModels = [];
 	let selectedModelId = null;
@@ -111,6 +118,9 @@
 	};
 
 	const isSharedModel = (model) => (model?.access_grants ?? []).length > 0 && !isPublicModel(model);
+
+	const isPresetModel = (model: any) =>
+		!!(model?.preset || model?.base_model_id || model?.info?.base_model_id);
 
 	const modelAccessLabel = (model) => {
 		if (isPublicModel(model)) {
@@ -257,19 +267,27 @@
 			selectedTag = '';
 		}
 
-		workspaceModels = await getBaseModels(localStorage.token, selectedTag);
-		baseModels = await getModels(localStorage.token, null, true);
-		const workspaceModelIds = new Set<string>(workspaceModels.map((wm: ModelListItem) => wm.id));
+		baseModels = await getBaseModels(localStorage.token, selectedTag);
+		allModels = await getModels(localStorage.token);
 
-		models = baseModels
-			.filter((m: ModelListItem) => !selectedTag || workspaceModelIds.has(m.id))
+		const providerModels = await getModels(localStorage.token, null, true);
+		const allModelIds = new Set<string>(allModels.map((model: ModelListItem) => model.id));
+		allModels = [
+			...allModels,
+			...providerModels.filter((model: ModelListItem) => !allModelIds.has(model.id))
+		];
+
+		const baseModelIds = new Set<string>(baseModels.map((model: ModelListItem) => model.id));
+
+		models = allModels
+			.filter((m: ModelListItem) => !selectedTag || baseModelIds.has(m.id))
 			.map((m: ModelListItem) => {
-				const workspaceModel = workspaceModels.find((wm: ModelListItem) => wm.id === m.id);
+				const baseModel = baseModels.find((model: ModelListItem) => model.id === m.id);
 
-				if (workspaceModel) {
+				if (baseModel) {
 					return {
 						...m,
-						...workspaceModel
+						...baseModel
 					};
 				} else {
 					return {
@@ -448,9 +466,9 @@
 	}
 
 	const upsertModelHandler = async (model, overrides = {}, showToast = true) => {
-		model = { ...model, base_model_id: null, ...overrides };
+		model = { ...model, ...(isPresetModel(model) ? {} : { base_model_id: null }), ...overrides };
 
-		if (workspaceModels.find((m) => m.id === model.id)) {
+		if (baseModels.find((m: ModelListItem) => m.id === model.id) || isPresetModel(model)) {
 			const res = await updateModelById(localStorage.token, model.id, model).catch((error) => {
 				return null;
 			});
@@ -486,10 +504,11 @@
 	};
 
 	const toggleModelHandler = async (model) => {
+		// RightWrite: a model that gets disabled must not stay publicly readable.
 		const wasActive = model.is_active ?? true;
 		const willBeActive = !wasActive;
 
-		if (!Object.keys(model).includes('base_model_id')) {
+		if (!Object.keys(model).includes('base_model_id') && !isPresetModel(model)) {
 			await createNewModel(localStorage.token, {
 				id: model.id,
 				name: model.name,
@@ -606,9 +625,19 @@
 	};
 
 	const getFullModel = async (model: any) =>
-		workspaceModels.some((workspaceModel) => workspaceModel.id === model.id)
+		baseModels.some((baseModel) => baseModel.id === model.id) || isPresetModel(model)
 			? ((await getModelById(localStorage.token, model.id).catch(() => null)) ?? model)
 			: model;
+
+	const openModelHandler = async (model: any) => {
+		if (isPresetModel(model)) {
+			showSettings.set(false);
+			await goto(`/workspace/models/edit?id=${encodeURIComponent(model.id)}`);
+			return;
+		}
+
+		selectedModelId = model.id;
+	};
 
 	const cloneHandler = async (model) => {
 		model = await getFullModel(model);
@@ -631,15 +660,12 @@
 	};
 
 	const pinModelHandler = async (modelId) => {
-		let pinnedModels = $settings?.pinnedModels ?? [];
-
-		if (pinnedModels.includes(modelId)) {
-			pinnedModels = pinnedModels.filter((id) => id !== modelId);
-		} else {
-			pinnedModels = [...new Set([...pinnedModels, modelId])];
-		}
-
-		settings.set({ ...$settings, pinnedModels: pinnedModels });
+		settings.set({
+			...$settings,
+			pinnedModels: $pinnedModels.includes(modelId)
+				? $pinnedModels.filter((id) => id !== modelId)
+				: [...$pinnedModels, modelId]
+		});
 		await updateUserSettings(localStorage.token, { ui: $settings });
 	};
 
@@ -857,7 +883,7 @@
 						<Dropdown align="end">
 							<Tooltip content={$i18n.t('Actions')}>
 								<button
-									class="flex h-8 items-center gap-1.5 rounded-xl bg-transparent px-1.5 text-[13px] font-normal text-gray-700 transition hover:text-gray-900 dark:text-gray-200 dark:hover:text-gray-100"
+									class="flex h-8 items-center gap-1.5 rounded-xl bg-transparent px-1.5 text-[0.8125rem] font-normal text-gray-700 transition hover:text-gray-900 dark:text-gray-200 dark:hover:text-gray-100"
 									type="button"
 								>
 									<span>{$i18n.t('Actions')}</span>
@@ -866,10 +892,10 @@
 							</Tooltip>
 
 							<div slot="content">
-								<DropdownMenu className="w-[170px] shadow-sm">
+								<DropdownMenu className="w-[10.625rem] shadow-sm">
 									{#if $user?.role === 'admin'}
 										<button
-											class="flex h-[1.6875rem] w-full cursor-pointer select-none items-center gap-2 rounded-xl bg-transparent px-2 text-[13px] disabled:pointer-events-none disabled:opacity-40 hover:text-gray-900 dark:hover:text-gray-100"
+											class="flex h-[1.6875rem] w-full cursor-pointer select-none items-center gap-2 rounded-xl bg-transparent px-2 text-[0.8125rem] disabled:pointer-events-none disabled:opacity-40 hover:text-gray-900 dark:hover:text-gray-100"
 											type="button"
 											disabled={modelsImportInProgress}
 											on:click={() => {
@@ -881,7 +907,7 @@
 										</button>
 
 										<button
-											class="flex h-[1.6875rem] w-full cursor-pointer select-none items-center gap-2 rounded-xl bg-transparent px-2 text-[13px] hover:text-gray-900 dark:hover:text-gray-100"
+											class="flex h-[1.6875rem] w-full cursor-pointer select-none items-center gap-2 rounded-xl bg-transparent px-2 text-[0.8125rem] hover:text-gray-900 dark:hover:text-gray-100"
 											type="button"
 											on:click={() => {
 												downloadModels(models ?? []);
@@ -893,7 +919,7 @@
 									{/if}
 
 									<button
-										class="flex h-[1.6875rem] w-full cursor-pointer select-none items-center gap-2 rounded-xl bg-transparent px-2 text-[13px] hover:text-gray-900 dark:hover:text-gray-100"
+										class="flex h-[1.6875rem] w-full cursor-pointer select-none items-center gap-2 rounded-xl bg-transparent px-2 text-[0.8125rem] hover:text-gray-900 dark:hover:text-gray-100"
 										type="button"
 										on:click={() => {
 											showManageModal = true;
@@ -904,7 +930,7 @@
 									</button>
 
 									<button
-										class="flex h-[1.6875rem] w-full cursor-pointer select-none items-center gap-2 rounded-xl bg-transparent px-2 text-[13px] hover:text-gray-900 dark:hover:text-gray-100"
+										class="flex h-[1.6875rem] w-full cursor-pointer select-none items-center gap-2 rounded-xl bg-transparent px-2 text-[0.8125rem] hover:text-gray-900 dark:hover:text-gray-100"
 										type="button"
 										on:click={() => {
 											showResetModal = true;
@@ -917,7 +943,7 @@
 									<hr class="mx-1 my-0.5 border-gray-100 dark:border-gray-800" />
 
 									<button
-										class="flex h-[1.6875rem] w-full cursor-pointer select-none items-center gap-2 rounded-xl bg-transparent px-2 text-[13px] hover:text-gray-900 dark:hover:text-gray-100"
+										class="flex h-[1.6875rem] w-full cursor-pointer select-none items-center gap-2 rounded-xl bg-transparent px-2 text-[0.8125rem] hover:text-gray-900 dark:hover:text-gray-100"
 										type="button"
 										on:click={() => {
 											enableAllHandler();
@@ -928,7 +954,7 @@
 									</button>
 
 									<button
-										class="flex h-[1.6875rem] w-full cursor-pointer select-none items-center gap-2 rounded-xl bg-transparent px-2 text-[13px] hover:text-gray-900 dark:hover:text-gray-100"
+										class="flex h-[1.6875rem] w-full cursor-pointer select-none items-center gap-2 rounded-xl bg-transparent px-2 text-[0.8125rem] hover:text-gray-900 dark:hover:text-gray-100"
 										type="button"
 										on:click={() => {
 											disableAllHandler();
@@ -941,7 +967,7 @@
 									<hr class="mx-1 my-0.5 border-gray-100 dark:border-gray-800" />
 
 									<button
-										class="flex h-[1.6875rem] w-full cursor-pointer select-none items-center gap-2 rounded-xl bg-transparent px-2 text-[13px] hover:text-gray-900 dark:hover:text-gray-100"
+										class="flex h-[1.6875rem] w-full cursor-pointer select-none items-center gap-2 rounded-xl bg-transparent px-2 text-[0.8125rem] hover:text-gray-900 dark:hover:text-gray-100"
 										type="button"
 										on:click={() => {
 											showAllHandler();
@@ -952,7 +978,7 @@
 									</button>
 
 									<button
-										class="flex h-[1.6875rem] w-full cursor-pointer select-none items-center gap-2 rounded-xl bg-transparent px-2 text-[13px] hover:text-gray-900 dark:hover:text-gray-100"
+										class="flex h-[1.6875rem] w-full cursor-pointer select-none items-center gap-2 rounded-xl bg-transparent px-2 text-[0.8125rem] hover:text-gray-900 dark:hover:text-gray-100"
 										type="button"
 										on:click={() => {
 											hideAllHandler();
@@ -1001,11 +1027,11 @@
 									class="flex group/item gap-2.5 w-full min-w-0 flex-1 text-left cursor-pointer"
 									type="button"
 									on:click={() => {
-										selectedModelId = model.id;
+										openModelHandler(model);
 									}}
 								>
 									<div class="self-center">
-										<div class="flex bg-white rounded-xl">
+										<div class="flex rounded-xl">
 											<div
 												class="{(model?.is_active ?? true)
 													? ''
@@ -1018,6 +1044,9 @@
 													loading="lazy"
 													decoding="async"
 													on:error={(e) => {
+														// LICENSE covers this Open WebUI fallback logo.
+														// Do not alter, remove, obscure, or replace it except as LICENSE permits:
+														// https://docs.openwebui.com/license.
 														e.target.src = '/favicon.png';
 													}}
 												/>
@@ -1042,12 +1071,12 @@
 											placement="top-start"
 										>
 											<div
-												class="flex min-w-0 items-center gap-1.5 text-[13px] font-normal leading-4"
+												class="flex min-w-0 items-center gap-1.5 text-[0.8125rem] font-normal leading-4"
 											>
 												<span class="min-w-0 truncate">{model.name}</span>
 
 												<span
-													class="shrink-0 text-[11px] font-normal leading-4 {modelAccessClass(
+													class="shrink-0 text-[0.6875rem] font-normal leading-4 {modelAccessClass(
 														model
 													)}"
 												>
@@ -1056,7 +1085,7 @@
 
 												{#if defaultModelIdSet.has(model.id)}
 													<span
-														class="shrink-0 text-[11px] font-normal leading-4 text-gray-500 dark:text-gray-400"
+														class="shrink-0 text-[0.6875rem] font-normal leading-4 text-gray-500 dark:text-gray-400"
 													>
 														{$i18n.t('Selected')}
 													</span>
@@ -1064,7 +1093,7 @@
 
 												{#if defaultPinnedModelIdSet.has(model.id)}
 													<span
-														class="shrink-0 text-[11px] font-normal leading-4 text-gray-500 dark:text-gray-400"
+														class="shrink-0 text-[0.6875rem] font-normal leading-4 text-gray-500 dark:text-gray-400"
 													>
 														{$i18n.t('Pinned')}
 													</span>
@@ -1170,7 +1199,7 @@
 										type="button"
 										aria-label={$i18n.t('Edit')}
 										on:click={() => {
-											selectedModelId = model.id;
+											openModelHandler(model);
 										}}
 									>
 										<svg
