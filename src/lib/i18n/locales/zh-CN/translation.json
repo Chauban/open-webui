@@ -3565,5 +3565,6 @@
 	"At due time": "恰好在截止时间开始",
 	"{{duration}} before due": "提前 {{duration}} 开始",
 	"{{duration}} after due": "晚于截止 {{duration}} 开始",
-	"Process Index = average of revision depth (deleted-or-replaced chars / written chars, {{ratio}}% counts as full), writing span (span / {{days}} days), and pacing (1 − end-loaded share). Each part is capped at 100. Missing revision or timing evidence leaves the index unavailable.": "过程投入指数 = 修订深度（删除或替换字符数 / 写入字符数，达到 {{ratio}}% 记满）、写作跨度（跨度 / {{days}} 天）和节奏（1 − 收尾集中占比）的平均值，每项最高 100。缺少修订或时间证据时不计算该指数。"
+	"Process Index = average of revision depth (deleted-or-replaced chars / written chars, {{ratio}}% counts as full), writing span (span / {{days}} days), and pacing (1 − end-loaded share). Each part is capped at 100. Missing revision or timing evidence leaves the index unavailable.": "过程投入指数 = 修订深度（删除或替换字符数 / 写入字符数，达到 {{ratio}}% 记满）、写作跨度（跨度 / {{days}} 天）和节奏（1 − 收尾集中占比）的平均值，每项最高 100。缺少修订或时间证据时不计算该指数。",
+	"vs early baseline": "较早期基线"
 }

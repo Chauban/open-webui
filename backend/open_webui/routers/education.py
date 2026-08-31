@@ -783,6 +783,16 @@ async def update_assignment(
             detail="Assignment due time is required",
         )
 
+    if (
+        "score_max" in form_data.model_fields_set
+        and form_data.score_max != assignment.score_max
+        and Education.get_submissions_by_assignment(assignment.id, db=db)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Maximum score cannot change after submissions exist",
+        )
+
     if form_data.classroom_id is not None:
         classroom = _get_classroom_or_404(form_data.classroom_id, db)
         _ensure_classroom_access(user, classroom, db, require_teacher=True)
@@ -2785,6 +2795,11 @@ async def save_submission_review(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid review status",
+        )
+    if form_data.score is not None and form_data.score > assignment.score_max:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Score must be between 0 and {assignment.score_max}",
         )
     if not submission.is_current:
         raise HTTPException(

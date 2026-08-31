@@ -29,7 +29,8 @@ from open_webui.services.education.analysis import (
 
 _ACTIVE_WRITING_GAP_SECONDS = 300
 _ACTIVE_WRITING_MIN_BLOCK_SECONDS = 30
-_LAST_MINUTE_WINDOW_RATIO = 0.1
+_END_LOADED_WINDOW_RATIO = 0.1
+_DEADLINE_WINDOW_SECONDS = 24 * 3600
 # 回头删改的字符量达到写入量的三成,就算把稿子认真打磨过一遍。
 _PROCESS_TARGET_REVISION_RATIO = 0.3
 _PROCESS_TARGET_SPAN_SECONDS = 3 * 24 * 3600
@@ -37,6 +38,8 @@ _COLLABORATION_TARGET_PROMPTS = 10
 _REFLECTION_TARGET_CHARS = 150
 _PROFILE_MAX_INSIGHTS = 5
 _TREND_FLAT_TOLERANCE = 0.05
+_TREND_MIN_SAMPLES = 3
+_TREND_MAX_WINDOW = 3
 
 # 学生自报的 AI 用途分两类:让 AI「生成」内容,和让 AI「打磨」自己的内容。
 # 从前者迁移到后者是很强的成长信号。
@@ -56,12 +59,13 @@ _AI_HELP_REFINING_TYPES = {
 
 _PROFILE_TREND_KEYS = (
     "total_chars",
-    "score",
+    "normalized_score",
     "process_index",
     "collaboration_index",
     "revision_depth",
     "active_writing_seconds",
-    "last_minute_ratio",
+    "end_loaded_ratio",
+    "deadline_window_ratio",
     "ai_ratio",
     "digestion_ratio",
     "prompt_count",
@@ -100,7 +104,7 @@ def _profile_index_formula() -> dict:
                 "weight": 1 / 3,
             },
             "pacing": {
-                "metric": "last_minute_ratio",
+                "metric": "end_loaded_ratio",
                 "inverted": True,
                 "weight": 1 / 3,
             },
@@ -124,11 +128,11 @@ def _profile_index_formula() -> dict:
     }
 
 
-def _estimate_active_writing_seconds(marks: list[int]) -> int:
+def _estimate_active_writing_seconds(marks: list[int]) -> Optional[int]:
     """把编辑操作的时间戳聚成写作块,块内累计时长,块间空档不计。"""
     sorted_marks = sorted({mark for mark in marks if mark is not None})
     if not sorted_marks:
-        return 0
+        return None
 
     total = 0
     block_start = sorted_marks[0]
@@ -142,17 +146,35 @@ def _estimate_active_writing_seconds(marks: list[int]) -> int:
     return total
 
 
-def _compute_last_minute_ratio(version_diffs: list[dict], start_at: int, end_at: int) -> float:
-    """最后一成时间里写下的字数占比 —— 越高越像临交前突击。"""
+def _compute_end_loaded_ratio(
+    version_diffs: list[dict], start_at: int, end_at: int
+) -> Optional[float]:
+    """本轮写作窗口最后一成时间内的写入占比；它描述收尾集中度，不冒充截止压力。"""
     total_inserted = sum(diff.get("inserted_length", 0) for diff in version_diffs)
     if total_inserted <= 0 or end_at <= start_at:
-        return 0.0
+        return None
 
-    threshold = end_at - (end_at - start_at) * _LAST_MINUTE_WINDOW_RATIO
+    threshold = end_at - (end_at - start_at) * _END_LOADED_WINDOW_RATIO
     late_inserted = sum(
         diff.get("inserted_length", 0) for diff in version_diffs if (diff.get("created_at") or 0) >= threshold
     )
     return round(late_inserted / total_inserted, 4)
+
+
+def _compute_deadline_window_ratio(
+    version_diffs: list[dict], due_at: Optional[int]
+) -> Optional[float]:
+    """截止前 24 小时起写入的字符占本轮全部写入的比例；逾期后的写入也计入。"""
+    total_inserted = sum(diff.get("inserted_length", 0) for diff in version_diffs)
+    if total_inserted <= 0 or due_at is None:
+        return None
+    threshold = due_at - _DEADLINE_WINDOW_SECONDS
+    deadline_window_inserted = sum(
+        diff.get("inserted_length", 0)
+        for diff in version_diffs
+        if (diff.get("created_at") or 0) >= threshold
+    )
+    return round(deadline_window_inserted / total_inserted, 4)
 
 
 def _score_reflection(text: str) -> dict:
@@ -173,7 +195,7 @@ def _score_reflection(text: str) -> dict:
     }
 
 
-def _compute_revision_depth(revised_chars: int, inserted_chars: int) -> int:
+def _compute_revision_depth(revised_chars: int, inserted_chars: int) -> Optional[int]:
     """回头删改的字符量占写入量的比例,折算成 0-100。
 
     刻意不用版本数:一个版本 = 编辑器停顿 1.2 秒后的一次自动保存,数量只反映打字
@@ -181,14 +203,20 @@ def _compute_revision_depth(revised_chars: int, inserted_chars: int) -> int:
     删改字符量才真正区分「一路往下写」和「回头反复打磨」。
     """
     if inserted_chars <= 0:
-        return 0
+        return None
     ratio = revised_chars / inserted_chars
     return int(round(min(ratio / _PROCESS_TARGET_REVISION_RATIO, 1.0) * 100))
 
 
-def _compute_process_index(revision_depth: int, writing_span_seconds: int, last_minute_ratio: float) -> int:
+def _compute_process_index(
+    revision_depth: Optional[int],
+    writing_span_seconds: int,
+    end_loaded_ratio: Optional[float],
+) -> Optional[int]:
+    if revision_depth is None or end_loaded_ratio is None:
+        return None
     span_effort = min(writing_span_seconds / _PROCESS_TARGET_SPAN_SECONDS, 1.0) * 100
-    pacing = (1 - min(max(last_minute_ratio, 0.0), 1.0)) * 100
+    pacing = (1 - min(max(end_loaded_ratio, 0.0), 1.0)) * 100
     return int(round((revision_depth + span_effort + pacing) / 3))
 
 
@@ -223,11 +251,14 @@ def _slice_round_versions(versions, previous_final_version_id, final_version_id)
 
 def _build_trend(key: str, values: list[float]) -> Optional[StudentProfileMetricTrend]:
     samples = [value for value in values if value is not None]
-    if len(samples) < 2:
+    if len(samples) < _TREND_MIN_SAMPLES:
         return None
 
-    first = float(samples[0])
-    last = float(samples[-1])
+    window_size = min(_TREND_MAX_WINDOW, len(samples) // 2)
+    early = samples[:window_size]
+    recent = samples[-window_size:]
+    first = sum(float(value) for value in early) / len(early)
+    last = sum(float(value) for value in recent) / len(recent)
     delta = last - first
     tolerance = max(abs(first), 1.0) * _TREND_FLAT_TOLERANCE
     if delta > tolerance:
@@ -270,11 +301,13 @@ def _build_profile_insights(
     help_shift: dict,
     reflection_quality: dict,
 ) -> list[StudentProfileInsight]:
-    if len(timeline) < 2:
-        return [StudentProfileInsight(code="not_enough_data", tone="neutral")]
+    candidates: list[StudentProfileInsight] = []
+    if len(timeline) < _TREND_MIN_SAMPLES:
+        candidates.append(StudentProfileInsight(code="not_enough_data", tone="neutral"))
+    if not timeline:
+        return candidates
 
     latest = timeline[-1]
-    candidates: list[StudentProfileInsight] = []
 
     digestion = trends.get("digestion_ratio")
     if digestion is not None and digestion.direction == "up":
@@ -298,19 +331,11 @@ def _build_profile_insights(
         )
 
     ai_ratio = trends.get("ai_ratio")
-    if ai_ratio is not None and ai_ratio.delta <= -0.15:
+    if ai_ratio is not None and abs(ai_ratio.delta) >= 0.15:
         candidates.append(
             StudentProfileInsight(
-                code="ai_reliance_down",
-                tone="positive",
-                params={"delta": ai_ratio.delta, "last": ai_ratio.last},
-            )
-        )
-    elif ai_ratio is not None and ai_ratio.delta >= 0.15:
-        candidates.append(
-            StudentProfileInsight(
-                code="ai_reliance_up",
-                tone="warning",
+                code="ai_share_changed",
+                tone="neutral",
                 params={"delta": ai_ratio.delta, "last": ai_ratio.last},
             )
         )
@@ -345,12 +370,15 @@ def _build_profile_insights(
             )
         )
 
-    if latest.last_minute_ratio >= 0.6:
+    if (
+        latest.deadline_window_ratio is not None
+        and latest.deadline_window_ratio >= 0.6
+    ):
         candidates.append(
             StudentProfileInsight(
-                code="last_minute_writing",
+                code="deadline_rush",
                 tone="warning",
-                params={"ratio": latest.last_minute_ratio},
+                params={"ratio": latest.deadline_window_ratio},
             )
         )
 
@@ -449,7 +477,12 @@ async def build_student_profile(
                     if window_start_at <= mark <= submission.submitted_at
                 ]
             )
-            last_minute_ratio = _compute_last_minute_ratio(version_diffs, window_start_at, submission.submitted_at)
+            end_loaded_ratio = _compute_end_loaded_ratio(
+                version_diffs, window_start_at, submission.submitted_at
+            )
+            deadline_window_ratio = _compute_deadline_window_ratio(
+                version_diffs, round_due_at
+            )
 
             ai_ratio = round(
                 summary.get("ai_inserted_ratio", 0) + summary.get("ai_pasted_ratio", 0),
@@ -468,6 +501,12 @@ async def build_student_profile(
                     submitted_at=submission.submitted_at,
                     total_chars=summary.get("total_chars", 0),
                     score=review.score if review else None,
+                    score_max=assignment.score_max,
+                    normalized_score=(
+                        round(review.score / assignment.score_max * 100, 2)
+                        if review and review.score is not None
+                        else None
+                    ),
                     rubric=review.rubric_json if review else None,
                     review_status=review.review_status if review else "pending",
                     inserted_chars=inserted_chars,
@@ -476,8 +515,11 @@ async def build_student_profile(
                     writing_span_seconds=writing_span_seconds,
                     active_writing_seconds=active_writing_seconds,
                     lead_time_seconds=(round_due_at - window_start_at if round_due_at is not None else None),
-                    last_minute_ratio=last_minute_ratio,
-                    process_index=_compute_process_index(revision_depth, writing_span_seconds, last_minute_ratio),
+                    end_loaded_ratio=end_loaded_ratio,
+                    deadline_window_ratio=deadline_window_ratio,
+                    process_index=_compute_process_index(
+                        revision_depth, writing_span_seconds, end_loaded_ratio
+                    ),
                     typed_ratio=summary.get("typed_ratio", 0),
                     ai_ratio=ai_ratio,
                     unknown_ratio=summary.get("unknown_ratio", 0),
@@ -570,7 +612,7 @@ async def build_student_profile(
     submitted_count = 0
     reviewed_count = 0
     returned_count = 0
-    scores: list[int] = []
+    normalized_scores: list[float] = []
     for assignment in assignments:
         assignment_rounds = rounds_by_assignment.get(assignment.id, [])
         current = next((item for item in reversed(assignment_rounds) if item.is_current == 1), None)
@@ -586,7 +628,7 @@ async def build_student_profile(
         elif review_status == "returned":
             returned_count += 1
         if review and review.score is not None:
-            scores.append(review.score)
+            normalized_scores.append(review.score / assignment.score_max * 100)
         profile_assignments.append(
             StudentProfileAssignmentItem(
                 assignment=assignment,
@@ -608,7 +650,11 @@ async def build_student_profile(
         unsubmitted_count=len(assignments) - submitted_count,
         reviewed_count=reviewed_count,
         returned_count=returned_count,
-        average_score=round(sum(scores) / len(scores), 1) if scores else None,
+        average_score_percent=(
+            round(sum(normalized_scores) / len(normalized_scores), 1)
+            if normalized_scores
+            else None
+        ),
         assignments=profile_assignments,
         timeline=timeline,
         round_progress=round_progress,

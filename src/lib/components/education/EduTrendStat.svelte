@@ -40,7 +40,7 @@
 		<div class="text-xs {tone}">
 			{ARROWS[direction]}
 			{delta == null ? '' : format(Math.abs(delta))}
-			<span class="text-gray-400 dark:text-gray-500">{$i18n.t('vs first submission')}</span>
+			<span class="text-gray-400 dark:text-gray-500">{$i18n.t('vs early baseline')}</span>
 		</div>
 	{/if}
 </div>

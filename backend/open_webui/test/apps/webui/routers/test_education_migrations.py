@@ -47,5 +47,6 @@ def test_fresh_database_upgrades_to_head(tmp_path, monkeypatch):
         assert {"round_no", "is_current"} <= {column["name"] for column in schema.get_columns("submission")}
         assert "resubmit_due_at" in {column["name"] for column in schema.get_columns("submission_review")}
         assert "ai_help_types" in {column["name"] for column in schema.get_columns("micro_reflection")}
+        assert "score_max" in {column["name"] for column in schema.get_columns("assignment")}
     finally:
         engine.dispose()

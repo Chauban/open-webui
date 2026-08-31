@@ -159,7 +159,13 @@ export const getTeacherClassroomAssignments = async (token: string, classroomId:
 
 export const createAssignment = async (
 	token: string,
-	payload: { title: string; description?: string; classroom_ids: string[]; due_at: number }
+	payload: {
+		title: string;
+		description?: string;
+		classroom_ids: string[];
+		due_at: number;
+		score_max: number;
+	}
 ) => {
 	return fetch(`${WEBUI_API_BASE_URL}/assignments`, {
 		method: 'POST',
@@ -210,6 +216,7 @@ export const updateAssignment = async (
 		classroom_id?: string;
 		status?: string;
 		due_at?: number;
+		score_max?: number;
 	}
 ) => {
 	return fetch(`${WEBUI_API_BASE_URL}/assignments/${assignmentId}`, {

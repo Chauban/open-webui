@@ -46,12 +46,8 @@
 			'AI text makes up {{ai}}% of the latest draft but was barely rewritten ({{digestion}}%).',
 			{ ai: Math.round((p.ai_ratio ?? 0) * 100), digestion: Math.round(p.digestion_ratio ?? 0) }
 		],
-		ai_reliance_down: (p) => [
-			'AI share of the draft dropped by {{delta}} points.',
-			{ delta: Math.round(Math.abs(p.delta ?? 0) * 100) }
-		],
-		ai_reliance_up: (p) => [
-			'AI share of the draft rose by {{delta}} points.',
+		ai_share_changed: (p) => [
+			'AI share of the draft changed by {{delta}} points; this is neutral unless read with digestion and reflection.',
 			{ delta: Math.round((p.delta ?? 0) * 100) }
 		],
 		round_improvement: (p) => [
@@ -66,8 +62,8 @@
 			'AI use shifted from generating text toward revising own writing (+{{delta}} points).',
 			{ delta: Math.round((p.delta ?? 0) * 100) }
 		],
-		last_minute_writing: (p) => [
-			'{{ratio}}% of the latest draft was written in the final tenth of the writing window.',
+		deadline_rush: (p) => [
+			'{{ratio}}% of the latest draft was written during the final 24 hours before the deadline or later.',
 			{ ratio: Math.round((p.ratio ?? 0) * 100) }
 		],
 		process_up: (p) => [
@@ -120,6 +116,13 @@
 
 	const trendOf = (key: string) => trends[key] ?? null;
 	const roundValue = (value) => (value == null ? null : Math.round(value));
+	const formatLeadTime = (value) => {
+		if (value == null) return '—';
+		if (value === 0) return t('At due time');
+		return value >= 0
+			? t('{{duration}} before due', { duration: formatDuration(value, t) })
+			: t('{{duration}} after due', { duration: formatDuration(Math.abs(value), t) });
+	};
 </script>
 
 {#if !profile}
@@ -132,8 +135,8 @@
 			<EduStatCard label="Unsubmitted" value={profile.unsubmitted_count} />
 			<EduStatCard label="Reviewed" value={profile.reviewed_count} />
 			<EduStatCard
-				label="Average Score"
-				value={profile.average_score != null ? profile.average_score : '—'}
+				label="Average Score (%)"
+				value={profile.average_score_percent != null ? `${profile.average_score_percent}%` : '—'}
 			/>
 		</div>
 
@@ -163,18 +166,18 @@
 		<EduCard>
 			<div class="mb-1 text-sm font-semibold">{$i18n.t('Output')}</div>
 			<div class="mb-5 text-xs text-gray-500 dark:text-gray-400">
-				{$i18n.t('Teacher scores and draft length, shown as raw values over time.')}
+				{$i18n.t('Scores are normalized by each assignment maximum before they are compared over time.')}
 			</div>
 
 			<div class="mb-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
 				<EduTrendStat
-					label="Latest Score"
-					hint="Score given by the teacher on the most recent submission."
-					value={latest?.score ?? null}
-					delta={trendOf('score')?.delta ?? null}
-					direction={trendOf('score')?.direction ?? null}
+					label="Latest Score (%)"
+					hint="Teacher score divided by the assignment maximum."
+					value={latest?.normalized_score ?? null}
+					delta={trendOf('normalized_score')?.delta ?? null}
+					direction={trendOf('normalized_score')?.direction ?? null}
 					higherIsBetter="yes"
-					format={(value) => `${Math.round(value)}`}
+					format={(value) => `${Math.round(value)}%`}
 				/>
 				<EduTrendStat
 					label="Draft Length"
@@ -189,12 +192,14 @@
 			<div class="grid gap-8 lg:grid-cols-2">
 				<div>
 					<div class="mb-2 text-xs font-medium text-gray-500 dark:text-gray-400">
-						{$i18n.t('Score')}
+						{$i18n.t('Normalized Score')}
 					</div>
 					<EduTrendChart
 						{labels}
-						series={[seriesOf('score', 'Score', 'emerald')]}
-						formatValue={(value) => `${Math.round(value)}`}
+						min={0}
+						max={100}
+						series={[seriesOf('normalized_score', 'Normalized Score', 'emerald')]}
+						formatValue={(value) => `${Math.round(value)}%`}
 					/>
 				</div>
 				<div>
@@ -237,7 +242,7 @@
 				{$i18n.t('How the draft was built: revisions, time span, and whether it was rushed.')}
 			</div>
 
-			<div class="mb-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-5">
+			<div class="mb-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
 				<EduTrendStat
 					label="Process Index"
 					hint="Average of revision effort, writing span, and pacing. See how it is calculated below."
@@ -266,21 +271,28 @@
 					format={(value) => formatDuration(value, t)}
 				/>
 				<EduTrendStat
-					label="Last-Minute Writing"
-					hint="Share of the text written in the final tenth of the writing window."
-					value={latest?.last_minute_ratio ?? null}
-					delta={trendOf('last_minute_ratio')?.delta ?? null}
-					direction={trendOf('last_minute_ratio')?.direction ?? null}
+					label="End-loaded Writing"
+					hint="Share of text written in the final tenth of this submission's own writing window."
+					value={latest?.end_loaded_ratio ?? null}
+					delta={trendOf('end_loaded_ratio')?.delta ?? null}
+					direction={trendOf('end_loaded_ratio')?.direction ?? null}
+					higherIsBetter="no"
+					format={(value) => formatRatioPercent(value)}
+				/>
+				<EduTrendStat
+					label="Deadline-window Writing"
+					hint="Share of text written in the final 24 hours before the deadline or later."
+					value={latest?.deadline_window_ratio ?? null}
+					delta={trendOf('deadline_window_ratio')?.delta ?? null}
+					direction={trendOf('deadline_window_ratio')?.direction ?? null}
 					higherIsBetter="no"
 					format={(value) => formatRatioPercent(value)}
 				/>
 				<EduTrendStat
 					label="Head Start"
 					hint="How long before the due time the student first started writing this round."
-					value={latest?.lead_time_seconds != null && latest.lead_time_seconds > 0
-						? latest.lead_time_seconds
-						: null}
-					format={(value) => formatDuration(value, t)}
+					value={latest?.lead_time_seconds ?? null}
+					format={formatLeadTime}
 				/>
 			</div>
 
@@ -463,7 +475,9 @@
 												: getReviewStatusLabel(item.review_status, t)}
 										</EduBadge>
 										{#if item.score != null}
-											<EduBadge tone="emerald">{$i18n.t('Score')}: {item.score}</EduBadge>
+										<EduBadge tone="emerald">
+											{$i18n.t('Score')}: {item.score}/{item.assignment.score_max}
+										</EduBadge>
 										{/if}
 										{#if item.round_no != null && item.round_no > 1}
 											<EduBadge>{$i18n.t('Round {{round}}', { round: item.round_no })}</EduBadge>
@@ -500,7 +514,7 @@
 				<div class="mt-4 space-y-3 text-xs text-gray-600 dark:text-gray-400">
 					<p>
 						{$i18n.t(
-							'Process Index = average of revision depth (deleted-or-replaced chars / written chars, {{ratio}}% counts as full), writing span (span / {{days}} days), and pacing (1 − last-minute share). Each part is capped at 100.',
+							'Process Index = average of revision depth (deleted-or-replaced chars / written chars, {{ratio}}% counts as full), writing span (span / {{days}} days), and pacing (1 − end-loaded share). Each part is capped at 100. Missing revision or timing evidence leaves the index unavailable.',
 							{
 								ratio: Math.round(
 									(profile.index_formula?.process_index?.revision_depth?.target ?? 0.3) * 100

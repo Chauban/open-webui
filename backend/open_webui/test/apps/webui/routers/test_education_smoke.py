@@ -33,6 +33,7 @@ from open_webui.models.education import (
     MicroReflection,
     ProvenanceSegment,
     Submission,
+    SubmissionCreateForm,
     SubmissionReview,
     WritingSession,
     WritingVersion,
@@ -289,6 +290,7 @@ def _prepare_assignment_flow(client, teacher, student):
             "title": "Argument Essay 1",
             "description": "Write a short argument essay.",
             "classroom_ids": [classroom["id"]],
+            "score_max": 100,
             "due_at": 2000000000,
         },
     )
@@ -616,6 +618,7 @@ def test_submission_accepts_multiple_ai_help_types(education_client):
             "title": "Reflective Essay",
             "description": "Write and reflect on AI help.",
             "classroom_ids": [classroom["id"]],
+            "score_max": 100,
             "due_at": 2000000000,
         },
     )
@@ -727,6 +730,7 @@ def test_student_cannot_submit_after_assignment_due_time(education_client):
             "title": "Past Due Essay",
             "description": "This assignment is closed.",
             "classroom_ids": [classroom["id"]],
+            "score_max": 100,
             "due_at": 1,
         },
     )
@@ -802,6 +806,7 @@ def test_assignment_requires_due_time_on_create_and_update(education_client):
             "title": "Argument Essay 1",
             "description": "Write a short argument essay.",
             "classroom_ids": [classroom["id"]],
+            "score_max": 100,
         },
     )
     assert missing_due_res.status_code == 400, missing_due_res.text
@@ -1018,11 +1023,13 @@ def test_student_assignment_and_profile_views(education_client):
     assert point["assignment_id"] == assignment["id"]
     assert point["ai_help_types"] == ["Outline"]
     assert point["reflection_quality"] > 0
-    assert 0 <= point["process_index"] <= 100
+    assert point["process_index"] is None or 0 <= point["process_index"] <= 100
     assert 0 <= point["collaboration_index"] <= 100
     # 一次提交看不出趋势,画像要如实说「数据不够」而不是编一条曲线。
     assert profile["trends"] == []
-    assert [insight["code"] for insight in profile["insights"]] == ["not_enough_data"]
+    insight_codes = [insight["code"] for insight in profile["insights"]]
+    assert insight_codes[0] == "not_enough_data"
+    assert "reflection_thin" in insight_codes
     assert profile["index_formula"]["process_index"]["revision_depth"]["target"] > 0
 
     blank_invite_res = client.post(
@@ -1056,6 +1063,7 @@ def test_teacher_classroom_listing_and_member_management(education_client):
             "title": "Narrative Essay",
             "description": "Write a short narrative essay.",
             "classroom_ids": [first_classroom["id"]],
+            "score_max": 100,
             "due_at": 2000000000,
         },
     )
@@ -1282,7 +1290,7 @@ def test_invite_regeneration_and_assignment_errors(education_client):
 
     blank_assignment_res = client.post(
         "/api/v1/assignments",
-        json={"title": "   ", "description": "x", "classroom_ids": [classroom["id"]]},
+        json={"title": "   ", "description": "x", "classroom_ids": [classroom["id"]], "score_max": 100},
     )
     assert blank_assignment_res.status_code == 400, blank_assignment_res.text
 
@@ -1319,6 +1327,7 @@ def test_invite_regeneration_and_assignment_errors(education_client):
             "title": "Should Fail",
             "description": "No teacher access",
             "classroom_ids": [classroom["id"]],
+            "score_max": 100,
         },
     )
     assert (
@@ -1342,6 +1351,7 @@ def test_assignment_workspace_returns_assignment_project(education_client):
             "title": "Argument Essay 1",
             "description": "Write a short argument essay.",
             "classroom_ids": [classroom["id"]],
+            "score_max": 100,
             "due_at": 2000000000,
         },
     )
@@ -1379,6 +1389,7 @@ def test_assignment_workspace_clears_missing_active_chat(education_client):
             "title": "Argument Essay 1",
             "description": "Write a short argument essay.",
             "classroom_ids": [classroom["id"]],
+            "score_max": 100,
             "due_at": 2000000000,
         },
     )
@@ -1515,6 +1526,7 @@ def test_workspace_project_creation_failure_returns_409(education_client, monkey
             "title": "Argument Essay 1",
             "description": "Write a short argument essay.",
             "classroom_ids": [classroom["id"]],
+            "score_max": 100,
             "due_at": 2000000000,
         },
     )
@@ -1722,7 +1734,7 @@ def _submit_body(session_id: str, text: str):
     }
 
 
-def _setup_submitted_assignment(client, teacher, student, title="Round Essay"):
+def _setup_submitted_assignment(client, teacher, student, title="Round Essay", score_max=100):
     UserContext.current_user = teacher
     classroom = client.post("/api/v1/classrooms", json={"name": f"CR {title}"}).json()[
         "classroom"
@@ -1733,7 +1745,7 @@ def _setup_submitted_assignment(client, teacher, student, title="Round Essay"):
     UserContext.current_user = teacher
     assignment = client.post(
         "/api/v1/assignments",
-        json={"title": title, "classroom_ids": [classroom["id"]], "due_at": 2000000000},
+        json={"title": title, "classroom_ids": [classroom["id"]], "due_at": 2000000000, "score_max": score_max},
     ).json()[0]
 
     UserContext.current_user = student
@@ -2257,6 +2269,7 @@ def test_update_assignment_rejects_null_and_unknown_status(education_client):
         json={
             "title": "Patch Essay",
             "classroom_ids": [classroom["id"]],
+            "score_max": 100,
             "due_at": 2000000000,
         },
     ).json()[0]
@@ -2285,6 +2298,7 @@ def test_unsubmitted_listing_and_reminder_targets_only_unsubmitted(education_cli
         json={
             "title": "Remind Essay",
             "classroom_ids": [classroom["id"]],
+            "score_max": 100,
             "due_at": 2000000000,
         },
     ).json()[0]
@@ -2399,6 +2413,7 @@ def test_delete_assignment_guards_and_notification_cleanup(education_client):
         json={
             "title": "Deletable Essay",
             "classroom_ids": [classroom["id"]],
+            "score_max": 100,
             "due_at": 2000000000,
         },
     ).json()[0]
@@ -2423,6 +2438,7 @@ def test_delete_assignment_guards_and_notification_cleanup(education_client):
         json={
             "title": "Untouched Essay",
             "classroom_ids": [classroom["id"]],
+            "score_max": 100,
             "due_at": 2000000000,
         },
     ).json()[0]
@@ -2451,18 +2467,28 @@ def test_active_writing_seconds_ignores_idle_gaps():
     assert education_profile_module._estimate_active_writing_seconds(marks) == 120
     # 单次操作没有跨度,按一个最小块计,而不是 0。
     assert education_profile_module._estimate_active_writing_seconds([100]) == 30
-    assert education_profile_module._estimate_active_writing_seconds([]) == 0
+    assert education_profile_module._estimate_active_writing_seconds([]) is None
 
 
-def test_last_minute_ratio_counts_only_the_final_tenth():
+def test_end_loaded_ratio_counts_only_the_final_tenth():
     diffs = [
         {"created_at": 0, "inserted_length": 100},
         {"created_at": 950, "inserted_length": 300},
     ]
 
-    ratio = education_profile_module._compute_last_minute_ratio(diffs, 0, 1000)
+    ratio = education_profile_module._compute_end_loaded_ratio(diffs, 0, 1000)
 
     assert ratio == 0.75
+
+
+def test_deadline_window_ratio_uses_the_final_24_hours():
+    due_at = 200000
+    diffs = [
+        {"inserted_length": 50, "created_at": due_at - 90000},
+        {"inserted_length": 30, "created_at": due_at - 3600},
+        {"inserted_length": 20, "created_at": due_at + 60},
+    ]
+    assert education_profile_module._compute_deadline_window_ratio(diffs, due_at) == 0.5
 
 
 def test_reflection_score_separates_concrete_from_generic():
@@ -2488,6 +2514,47 @@ def test_collaboration_index_falls_back_to_reflection_without_ai():
 
     assert without_ai == 80
     assert with_ai < without_ai
+
+
+def test_submission_form_allows_no_ai_and_rejects_unknown_help_types():
+    form = SubmissionCreateForm(
+        writing_session_id="session",
+        final_content_text="student draft",
+        ai_help_types=[],
+        reflection_text="I revised the conclusion and clarified my reasoning.",
+    )
+    assert form.ai_help_types == []
+    with pytest.raises(ValueError):
+        SubmissionCreateForm(
+            writing_session_id="session",
+            final_content_text="draft",
+            ai_help_types=["Magic answer generator"],
+            reflection_text="I revised the conclusion and clarified my reasoning.",
+        )
+
+
+def test_profile_normalizes_scores_by_assignment_maximum(education_client):
+    client, teacher, _, student, _, _ = education_client
+    assignment, _, submission_id = _setup_submitted_assignment(
+        client, teacher, student, "Fifty Point Essay", score_max=50
+    )
+    UserContext.current_user = teacher
+    too_high = client.post(
+        f"/api/v1/teacher/submissions/{submission_id}/review",
+        json={"review_status": "reviewed", "score": 51},
+    )
+    assert too_high.status_code == 400
+    reviewed = client.post(
+        f"/api/v1/teacher/submissions/{submission_id}/review",
+        json={"review_status": "reviewed", "score": 40},
+    )
+    assert reviewed.status_code == 200
+    profile = client.get(
+        f"/api/v1/teacher/classrooms/{assignment['classroom_id']}/students/{student.id}/profile"
+    ).json()
+    assert profile["timeline"][0]["score_max"] == 50
+    assert profile["timeline"][0]["normalized_score"] == 80
+    assert profile["average_score_percent"] == 80
 
 
 def test_versions_up_to_stops_at_the_round_final_version():
@@ -2562,7 +2629,7 @@ def test_student_profile_tracks_round_progress_and_trends(education_client):
     assert profile["timeline"][1]["is_current"] is True
     # 当前轮才计入作业统计与平均分
     assert profile["submitted_count"] == 1
-    assert profile["average_score"] == 88
+    assert profile["average_score_percent"] == 88
 
     assert len(profile["round_progress"]) == 1
     progress = profile["round_progress"][0]
@@ -2573,13 +2640,12 @@ def test_student_profile_tracks_round_progress_and_trends(education_client):
     assert progress["revision_ratio"] > 0
     assert progress["turnaround_seconds"] is not None
 
-    trends = {trend["key"]: trend for trend in profile["trends"]}
-    assert trends["score"]["direction"] == "up"
-    assert trends["total_chars"]["direction"] == "up"
+    # 两次提交可以展示折线，但不足以生成成长方向；至少需要三个样本。
+    assert profile["trends"] == []
 
     codes = [insight["code"] for insight in profile["insights"]]
     assert "round_improvement" in codes
-    assert "not_enough_data" not in codes
+    assert "not_enough_data" in codes
 
     # 历史轮的分析必须停在自己那一版正文上,不能读到第二轮的字数
     assert profile["timeline"][0]["total_chars"] < profile["timeline"][1]["total_chars"]
@@ -2688,17 +2754,31 @@ def test_revision_depth_measures_rework_not_autosave_count():
     # 删改比写入还多也不会超过 100
     assert education_profile_module._compute_revision_depth(2000, 1000) == 100
     # 没写过东西不该除以零
-    assert education_profile_module._compute_revision_depth(0, 0) == 0
+    assert education_profile_module._compute_revision_depth(0, 0) is None
 
 
 def test_process_index_ignores_version_count():
     # 自动保存次数再多,只要没回头改过,过程投入就不该被抬高。
     steady_typing = education_profile_module._compute_process_index(
-        revision_depth=0, writing_span_seconds=0, last_minute_ratio=1.0
+        revision_depth=0, writing_span_seconds=0, end_loaded_ratio=1.0
     )
     reworked = education_profile_module._compute_process_index(
-        revision_depth=100, writing_span_seconds=0, last_minute_ratio=1.0
+        revision_depth=100, writing_span_seconds=0, end_loaded_ratio=1.0
     )
 
     assert steady_typing == 0
     assert reworked == 33
+    assert education_profile_module._compute_process_index(None, 0, None) is None
+
+
+def test_profile_trend_compares_early_and_recent_windows():
+    trend = education_profile_module._build_trend(
+        "normalized_score", [60, 62, 64, 82, 84, 86]
+    )
+
+    assert trend is not None
+    assert trend.first == 62
+    assert trend.last == 84
+    assert trend.delta == 22
+    assert trend.direction == "up"
+    assert education_profile_module._build_trend("score", [60, 80]) is None

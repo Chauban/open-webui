@@ -1,15 +1,27 @@
 import time
 import uuid
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import BigInteger, Column, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Column, Integer, Text, UniqueConstraint
 from sqlalchemy.orm import Session
 
 from open_webui.internal.db import Base, JSONField, get_db_context
 
 
 ASSIGNMENT_STATUSES = ("active", "archived")
+AIHelpType = Literal[
+    "Understand Assignment",
+    "Outline",
+    "Examples",
+    "Explain Concepts",
+    "Revise Structure",
+    "Polish",
+    "Check Errors",
+    "Help Break Through Writer's Block",
+    "Strengthen Reasoning",
+    "Other",
+]
 
 
 class SubmissionAlreadyReviewedError(Exception):
@@ -26,6 +38,7 @@ class Assignment(Base):
     classroom_id = Column(Text, nullable=True)
     status = Column(Text, nullable=False, default="active")
     due_at = Column(BigInteger, nullable=True)
+    score_max = Column(Integer, nullable=False)
     archived_at = Column(BigInteger, nullable=True)
     created_at = Column(BigInteger, nullable=False)
     updated_at = Column(BigInteger, nullable=False)
@@ -216,6 +229,7 @@ class AssignmentModel(BaseModel):
     classroom_id: Optional[str] = None
     status: str
     due_at: Optional[int] = None
+    score_max: int
     archived_at: Optional[int] = None
     created_at: int
     updated_at: int
@@ -389,6 +403,7 @@ class AssignmentCreateForm(BaseModel):
     description: Optional[str] = None
     classroom_ids: list[str] = Field(default_factory=list)
     due_at: Optional[int] = None
+    score_max: int = Field(gt=0, le=10000)
 
 
 class AssignmentUpdateForm(BaseModel):
@@ -397,6 +412,7 @@ class AssignmentUpdateForm(BaseModel):
     classroom_id: Optional[str] = None
     status: Optional[str] = None
     due_at: Optional[int] = None
+    score_max: Optional[int] = Field(default=None, gt=0, le=10000)
 
 
 class ClassroomCreateForm(BaseModel):
@@ -570,13 +586,13 @@ class SubmissionCreateForm(BaseModel):
     final_content_json: Optional[dict] = None
     final_content_html: Optional[str] = None
     final_content_text: str
-    ai_help_types: list[str] = Field(default_factory=list, min_length=1)
+    ai_help_types: list[AIHelpType] = Field(default_factory=list)
     reflection_text: str
 
 
 class SubmissionReviewForm(BaseModel):
     review_status: str = "reviewed"
-    score: Optional[int] = None
+    score: Optional[int] = Field(default=None, ge=0)
     overall_comment: Optional[str] = None
     rubric_json: Optional[dict] = None
     returned_comment: Optional[str] = None
@@ -734,9 +750,11 @@ class StudentProfileTimelinePoint(BaseModel):
     is_current: bool = True
     submitted_at: int
 
-    # 产出维:教师评分与 rubric 原值,不做归一化(满分由教师自定,没有统一量纲)。
+    # 产出维:保留教师评分原值，并用作业明确声明的满分生成可比较百分比。
     total_chars: int = 0
     score: Optional[int] = None
+    score_max: int
+    normalized_score: Optional[float] = None
     rubric: Optional[dict] = None
     review_status: str = "pending"
 
@@ -744,12 +762,13 @@ class StudentProfileTimelinePoint(BaseModel):
     # 而不是「改了几版」,拿它当修改投入会被打字速度带偏。
     inserted_chars: int = 0
     revised_chars: int = 0
-    revision_depth: int = 0
+    revision_depth: Optional[int] = None
     writing_span_seconds: int = 0
-    active_writing_seconds: int = 0
+    active_writing_seconds: Optional[int] = None
     lead_time_seconds: Optional[int] = None
-    last_minute_ratio: float = 0.0
-    process_index: int = 0
+    end_loaded_ratio: Optional[float] = None
+    deadline_window_ratio: Optional[float] = None
+    process_index: Optional[int] = None
 
     # AI 协作维
     typed_ratio: float = 0.0
@@ -807,7 +826,7 @@ class StudentProfileResponse(BaseModel):
     unsubmitted_count: int = 0
     reviewed_count: int = 0
     returned_count: int = 0
-    average_score: Optional[float] = None
+    average_score_percent: Optional[float] = None
     assignments: list[StudentProfileAssignmentItem] = Field(default_factory=list)
     timeline: list[StudentProfileTimelinePoint] = Field(default_factory=list)
     round_progress: list[StudentProfileRoundProgress] = Field(default_factory=list)
@@ -1087,6 +1106,10 @@ class EducationTable:
                 if form_data.due_at is None or form_data.due_at <= 0:
                     raise ValueError("Assignment due time is required")
                 assignment.due_at = form_data.due_at
+            if "score_max" in form_data.model_fields_set:
+                if form_data.score_max is None or form_data.score_max <= 0:
+                    raise ValueError("Assignment maximum score is required")
+                assignment.score_max = form_data.score_max
 
             assignment.updated_at = int(time.time())
             db.commit()
@@ -1133,6 +1156,7 @@ class EducationTable:
                 classroom_id=classroom_id,
                 status="active",
                 due_at=form_data.due_at,
+                score_max=form_data.score_max,
                 archived_at=None,
                 created_at=now,
                 updated_at=now,
