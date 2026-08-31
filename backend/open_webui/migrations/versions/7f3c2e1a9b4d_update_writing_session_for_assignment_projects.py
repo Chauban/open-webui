@@ -1,7 +1,7 @@
 """Update writing session for assignment projects
 
 Revision ID: 7f3c2e1a9b4d
-Revises: 018012973d35
+Revises: a1c3e5f7b9d2
 Create Date: 2026-03-14 00:00:00.000000
 
 """
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from sqlalchemy import inspect
 
 revision = "7f3c2e1a9b4d"
-down_revision = "018012973d35"
+down_revision = "a1c3e5f7b9d2"
 branch_labels = None
 depends_on = None
 
