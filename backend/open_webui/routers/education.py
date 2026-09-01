@@ -56,11 +56,17 @@ from open_webui.models.education import (
     SubmissionModel,
     SubmissionReviewForm,
     StudentAssignmentListItem,
+    StudentGrowthGoalCreateForm,
+    StudentGrowthGoalModel,
+    StudentGrowthGoalUpdateForm,
     StudentProfileResponse,
     TeacherAssignmentListItem,
     TeacherClassroomListItem,
     TeacherOverviewResponse,
     TeacherReviewResponse,
+    TeacherStudentNoteCreateForm,
+    TeacherStudentNoteModel,
+    TeacherStudentNoteUpdateForm,
     UnifiedWritingWorkspaceResponse,
     UnsubmittedStudentItem,
     VersionCreateForm,
@@ -1030,18 +1036,18 @@ async def join_classroom(
             detail="Only students can join classrooms",
         )
 
-    existing_membership = Education.get_classroom_member_by_user_id(user.id, db=db)
-    if existing_membership is not None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Student is already linked to a classroom",
-        )
-
     classroom = Education.get_classroom_by_invite_code(form_data.invite_code, db=db)
     if classroom is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Invalid classroom invite code",
+        )
+
+    existing_membership = Education.get_classroom_member(classroom.id, user.id, db=db)
+    if existing_membership is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Student has already joined this classroom",
         )
 
     membership = Education.ensure_classroom_member(
@@ -1378,18 +1384,6 @@ async def add_classroom_member(
             detail="Only users with student identity can be added",
         )
 
-    existing_membership = Education.get_classroom_member_by_user_id(
-        member_user.id, db=db
-    )
-    if (
-        existing_membership is not None
-        and existing_membership.classroom_id != classroom.id
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Student is already linked to another classroom",
-        )
-
     member = Education.ensure_classroom_member(
         classroom.id, member_user.id, "student", db=db
     )
@@ -1458,25 +1452,10 @@ async def bulk_import_classroom_members(
             )
             continue
 
-        existing_membership = Education.get_classroom_member_by_user_id(
-            member_user.id, db=db
+        existing_membership = Education.get_classroom_member(
+            classroom.id, member_user.id, db=db
         )
-        if (
-            existing_membership is not None
-            and existing_membership.classroom_id != classroom.id
-        ):
-            result.failed_users.append(
-                {
-                    "value": user_id,
-                    "reason": "Student is already linked to another classroom",
-                }
-            )
-            continue
-
-        if (
-            existing_membership is not None
-            and existing_membership.classroom_id == classroom.id
-        ):
+        if existing_membership is not None:
             result.skipped_users.append(user_id)
             continue
 
@@ -1750,6 +1729,7 @@ async def export_classroom_progress(
 async def get_student_profile(
     student_user_id: str,
     classroom: ClassroomModel = Depends(require_teacher_classroom),
+    user=Depends(get_verified_user),
     start_at: Optional[int] = Query(default=None, ge=0),
     end_at: Optional[int] = Query(default=None, ge=0),
     assignment_id: Optional[str] = Query(default=None, min_length=1),
@@ -1773,13 +1753,20 @@ async def get_student_profile(
     return await build_student_profile(
         student,
         student_user_id,
-        classroom,
+        [classroom],
         assignments,
         db,
         start_at=start_at,
         end_at=end_at,
         assignment_id=assignment_id,
         round_no=round_no,
+        teacher_notes=(
+            Education.get_teacher_student_notes(
+                user.id, classroom.id, student_user_id, db=db
+            )
+            if user.id == classroom.teacher_id
+            else []
+        ),
     )
 
 
@@ -1909,15 +1896,20 @@ async def get_writing_home(
     db: Session = Depends(get_session),
 ):
     education_role = _get_education_role(user)
-    classroom = (
-        Education.get_classroom_by_id(
-            Education.get_classroom_member_by_user_id(user.id, db=db).classroom_id,
-            db=db,
-        )
+    memberships = (
+        Education.get_classroom_members_by_user_id(user.id, db=db)
         if education_role == "student"
-        and Education.get_classroom_member_by_user_id(user.id, db=db)
-        else None
+        else []
     )
+    classrooms = [
+        classroom
+        for classroom in (
+            Education.get_classroom_by_id(membership.classroom_id, db=db)
+            for membership in memberships
+            if membership.member_role == "student"
+        )
+        if classroom is not None
+    ]
 
     sessions = Education.get_writing_sessions_by_owner(user.id, db=db)
     personal_items = []
@@ -1993,7 +1985,7 @@ async def get_writing_home(
 
     return WritingHomeResponse(
         role=education_role or user.role,
-        classroom=classroom,
+        classrooms=classrooms,
         recent_items=recent_items,
         assignment_items=assignment_items,
         personal_items=personal_items,
@@ -2426,6 +2418,7 @@ async def submit_assignment(
             prompt_count=prompt_count,
             version_count=len(versions),
         )
+    stats["data_completeness"] = form_data.data_completeness.model_dump()
     reflection = Education.insert_micro_reflection(
         assignment.id,
         session.owner_user_id,
@@ -2975,6 +2968,151 @@ async def get_teacher_dashboard(
     )
 
 
+@router.get("/me/writing/goals", response_model=list[StudentGrowthGoalModel])
+async def get_my_growth_goals(
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+):
+    return Education.get_student_growth_goals(user.id, db=db)
+
+
+@router.post("/me/writing/goals", response_model=StudentGrowthGoalModel)
+async def create_my_growth_goal(
+    form_data: StudentGrowthGoalCreateForm,
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+):
+    normalized_form = form_data
+    memberships = {
+        membership.classroom_id
+        for membership in Education.get_classroom_members_by_user_id(user.id, db=db)
+        if membership.member_role == "student"
+    }
+    if form_data.classroom_id is not None and form_data.classroom_id not in memberships:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Growth goal classroom is outside the student's memberships",
+        )
+    if form_data.assignment_id is not None:
+        assignment = _get_assignment_or_404(form_data.assignment_id, db)
+        if assignment.classroom_id not in memberships:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Growth goal assignment is outside the student's memberships",
+            )
+        if (
+            form_data.classroom_id is not None
+            and form_data.classroom_id != assignment.classroom_id
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Growth goal classroom and assignment do not match",
+            )
+        if form_data.classroom_id is None:
+            normalized_form = form_data.model_copy(
+                update={"classroom_id": assignment.classroom_id}
+            )
+    return Education.insert_student_growth_goal(user.id, normalized_form, db=db)
+
+
+@router.patch(
+    "/me/writing/goals/{goal_id}", response_model=StudentGrowthGoalModel
+)
+async def update_my_growth_goal(
+    goal_id: str,
+    form_data: StudentGrowthGoalUpdateForm,
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+):
+    goal = Education.update_student_growth_goal(goal_id, user.id, form_data, db=db)
+    if goal is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Growth goal not found"
+        )
+    return goal
+
+
+@router.get(
+    "/teacher/classrooms/{classroom_id}/students/{student_user_id}/profile-notes",
+    response_model=list[TeacherStudentNoteModel],
+)
+async def get_student_profile_notes(
+    student_user_id: str,
+    classroom: ClassroomModel = Depends(require_teacher_classroom),
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+):
+    member = Education.get_classroom_member(classroom.id, student_user_id, db=db)
+    if member is None or member.member_role != "student":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Student not found in classroom",
+        )
+    if user.id != classroom.teacher_id:
+        return []
+    return Education.get_teacher_student_notes(
+        user.id, classroom.id, student_user_id, db=db
+    )
+
+
+@router.post(
+    "/teacher/classrooms/{classroom_id}/students/{student_user_id}/profile-notes",
+    response_model=TeacherStudentNoteModel,
+)
+async def create_student_profile_note(
+    student_user_id: str,
+    form_data: TeacherStudentNoteCreateForm,
+    classroom: ClassroomModel = Depends(require_teacher_classroom),
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+):
+    member = Education.get_classroom_member(classroom.id, student_user_id, db=db)
+    if member is None or member.member_role != "student":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Student not found in classroom",
+        )
+    if user.id != classroom.teacher_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the classroom teacher can add private notes",
+        )
+    return Education.insert_teacher_student_note(
+        user.id, classroom.id, student_user_id, form_data, db=db
+    )
+
+
+@router.patch(
+    "/teacher/profile-notes/{note_id}", response_model=TeacherStudentNoteModel
+)
+async def update_student_profile_note(
+    note_id: str,
+    form_data: TeacherStudentNoteUpdateForm,
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+):
+    note = Education.update_teacher_student_note(note_id, user.id, form_data, db=db)
+    if note is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Teacher note not found"
+        )
+    return note
+
+
+@router.delete("/teacher/profile-notes/{note_id}")
+async def delete_student_profile_note(
+    note_id: str,
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+):
+    deleted = Education.delete_teacher_student_note(note_id, user.id, db=db)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Teacher note not found"
+        )
+    return {"ok": True}
+
+
 @router.get("/me/writing/profile", response_model=StudentProfileResponse)
 async def get_my_writing_profile(
     user=Depends(get_verified_user),
@@ -2989,19 +3127,23 @@ async def get_my_writing_profile(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="start_at must not be later than end_at",
         )
-    membership = Education.get_classroom_member_by_user_id(user.id, db=db)
-    classroom = (
-        Education.get_classroom_by_id(membership.classroom_id, db=db)
-        if membership
-        else None
-    )
+    memberships = Education.get_classroom_members_by_user_id(user.id, db=db)
+    classrooms = [
+        classroom
+        for classroom in (
+            Education.get_classroom_by_id(membership.classroom_id, db=db)
+            for membership in memberships
+            if membership.member_role == "student"
+        )
+        if classroom is not None
+    ]
     assignments = Education.get_assignments_by_student(user.id, db=db)[
         :MAX_STUDENT_ASSIGNMENTS
     ]
     return await build_student_profile(
         user,
         user.id,
-        classroom,
+        classrooms,
         assignments,
         db,
         start_at=start_at,
@@ -3019,7 +3161,11 @@ async def get_student_assignments(
     assignments = Education.get_assignments_by_student(user.id, db=db)[
         :MAX_STUDENT_ASSIGNMENTS
     ]
-    membership = Education.get_classroom_member_by_user_id(user.id, db=db)
+    memberships = {
+        membership.classroom_id: membership
+        for membership in Education.get_classroom_members_by_user_id(user.id, db=db)
+        if membership.member_role == "student"
+    }
     items = []
 
     for assignment in assignments:
@@ -3035,7 +3181,7 @@ async def get_student_assignments(
         items.append(
             StudentAssignmentListItem(
                 assignment=assignment,
-                membership=membership,
+                membership=memberships[assignment.classroom_id],
                 has_submission=submission is not None,
                 submission_id=submission.id if submission else None,
                 writing_session_id=session.id if session else None,

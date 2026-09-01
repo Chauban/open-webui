@@ -60,7 +60,7 @@
 				<div>
 					<div class="mb-2 text-sm text-gray-500 dark:text-gray-400">
 						{$i18n.t('Teaching')} / {$i18n.t('Classrooms')} /
-						{getClassroomDisplayName(profile.classroom?.name, t)} / {$i18n.t('Students')}
+						{getClassroomDisplayName(profile.classrooms[0]?.name, t)} / {$i18n.t('Students')}
 					</div>
 					<h1 class="text-3xl font-semibold">{profile.student_name}</h1>
 					{#if profile.student_email}

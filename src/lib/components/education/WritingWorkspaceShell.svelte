@@ -16,6 +16,7 @@
 	import { EDU_FIELD_CLASS, eduSegmentClass } from '$lib/components/education/styles';
 	import { prepareAssistantContentForWriting } from '$lib/utils/writing-content';
 	import { createSerializedSaveRunner } from '$lib/utils/save-coordinator';
+	import { getStructuredReflectionError } from '$lib/utils/structured-reflection';
 	import {
 		applySourceMapChange,
 		normalizeSourceRuns,
@@ -131,7 +132,12 @@
 		const remainingSeconds = dueAtSeconds - nowMs / 1000;
 
 		if (remainingSeconds <= 0) {
-			return { overdue: true, className: 'text-gray-500 dark:text-gray-400', labelKey: '', params: {} };
+			return {
+				overdue: true,
+				className: 'text-gray-500 dark:text-gray-400',
+				labelKey: '',
+				params: {}
+			};
 		}
 
 		let className = 'text-gray-500 dark:text-gray-400';
@@ -467,7 +473,11 @@
 			if (diff.insertedText && diff.deletedText) opType = 'replace';
 			else if (diff.deletedText) opType = 'delete_text';
 			else if (sourceType === 'ai_inserted') opType = 'ai_insert_clicked';
-			else if (sourceType === 'ai_pasted' || sourceType === 'external_paste' || sourceType === 'paste') {
+			else if (
+				sourceType === 'ai_pasted' ||
+				sourceType === 'external_paste' ||
+				sourceType === 'paste'
+			) {
 				opType = 'paste_detected';
 			}
 
@@ -573,26 +583,24 @@
 			return;
 		}
 
-		if (reflectionAction.trim().length < 10) {
-			toast.error($i18n.t('Describe what you changed in at least 10 characters.'));
-			return;
-		}
-		if (reflectionLocation.trim().length < 2) {
-			toast.error($i18n.t('Name where you made the change.'));
-			return;
-		}
-		if (reflectionJudgement.trim().length < 10) {
-			toast.error($i18n.t('Explain your judgement in at least 10 characters.'));
-			return;
-		}
-		if (reflectionNextStep.trim().length < 5) {
-			toast.error($i18n.t('Describe your next step in at least 5 characters.'));
+		const reflectionError = getStructuredReflectionError({
+			action: reflectionAction,
+			location: reflectionLocation,
+			judgement: reflectionJudgement,
+			next_step: reflectionNextStep
+		});
+		if (reflectionError) {
+			toast.error($i18n.t(reflectionError));
 			return;
 		}
 
 		isSubmitting = true;
 		try {
 			await persistDraft('submit_preflight', { force: true });
+			if (hasUnsavedFailure) {
+				toast.error($i18n.t('Save failed. Fix the connection before submitting.'));
+				return;
+			}
 
 			await submitAssignment(localStorage.token, assignment.id, {
 				writing_session_id: writingSession.id,
@@ -601,6 +609,11 @@
 				final_content_text: noteText,
 				ai_used: aiUsage === 'used',
 				ai_help_types: aiHelpTypes,
+				data_completeness: {
+					version_data_complete: true,
+					editor_operations_complete: true,
+					source_tracking_complete: true
+				},
 				reflection: {
 					action: reflectionAction.trim(),
 					location: reflectionLocation.trim(),
@@ -687,13 +700,20 @@
 		currentChatId = $page.url.searchParams.get('chat') ?? '';
 	}
 
-	$: if (loaded && writingSession?.id && currentChatId && lastPersistedActiveChatId !== currentChatId) {
+	$: if (
+		loaded &&
+		writingSession?.id &&
+		currentChatId &&
+		lastPersistedActiveChatId !== currentChatId
+	) {
 		lastPersistedActiveChatId = currentChatId;
-		void setWritingSessionActiveChat(localStorage.token, writingSession.id, currentChatId || null).catch(
-			(error) => {
-				console.error(error);
-			}
-		);
+		void setWritingSessionActiveChat(
+			localStorage.token,
+			writingSession.id,
+			currentChatId || null
+		).catch((error) => {
+			console.error(error);
+		});
 	}
 </script>
 
@@ -709,7 +729,7 @@
 {#if loaded}
 	<Chat
 		chatIdProp={currentChatId}
-		projectBaseUrl={projectBaseUrl}
+		{projectBaseUrl}
 		responseInsertHandler={isReadOnly ? null : insertAssistantContent}
 		responseCopyHandler={copyAssistantContentWithSource}
 		responseInsertLabel={'Insert to Writing'}
@@ -725,14 +745,18 @@
 			slot="right-panel"
 			class="h-full w-full flex-col border-l border-gray-200 dark:border-gray-800 bg-stone-50 dark:bg-gray-900 lg:flex"
 		>
-			<div class="border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-5 py-4">
+			<div
+				class="border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-5 py-4"
+			>
 				<div class="flex items-start justify-between gap-4">
 					<div class="min-w-0 flex-1">
 						<div class="text-xs uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
 							{$i18n.t(isAssignment ? 'Assignment Writing' : 'Writing')}
 						</div>
 						{#if isAssignment}
-							<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">{assignment?.title}</div>
+							<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">
+								{assignment?.title}
+							</div>
 							<div class="text-xs text-gray-500 dark:text-gray-400">
 								{#if isGraded}
 									{$i18n.t('Graded. Ask your teacher to return it if you need to revise.')}
@@ -765,12 +789,16 @@
 								placeholder={$i18n.t('Untitled Writing')}
 								on:blur={saveTitle}
 							/>
-							<div class="mt-1 text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Write freely. Autosaved.')}</div>
+							<div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+								{$i18n.t('Write freely. Autosaved.')}
+							</div>
 						{/if}
 					</div>
 					<div class="flex items-center gap-2">
 						{#if isSubmitted}
-							<div class="rounded-full bg-emerald-100 px-3 py-1 text-xs text-emerald-700 dark:text-emerald-300">
+							<div
+								class="rounded-full bg-emerald-100 px-3 py-1 text-xs text-emerald-700 dark:text-emerald-300"
+							>
 								{$i18n.t('Submitted')}
 							</div>
 						{/if}
@@ -782,7 +810,9 @@
 								{$i18n.t('Submission History')}
 							</button>
 						{/if}
-						<div class="rounded-full bg-stone-100 dark:bg-gray-800 px-3 py-1 text-xs text-gray-600 dark:text-gray-400">
+						<div
+							class="rounded-full bg-stone-100 dark:bg-gray-800 px-3 py-1 text-xs text-gray-600 dark:text-gray-400"
+						>
 							{saveStatusDisplay}
 						</div>
 						{#if canSubmitAssignment}
@@ -812,7 +842,9 @@
 							)}
 						</button>
 						{#if showAssignmentDescription}
-							<div class="mt-2 whitespace-pre-wrap rounded-2xl bg-stone-50 dark:bg-gray-900 p-3 text-xs text-gray-600 dark:text-gray-400">
+							<div
+								class="mt-2 whitespace-pre-wrap rounded-2xl bg-stone-50 dark:bg-gray-900 p-3 text-xs text-gray-600 dark:text-gray-400"
+							>
 								{assignment.description}
 							</div>
 						{/if}
@@ -828,7 +860,9 @@
 					bind:value={noteJson}
 					editable={!isReadOnly}
 					json={true}
-					placeholder={$i18n.t(isAssignment ? 'Write the final assignment here.' : 'Start writing...')}
+					placeholder={$i18n.t(
+						isAssignment ? 'Write the final assignment here.' : 'Start writing...'
+					)}
 					className="input-prose min-h-[70vh]"
 					onChange={handleContentChange}
 					on:paste={async (event) => {
@@ -865,7 +899,9 @@
 			<div
 				class="pointer-events-auto flex items-center gap-2 rounded-full border border-gray-200 dark:border-gray-800 bg-white/95 dark:bg-gray-850/95 px-3 py-2 shadow-lg backdrop-blur"
 			>
-				<div class="rounded-full bg-stone-100 dark:bg-gray-800 px-3 py-1 text-xs text-gray-600 dark:text-gray-400">
+				<div
+					class="rounded-full bg-stone-100 dark:bg-gray-800 px-3 py-1 text-xs text-gray-600 dark:text-gray-400"
+				>
 					{saveStatusDisplay}
 				</div>
 				<EduButton
@@ -901,7 +937,9 @@
 				class="flex h-[78dvh] w-full flex-col rounded-t-3xl bg-stone-50 dark:bg-gray-900"
 				on:click|stopPropagation
 			>
-				<div class="border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-5 py-4">
+				<div
+					class="border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-5 py-4"
+				>
 					<div class="flex items-start justify-between gap-4">
 						<div class="min-w-0 flex-1">
 							<div class="text-xs uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
@@ -930,7 +968,9 @@
 						bind:value={noteJson}
 						editable={!isReadOnly}
 						json={true}
-						placeholder={$i18n.t(isAssignment ? 'Write the final assignment here.' : 'Start writing...')}
+						placeholder={$i18n.t(
+							isAssignment ? 'Write the final assignment here.' : 'Start writing...'
+						)}
 						className="input-prose min-h-[60vh]"
 						onChange={handleContentChange}
 						on:paste={async (event) => {
@@ -1021,7 +1061,10 @@
 				<div class="mt-4 space-y-4">
 					{#if aiHelpTypes.includes('Other')}
 						<div>
-							<label for="other-ai-help-text" class="mb-2 block text-sm font-medium text-gray-800 dark:text-gray-200">
+							<label
+								for="other-ai-help-text"
+								class="mb-2 block text-sm font-medium text-gray-800 dark:text-gray-200"
+							>
 								{$i18n.t('Please briefly describe what else AI helped with.')}
 							</label>
 							<input
@@ -1041,7 +1084,10 @@
 						</div>
 					{/if}
 					<div>
-						<label for="reflection-action" class="mb-2 block text-sm font-medium text-gray-800 dark:text-gray-200">
+						<label
+							for="reflection-action"
+							class="mb-2 block text-sm font-medium text-gray-800 dark:text-gray-200"
+						>
 							{$i18n.t('What did you change?')}
 						</label>
 						<textarea
@@ -1053,7 +1099,10 @@
 						></textarea>
 					</div>
 					<div>
-						<label for="reflection-location" class="mb-2 block text-sm font-medium text-gray-800 dark:text-gray-200">
+						<label
+							for="reflection-location"
+							class="mb-2 block text-sm font-medium text-gray-800 dark:text-gray-200"
+						>
 							{$i18n.t('Where did you make this change?')}
 						</label>
 						<input
@@ -1061,11 +1110,16 @@
 							bind:value={reflectionLocation}
 							on:input={saveReflectionDraft}
 							class="w-full {EDU_FIELD_CLASS}"
-							placeholder={$i18n.t('For example: paragraph 2, the conclusion, or the evidence section.')}
+							placeholder={$i18n.t(
+								'For example: paragraph 2, the conclusion, or the evidence section.'
+							)}
 						/>
 					</div>
 					<div>
-						<label for="reflection-judgement" class="mb-2 block text-sm font-medium text-gray-800 dark:text-gray-200">
+						<label
+							for="reflection-judgement"
+							class="mb-2 block text-sm font-medium text-gray-800 dark:text-gray-200"
+						>
 							{$i18n.t('Why did you make this judgement?')}
 						</label>
 						<textarea
@@ -1073,11 +1127,16 @@
 							bind:value={reflectionJudgement}
 							on:input={saveReflectionDraft}
 							class="min-h-20 w-full {EDU_FIELD_CLASS}"
-							placeholder={$i18n.t('Explain why you accepted, rejected, or changed the suggestion or feedback.')}
+							placeholder={$i18n.t(
+								'Explain why you accepted, rejected, or changed the suggestion or feedback.'
+							)}
 						></textarea>
 					</div>
 					<div>
-						<label for="reflection-next-step" class="mb-2 block text-sm font-medium text-gray-800 dark:text-gray-200">
+						<label
+							for="reflection-next-step"
+							class="mb-2 block text-sm font-medium text-gray-800 dark:text-gray-200"
+						>
 							{$i18n.t('What will you do next time?')}
 						</label>
 						<textarea

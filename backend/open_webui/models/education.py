@@ -225,6 +225,33 @@ class StudentProfileSnapshot(Base):
     updated_at = Column(BigInteger, nullable=False)
 
 
+class StudentGrowthGoal(Base):
+    __tablename__ = "student_growth_goal"
+
+    id = Column(Text, primary_key=True, unique=True)
+    student_id = Column(Text, nullable=False)
+    classroom_id = Column(Text, nullable=True)
+    assignment_id = Column(Text, nullable=True)
+    goal_text = Column(Text, nullable=False)
+    target_at = Column(BigInteger, nullable=True)
+    status = Column(Text, nullable=False)
+    created_at = Column(BigInteger, nullable=False)
+    updated_at = Column(BigInteger, nullable=False)
+
+
+class TeacherStudentNote(Base):
+    __tablename__ = "teacher_student_note"
+
+    id = Column(Text, primary_key=True, unique=True)
+    teacher_id = Column(Text, nullable=False)
+    classroom_id = Column(Text, nullable=False)
+    student_id = Column(Text, nullable=False)
+    content = Column(Text, nullable=False)
+    observed_at = Column(BigInteger, nullable=False)
+    created_at = Column(BigInteger, nullable=False)
+    updated_at = Column(BigInteger, nullable=False)
+
+
 class EducationNotification(Base):
     __tablename__ = "education_notification"
 
@@ -409,7 +436,7 @@ class MicroReflectionModel(BaseModel):
     student_id: str
     writing_session_id: str
     ai_used: bool
-    ai_help_types: list[str] = Field(default_factory=list)
+    ai_help_types: list[AIHelpType] = Field(default_factory=list)
     reflection_json: StructuredReflection
     created_at: int
 
@@ -543,7 +570,7 @@ class WritingRecentItem(BaseModel):
 
 class WritingHomeResponse(BaseModel):
     role: str
-    classroom: Optional[ClassroomModel] = None
+    classrooms: list[ClassroomModel] = Field(default_factory=list)
     recent_items: list[WritingRecentItem] = Field(default_factory=list)
     assignment_items: list["AssignmentWorkspaceListItem"] = Field(default_factory=list)
     personal_items: list[PersonalWorkspaceListItem] = Field(default_factory=list)
@@ -659,6 +686,14 @@ class ProvenanceCreateForm(BaseModel):
     replace_existing: bool = False
 
 
+class SubmissionEvidenceCompleteness(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    version_data_complete: bool
+    editor_operations_complete: bool
+    source_tracking_complete: bool
+
+
 class SubmissionCreateForm(BaseModel):
     writing_session_id: str
     final_content_json: Optional[dict] = None
@@ -667,6 +702,7 @@ class SubmissionCreateForm(BaseModel):
     ai_used: bool
     ai_help_types: list[AIHelpType] = Field(default_factory=list)
     reflection: StructuredReflection
+    data_completeness: SubmissionEvidenceCompleteness
 
     @model_validator(mode="after")
     def validate_ai_reflection(self):
@@ -834,6 +870,8 @@ ProfileInsightCode = Literal[
     "deadline_rush",
     "process_up",
     "reflection_thin",
+    "ai_revision_productive",
+    "ai_use_needs_review",
 ]
 ProfileInsightActionCode = Literal[
     "complete_more_submissions",
@@ -846,6 +884,8 @@ ProfileInsightActionCode = Literal[
     "start_next_assignment_earlier",
     "keep_current_process",
     "add_specific_reflection_evidence",
+    "repeat_productive_ai_revision",
+    "reduce_ai_share_and_deepen_revision",
 ]
 ProfileMetricKey = Literal[
     "total_chars",
@@ -861,6 +901,14 @@ ProfileMetricKey = Literal[
     "prompt_count",
     "reflection_quality",
 ]
+ProfileFormulaMetric = Literal[
+    "revised_chars / inserted_chars",
+    "writing_span_seconds",
+    "end_loaded_ratio",
+    "digestion_ratio",
+    "prompt_count",
+    "reflection_quality",
+]
 
 
 class StrictProfileModel(BaseModel):
@@ -872,6 +920,15 @@ class StudentProfileDataCompleteness(StrictProfileModel):
     editor_operations_complete: bool
     source_tracking_complete: bool
     scoring_comparable: bool
+
+
+class StudentProfileCompletenessSummary(StrictProfileModel):
+    point_count: int = 0
+    version_complete_count: int = 0
+    editor_operations_complete_count: int = 0
+    source_tracking_complete_count: int = 0
+    scoring_comparable_count: int = 0
+    overall_ratio: Optional[float] = None
 
 
 class StudentProfileAssignmentItem(StrictProfileModel):
@@ -943,6 +1000,7 @@ class StudentProfileRoundProgress(StrictProfileModel):
     revision_ratio: int = 0
     score_delta: Optional[int] = None
     turnaround_seconds: Optional[int] = None
+    comparison_scope: Literal["same_assignment_rounds"] = "same_assignment_rounds"
 
 
 class StudentProfileMetricTrend(StrictProfileModel):
@@ -952,6 +1010,7 @@ class StudentProfileMetricTrend(StrictProfileModel):
     delta: float
     direction: ProfileTrendDirection = "flat"
     sample_count: int = 0
+    comparison_scope: Literal["cross_assignment"] = "cross_assignment"
 
 
 class StudentProfileInsightParams(StrictProfileModel):
@@ -964,6 +1023,10 @@ class StudentProfileInsightParams(StrictProfileModel):
     revision_ratio: Optional[int] = None
     ratio: Optional[float] = None
     average_score: Optional[int] = None
+    normalized_score: Optional[float] = None
+    revision_depth: Optional[int] = None
+    reflection_quality: Optional[int] = None
+    score_delta: Optional[float] = None
 
 
 class StudentProfileInsight(StrictProfileModel):
@@ -974,6 +1037,101 @@ class StudentProfileInsight(StrictProfileModel):
     params: StudentProfileInsightParams = Field(default_factory=StudentProfileInsightParams)
     action_code: Optional[ProfileInsightActionCode] = None
     submission_id: Optional[str] = None
+    severity: Literal["low", "medium", "high"] = "low"
+    confidence: float = Field(default=0, ge=0, le=1)
+    sample_count: int = Field(default=0, ge=0)
+    data_completeness: float = Field(default=0, ge=0, le=1)
+    teaching_value: int = Field(default=1, ge=1, le=5)
+
+
+class StudentGrowthGoalCreateForm(StrictProfileModel):
+    goal_text: str = Field(min_length=5, max_length=500)
+    classroom_id: Optional[str] = None
+    assignment_id: Optional[str] = None
+    target_at: Optional[int] = Field(default=None, ge=0)
+
+    @field_validator("goal_text", mode="before")
+    @classmethod
+    def strip_goal_text(cls, value: str) -> str:
+        return value.strip()
+
+
+class StudentGrowthGoalUpdateForm(StrictProfileModel):
+    goal_text: Optional[str] = Field(default=None, min_length=5, max_length=500)
+    target_at: Optional[int] = Field(default=None, ge=0)
+    status: Optional[Literal["active", "completed", "archived"]] = None
+
+    @field_validator("goal_text", mode="before")
+    @classmethod
+    def strip_updated_goal_text(cls, value: Optional[str]) -> Optional[str]:
+        return value.strip() if value is not None else None
+
+    @model_validator(mode="after")
+    def require_goal_update(self):
+        if not self.model_fields_set:
+            raise ValueError("At least one goal field is required")
+        if "goal_text" in self.model_fields_set and self.goal_text is None:
+            raise ValueError("goal_text cannot be null")
+        if "status" in self.model_fields_set and self.status is None:
+            raise ValueError("status cannot be null")
+        return self
+
+
+class StudentGrowthGoalModel(StrictProfileModel):
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    id: str
+    student_id: str
+    classroom_id: Optional[str] = None
+    assignment_id: Optional[str] = None
+    goal_text: str
+    target_at: Optional[int] = None
+    status: Literal["active", "completed", "archived"]
+    created_at: int
+    updated_at: int
+
+
+class TeacherStudentNoteCreateForm(StrictProfileModel):
+    content: str = Field(min_length=2, max_length=2000)
+    observed_at: Optional[int] = Field(default=None, ge=0)
+
+    @field_validator("content", mode="before")
+    @classmethod
+    def strip_note_content(cls, value: str) -> str:
+        return value.strip()
+
+
+class TeacherStudentNoteUpdateForm(StrictProfileModel):
+    content: Optional[str] = Field(default=None, min_length=2, max_length=2000)
+    observed_at: Optional[int] = Field(default=None, ge=0)
+
+    @field_validator("content", mode="before")
+    @classmethod
+    def strip_updated_note_content(cls, value: Optional[str]) -> Optional[str]:
+        return value.strip() if value is not None else None
+
+    @model_validator(mode="after")
+    def require_note_update(self):
+        if not self.model_fields_set:
+            raise ValueError("At least one note field is required")
+        if "content" in self.model_fields_set and self.content is None:
+            raise ValueError("content cannot be null")
+        if "observed_at" in self.model_fields_set and self.observed_at is None:
+            raise ValueError("observed_at cannot be null")
+        return self
+
+
+class TeacherStudentNoteModel(StrictProfileModel):
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    id: str
+    teacher_id: str
+    classroom_id: str
+    student_id: str
+    content: str
+    observed_at: int
+    created_at: int
+    updated_at: int
 
 
 class StudentProfileHelpTypeSummary(StrictProfileModel):
@@ -995,7 +1153,7 @@ class StudentProfileReflectionQuality(StrictProfileModel):
 
 
 class StudentProfileFormulaTerm(StrictProfileModel):
-    metric: str
+    metric: ProfileFormulaMetric
     weight: float
     target: Optional[float] = None
     inverted: bool = False
@@ -1058,7 +1216,7 @@ class StudentProfileResponse(StrictProfileModel):
     student_id: str
     student_name: Optional[str] = None
     student_email: Optional[str] = None
-    classroom: Optional[ClassroomModel] = None
+    classrooms: list[ClassroomModel] = Field(default_factory=list)
     assignment_count: int = 0
     submitted_count: int = 0
     unsubmitted_count: int = 0
@@ -1074,6 +1232,9 @@ class StudentProfileResponse(StrictProfileModel):
     reflection_quality: StudentProfileReflectionQuality
     index_formula: StudentProfileIndexFormula
     insights: list[StudentProfileInsight] = Field(default_factory=list)
+    data_completeness: StudentProfileCompletenessSummary
+    growth_goals: list[StudentGrowthGoalModel] = Field(default_factory=list)
+    teacher_notes: list[TeacherStudentNoteModel] = Field(default_factory=list)
 
 
 class ClassroomBulkImportResult(BaseModel):
@@ -1281,6 +1442,18 @@ class EducationTable:
                 .first()
             )
             return ClassroomMemberModel.model_validate(member) if member else None
+
+    def get_classroom_members_by_user_id(
+        self, user_id: str, db: Optional[Session] = None
+    ) -> list[ClassroomMemberModel]:
+        with get_db_context(db) as db:
+            members = (
+                db.query(ClassroomMember)
+                .filter(ClassroomMember.user_id == user_id)
+                .order_by(ClassroomMember.created_at.asc())
+                .all()
+            )
+            return [ClassroomMemberModel.model_validate(member) for member in members]
 
     def delete_classroom_member(
         self, classroom_id: str, user_id: str, db: Optional[Session] = None
@@ -1496,15 +1669,19 @@ class EducationTable:
         self, student_id: str, db: Optional[Session] = None
     ) -> list[AssignmentModel]:
         with get_db_context(db) as db:
-            classroom_member = self.get_classroom_member_by_user_id(student_id, db=db)
-            if classroom_member is None:
+            classroom_ids = [
+                member.classroom_id
+                for member in self.get_classroom_members_by_user_id(student_id, db=db)
+                if member.member_role == "student"
+            ]
+            if not classroom_ids:
                 return []
             assignments = (
                 db.query(Assignment)
                 .filter(
-                    Assignment.classroom_id == classroom_member.classroom_id,
+                    Assignment.classroom_id.in_(classroom_ids),
                 )
-                .order_by(Assignment.updated_at.desc())
+                .order_by(Assignment.updated_at.desc(), Assignment.id.asc())
                 .all()
             )
             return [
@@ -2028,7 +2205,7 @@ class EducationTable:
         student_id: str,
         writing_session_id: str,
         ai_used: bool,
-        ai_help_types: list[str],
+        ai_help_types: list[AIHelpType],
         reflection: StructuredReflection,
         db: Optional[Session] = None,
     ) -> MicroReflectionModel:
@@ -2447,6 +2624,158 @@ class EducationTable:
             return [
                 SubmissionModel.model_validate(submission) for submission in submissions
             ]
+
+    def get_student_growth_goals(
+        self,
+        student_id: str,
+        classroom_ids: Optional[list[str]] = None,
+        include_archived: bool = False,
+        db: Optional[Session] = None,
+    ) -> list[StudentGrowthGoalModel]:
+        with get_db_context(db) as db:
+            query = db.query(StudentGrowthGoal).filter(
+                StudentGrowthGoal.student_id == student_id
+            )
+            if classroom_ids is not None:
+                query = query.filter(
+                    (StudentGrowthGoal.classroom_id.is_(None))
+                    | (StudentGrowthGoal.classroom_id.in_(classroom_ids))
+                )
+            if not include_archived:
+                query = query.filter(StudentGrowthGoal.status != "archived")
+            goals = query.order_by(
+                StudentGrowthGoal.status.asc(), StudentGrowthGoal.updated_at.desc()
+            ).all()
+            return [StudentGrowthGoalModel.model_validate(goal) for goal in goals]
+
+    def insert_student_growth_goal(
+        self,
+        student_id: str,
+        form_data: StudentGrowthGoalCreateForm,
+        db: Optional[Session] = None,
+    ) -> StudentGrowthGoalModel:
+        with get_db_context(db) as db:
+            now = int(time.time())
+            goal = StudentGrowthGoal(
+                id=str(uuid.uuid4()),
+                student_id=student_id,
+                classroom_id=form_data.classroom_id,
+                assignment_id=form_data.assignment_id,
+                goal_text=form_data.goal_text,
+                target_at=form_data.target_at,
+                status="active",
+                created_at=now,
+                updated_at=now,
+            )
+            db.add(goal)
+            db.commit()
+            db.refresh(goal)
+            return StudentGrowthGoalModel.model_validate(goal)
+
+    def update_student_growth_goal(
+        self,
+        goal_id: str,
+        student_id: str,
+        form_data: StudentGrowthGoalUpdateForm,
+        db: Optional[Session] = None,
+    ) -> Optional[StudentGrowthGoalModel]:
+        with get_db_context(db) as db:
+            goal = db.get(StudentGrowthGoal, goal_id)
+            if goal is None or goal.student_id != student_id:
+                return None
+            if "goal_text" in form_data.model_fields_set:
+                goal.goal_text = form_data.goal_text
+            if "target_at" in form_data.model_fields_set:
+                goal.target_at = form_data.target_at
+            if "status" in form_data.model_fields_set:
+                goal.status = form_data.status
+            goal.updated_at = int(time.time())
+            db.commit()
+            db.refresh(goal)
+            return StudentGrowthGoalModel.model_validate(goal)
+
+    def get_teacher_student_notes(
+        self,
+        teacher_id: str,
+        classroom_id: str,
+        student_id: str,
+        db: Optional[Session] = None,
+    ) -> list[TeacherStudentNoteModel]:
+        with get_db_context(db) as db:
+            notes = (
+                db.query(TeacherStudentNote)
+                .filter(
+                    TeacherStudentNote.teacher_id == teacher_id,
+                    TeacherStudentNote.classroom_id == classroom_id,
+                    TeacherStudentNote.student_id == student_id,
+                )
+                .order_by(TeacherStudentNote.observed_at.desc())
+                .all()
+            )
+            return [TeacherStudentNoteModel.model_validate(note) for note in notes]
+
+    def insert_teacher_student_note(
+        self,
+        teacher_id: str,
+        classroom_id: str,
+        student_id: str,
+        form_data: TeacherStudentNoteCreateForm,
+        db: Optional[Session] = None,
+    ) -> TeacherStudentNoteModel:
+        with get_db_context(db) as db:
+            now = int(time.time())
+            note = TeacherStudentNote(
+                id=str(uuid.uuid4()),
+                teacher_id=teacher_id,
+                classroom_id=classroom_id,
+                student_id=student_id,
+                content=form_data.content,
+                observed_at=form_data.observed_at or now,
+                created_at=now,
+                updated_at=now,
+            )
+            db.add(note)
+            db.commit()
+            db.refresh(note)
+            return TeacherStudentNoteModel.model_validate(note)
+
+    def update_teacher_student_note(
+        self,
+        note_id: str,
+        teacher_id: str,
+        form_data: TeacherStudentNoteUpdateForm,
+        db: Optional[Session] = None,
+    ) -> Optional[TeacherStudentNoteModel]:
+        with get_db_context(db) as db:
+            note = db.get(TeacherStudentNote, note_id)
+            if note is None or note.teacher_id != teacher_id:
+                return None
+            if "content" in form_data.model_fields_set:
+                note.content = form_data.content
+            if "observed_at" in form_data.model_fields_set:
+                note.observed_at = form_data.observed_at
+            note.updated_at = int(time.time())
+            db.commit()
+            db.refresh(note)
+            return TeacherStudentNoteModel.model_validate(note)
+
+    def delete_teacher_student_note(
+        self,
+        note_id: str,
+        teacher_id: str,
+        db: Optional[Session] = None,
+    ) -> bool:
+        with get_db_context(db) as db:
+            deleted = (
+                db.query(TeacherStudentNote)
+                .filter(
+                    TeacherStudentNote.id == note_id,
+                    TeacherStudentNote.teacher_id == teacher_id,
+                )
+                .delete()
+            )
+            db.commit()
+            return deleted > 0
 
     def insert_notifications(
         self,

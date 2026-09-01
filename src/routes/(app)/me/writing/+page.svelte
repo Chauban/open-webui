@@ -19,7 +19,6 @@
 	import {
 		createPersonalWriting,
 		deletePersonalWriting,
-		getMyClassroom,
 		getWritingHome,
 		joinClassroom
 	} from '$lib/apis/education';
@@ -180,7 +179,9 @@
 			return;
 		}
 
-		const deletedItem = (home?.personal_items ?? []).find((item) => item.writing_session.id === sessionId);
+		const deletedItem = (home?.personal_items ?? []).find(
+			(item) => item.writing_session.id === sessionId
+		);
 		const deletedProjectId = deletedItem?.project_id ?? null;
 
 		deletingPersonalIds = new Set(deletingPersonalIds).add(sessionId);
@@ -203,7 +204,9 @@
 			personal_items: (home?.personal_items ?? []).filter(
 				(item) => item.writing_session.id !== sessionId
 			),
-			recent_items: (home?.recent_items ?? []).filter((item) => item.writing_session_id !== sessionId)
+			recent_items: (home?.recent_items ?? []).filter(
+				(item) => item.writing_session_id !== sessionId
+			)
 		};
 
 		const deletedFolderIds = new Set([
@@ -256,7 +259,7 @@
 		}
 	};
 
-	// Fetch-only: refreshes `home` (plus the classroom fallback) without touching
+	// Fetch-only: refreshes `home` without touching
 	// `activeTab`, so background refreshes never yank the user off their current tab.
 	const fetchHomeData = async () => {
 		if (homeLoading) {
@@ -268,12 +271,6 @@
 			const data = await getWritingHome(localStorage.token);
 			const sessionUser = get(user);
 			const role = sessionUser?.education_role || data?.role;
-			if (!data?.classroom && role === 'student') {
-				try {
-					const classroomResponse = await getMyClassroom(localStorage.token);
-					data.classroom = classroomResponse.classroom;
-				} catch {}
-			}
 			home = data;
 			return { role };
 		} catch (error) {
@@ -338,7 +335,9 @@
 		<nav class="w-full px-2.5 pt-1.5 backdrop-blur-xl drag-region">
 			<div class="flex items-center">
 				{#if $mobile}
-					<div class="{$showSidebar ? 'md:hidden' : ''} flex flex-none items-center self-end mt-1.5">
+					<div
+						class="{$showSidebar ? 'md:hidden' : ''} flex flex-none items-center self-end mt-1.5"
+					>
 						<Tooltip
 							content={$showSidebar ? $i18n.t('Close Sidebar') : $i18n.t('Open Sidebar')}
 							interactive={true}
@@ -358,11 +357,13 @@
 
 				<div class="ml-2 flex w-full items-center justify-between py-1">
 					<div>
-						<div class="text-xs uppercase tracking-[0.2em] text-gray-500 dark:text-gray-400">{$i18n.t('Writing')}</div>
+						<div class="text-xs uppercase tracking-[0.2em] text-gray-500 dark:text-gray-400">
+							{$i18n.t('Writing')}
+						</div>
 						<h1 class="text-2xl font-semibold">{$i18n.t('Writing')}</h1>
 					</div>
 					<EduButton on:click={() => goto('/me/writing/growth')}>
-						{$i18n.t('My Growth')}
+						{$i18n.t('Assignment Writing Growth Profile')}
 					</EduButton>
 				</div>
 			</div>
@@ -374,12 +375,16 @@
 					<div class="mb-4 flex items-center justify-between gap-4">
 						<div>
 							<div class="text-lg font-semibold">{$i18n.t('Continue Recent Writing')}</div>
-							<div class="text-sm text-gray-500 dark:text-gray-400">{$i18n.t('Jump back into your latest draft.')}</div>
+							<div class="text-sm text-gray-500 dark:text-gray-400">
+								{$i18n.t('Jump back into your latest draft.')}
+							</div>
 						</div>
 					</div>
 
 					{#if (home?.recent_items ?? []).length === 0}
-						<div class="rounded-2xl border border-dashed border-gray-200 dark:border-gray-800 bg-stone-50 dark:bg-gray-900 p-5 text-sm text-gray-500 dark:text-gray-400">
+						<div
+							class="rounded-2xl border border-dashed border-gray-200 dark:border-gray-800 bg-stone-50 dark:bg-gray-900 p-5 text-sm text-gray-500 dark:text-gray-400"
+						>
 							{$i18n.t('No recent writing yet.')}
 						</div>
 					{:else}
@@ -390,7 +395,9 @@
 									on:click={() => openRecentItem(item)}
 								>
 									<div class="flex items-center justify-between gap-3">
-										<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">{item.title}</div>
+										<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">
+											{item.title}
+										</div>
 										<EduBadge soft>
 											{item.project_mode === 'assignment_writing'
 												? $i18n.t('Assignment Writing')
@@ -425,12 +432,12 @@
 					{#if activeTab === 'assignment'}
 						<div class="mb-8">
 							<EduCard class="mb-6">
-								<div class="mb-3 text-sm font-semibold">{$i18n.t('My Classroom')}</div>
-								{#if home?.classroom}
-									<div class="text-sm text-gray-600 dark:text-gray-400">
-										{$i18n.t('You are connected to {{name}}.', {
-											name: getClassroomDisplayName(home.classroom.name, t)
-										})}
+								<div class="mb-3 text-sm font-semibold">{$i18n.t('My Classrooms')}</div>
+								{#if home?.classrooms?.length}
+									<div class="flex flex-wrap gap-2">
+										{#each home.classrooms as classroom}
+											<EduBadge>{getClassroomDisplayName(classroom.name, t)}</EduBadge>
+										{/each}
 									</div>
 								{:else}
 									<div class="text-sm text-gray-500 dark:text-gray-400">
@@ -461,7 +468,9 @@
 								<div class="grid gap-4">
 									{#each sortedAssignmentItems as item}
 										<EduCard>
-											<div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+											<div
+												class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between"
+											>
 												<div>
 													<div class="flex flex-wrap items-center gap-2">
 														<div class="text-lg font-semibold">{item.assignment.title}</div>
@@ -469,7 +478,8 @@
 															<EduBadge soft tone="rose">{$i18n.t('Returned')}</EduBadge>
 														{:else if item.review_status === 'reviewed'}
 															<EduBadge soft tone="emerald">
-																{$i18n.t('Reviewed')} {item.score ?? ''}
+																{$i18n.t('Reviewed')}
+																{item.score ?? ''}
 															</EduBadge>
 														{:else if item.review_status === 'pending'}
 															<EduBadge soft>{$i18n.t('Awaiting review')}</EduBadge>
@@ -478,12 +488,16 @@
 													<div class="mt-1 text-sm text-gray-500 dark:text-gray-400">
 														{item.assignment.description || $i18n.t('No description')}
 													</div>
-													<div class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500 dark:text-gray-400">
+													<div
+														class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500 dark:text-gray-400"
+													>
 														<div>{$i18n.t('Status')}: {getAssignmentStatusLabel(item.status)}</div>
 														<div>{$i18n.t('Updated')}: {formatTimestamp(item.updated_at)}</div>
 														{#if item.review_status === 'returned'}
 															<div class="font-medium text-rose-600 dark:text-rose-400">
-																{$i18n.t('Resubmit before')}: {formatTimestamp(item.effective_due_at)}
+																{$i18n.t('Resubmit before')}: {formatTimestamp(
+																	item.effective_due_at
+																)}
 															</div>
 														{:else}
 															{@const dueInfo = getDueInfo(item)}
@@ -526,7 +540,9 @@
 								{creatingPersonal ? $i18n.t('Creating...') : $i18n.t('New Writing')}
 							</EduButton>
 						</div>
-						<div class="mb-4 text-sm text-gray-500 dark:text-gray-400">{$i18n.t('Your personal drafts live here.')}</div>
+						<div class="mb-4 text-sm text-gray-500 dark:text-gray-400">
+							{$i18n.t('Your personal drafts live here.')}
+						</div>
 
 						{#if (home?.personal_items ?? []).length === 0}
 							<EduStateCard>{$i18n.t('No personal writing yet.')}</EduStateCard>

@@ -1,29 +1,17 @@
-import difflib
 from typing import Optional
 
-from sqlalchemy.orm import Session
-
 from open_webui.models.education import (
-    Education,
     StudentProfileCollaborationFormula,
     StudentProfileFormulaTerm,
     StudentProfileHelpTypeShift,
     StudentProfileHelpTypeSummary,
     StudentProfileIndexFormula,
-    StudentProfileAssignmentItem,
     StudentProfileInsight,
     StudentProfileMetricTrend,
     StudentProfileProcessFormula,
     StudentProfileReflectionFormula,
     StudentProfileReflectionFormulaTerm,
     StudentProfileReflectionQuality,
-    StudentProfileResponse,
-    StudentProfileRoundProgress,
-    StudentProfileTimelinePoint,
-)
-from open_webui.services.education.analysis import (
-    build_version_diffs,
-    get_or_build_submission_analyses,
 )
 
 # ---------------------------------------------------------------------------
@@ -53,7 +41,23 @@ _PROFILE_MAX_INSIGHTS = 5
 _TREND_FLAT_TOLERANCE = 0.05
 _TREND_MIN_SAMPLES = 3
 _TREND_MAX_WINDOW = 3
-PROFILE_METRIC_VERSION = "2026-09-01.1"
+PROFILE_METRIC_VERSION = "2026-09-01.2"
+
+_INSIGHT_META = {
+    "not_enough_data": ("low", 5, "all"),
+    "digestion_up": ("low", 4, "source"),
+    "digestion_low": ("high", 5, "source"),
+    "ai_share_changed": ("low", 3, "source"),
+    "round_improvement": ("low", 5, "round"),
+    "round_revision_thin": ("high", 5, "round"),
+    "help_type_shift_refining": ("low", 4, "source"),
+    "deadline_rush": ("high", 5, "version"),
+    "process_up": ("low", 4, "process"),
+    "reflection_thin": ("medium", 5, "reflection"),
+    "ai_revision_productive": ("low", 5, "combined"),
+    "ai_use_needs_review": ("high", 5, "combined"),
+}
+_INSIGHT_SEVERITY_WEIGHT = {"high": 3, "medium": 2, "low": 1}
 
 # 学生自报的 AI 用途分两类:让 AI「生成」内容,和让 AI「打磨」自己的内容。
 # 从前者迁移到后者是很强的成长信号。
@@ -311,12 +315,19 @@ def _build_profile_insights(
     reflection_quality: StudentProfileReflectionQuality,
 ) -> list[StudentProfileInsight]:
     candidates: list[StudentProfileInsight] = []
-    if len(timeline) < _TREND_MIN_SAMPLES:
+    assignment_sample_count = len(
+        {point.assignment_id for point in timeline if point.is_current}
+    )
+    if assignment_sample_count < _TREND_MIN_SAMPLES:
         candidates.append(
             StudentProfileInsight(
                 code="not_enough_data",
                 tone="neutral",
                 action_code="complete_more_submissions",
+                confidence=1,
+                sample_count=assignment_sample_count,
+                data_completeness=0,
+                teaching_value=5,
             )
         )
     if not timeline:
@@ -441,269 +452,177 @@ def _build_profile_insights(
             )
         )
 
-    return candidates[:_PROFILE_MAX_INSIGHTS]
-
-
-async def build_student_profile(
-    student,
-    student_id: str,
-    classroom,
-    assignments: list,
-    db: Session,
-) -> StudentProfileResponse:
-    assignment_by_id = {assignment.id: assignment for assignment in assignments}
-    submissions = Education.get_submissions_by_student(student_id, list(assignment_by_id.keys()), db=db)
-    reviews = Education.get_submission_reviews_by_submission_ids([submission.id for submission in submissions], db=db)
-    sessions = Education.get_writing_sessions_by_ids(
-        [submission.writing_session_id for submission in submissions], db=db
+    score_trend = trends.get("normalized_score")
+    latest_round = round_progress[-1] if round_progress else None
+    score_improved = bool(
+        (score_trend is not None and score_trend.direction == "up")
+        or (latest_round and latest_round.score_delta is not None and latest_round.score_delta > 0)
     )
-    versions_by_session = Education.get_versions_by_session_ids(list(sessions.keys()), db=db)
-    operation_marks = Education.get_editor_operation_marks_by_session_ids(list(sessions.keys()), db=db)
-    reflections = Education.get_micro_reflections_by_ids(
-        [submission.micro_reflection_id for submission in submissions], db=db
+    score_not_improved = bool(
+        (score_trend is not None and score_trend.direction in {"flat", "down"})
+        or (latest_round and latest_round.score_delta is not None and latest_round.score_delta <= 0)
     )
-    analyses = await get_or_build_submission_analyses(submissions, sessions, db)
-
-    rounds_by_assignment: dict[str, list] = {}
-    for submission in submissions:
-        rounds_by_assignment.setdefault(submission.assignment_id, []).append(submission)
-    for assignment_rounds in rounds_by_assignment.values():
-        assignment_rounds.sort(key=lambda item: item.round_no)
-
-    timeline: list[StudentProfileTimelinePoint] = []
-    round_progress: list[StudentProfileRoundProgress] = []
-
-    for assignment_id, assignment_rounds in rounds_by_assignment.items():
-        assignment = assignment_by_id.get(assignment_id)
-        if assignment is None:
-            continue
-
-        previous_submission = None
-        previous_final_text = ""
-        for submission in assignment_rounds:
-            session = sessions.get(submission.writing_session_id)
-            if session is None:
-                continue
-
-            previous_review = reviews.get(previous_submission.id) if previous_submission else None
-            # 第 2 轮起的截止时间是退回时设的重交截止,拿作业原始截止算提前量会失真。
-            round_due_at = (
-                previous_review.resubmit_due_at
-                if previous_review and previous_review.resubmit_due_at
-                else assignment.due_at
+    if (
+        latest.ai_ratio is not None
+        and latest.ai_ratio >= 0.1
+        and latest.digestion_ratio is not None
+        and latest.digestion_ratio >= 50
+        and latest.reflection_quality >= 60
+        and latest.revision_depth is not None
+        and latest.revision_depth >= 40
+        and score_improved
+    ):
+        candidates.append(
+            StudentProfileInsight(
+                code="ai_revision_productive",
+                tone="positive",
+                params={
+                    "ai_ratio": latest.ai_ratio,
+                    "digestion_ratio": latest.digestion_ratio,
+                    "revision_depth": latest.revision_depth,
+                    "reflection_quality": latest.reflection_quality,
+                    "normalized_score": latest.normalized_score,
+                    "score_delta": latest_round.score_delta if latest_round else None,
+                },
+                action_code="repeat_productive_ai_revision",
+                submission_id=latest.submission_id,
             )
-
-            summary = (analyses.get(submission.id) or {}).get("summary") or {}
-            review = reviews.get(submission.id)
-            reflection = reflections.get(submission.micro_reflection_id)
-            reflection_score = _score_reflection(
-                reflection.reflection_json if reflection else None
-            )
-
-            all_versions = versions_by_session.get(submission.writing_session_id, [])
-            round_versions = _slice_round_versions(
-                all_versions,
-                previous_submission.final_version_id if previous_submission else None,
-                submission.final_version_id,
-            )
-            window_start_at = round_versions[0].created_at if round_versions else submission.submitted_at
-            version_diffs = build_version_diffs(round_versions, previous_final_text)
-            inserted_chars = sum(diff.get("inserted_length", 0) for diff in version_diffs)
-            revised_chars = sum(diff.get("deleted_length", 0) for diff in version_diffs)
-            revision_depth = _compute_revision_depth(revised_chars, inserted_chars)
-            writing_span_seconds = max(submission.submitted_at - window_start_at, 0)
-            active_writing_seconds = _estimate_active_writing_seconds(
-                [
-                    mark
-                    for mark in operation_marks.get(submission.writing_session_id, [])
-                    if window_start_at <= mark <= submission.submitted_at
-                ]
-            )
-            end_loaded_ratio = _compute_end_loaded_ratio(
-                version_diffs, window_start_at, submission.submitted_at
-            )
-            deadline_window_ratio = _compute_deadline_window_ratio(
-                version_diffs, round_due_at
-            )
-
-            ai_ratio = round(
-                summary.get("ai_inserted_ratio", 0) + summary.get("ai_pasted_ratio", 0),
-                4,
-            )
-            digestion_ratio = summary.get("average_rewrite_ratio", 0)
-            prompt_count = summary.get("prompt_count", 0)
-
-            timeline.append(
-                StudentProfileTimelinePoint(
-                    submission_id=submission.id,
-                    assignment_id=assignment.id,
-                    assignment_title=assignment.title,
-                    round_no=submission.round_no,
-                    is_current=submission.is_current == 1,
-                    submitted_at=submission.submitted_at,
-                    total_chars=summary.get("total_chars", 0),
-                    score=review.score if review else None,
-                    score_max=assignment.score_max,
-                    normalized_score=(
-                        round(review.score / assignment.score_max * 100, 2)
-                        if review and review.score is not None
-                        else None
-                    ),
-                    rubric=review.rubric_scores if review else None,
-                    review_status=review.review_status if review else "pending",
-                    inserted_chars=inserted_chars,
-                    revised_chars=revised_chars,
-                    revision_depth=revision_depth,
-                    writing_span_seconds=writing_span_seconds,
-                    active_writing_seconds=active_writing_seconds,
-                    lead_time_seconds=(round_due_at - window_start_at if round_due_at is not None else None),
-                    end_loaded_ratio=end_loaded_ratio,
-                    deadline_window_ratio=deadline_window_ratio,
-                    process_index=_compute_process_index(
-                        revision_depth, writing_span_seconds, end_loaded_ratio
-                    ),
-                    typed_ratio=summary.get("typed_ratio", 0),
-                    ai_ratio=ai_ratio,
-                    unknown_ratio=summary.get("unknown_ratio", 0),
-                    prompt_count=prompt_count,
-                    digestion_ratio=digestion_ratio,
-                    reflection_char_count=reflection_score["char_count"],
-                    reflection_quality=reflection_score["score"],
-                    ai_help_types=list(reflection.ai_help_types) if reflection else [],
-                    collaboration_index=_compute_collaboration_index(
-                        digestion_ratio,
-                        prompt_count,
-                        reflection_score["score"],
-                        ai_ratio,
-                    ),
-                    burst_count=summary.get("burst_count", 0),
-                    suspected_unmarked_import_count=summary.get("suspected_unmarked_import_count", 0),
-                )
-            )
-
-            final_version = next(
-                (version for version in all_versions if version.id == submission.final_version_id),
-                None,
-            )
-            final_text = (final_version.note_snapshot_text if final_version else "") or ""
-
-            if previous_submission is not None:
-                similarity = difflib.SequenceMatcher(None, previous_final_text, final_text).ratio()
-                round_progress.append(
-                    StudentProfileRoundProgress(
-                        assignment_id=assignment.id,
-                        assignment_title=assignment.title,
-                        from_round=previous_submission.round_no,
-                        to_round=submission.round_no,
-                        char_delta=len(final_text) - len(previous_final_text),
-                        revision_ratio=int(round((1 - similarity) * 100)),
-                        score_delta=(
-                            review.score - previous_review.score
-                            if review
-                            and review.score is not None
-                            and previous_review
-                            and previous_review.score is not None
-                            else None
-                        ),
-                        turnaround_seconds=(
-                            submission.submitted_at - previous_review.reviewed_at
-                            if previous_review and previous_review.reviewed_at
-                            else None
-                        ),
-                    )
-                )
-
-            previous_submission = submission
-            previous_final_text = final_text
-
-    timeline.sort(key=lambda point: (point.submitted_at, point.round_no))
-    round_progress.sort(key=lambda item: (item.assignment_title, item.to_round))
-
-    trends = {}
-    for key in _PROFILE_TREND_KEYS:
-        trend = _build_trend(key, [getattr(point, key) for point in timeline])
-        if trend is not None:
-            trends[key] = trend
-
-    half = len(timeline) // 2
-    early_points = timeline[:half] if half else []
-    recent_points = timeline[half:] if half else timeline
-    early_help = _summarize_help_types(early_points)
-    recent_help = _summarize_help_types(recent_points)
-    help_shift = {
-        "early": early_help,
-        "recent": recent_help,
-        "refining_ratio_delta": round(recent_help["refining_ratio"] - early_help["refining_ratio"], 4),
-    }
-
-    help_distribution: dict[str, int] = {}
-    for point in timeline:
-        for help_type in point.ai_help_types:
-            help_distribution[help_type] = help_distribution.get(help_type, 0) + 1
-
-    reflection_scores = [point.reflection_quality for point in timeline]
-    reflection_quality = {
-        "count": len(reflection_scores),
-        "average_score": (int(round(sum(reflection_scores) / len(reflection_scores))) if reflection_scores else 0),
-        "average_chars": (
-            int(round(sum(point.reflection_char_count for point in timeline) / len(timeline))) if timeline else 0
-        ),
-    }
-
-    profile_assignments: list[StudentProfileAssignmentItem] = []
-    submitted_count = 0
-    reviewed_count = 0
-    returned_count = 0
-    normalized_scores: list[float] = []
-    for assignment in assignments:
-        assignment_rounds = rounds_by_assignment.get(assignment.id, [])
-        current = next((item for item in reversed(assignment_rounds) if item.is_current == 1), None)
-        if current is None:
-            profile_assignments.append(StudentProfileAssignmentItem(assignment=assignment))
-            continue
-
-        review = reviews.get(current.id)
-        review_status = review.review_status if review else "pending"
-        submitted_count += 1
-        if review_status == "reviewed":
-            reviewed_count += 1
-        elif review_status == "returned":
-            returned_count += 1
-        if review and review.score is not None:
-            normalized_scores.append(review.score / assignment.score_max * 100)
-        profile_assignments.append(
-            StudentProfileAssignmentItem(
-                assignment=assignment,
-                submission_id=current.id,
-                submitted_at=current.submitted_at,
-                round_no=current.round_no,
-                review_status=review_status,
-                score=review.score if review else None,
+        )
+    elif (
+        latest.ai_ratio is not None
+        and latest.ai_ratio >= 0.3
+        and latest.digestion_ratio is not None
+        and latest.digestion_ratio < 30
+        and latest.reflection_quality < 50
+        and latest.revision_depth is not None
+        and latest.revision_depth < 20
+        and score_not_improved
+    ):
+        candidates.append(
+            StudentProfileInsight(
+                code="ai_use_needs_review",
+                tone="warning",
+                params={
+                    "ai_ratio": latest.ai_ratio,
+                    "digestion_ratio": latest.digestion_ratio,
+                    "revision_depth": latest.revision_depth,
+                    "reflection_quality": latest.reflection_quality,
+                    "normalized_score": latest.normalized_score,
+                    "score_delta": latest_round.score_delta if latest_round else None,
+                },
+                action_code="reduce_ai_share_and_deepen_revision",
+                submission_id=latest.submission_id,
             )
         )
 
-    return StudentProfileResponse(
-        student_id=student_id,
-        student_name=student.name if student else student_id,
-        student_email=student.email if student else None,
-        classroom=classroom,
-        assignment_count=len(assignments),
-        submitted_count=submitted_count,
-        unsubmitted_count=len(assignments) - submitted_count,
-        reviewed_count=reviewed_count,
-        returned_count=returned_count,
-        average_score_percent=(
-            round(sum(normalized_scores) / len(normalized_scores), 1)
-            if normalized_scores
-            else None
+    def evidence_for(insight):
+        _, _, evidence_kind = _INSIGHT_META[insight.code]
+        if insight.code == "not_enough_data":
+            relevant = [point for point in timeline if point.is_current]
+            completeness = (
+                sum(
+                    sum(
+                        (
+                            point.data_completeness.version_data_complete,
+                            point.data_completeness.editor_operations_complete,
+                            point.data_completeness.source_tracking_complete,
+                            point.data_completeness.scoring_comparable,
+                        )
+                    )
+                    / 4
+                    for point in relevant
+                )
+                / len(relevant)
+                if relevant
+                else 0
+            )
+            return insight.model_copy(
+                update={
+                    "severity": "low",
+                    "confidence": 1,
+                    "sample_count": assignment_sample_count,
+                    "data_completeness": round(completeness, 2),
+                    "teaching_value": 5,
+                }
+            )
+        if evidence_kind == "round":
+            count = len(round_progress)
+            completeness = (
+                sum(
+                    int(item.score_delta is not None) + int(item.revision_ratio >= 0)
+                    for item in round_progress
+                )
+                / (count * 2)
+                if count
+                else 0
+            )
+        else:
+            if evidence_kind == "combined":
+                relevant = [
+                    point
+                    for point in timeline
+                    if point.data_completeness.source_tracking_complete
+                    and point.data_completeness.version_data_complete
+                    and point.data_completeness.scoring_comparable
+                ]
+            elif evidence_kind == "source":
+                relevant = [
+                    point
+                    for point in timeline
+                    if point.data_completeness.source_tracking_complete
+                ]
+            elif evidence_kind == "version":
+                relevant = [
+                    point
+                    for point in timeline
+                    if point.data_completeness.version_data_complete
+                ]
+            elif evidence_kind == "process":
+                relevant = [
+                    point
+                    for point in timeline
+                    if point.data_completeness.version_data_complete
+                    and point.data_completeness.editor_operations_complete
+                ]
+            else:
+                relevant = timeline
+            count = len(relevant)
+            completeness = (
+                sum(
+                    sum(
+                        (
+                            point.data_completeness.version_data_complete,
+                            point.data_completeness.editor_operations_complete,
+                            point.data_completeness.source_tracking_complete,
+                            point.data_completeness.scoring_comparable,
+                        )
+                    )
+                    / 4
+                    for point in relevant
+                )
+                / count
+                if count
+                else 0
+            )
+        confidence = min(count / _TREND_MIN_SAMPLES, 1.0) * completeness
+        severity, teaching_value, _ = _INSIGHT_META[insight.code]
+        return insight.model_copy(
+            update={
+                "severity": severity,
+                "confidence": round(confidence, 2),
+                "sample_count": count,
+                "data_completeness": round(completeness, 2),
+                "teaching_value": teaching_value,
+            }
+        )
+
+    enriched = [evidence_for(insight) for insight in candidates]
+    enriched.sort(
+        key=lambda insight: (
+            _INSIGHT_SEVERITY_WEIGHT[insight.severity],
+            insight.teaching_value,
+            insight.confidence,
         ),
-        assignments=profile_assignments,
-        timeline=timeline,
-        round_progress=round_progress,
-        trends=list(trends.values()),
-        ai_help_type_distribution=help_distribution,
-        ai_help_type_shift=help_shift,
-        reflection_quality=reflection_quality,
-        index_formula=_profile_index_formula(),
-        insights=_build_profile_insights(timeline, round_progress, trends, help_shift, reflection_quality),
+        reverse=True,
     )
+    return enriched[:_PROFILE_MAX_INSIGHTS]

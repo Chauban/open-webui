@@ -36,7 +36,13 @@ from open_webui.models.education import (
     Submission,
     SubmissionCreateForm,
     SubmissionReview,
+    StudentGrowthGoal,
+    StudentProfileHelpTypeShift,
+    StudentProfileHelpTypeSummary,
+    StudentProfileMetricTrend,
+    StudentProfileReflectionQuality,
     StudentProfileSnapshot,
+    TeacherStudentNote,
     WritingSession,
     WritingVersion,
 )
@@ -71,6 +77,14 @@ def _reflection_payload(
         "judgement": judgement,
         "next_step": next_step,
         "other_ai_help": other_ai_help,
+    }
+
+
+def _evidence_completeness(source_tracking_complete=True):
+    return {
+        "version_data_complete": True,
+        "editor_operations_complete": True,
+        "source_tracking_complete": source_tracking_complete,
     }
 
 
@@ -405,6 +419,7 @@ def _prepare_assignment_flow(client, teacher, student):
             "final_content_text": "AI outline draft. My final draft. This looks like a very large typed burst that should be treated as suspicious imported text for teacher review.",
             "ai_used": True,
             "ai_help_types": ["Outline"],
+            "data_completeness": _evidence_completeness(),
             "reflection": _reflection_payload(),
         },
     )
@@ -461,6 +476,8 @@ def education_client():
             Submission.__table__,
             SubmissionReview.__table__,
             StudentProfileSnapshot.__table__,
+            StudentGrowthGoal.__table__,
+            TeacherStudentNote.__table__,
             EducationNotification.__table__,
         ]:
             table.create(bind=engine, checkfirst=True)
@@ -628,7 +645,7 @@ def test_education_classroom_main_flow(education_client):
         "/api/v1/classrooms/join",
         json={"invite_code": second_classroom["invite_code"]},
     )
-    assert rejoin_res.status_code == 400, rejoin_res.text
+    assert rejoin_res.status_code == 200, rejoin_res.text
 
     UserContext.current_user = outsider
     foreign_workspace_res = client.get(
@@ -681,6 +698,7 @@ def test_submission_accepts_multiple_ai_help_types(education_client):
             "final_content_text": "I revised the essay after reviewing AI suggestions.",
             "ai_used": True,
             "ai_help_types": ["Outline", "Examples", "Strengthen Reasoning"],
+            "data_completeness": _evidence_completeness(),
             "reflection": _reflection_payload(),
         },
     )
@@ -714,6 +732,7 @@ def test_student_resubmission_overwrites_previous_submission(education_client):
             "final_content_text": "Second final draft with substantial revisions.",
             "ai_used": True,
             "ai_help_types": ["Polish"],
+            "data_completeness": _evidence_completeness(),
             "reflection": _reflection_payload(),
         },
     )
@@ -796,6 +815,7 @@ def test_student_cannot_submit_after_assignment_due_time(education_client):
             "final_content_text": "Late submission.",
             "ai_used": True,
             "ai_help_types": ["Outline"],
+            "data_completeness": _evidence_completeness(),
             "reflection": _reflection_payload(),
         },
     )
@@ -1179,7 +1199,7 @@ def test_teacher_classroom_listing_and_member_management(education_client):
         f"/api/v1/teacher/classrooms/{second_classroom['id']}/members",
         json={"user_id": student.id},
     )
-    assert repeat_classroom_link_res.status_code == 400, repeat_classroom_link_res.text
+    assert repeat_classroom_link_res.status_code == 200, repeat_classroom_link_res.text
 
     remove_teacher_res = client.delete(
         f"/api/v1/teacher/classrooms/{first_classroom['id']}/members/{teacher.id}"
@@ -1283,6 +1303,7 @@ def test_workspace_editing_and_submission_validation(education_client):
             "final_content_text": "Too short reflection test.",
             "ai_used": True,
             "ai_help_types": ["Outline"],
+            "data_completeness": _evidence_completeness(),
             "reflection": _reflection_payload(action="Too short"),
         },
     )
@@ -1788,6 +1809,7 @@ def _submit_body(session_id: str, text: str):
         "final_content_text": text,
         "ai_used": True,
         "ai_help_types": ["Outline"],
+        "data_completeness": _evidence_completeness(),
         "reflection": _reflection_payload(),
     }
 
@@ -2604,6 +2626,7 @@ def test_submission_form_allows_no_ai_and_rejects_unknown_help_types():
         final_content_text="student draft",
         ai_used=False,
         ai_help_types=[],
+        data_completeness=_evidence_completeness(),
         reflection=_reflection_payload(),
     )
     assert form.ai_help_types == []
@@ -2613,6 +2636,7 @@ def test_submission_form_allows_no_ai_and_rejects_unknown_help_types():
             final_content_text="draft",
             ai_used=True,
             ai_help_types=["Magic answer generator"],
+            data_completeness=_evidence_completeness(),
             reflection=_reflection_payload(),
         )
 
@@ -2721,13 +2745,19 @@ def test_student_profile_tracks_round_progress_and_trends(
     assert profile_res.status_code == 200, profile_res.text
     profile = profile_res.json()
 
-    assert profile["metric_version"] == "2026-09-01.1"
+    assert profile["metric_version"] == "2026-09-01.2"
 
     # 两轮都进时间线:成长看的是轮次之间的变化,历史轮不能丢。
     assert [point["round_no"] for point in profile["timeline"]] == [1, 2]
     assert [point["score"] for point in profile["timeline"]] == [70, 88]
     assert profile["timeline"][0]["is_current"] is False
     assert profile["timeline"][1]["is_current"] is True
+    # 客户端确认编辑事件采集链路已完整落盘时，零条操作是真实的 0，
+    # 不能再被误判成采集缺失。
+    assert profile["timeline"][0]["data_completeness"][
+        "editor_operations_complete"
+    ] is True
+    assert profile["timeline"][0]["active_writing_seconds"] == 0
     # 当前轮才计入作业统计与平均分
     assert profile["submitted_count"] == 1
     assert profile["average_score_percent"] == 88
@@ -2788,6 +2818,108 @@ def test_student_profile_requires_classroom_membership(education_client):
         f"/api/v1/teacher/classrooms/{classroom_id}/students/{student.id}/profile"
     )
     assert forbidden.status_code == 403, forbidden.text
+
+
+def test_multi_class_assignments_growth_goals_and_teacher_notes(education_client):
+    client, teacher, _, student, _, _ = education_client
+    UserContext.current_user = teacher
+
+    classrooms = []
+    assignments = []
+    for index in (1, 2):
+        classroom_response = client.post(
+            "/api/v1/classrooms", json={"name": f"Writing Class {index}"}
+        )
+        assert classroom_response.status_code == 200, classroom_response.text
+        classroom = classroom_response.json()["classroom"]
+        classrooms.append(classroom)
+        member_response = client.post(
+            f"/api/v1/teacher/classrooms/{classroom['id']}/members",
+            json={"user_id": student.id, "member_role": "student"},
+        )
+        assert member_response.status_code == 200, member_response.text
+        assignment_response = client.post(
+            "/api/v1/assignments",
+            json={
+                "title": f"Essay {index}",
+                "description": "Multi-class assignment",
+                "classroom_ids": [classroom["id"]],
+                "score_max": 100,
+                "rubric_schema": _rubric_schema(),
+                "due_at": 2100000000,
+            },
+        )
+        assert assignment_response.status_code == 200, assignment_response.text
+        assignments.append(assignment_response.json()[0])
+
+    UserContext.current_user = student
+    assignment_list = client.get("/api/v1/me/writing/assignments")
+    assert assignment_list.status_code == 200, assignment_list.text
+    assignment_memberships = {
+        item["assignment"]["id"]: item["membership"]["classroom_id"]
+        for item in assignment_list.json()
+    }
+    assert assignment_memberships == {
+        assignments[0]["id"]: classrooms[0]["id"],
+        assignments[1]["id"]: classrooms[1]["id"],
+    }
+
+    home = client.get("/api/v1/me/writing/home")
+    assert home.status_code == 200, home.text
+    assert {item["id"] for item in home.json()["classrooms"]} == {
+        classrooms[0]["id"],
+        classrooms[1]["id"],
+    }
+
+    goal_response = client.post(
+        "/api/v1/me/writing/goals",
+        json={
+            "goal_text": "Create the outline two days before the next deadline",
+            "classroom_id": classrooms[1]["id"],
+            "assignment_id": assignments[1]["id"],
+            "target_at": 2000000000,
+        },
+    )
+    assert goal_response.status_code == 200, goal_response.text
+    goal = goal_response.json()
+    completed_goal = client.patch(
+        f"/api/v1/me/writing/goals/{goal['id']}",
+        json={"status": "completed"},
+    )
+    assert completed_goal.status_code == 200, completed_goal.text
+    assert completed_goal.json()["status"] == "completed"
+
+    student_profile = client.get("/api/v1/me/writing/profile")
+    assert student_profile.status_code == 200, student_profile.text
+    assert {item["id"] for item in student_profile.json()["classrooms"]} == {
+        classrooms[0]["id"],
+        classrooms[1]["id"],
+    }
+    assert student_profile.json()["growth_goals"][0]["id"] == goal["id"]
+    assert student_profile.json()["teacher_notes"] == []
+
+    UserContext.current_user = teacher
+    note_response = client.post(
+        f"/api/v1/teacher/classrooms/{classrooms[0]['id']}/students/{student.id}/profile-notes",
+        json={"content": "Follow up on outline planning next week."},
+    )
+    assert note_response.status_code == 200, note_response.text
+    note = note_response.json()
+
+    teacher_profile = client.get(
+        f"/api/v1/teacher/classrooms/{classrooms[0]['id']}/students/{student.id}/profile"
+    )
+    assert teacher_profile.status_code == 200, teacher_profile.text
+    assert teacher_profile.json()["teacher_notes"][0]["id"] == note["id"]
+    assert teacher_profile.json()["classrooms"][0]["id"] == classrooms[0]["id"]
+
+    updated_note = client.patch(
+        f"/api/v1/teacher/profile-notes/{note['id']}",
+        json={"content": "Outline planning improved; check evidence selection next."},
+    )
+    assert updated_note.status_code == 200, updated_note.text
+    deleted_note = client.delete(f"/api/v1/teacher/profile-notes/{note['id']}")
+    assert deleted_note.status_code == 200, deleted_note.text
 
 
 def test_analysis_payload_usability_treats_history_as_immutable():
@@ -2902,3 +3034,57 @@ def test_profile_trend_compares_early_and_recent_windows():
     assert trend.delta == 22
     assert trend.direction == "up"
     assert education_profile_module._build_trend("score", [60, 80]) is None
+
+
+def test_profile_insights_rank_confidence_and_combine_ai_evidence():
+    completeness = SimpleNamespace(
+        version_data_complete=True,
+        editor_operations_complete=True,
+        source_tracking_complete=True,
+        scoring_comparable=True,
+    )
+    timeline = [
+        SimpleNamespace(
+            assignment_id=f"assignment-{index}",
+            is_current=True,
+            submission_id=f"submission-{index}",
+            ai_ratio=0.4,
+            digestion_ratio=20,
+            reflection_quality=30,
+            revision_depth=10,
+            normalized_score=70,
+            deadline_window_ratio=0.2,
+            data_completeness=completeness,
+        )
+        for index in range(3)
+    ]
+    round_progress = [
+        SimpleNamespace(score_delta=0, revision_ratio=5),
+    ]
+    trends = {
+        "normalized_score": StudentProfileMetricTrend(
+            key="normalized_score",
+            first=70,
+            last=70,
+            delta=0,
+            direction="flat",
+            sample_count=3,
+        )
+    }
+    help_shift = StudentProfileHelpTypeShift(
+        early=StudentProfileHelpTypeSummary(),
+        recent=StudentProfileHelpTypeSummary(),
+    )
+    reflection_quality = StudentProfileReflectionQuality(
+        count=3, average_score=30, average_chars=20
+    )
+
+    insights = education_profile_module._build_profile_insights(
+        timeline, round_progress, trends, help_shift, reflection_quality
+    )
+
+    assert insights[0].severity == "high"
+    assert insights[0].teaching_value == 5
+    assert all(0 <= insight.confidence <= 1 for insight in insights)
+    assert all(insight.sample_count >= 0 for insight in insights)
+    assert "ai_use_needs_review" in {insight.code for insight in insights}

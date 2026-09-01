@@ -18,6 +18,8 @@ EDUCATION_TABLES = {
     "submission",
     "submission_review",
     "student_profile_snapshot",
+    "student_growth_goal",
+    "teacher_student_note",
     "writing_session",
     "writing_version",
 }
@@ -74,5 +76,11 @@ def test_fresh_database_upgrades_to_head(tmp_path, monkeypatch):
             "metric_version",
             "snapshot_json",
         } <= snapshot_columns
+        assert {"student_id", "goal_text", "status", "target_at"} <= {
+            column["name"] for column in schema.get_columns("student_growth_goal")
+        }
+        assert {"teacher_id", "classroom_id", "student_id", "content"} <= {
+            column["name"] for column in schema.get_columns("teacher_student_note")
+        }
     finally:
         engine.dispose()

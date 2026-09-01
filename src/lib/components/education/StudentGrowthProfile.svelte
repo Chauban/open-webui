@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { createEventDispatcher, getContext } from 'svelte';
 	import { get } from 'svelte/store';
+	import { toast } from 'svelte-sonner';
 
 	import EduBadge from './EduBadge.svelte';
 	import EduButton from './EduButton.svelte';
@@ -17,6 +18,12 @@
 		StudentProfileInsight,
 		StudentProfileInsightParams
 	} from '$lib/apis/education/types';
+	import {
+		createGrowthGoal,
+		createTeacherStudentNote,
+		deleteTeacherStudentNote,
+		updateGrowthGoal
+	} from '$lib/apis/education';
 	import {
 		formatDuration,
 		formatRatioPercent,
@@ -48,6 +55,12 @@
 	let assignmentFilter = filters.assignment_id ?? '';
 	let roundFilter = filters.round_no ? `${filters.round_no}` : '';
 	let assignmentOptions: StudentProfile['assignments'] = [];
+	let goalText = '';
+	let goalTargetDate = '';
+	let goalClassroomId = '';
+	let noteContent = '';
+	let savingGoal = false;
+	let savingNote = false;
 	type CompletenessItem = { label: string; complete: boolean };
 
 	const sections: Array<{ key: Section; label: string }> = [
@@ -107,6 +120,14 @@
 		reflection_thin: (p) => [
 			'Reflections are mostly generic (average quality {{score}}/100).',
 			{ score: p.average_score ?? 0 }
+		],
+		ai_revision_productive: (p) => [
+			'AI use, rewriting, reflection, revision depth, and score evidence point in the same productive direction.',
+			{}
+		],
+		ai_use_needs_review: (p) => [
+			'High AI share currently coincides with shallow rewriting, reflection, and revision without score improvement.',
+			{}
 		]
 	};
 
@@ -127,7 +148,11 @@
 			'Next: create the outline at least two days before the deadline.',
 		keep_current_process: 'Next: keep the current revision and pacing routine.',
 		add_specific_reflection_evidence:
-			'Next: name the exact change, location, reason, and next step.'
+			'Next: name the exact change, location, reason, and next step.',
+		repeat_productive_ai_revision:
+			'Next: repeat this pattern—question, rewrite, reflect, and verify the result against the rubric.',
+		reduce_ai_share_and_deepen_revision:
+			'Next: reduce generated text in one section and rebuild it through deeper revision and evidence.'
 	};
 
 	const renderInsight = (insight: StudentProfileInsight) => {
@@ -243,6 +268,77 @@
 		roundFilter = '';
 		dispatch('filter', {});
 	};
+
+	const addGoal = async () => {
+		if (!profile || goalText.trim().length < 5 || savingGoal) return;
+		savingGoal = true;
+		try {
+			const goal = await createGrowthGoal(localStorage.token, {
+				goal_text: goalText.trim(),
+				classroom_id:
+					goalClassroomId ||
+					(profile.classrooms.length === 1 ? profile.classrooms[0].id : undefined),
+				target_at: dateToSeconds(goalTargetDate, true)
+			});
+			profile.growth_goals = [goal, ...profile.growth_goals];
+			profile = profile;
+			goalText = '';
+			goalTargetDate = '';
+			goalClassroomId = '';
+			toast.success(t('Growth goal added'));
+		} catch (error) {
+			toast.error(`${error?.detail ?? error}`);
+		} finally {
+			savingGoal = false;
+		}
+	};
+
+	const toggleGoal = async (goalId: string, completed: boolean) => {
+		if (!profile) return;
+		try {
+			const updated = await updateGrowthGoal(localStorage.token, goalId, {
+				status: completed ? 'active' : 'completed'
+			});
+			profile.growth_goals = profile.growth_goals.map((goal) =>
+				goal.id === goalId ? updated : goal
+			);
+			profile = profile;
+		} catch (error) {
+			toast.error(`${error?.detail ?? error}`);
+		}
+	};
+
+	const addTeacherNote = async () => {
+		if (!profile || noteContent.trim().length < 2 || savingNote || !profile.classrooms[0]) return;
+		savingNote = true;
+		try {
+			const note = await createTeacherStudentNote(
+				localStorage.token,
+				profile.classrooms[0].id,
+				profile.student_id,
+				{ content: noteContent.trim() }
+			);
+			profile.teacher_notes = [note, ...profile.teacher_notes];
+			profile = profile;
+			noteContent = '';
+			toast.success(t('Teacher note added'));
+		} catch (error) {
+			toast.error(`${error?.detail ?? error}`);
+		} finally {
+			savingNote = false;
+		}
+	};
+
+	const removeTeacherNote = async (noteId: string) => {
+		if (!profile) return;
+		try {
+			await deleteTeacherStudentNote(localStorage.token, noteId);
+			profile.teacher_notes = profile.teacher_notes.filter((note) => note.id !== noteId);
+			profile = profile;
+		} catch (error) {
+			toast.error(`${error?.detail ?? error}`);
+		}
+	};
 </script>
 
 {#if !profile}
@@ -346,6 +442,17 @@
 								</EduBadge>
 								<div class="min-w-0 flex-1">
 									<div class="text-gray-700 dark:text-gray-300">{renderInsight(insight)}</div>
+									<div
+										class="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400"
+									>
+										<span>{$i18n.t('Samples')}: {insight.sample_count}</span>
+										<span
+											>{$i18n.t('Data completeness')}: {Math.round(
+												insight.data_completeness * 100
+											)}%</span
+										>
+										<span>{$i18n.t('Confidence')}: {Math.round(insight.confidence * 100)}%</span>
+									</div>
 									{#if insight.action_code && INSIGHT_ACTION_TEXT[insight.action_code]}
 										<div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
 											{$i18n.t(INSIGHT_ACTION_TEXT[insight.action_code])}
@@ -364,6 +471,130 @@
 							</li>
 						{/each}
 					</ul>
+				</EduCard>
+			{/if}
+
+			<EduCard>
+				<div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+					<div class="text-sm font-semibold">{$i18n.t('Growth goals')}</div>
+					{#if profile.data_completeness.overall_ratio != null}
+						<EduBadge>
+							{$i18n.t('Overall data completeness')}: {Math.round(
+								profile.data_completeness.overall_ratio * 100
+							)}%
+						</EduBadge>
+					{/if}
+				</div>
+				{#if variant === 'student'}
+					<div class="mb-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_auto_auto_auto]">
+						<input
+							class="min-w-0 rounded-lg border border-gray-200 bg-transparent px-3 py-2 text-sm dark:border-gray-700"
+							bind:value={goalText}
+							maxlength="500"
+							placeholder={$i18n.t('Example: create an outline two days before the next deadline')}
+						/>
+						{#if profile.classrooms.length > 1}
+							<select
+								class="rounded-lg border border-gray-200 bg-transparent px-3 py-2 text-sm dark:border-gray-700"
+								bind:value={goalClassroomId}
+								aria-label={$i18n.t('Goal classroom')}
+							>
+								<option value="">{$i18n.t('All classes')}</option>
+								{#each profile.classrooms as classroom}
+									<option value={classroom.id}>{classroom.name}</option>
+								{/each}
+							</select>
+						{/if}
+						<input
+							class="rounded-lg border border-gray-200 bg-transparent px-3 py-2 text-sm dark:border-gray-700"
+							type="date"
+							aria-label={$i18n.t('Target date')}
+							bind:value={goalTargetDate}
+						/>
+						<EduButton
+							variant="primary"
+							disabled={savingGoal || goalText.trim().length < 5}
+							on:click={addGoal}
+						>
+							{$i18n.t('Add goal')}
+						</EduButton>
+					</div>
+				{/if}
+				{#if profile.growth_goals.length}
+					<div class="space-y-2">
+						{#each profile.growth_goals as goal}
+							<div
+								class="flex flex-col gap-2 rounded-lg border border-gray-200 px-3 py-2 sm:flex-row sm:items-center sm:justify-between dark:border-gray-800"
+							>
+								<div class:line-through={goal.status === 'completed'} class="text-sm">
+									{goal.goal_text}
+									{#if goal.target_at}
+										<span class="ml-2 text-xs text-gray-500"
+											>{new Date(goal.target_at * 1000).toLocaleDateString()}</span
+										>
+									{/if}
+								</div>
+								{#if variant === 'student'}
+									<EduButton
+										size="sm"
+										on:click={() => toggleGoal(goal.id, goal.status === 'completed')}
+									>
+										{$i18n.t(goal.status === 'completed' ? 'Reopen' : 'Complete goal')}
+									</EduButton>
+								{:else}
+									<EduBadge tone={goal.status === 'completed' ? 'emerald' : 'gray'}>
+										{$i18n.t(goal.status === 'completed' ? 'Completed' : 'Active')}
+									</EduBadge>
+								{/if}
+							</div>
+						{/each}
+					</div>
+				{:else}
+					<EduEmpty>{$i18n.t('No growth goals yet.')}</EduEmpty>
+				{/if}
+			</EduCard>
+
+			{#if variant === 'teacher'}
+				<EduCard>
+					<div class="mb-3 text-sm font-semibold">
+						{$i18n.t('Teacher observations and coaching notes')}
+					</div>
+					<div class="mb-4 flex flex-col gap-2 sm:flex-row">
+						<textarea
+							class="min-h-20 flex-1 rounded-lg border border-gray-200 bg-transparent px-3 py-2 text-sm dark:border-gray-700"
+							bind:value={noteContent}
+							maxlength="2000"
+							placeholder={$i18n.t('Record an observation or coaching follow-up')}
+						></textarea>
+						<EduButton
+							variant="primary"
+							disabled={savingNote || noteContent.trim().length < 2}
+							on:click={addTeacherNote}
+						>
+							{$i18n.t('Add note')}
+						</EduButton>
+					</div>
+					{#if profile.teacher_notes.length}
+						<div class="space-y-2">
+							{#each profile.teacher_notes as note}
+								<div
+									class="flex items-start justify-between gap-3 rounded-lg border border-gray-200 px-3 py-2 dark:border-gray-800"
+								>
+									<div>
+										<div class="whitespace-pre-wrap text-sm">{note.content}</div>
+										<div class="mt-1 text-xs text-gray-500">
+											{new Date(note.observed_at * 1000).toLocaleString()}
+										</div>
+									</div>
+									<EduButton size="sm" variant="danger" on:click={() => removeTeacherNote(note.id)}>
+										{$i18n.t('Delete')}
+									</EduButton>
+								</div>
+							{/each}
+						</div>
+					{:else}
+						<EduEmpty>{$i18n.t('No teacher notes yet.')}</EduEmpty>
+					{/if}
 				</EduCard>
 			{/if}
 
@@ -396,7 +627,10 @@
 		<!-- 产出维：分数没有统一满分，所以只呈现原值与变化，不折算成任何指数。 -->
 		{#if activeSection === 'output'}
 			<EduCard>
-				<div class="mb-1 text-sm font-semibold">{$i18n.t('Output')}</div>
+				<div class="mb-1 flex flex-wrap items-center gap-2 text-sm font-semibold">
+					{$i18n.t('Output')}
+					<EduBadge>{$i18n.t('Cross-assignment growth')}</EduBadge>
+				</div>
 				<div class="mb-5 text-xs text-gray-500 dark:text-gray-400">
 					{$i18n.t(
 						'Scores are normalized by each assignment maximum before they are compared over time.'
@@ -480,7 +714,10 @@
 		<!-- 过程维 -->
 		{#if activeSection === 'process'}
 			<EduCard>
-				<div class="mb-1 text-sm font-semibold">{$i18n.t('Writing Process')}</div>
+				<div class="mb-1 flex flex-wrap items-center gap-2 text-sm font-semibold">
+					{$i18n.t('Writing Process')}
+					<EduBadge>{$i18n.t('Cross-assignment growth')}</EduBadge>
+				</div>
 				<div class="mb-5 text-xs text-gray-500 dark:text-gray-400">
 					{$i18n.t('How the draft was built: revisions, time span, and whether it was rushed.')}
 				</div>
@@ -553,7 +790,10 @@
 		<!-- AI 协作维：AI 占比本身不评好坏，真正有教学意义的是「消化度」。 -->
 		{#if activeSection === 'ai'}
 			<EduCard>
-				<div class="mb-1 text-sm font-semibold">{$i18n.t('AI Collaboration')}</div>
+				<div class="mb-1 flex flex-wrap items-center gap-2 text-sm font-semibold">
+					{$i18n.t('AI Collaboration')}
+					<EduBadge>{$i18n.t('Cross-assignment growth')}</EduBadge>
+				</div>
 				<div class="mb-5 text-xs text-gray-500 dark:text-gray-400">
 					{$i18n.t(
 						'A high AI share is not good or bad by itself. What matters is how much of it was rewritten.'
@@ -658,7 +898,10 @@
 		<!-- 轮次进步：退回—重交之间的改动幅度 -->
 		{#if activeSection === 'rounds'}
 			<EduCard>
-				<div class="mb-1 text-sm font-semibold">{$i18n.t('Revision Between Rounds')}</div>
+				<div class="mb-1 flex flex-wrap items-center gap-2 text-sm font-semibold">
+					{$i18n.t('Revision Between Rounds')}
+					<EduBadge>{$i18n.t('Same-assignment round improvement')}</EduBadge>
+				</div>
 				<div class="mb-4 text-xs text-gray-500 dark:text-gray-400">
 					{$i18n.t('How much changed after the teacher returned the work.')}
 				</div>

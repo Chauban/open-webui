@@ -5,7 +5,9 @@ from sqlalchemy.orm import Session
 
 from open_webui.models.education import (
     Education,
+    SubmissionEvidenceCompleteness,
     StudentProfileAssignmentItem,
+    StudentProfileCompletenessSummary,
     StudentProfileDataCompleteness,
     StudentProfileHelpTypeShift,
     StudentProfileReflectionQuality,
@@ -85,7 +87,14 @@ def refresh_student_profile_snapshot(
         previous_submission.final_version_id if previous_submission else None,
         submission.final_version_id,
     )
-    version_data_complete = final_version is not None and bool(round_versions)
+    capture_status = SubmissionEvidenceCompleteness.model_validate(
+        submission.stats_json["data_completeness"]
+    )
+    version_data_complete = (
+        capture_status.version_data_complete
+        and final_version is not None
+        and bool(round_versions)
+    )
     window_start_at = round_versions[0].created_at if round_versions else submission.submitted_at
     previous_final_text = (previous_final_version.note_snapshot_text or "") if previous_final_version else ""
     final_text = (final_version.note_snapshot_text or "") if final_version else ""
@@ -99,9 +108,9 @@ def refresh_student_profile_snapshot(
         for operation in Education.get_editor_operations(session.id, db=db)
         if window_start_at <= operation.created_at <= submission.submitted_at
     ]
-    editor_operations_complete = bool(operations)
+    editor_operations_complete = capture_status.editor_operations_complete
     active_writing_seconds = (
-        _estimate_active_writing_seconds([operation.created_at for operation in operations])
+        _estimate_active_writing_seconds([operation.created_at for operation in operations]) or 0
         if editor_operations_complete
         else None
     )
@@ -120,7 +129,9 @@ def refresh_student_profile_snapshot(
         _compute_deadline_window_ratio(version_diffs, round_due_at) if version_data_complete else None
     )
 
-    source_tracking_complete = bool(summary.get("source_tracking_complete", False))
+    source_tracking_complete = capture_status.source_tracking_complete and bool(
+        summary.get("source_tracking_complete", False)
+    )
     ai_ratio = (
         round(
             float(summary.get("ai_inserted_ratio", 0)) + float(summary.get("ai_pasted_ratio", 0)),
@@ -225,7 +236,7 @@ def refresh_student_profile_snapshot(
 async def build_student_profile(
     student,
     student_id: str,
-    classroom,
+    classrooms: list,
     assignments: list,
     db: Session,
     *,
@@ -233,6 +244,7 @@ async def build_student_profile(
     end_at: Optional[int] = None,
     assignment_id: Optional[str] = None,
     round_no: Optional[int] = None,
+    teacher_notes: Optional[list] = None,
 ) -> StudentProfileResponse:
     assignment_by_id = {assignment.id: assignment for assignment in assignments}
     if assignment_id is not None:
@@ -273,9 +285,14 @@ async def build_student_profile(
         if snapshot.snapshot_json.round_progress is not None
     ]
 
+    # 跨作业成长只比较每份作业的当前轮；同一作业的重交变化由
+    # round_progress 单独表达，不能混入跨作业趋势样本。
+    cross_assignment_points = [point for point in timeline if point.is_current]
     trends = {}
     for key in _PROFILE_TREND_KEYS:
-        trend = _build_trend(key, [getattr(point, key) for point in timeline])
+        trend = _build_trend(
+            key, [getattr(point, key) for point in cross_assignment_points]
+        )
         if trend is not None:
             trends[key] = trend
 
@@ -302,6 +319,40 @@ async def build_student_profile(
         average_score=(int(round(sum(reflection_scores) / len(reflection_scores))) if reflection_scores else None),
         average_chars=(
             int(round(sum(point.reflection_char_count for point in timeline) / len(timeline))) if timeline else None
+        ),
+    )
+    completeness = StudentProfileCompletenessSummary(
+        point_count=len(timeline),
+        version_complete_count=sum(
+            point.data_completeness.version_data_complete for point in timeline
+        ),
+        editor_operations_complete_count=sum(
+            point.data_completeness.editor_operations_complete for point in timeline
+        ),
+        source_tracking_complete_count=sum(
+            point.data_completeness.source_tracking_complete for point in timeline
+        ),
+        scoring_comparable_count=sum(
+            point.data_completeness.scoring_comparable for point in timeline
+        ),
+        overall_ratio=(
+            round(
+                sum(
+                    sum(
+                        (
+                            point.data_completeness.version_data_complete,
+                            point.data_completeness.editor_operations_complete,
+                            point.data_completeness.source_tracking_complete,
+                            point.data_completeness.scoring_comparable,
+                        )
+                    )
+                    for point in timeline
+                )
+                / (len(timeline) * 4),
+                4,
+            )
+            if timeline
+            else None
         ),
     )
 
@@ -336,7 +387,7 @@ async def build_student_profile(
         student_id=student_id,
         student_name=student.name if student else student_id,
         student_email=student.email if student else None,
-        classroom=classroom,
+        classrooms=classrooms,
         assignment_count=len(scoped_assignments),
         submitted_count=submitted_count,
         unsubmitted_count=len(scoped_assignments) - submitted_count,
@@ -354,4 +405,11 @@ async def build_student_profile(
         reflection_quality=reflection_quality,
         index_formula=_profile_index_formula(),
         insights=_build_profile_insights(timeline, round_progress, trends, help_shift, reflection_quality),
+        data_completeness=completeness,
+        growth_goals=Education.get_student_growth_goals(
+            student_id,
+            classroom_ids=[classroom.id for classroom in classrooms],
+            db=db,
+        ),
+        teacher_notes=teacher_notes or [],
     )

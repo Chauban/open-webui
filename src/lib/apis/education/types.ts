@@ -86,6 +86,7 @@ export type StudentProfileMetricTrend = {
 	delta: number;
 	direction: 'up' | 'down' | 'flat';
 	sample_count: number;
+	comparison_scope: 'cross_assignment';
 };
 
 export type StudentProfileInsightParams = {
@@ -98,6 +99,10 @@ export type StudentProfileInsightParams = {
 	revision_ratio?: number | null;
 	ratio?: number | null;
 	average_score?: number | null;
+	normalized_score?: number | null;
+	revision_depth?: number | null;
+	reflection_quality?: number | null;
+	score_delta?: number | null;
 };
 
 export type StudentProfileInsight = {
@@ -106,6 +111,11 @@ export type StudentProfileInsight = {
 	params: StudentProfileInsightParams;
 	action_code: string | null;
 	submission_id: string | null;
+	severity: 'low' | 'medium' | 'high';
+	confidence: number;
+	sample_count: number;
+	data_completeness: number;
+	teaching_value: number;
 };
 
 export type StudentProfileRoundProgress = {
@@ -117,6 +127,30 @@ export type StudentProfileRoundProgress = {
 	revision_ratio: number;
 	score_delta: number | null;
 	turnaround_seconds: number | null;
+	comparison_scope: 'same_assignment_rounds';
+};
+
+export type StudentGrowthGoal = {
+	id: string;
+	student_id: string;
+	classroom_id: string | null;
+	assignment_id: string | null;
+	goal_text: string;
+	target_at: number | null;
+	status: 'active' | 'completed' | 'archived';
+	created_at: number;
+	updated_at: number;
+};
+
+export type TeacherStudentNote = {
+	id: string;
+	teacher_id: string;
+	classroom_id: string;
+	student_id: string;
+	content: string;
+	observed_at: number;
+	created_at: number;
+	updated_at: number;
 };
 
 export type ProfileFormulaTerm = {
@@ -149,7 +183,7 @@ export type StudentProfile = {
 	student_id: string;
 	student_name: string | null;
 	student_email: string | null;
-	classroom: ({ id: string; name: string } & Record<string, unknown>) | null;
+	classrooms: Array<{ id: string; name: string } & Record<string, unknown>>;
 	assignment_count: number;
 	submitted_count: number;
 	unsubmitted_count: number;
@@ -180,6 +214,16 @@ export type StudentProfile = {
 	};
 	index_formula: StudentProfileIndexFormula;
 	insights: StudentProfileInsight[];
+	data_completeness: {
+		point_count: number;
+		version_complete_count: number;
+		editor_operations_complete_count: number;
+		source_tracking_complete_count: number;
+		scoring_comparable_count: number;
+		overall_ratio: number | null;
+	};
+	growth_goals: StudentGrowthGoal[];
+	teacher_notes: TeacherStudentNote[];
 };
 
 export type StudentProfileFilters = {

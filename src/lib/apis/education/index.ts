@@ -1,5 +1,10 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
-import type { StudentProfile, StudentProfileFilters } from './types';
+import type {
+	StudentGrowthGoal,
+	StudentProfile,
+	StudentProfileFilters,
+	TeacherStudentNote
+} from './types';
 import { buildProfileQuery } from '$lib/utils/growth-profile';
 
 export type * from './types';
@@ -403,6 +408,11 @@ export const submitAssignment = async (
 		final_content_text: string;
 		ai_used: boolean;
 		ai_help_types: string[];
+		data_completeness: {
+			version_data_complete: boolean;
+			editor_operations_complete: boolean;
+			source_tracking_complete: boolean;
+		};
 		reflection: {
 			action: string;
 			location: string;
@@ -593,6 +603,73 @@ export const getMyWritingProfile = async (
 	const suffix = query ? `?${query}` : '';
 	return fetch(`${WEBUI_API_BASE_URL}/me/writing/profile${suffix}`, {
 		method: 'GET',
+		headers: withAuth(token)
+	}).then(handleJson);
+};
+
+export const createGrowthGoal = async (
+	token: string,
+	payload: {
+		goal_text: string;
+		classroom_id?: string;
+		assignment_id?: string;
+		target_at?: number;
+	}
+): Promise<StudentGrowthGoal> => {
+	return fetch(`${WEBUI_API_BASE_URL}/me/writing/goals`, {
+		method: 'POST',
+		headers: withAuth(token),
+		body: JSON.stringify(payload)
+	}).then(handleJson);
+};
+
+export const updateGrowthGoal = async (
+	token: string,
+	goalId: string,
+	payload: {
+		goal_text?: string;
+		target_at?: number | null;
+		status?: 'active' | 'completed' | 'archived';
+	}
+): Promise<StudentGrowthGoal> => {
+	return fetch(`${WEBUI_API_BASE_URL}/me/writing/goals/${goalId}`, {
+		method: 'PATCH',
+		headers: withAuth(token),
+		body: JSON.stringify(payload)
+	}).then(handleJson);
+};
+
+export const createTeacherStudentNote = async (
+	token: string,
+	classroomId: string,
+	studentUserId: string,
+	payload: { content: string; observed_at?: number }
+): Promise<TeacherStudentNote> => {
+	return fetch(
+		`${WEBUI_API_BASE_URL}/teacher/classrooms/${classroomId}/students/${studentUserId}/profile-notes`,
+		{
+			method: 'POST',
+			headers: withAuth(token),
+			body: JSON.stringify(payload)
+		}
+	).then(handleJson);
+};
+
+export const updateTeacherStudentNote = async (
+	token: string,
+	noteId: string,
+	payload: { content?: string; observed_at?: number }
+): Promise<TeacherStudentNote> => {
+	return fetch(`${WEBUI_API_BASE_URL}/teacher/profile-notes/${noteId}`, {
+		method: 'PATCH',
+		headers: withAuth(token),
+		body: JSON.stringify(payload)
+	}).then(handleJson);
+};
+
+export const deleteTeacherStudentNote = async (token: string, noteId: string) => {
+	return fetch(`${WEBUI_API_BASE_URL}/teacher/profile-notes/${noteId}`, {
+		method: 'DELETE',
 		headers: withAuth(token)
 	}).then(handleJson);
 };
