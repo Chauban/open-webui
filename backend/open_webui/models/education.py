@@ -210,6 +210,21 @@ class SubmissionReview(Base):
     updated_at = Column(BigInteger, nullable=False)
 
 
+class StudentProfileSnapshot(Base):
+    __tablename__ = "student_profile_snapshot"
+
+    id = Column(Text, primary_key=True, unique=True)
+    submission_id = Column(Text, nullable=False, unique=True)
+    student_id = Column(Text, nullable=False)
+    assignment_id = Column(Text, nullable=False)
+    round_no = Column(BigInteger, nullable=False)
+    submitted_at = Column(BigInteger, nullable=False)
+    metric_version = Column(Text, nullable=False)
+    snapshot_json = Column(JSONField, nullable=False)
+    created_at = Column(BigInteger, nullable=False)
+    updated_at = Column(BigInteger, nullable=False)
+
+
 class EducationNotification(Base):
     __tablename__ = "education_notification"
 
@@ -805,18 +820,72 @@ class TeacherReviewResponse(BaseModel):
     total: int = 0
 
 
-class StudentProfileAssignmentItem(BaseModel):
+ProfileReviewStatus = Literal["unsubmitted", "pending", "reviewed", "returned"]
+ProfileTrendDirection = Literal["up", "down", "flat"]
+ProfileInsightTone = Literal["positive", "warning", "neutral"]
+ProfileInsightCode = Literal[
+    "not_enough_data",
+    "digestion_up",
+    "digestion_low",
+    "ai_share_changed",
+    "round_improvement",
+    "round_revision_thin",
+    "help_type_shift_refining",
+    "deadline_rush",
+    "process_up",
+    "reflection_thin",
+]
+ProfileInsightActionCode = Literal[
+    "complete_more_submissions",
+    "keep_rewriting_ai_text",
+    "rewrite_one_ai_section",
+    "review_ai_use_pattern",
+    "reuse_successful_revision",
+    "revise_feedback_deeply",
+    "continue_refining_own_writing",
+    "start_next_assignment_earlier",
+    "keep_current_process",
+    "add_specific_reflection_evidence",
+]
+ProfileMetricKey = Literal[
+    "total_chars",
+    "normalized_score",
+    "process_index",
+    "collaboration_index",
+    "revision_depth",
+    "active_writing_seconds",
+    "end_loaded_ratio",
+    "deadline_window_ratio",
+    "ai_ratio",
+    "digestion_ratio",
+    "prompt_count",
+    "reflection_quality",
+]
+
+
+class StrictProfileModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class StudentProfileDataCompleteness(StrictProfileModel):
+    version_data_complete: bool
+    editor_operations_complete: bool
+    source_tracking_complete: bool
+    scoring_comparable: bool
+
+
+class StudentProfileAssignmentItem(StrictProfileModel):
     """作业维度的当前状态；未提交的作业也要出现,否则缺交信息会从画像里消失。"""
 
     assignment: AssignmentModel
     submission_id: Optional[str] = None
     submitted_at: Optional[int] = None
     round_no: Optional[int] = None
-    review_status: str = "unsubmitted"
+    review_status: ProfileReviewStatus = "unsubmitted"
     score: Optional[int] = None
 
 
-class StudentProfileTimelinePoint(BaseModel):
+class StudentProfileTimelinePoint(StrictProfileModel):
     """一次提交在成长画像里的三维快照(产出 / 过程 / AI 协作)。"""
 
     submission_id: str
@@ -825,14 +894,15 @@ class StudentProfileTimelinePoint(BaseModel):
     round_no: int = 1
     is_current: bool = True
     submitted_at: int
+    data_completeness: StudentProfileDataCompleteness
 
     # 产出维:保留教师评分原值，并用作业明确声明的满分生成可比较百分比。
     total_chars: int = 0
     score: Optional[int] = None
     score_max: int
     normalized_score: Optional[float] = None
-    rubric: Optional[dict] = None
-    review_status: str = "pending"
+    rubric: Optional[dict[str, int]] = None
+    review_status: ProfileReviewStatus = "pending"
 
     # 过程维。不用版本数:一个版本 = 一次 1.2 秒防抖自动保存,衡量的是打字时长
     # 而不是「改了几版」,拿它当修改投入会被打字速度带偏。
@@ -847,22 +917,22 @@ class StudentProfileTimelinePoint(BaseModel):
     process_index: Optional[int] = None
 
     # AI 协作维
-    typed_ratio: float = 0.0
-    ai_ratio: float = 0.0
-    unknown_ratio: float = 0.0
-    prompt_count: int = 0
-    digestion_ratio: int = 0
+    typed_ratio: Optional[float] = None
+    ai_ratio: Optional[float] = None
+    unknown_ratio: Optional[float] = None
+    prompt_count: Optional[int] = None
+    digestion_ratio: Optional[int] = None
     reflection_char_count: int = 0
     reflection_quality: int = 0
-    ai_help_types: list[str] = Field(default_factory=list)
-    collaboration_index: int = 0
+    ai_help_types: list[AIHelpType] = Field(default_factory=list)
+    collaboration_index: Optional[int] = None
 
     # 风险信号:只做展示,不参与任何成长指数。
     burst_count: int = 0
     suspected_unmarked_import_count: int = 0
 
 
-class StudentProfileRoundProgress(BaseModel):
+class StudentProfileRoundProgress(StrictProfileModel):
     """退回—重交之间的改动幅度,是最直接的「响应反馈」证据。"""
 
     assignment_id: str
@@ -875,26 +945,116 @@ class StudentProfileRoundProgress(BaseModel):
     turnaround_seconds: Optional[int] = None
 
 
-class StudentProfileMetricTrend(BaseModel):
-    key: str
+class StudentProfileMetricTrend(StrictProfileModel):
+    key: ProfileMetricKey
     first: float
     last: float
     delta: float
-    direction: str = "flat"
+    direction: ProfileTrendDirection = "flat"
     sample_count: int = 0
 
 
-class StudentProfileInsight(BaseModel):
+class StudentProfileInsightParams(StrictProfileModel):
+    delta: Optional[float] = None
+    last: Optional[float] = None
+    digestion_ratio: Optional[int] = None
+    ai_ratio: Optional[float] = None
+    count: Optional[int] = None
+    best_delta: Optional[float] = None
+    revision_ratio: Optional[int] = None
+    ratio: Optional[float] = None
+    average_score: Optional[int] = None
+
+
+class StudentProfileInsight(StrictProfileModel):
     """规则生成的结论;文案由前端按 code 走 i18n,后端不产出自然语言。"""
 
-    code: str
-    tone: str = "neutral"
-    params: dict = Field(default_factory=dict)
-    action_code: Optional[str] = None
+    code: ProfileInsightCode
+    tone: ProfileInsightTone = "neutral"
+    params: StudentProfileInsightParams = Field(default_factory=StudentProfileInsightParams)
+    action_code: Optional[ProfileInsightActionCode] = None
     submission_id: Optional[str] = None
 
 
-class StudentProfileResponse(BaseModel):
+class StudentProfileHelpTypeSummary(StrictProfileModel):
+    generative: int = 0
+    refining: int = 0
+    refining_ratio: Optional[float] = None
+
+
+class StudentProfileHelpTypeShift(StrictProfileModel):
+    early: StudentProfileHelpTypeSummary
+    recent: StudentProfileHelpTypeSummary
+    refining_ratio_delta: Optional[float] = None
+
+
+class StudentProfileReflectionQuality(StrictProfileModel):
+    count: int = 0
+    average_score: Optional[int] = None
+    average_chars: Optional[int] = None
+
+
+class StudentProfileFormulaTerm(StrictProfileModel):
+    metric: str
+    weight: float
+    target: Optional[float] = None
+    inverted: bool = False
+
+
+class StudentProfileProcessFormula(StrictProfileModel):
+    revision_depth: StudentProfileFormulaTerm
+    span_effort: StudentProfileFormulaTerm
+    pacing: StudentProfileFormulaTerm
+
+
+class StudentProfileCollaborationFormula(StrictProfileModel):
+    digestion: StudentProfileFormulaTerm
+    inquiry: StudentProfileFormulaTerm
+    reflection: StudentProfileFormulaTerm
+    no_ai_fallback_metric: Literal["reflection_quality"] = "reflection_quality"
+
+
+class StudentProfileReflectionFormulaTerm(StrictProfileModel):
+    target_chars: int
+    max_score: int
+
+
+class StudentProfileReflectionFormula(StrictProfileModel):
+    action: StudentProfileReflectionFormulaTerm
+    location: StudentProfileReflectionFormulaTerm
+    judgement: StudentProfileReflectionFormulaTerm
+    next_step: StudentProfileReflectionFormulaTerm
+
+
+class StudentProfileIndexFormula(StrictProfileModel):
+    process_index: StudentProfileProcessFormula
+    collaboration_index: StudentProfileCollaborationFormula
+    reflection_quality: StudentProfileReflectionFormula
+
+
+class StudentProfileSnapshotPayload(StrictProfileModel):
+    metric_version: str
+    point: StudentProfileTimelinePoint
+    round_progress: Optional[StudentProfileRoundProgress] = None
+
+
+class StudentProfileSnapshotModel(StrictProfileModel):
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    id: str
+    submission_id: str
+    student_id: str
+    assignment_id: str
+    round_no: int
+    submitted_at: int
+    metric_version: str
+    snapshot_json: StudentProfileSnapshotPayload
+    created_at: int
+    updated_at: int
+
+
+class StudentProfileResponse(StrictProfileModel):
+    metric_version: str
     student_id: str
     student_name: Optional[str] = None
     student_email: Optional[str] = None
@@ -909,10 +1069,10 @@ class StudentProfileResponse(BaseModel):
     timeline: list[StudentProfileTimelinePoint] = Field(default_factory=list)
     round_progress: list[StudentProfileRoundProgress] = Field(default_factory=list)
     trends: list[StudentProfileMetricTrend] = Field(default_factory=list)
-    ai_help_type_distribution: dict = Field(default_factory=dict)
-    ai_help_type_shift: dict = Field(default_factory=dict)
-    reflection_quality: dict = Field(default_factory=dict)
-    index_formula: dict = Field(default_factory=dict)
+    ai_help_type_distribution: dict[AIHelpType, int] = Field(default_factory=dict)
+    ai_help_type_shift: StudentProfileHelpTypeShift
+    reflection_quality: StudentProfileReflectionQuality
+    index_formula: StudentProfileIndexFormula
     insights: list[StudentProfileInsight] = Field(default_factory=list)
 
 
@@ -1917,6 +2077,81 @@ class EducationTable:
             )
             return {row.submission_id: row.payload_json for row in rows}
 
+    def upsert_student_profile_snapshot(
+        self,
+        submission: SubmissionModel,
+        metric_version: str,
+        payload: StudentProfileSnapshotPayload,
+        db: Optional[Session] = None,
+    ) -> StudentProfileSnapshotModel:
+        with get_db_context(db) as db:
+            now = int(time.time())
+            snapshot = (
+                db.query(StudentProfileSnapshot)
+                .filter(StudentProfileSnapshot.submission_id == submission.id)
+                .first()
+            )
+            if snapshot is None:
+                snapshot = StudentProfileSnapshot(
+                    id=str(uuid.uuid4()),
+                    submission_id=submission.id,
+                    student_id=submission.student_id,
+                    assignment_id=submission.assignment_id,
+                    round_no=submission.round_no,
+                    submitted_at=submission.submitted_at,
+                    metric_version=metric_version,
+                    snapshot_json=payload.model_dump(mode="json"),
+                    created_at=now,
+                    updated_at=now,
+                )
+                db.add(snapshot)
+            else:
+                snapshot.student_id = submission.student_id
+                snapshot.assignment_id = submission.assignment_id
+                snapshot.round_no = submission.round_no
+                snapshot.submitted_at = submission.submitted_at
+                snapshot.metric_version = metric_version
+                snapshot.snapshot_json = payload.model_dump(mode="json")
+                snapshot.updated_at = now
+            db.commit()
+            db.refresh(snapshot)
+            return StudentProfileSnapshotModel.model_validate(snapshot)
+
+    def get_student_profile_snapshots(
+        self,
+        student_id: str,
+        metric_version: str,
+        assignment_ids: Optional[list[str]] = None,
+        start_at: Optional[int] = None,
+        end_at: Optional[int] = None,
+        round_no: Optional[int] = None,
+        db: Optional[Session] = None,
+    ) -> list[StudentProfileSnapshotModel]:
+        if assignment_ids is not None and not assignment_ids:
+            return []
+        with get_db_context(db) as db:
+            query = db.query(StudentProfileSnapshot).filter(
+                StudentProfileSnapshot.student_id == student_id,
+                StudentProfileSnapshot.metric_version == metric_version,
+            )
+            if assignment_ids is not None:
+                query = query.filter(
+                    StudentProfileSnapshot.assignment_id.in_(assignment_ids)
+                )
+            if start_at is not None:
+                query = query.filter(StudentProfileSnapshot.submitted_at >= start_at)
+            if end_at is not None:
+                query = query.filter(StudentProfileSnapshot.submitted_at <= end_at)
+            if round_no is not None:
+                query = query.filter(StudentProfileSnapshot.round_no == round_no)
+            rows = query.order_by(
+                StudentProfileSnapshot.submitted_at.asc(),
+                StudentProfileSnapshot.round_no.asc(),
+            ).all()
+            return [
+                StudentProfileSnapshotModel.model_validate(row) for row in rows
+            ]
+
     def get_micro_reflections_by_ids(
         self, reflection_ids: list[str], db: Optional[Session] = None
     ) -> dict[str, MicroReflectionModel]:
@@ -2073,6 +2308,26 @@ class EducationTable:
             submissions = query.order_by(
                 Submission.submitted_at.asc(), Submission.round_no.asc()
             ).all()
+            return [
+                SubmissionModel.model_validate(submission) for submission in submissions
+            ]
+
+    def get_current_submissions_by_student(
+        self,
+        student_id: str,
+        assignment_ids: Optional[list[str]] = None,
+        db: Optional[Session] = None,
+    ) -> list[SubmissionModel]:
+        if assignment_ids is not None and not assignment_ids:
+            return []
+        with get_db_context(db) as db:
+            query = db.query(Submission).filter(
+                Submission.student_id == student_id,
+                Submission.is_current == 1,
+            )
+            if assignment_ids is not None:
+                query = query.filter(Submission.assignment_id.in_(assignment_ids))
+            submissions = query.order_by(Submission.submitted_at.asc()).all()
             return [
                 SubmissionModel.model_validate(submission) for submission in submissions
             ]

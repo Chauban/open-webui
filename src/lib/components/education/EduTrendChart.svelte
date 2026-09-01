@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { getContext } from 'svelte';
+	import { buildTrendPath } from '$lib/utils/growth-profile';
 
 	// 成长画像的趋势折线。教学模块不引第三方图表库，纯 SVG 就够：
 	// 数据点个数是「提交次数」，量级很小，交互只需要点上的原生 tooltip。
@@ -16,12 +17,35 @@
 
 	export let series: TrendSeries[] = [];
 	export let labels: string[] = [];
+	export let axisLabels: string[] = labels;
 	/** 固定 y 轴范围（指数固定 0-100、比率固定 0-1），不传则按数据自适应。 */
 	export let min: number | null = null;
 	export let max: number | null = null;
 	export let formatValue: (value: number) => string = (value) => `${value}`;
 
 	const i18n = getContext('i18n');
+	let showTable = false;
+	let selectedPoint: { seriesLabel: string; pointLabel: string; value: number } | null = null;
+
+	const selectPoint = (seriesLabel: string, index: number, value: number) => {
+		selectedPoint = {
+			seriesLabel,
+			pointLabel: labels[index] ?? `${index + 1}`,
+			value
+		};
+	};
+
+	const handlePointKeydown = (
+		event: KeyboardEvent,
+		seriesLabel: string,
+		index: number,
+		value: number
+	) => {
+		if (event.key === 'Enter' || event.key === ' ') {
+			event.preventDefault();
+			selectPoint(seriesLabel, index, value);
+		}
+	};
 
 	const TONE_CLASSES = {
 		sky: 'text-sky-500 dark:text-sky-400',
@@ -55,22 +79,6 @@
 		count <= 1 ? PADDING.left + plotWidth / 2 : PADDING.left + (index / (count - 1)) * plotWidth;
 	const toY = (value: number, low: number, high: number) =>
 		PADDING.top + plotHeight - ((value - low) / (high - low || 1)) * plotHeight;
-
-	/** 缺值断线而不是连一条假的直线过去。 */
-	const buildPath = (values: (number | null)[], count: number, low: number, high: number) => {
-		let path = '';
-		let penDown = false;
-		values.forEach((value, index) => {
-			if (typeof value !== 'number') {
-				penDown = false;
-				return;
-			}
-			const command = penDown ? 'L' : 'M';
-			path += `${command}${toX(index, count).toFixed(2)},${toY(value, low, high).toFixed(2)} `;
-			penDown = true;
-		});
-		return path.trim();
-	};
 
 	$: gridValues = [scaleHigh, (scaleHigh + scaleLow) / 2, scaleLow];
 </script>
@@ -111,7 +119,7 @@
 			{#each series as item}
 				<g class={TONE_CLASSES[item.tone ?? 'sky']}>
 					<path
-						d={buildPath(item.values, pointCount, scaleLow, scaleHigh)}
+						d={buildTrendPath(item.values, pointCount, scaleLow, scaleHigh, toX, toY)}
 						fill="none"
 						stroke="currentColor"
 						stroke-width="2"
@@ -125,6 +133,20 @@
 								cy={toY(value, scaleLow, scaleHigh)}
 								r="3.5"
 								fill="currentColor"
+								pointer-events="none"
+							/>
+							<circle
+								cx={toX(index, pointCount)}
+								cy={toY(value, scaleLow, scaleHigh)}
+								r="14"
+								fill="transparent"
+								stroke="transparent"
+								tabindex="0"
+								role="button"
+								aria-label={`${item.label} · ${labels[index] ?? index + 1}: ${formatValue(value)}`}
+								on:click={() => selectPoint(item.label, index, value)}
+								on:focus={() => selectPoint(item.label, index, value)}
+								on:keydown={(event) => handlePointKeydown(event, item.label, index, value)}
 							>
 								<title>{item.label} · {labels[index] ?? index + 1}: {formatValue(value)}</title>
 							</circle>
@@ -133,7 +155,7 @@
 				</g>
 			{/each}
 
-			{#each labels as label, index}
+			{#each axisLabels as label, index}
 				{#if index === 0 || index === labels.length - 1 || labels.length <= 6}
 					<text
 						x={toX(index, pointCount)}
@@ -149,6 +171,16 @@
 		</svg>
 	</div>
 
+	{#if selectedPoint}
+		<div
+			class="mt-2 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-700 dark:bg-gray-900 dark:text-gray-300"
+			aria-live="polite"
+		>
+			<span class="font-medium">{selectedPoint.seriesLabel}</span>
+			· {selectedPoint.pointLabel}: {formatValue(selectedPoint.value)}
+		</div>
+	{/if}
+
 	<div class="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-gray-500 dark:text-gray-400">
 		{#each series as item}
 			<span class="inline-flex items-center gap-1.5">
@@ -157,4 +189,49 @@
 			</span>
 		{/each}
 	</div>
+
+	<button
+		type="button"
+		class="mt-3 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-sky-500 dark:border-gray-700 dark:hover:bg-gray-900"
+		aria-expanded={showTable}
+		on:click={() => (showTable = !showTable)}
+	>
+		{$i18n.t(showTable ? 'Hide data table' : 'Show data table')}
+	</button>
+
+	{#if showTable}
+		<div class="mt-3 overflow-x-auto">
+			<table class="min-w-full border-collapse text-left text-xs">
+				<caption class="sr-only">{$i18n.t('Trend chart data')}</caption>
+				<thead>
+					<tr>
+						<th class="border-b border-gray-200 px-2 py-2 font-medium dark:border-gray-700"
+							>{$i18n.t('Submission')}</th
+						>
+						{#each series as item}
+							<th class="border-b border-gray-200 px-2 py-2 font-medium dark:border-gray-700"
+								>{item.label}</th
+							>
+						{/each}
+					</tr>
+				</thead>
+				<tbody>
+					{#each labels as label, index}
+						<tr>
+							<th class="border-b border-gray-100 px-2 py-2 font-normal dark:border-gray-800"
+								>{label}</th
+							>
+							{#each series as item}
+								<td class="border-b border-gray-100 px-2 py-2 dark:border-gray-800">
+									{typeof item.values[index] === 'number'
+										? formatValue(item.values[index] as number)
+										: $i18n.t('Data missing')}
+								</td>
+							{/each}
+						</tr>
+					{/each}
+				</tbody>
+			</table>
+		</div>
+	{/if}
 {/if}

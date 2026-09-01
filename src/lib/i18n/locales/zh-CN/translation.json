@@ -3602,5 +3602,22 @@
 	"Rubric maximum scores must add up to the assignment maximum.": "各评分维度满分之和必须等于作业满分。",
 	"Rubric score for {{label}} must be between 0 and {{max}}.": "{{label}} 的评分必须在 0 到 {{max}} 之间。",
 	"Reviewed submissions require a total score and complete rubric scores.": "完成批改时必须填写总分和全部评分维度。",
-	"Total score must equal the sum of rubric scores.": "总分必须等于各评分维度分数之和。"
+	"Total score must equal the sum of rubric scores.": "总分必须等于各评分维度分数之和。",
+	"Start date": "开始日期",
+	"End date": "结束日期",
+	"Round": "轮次",
+	"All rounds": "全部轮次",
+	"Apply": "应用",
+	"Growth profile sections": "成长画像分区",
+	"Latest data completeness": "最近一次数据完整度",
+	"Version data": "版本数据",
+	"Editing operations": "编辑操作",
+	"Source tracking": "来源追踪",
+	"Comparable score": "可比较评分",
+	"Complete": "完整",
+	"Data missing": "数据缺失",
+	"Hide data table": "隐藏数据表",
+	"Show data table": "显示数据表",
+	"Trend chart data": "趋势图数据",
+	"Submission": "提交记录"
 }

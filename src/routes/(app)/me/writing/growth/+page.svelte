@@ -8,6 +8,7 @@
 	import { mobile, showSidebar } from '$lib/stores';
 
 	import { getMyWritingProfile } from '$lib/apis/education';
+	import type { StudentProfile, StudentProfileFilters } from '$lib/apis/education';
 	import LoadingState from '$lib/components/education/LoadingState.svelte';
 	import EduButton from '$lib/components/education/EduButton.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
@@ -17,20 +18,25 @@
 	// 学生看不到自己的成长，这个模块的教育价值就少一半。
 	const i18n = getContext('i18n');
 
-	let profile = null;
+	let profile: StudentProfile | null = null;
+	let filters: StudentProfileFilters = {};
 	let loaded = false;
 	let loadError = '';
 
-	onMount(async () => {
+	const loadProfile = async (nextFilters: StudentProfileFilters = filters) => {
+		filters = nextFilters;
+		loadError = '';
 		try {
-			profile = await getMyWritingProfile(localStorage.token);
+			profile = await getMyWritingProfile(localStorage.token, filters);
 		} catch (error) {
 			loadError = `${error?.detail ?? error}`;
 			toast.error(loadError);
 		} finally {
 			loaded = true;
 		}
-	});
+	};
+
+	onMount(loadProfile);
 </script>
 
 {#if loaded && !loadError}
@@ -78,7 +84,12 @@
 
 		<div class="flex-1 overflow-y-auto">
 			<div class="mx-auto max-w-6xl px-4 py-8">
-				<StudentGrowthProfile {profile} variant="student" />
+				<StudentGrowthProfile
+					{profile}
+					{filters}
+					variant="student"
+					on:filter={(event) => loadProfile(event.detail)}
+				/>
 			</div>
 		</div>
 	</div>

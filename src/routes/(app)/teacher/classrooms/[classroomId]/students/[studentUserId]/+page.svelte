@@ -6,6 +6,7 @@
 	import { toast } from 'svelte-sonner';
 
 	import { getStudentProfile } from '$lib/apis/education';
+	import type { StudentProfile, StudentProfileFilters } from '$lib/apis/education';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
 	import EduButton from '$lib/components/education/EduButton.svelte';
@@ -16,16 +17,20 @@
 	const i18n = getContext('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
 
-	let profile = null;
+	let profile: StudentProfile | null = null;
+	let filters: StudentProfileFilters = {};
 	let loading = true;
 	let loadError = '';
 
-	onMount(async () => {
+	const loadProfile = async (nextFilters: StudentProfileFilters = filters) => {
+		filters = nextFilters;
+		loadError = '';
 		try {
 			profile = await getStudentProfile(
 				localStorage.token,
 				$page.params.classroomId,
-				$page.params.studentUserId
+				$page.params.studentUserId,
+				filters
 			);
 		} catch (error) {
 			loadError = `${error?.detail ?? error}`;
@@ -33,7 +38,9 @@
 		} finally {
 			loading = false;
 		}
-	});
+	};
+
+	onMount(loadProfile);
 </script>
 
 <TeacherPageShell title="Classrooms">
@@ -71,8 +78,10 @@
 
 			<StudentGrowthProfile
 				{profile}
+				{filters}
 				variant="teacher"
 				on:open={(event) => goto(`/teacher/submissions/${event.detail.submissionId}`)}
+				on:filter={(event) => loadProfile(event.detail)}
 			/>
 		</div>
 	{/if}

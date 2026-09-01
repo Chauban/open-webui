@@ -29,12 +29,14 @@ from open_webui.models.education import (
     Classroom,
     ClassroomMember,
     EditorOperation,
+    Education,
     EducationNotification,
     MicroReflection,
     ProvenanceSegment,
     Submission,
     SubmissionCreateForm,
     SubmissionReview,
+    StudentProfileSnapshot,
     WritingSession,
     WritingVersion,
 )
@@ -458,6 +460,7 @@ def education_client():
             MicroReflection.__table__,
             Submission.__table__,
             SubmissionReview.__table__,
+            StudentProfileSnapshot.__table__,
             EducationNotification.__table__,
         ]:
             table.create(bind=engine, checkfirst=True)
@@ -1062,7 +1065,16 @@ def test_student_assignment_and_profile_views(education_client):
     assert point["ai_help_types"] == ["Outline"]
     assert point["reflection_quality"] > 0
     assert point["process_index"] is None or 0 <= point["process_index"] <= 100
-    assert 0 <= point["collaboration_index"] <= 100
+    assert point["data_completeness"] == {
+        "version_data_complete": True,
+        "editor_operations_complete": True,
+        "source_tracking_complete": False,
+        "scoring_comparable": False,
+    }
+    # 来源证据缺失不是「AI 占比为 0」；所有依赖来源追踪的值都必须为空。
+    assert point["ai_ratio"] is None
+    assert point["digestion_ratio"] is None
+    assert point["collaboration_index"] is None
     # 一次提交看不出趋势,画像要如实说「数据不够」而不是编一条曲线。
     assert profile["trends"] == []
     insight_codes = [insight["code"] for insight in profile["insights"]]
@@ -2568,10 +2580,18 @@ def test_reflection_score_separates_concrete_from_generic():
 def test_collaboration_index_falls_back_to_reflection_without_ai():
     # 完全没用 AI 的提交不该被「消化度 0」拖成低分。
     without_ai = education_profile_module._compute_collaboration_index(
-        digestion_ratio=0, prompt_count=0, reflection_quality=80, ai_ratio=0.0
+        digestion_ratio=0,
+        prompt_count=0,
+        reflection_quality=80,
+        ai_ratio=0.0,
+        ai_used=False,
     )
     with_ai = education_profile_module._compute_collaboration_index(
-        digestion_ratio=0, prompt_count=0, reflection_quality=80, ai_ratio=0.5
+        digestion_ratio=0,
+        prompt_count=0,
+        reflection_quality=80,
+        ai_ratio=0.5,
+        ai_used=True,
     )
 
     assert without_ai == 80
@@ -2649,7 +2669,9 @@ def test_versions_up_to_stops_at_the_round_final_version():
     assert len(education_analysis_module._versions_up_to(versions, "missing")) == 3
 
 
-def test_student_profile_tracks_round_progress_and_trends(education_client):
+def test_student_profile_tracks_round_progress_and_trends(
+    education_client, monkeypatch
+):
     client, teacher, _, student, _, _ = education_client
     assignment, session_id, first_submission_id = _setup_submitted_assignment(
         client, teacher, student, "Growth Essay"
@@ -2699,6 +2721,8 @@ def test_student_profile_tracks_round_progress_and_trends(education_client):
     assert profile_res.status_code == 200, profile_res.text
     profile = profile_res.json()
 
+    assert profile["metric_version"] == "2026-09-01.1"
+
     # 两轮都进时间线:成长看的是轮次之间的变化,历史轮不能丢。
     assert [point["round_no"] for point in profile["timeline"]] == [1, 2]
     assert [point["score"] for point in profile["timeline"]] == [70, 88]
@@ -2723,6 +2747,25 @@ def test_student_profile_tracks_round_progress_and_trends(education_client):
     codes = [insight["code"] for insight in profile["insights"]]
     assert "round_improvement" in codes
     assert "not_enough_data" in codes
+
+    # 读取只消费版本一致的画像快照，不再碰历史版本与来源表。
+    def fail_live_aggregation(*args, **kwargs):
+        raise AssertionError("profile reads must not aggregate writing versions")
+
+    monkeypatch.setattr(Education, "get_versions", fail_live_aggregation)
+    monkeypatch.setattr(Education, "get_submissions_by_student", fail_live_aggregation)
+    second_round_only = client.get(
+        f"/api/v1/teacher/classrooms/{classroom_id}/students/{student.id}/profile",
+        params={"assignment_id": assignment["id"], "round_no": 2},
+    )
+    assert second_round_only.status_code == 200, second_round_only.text
+    assert [point["round_no"] for point in second_round_only.json()["timeline"]] == [2]
+
+    invalid_range = client.get(
+        f"/api/v1/teacher/classrooms/{classroom_id}/students/{student.id}/profile",
+        params={"start_at": 20, "end_at": 10},
+    )
+    assert invalid_range.status_code == 422
 
     # 历史轮的分析必须停在自己那一版正文上,不能读到第二轮的字数
     assert profile["timeline"][0]["total_chars"] < profile["timeline"][1]["total_chars"]

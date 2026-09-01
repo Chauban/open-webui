@@ -1,4 +1,8 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
+import type { StudentProfile, StudentProfileFilters } from './types';
+import { buildProfileQuery } from '$lib/utils/growth-profile';
+
+export type * from './types';
 
 const parseErrorResponse = async (res: Response) => {
 	const contentType = res.headers.get('content-type') || '';
@@ -529,10 +533,13 @@ export const bulkImportClassroomMembers = async (
 export const getStudentProfile = async (
 	token: string,
 	classroomId: string,
-	studentUserId: string
-) => {
+	studentUserId: string,
+	filters: StudentProfileFilters = {}
+): Promise<StudentProfile> => {
+	const query = buildProfileQuery(filters);
+	const suffix = query ? `?${query}` : '';
 	return fetch(
-		`${WEBUI_API_BASE_URL}/teacher/classrooms/${classroomId}/students/${studentUserId}/profile`,
+		`${WEBUI_API_BASE_URL}/teacher/classrooms/${classroomId}/students/${studentUserId}/profile${suffix}`,
 		{
 			method: 'GET',
 			headers: withAuth(token)
@@ -578,8 +585,13 @@ export const exportClassroomProgress = async (token: string, classroomId: string
 	return res.text();
 };
 
-export const getMyWritingProfile = async (token: string) => {
-	return fetch(`${WEBUI_API_BASE_URL}/me/writing/profile`, {
+export const getMyWritingProfile = async (
+	token: string,
+	filters: StudentProfileFilters = {}
+): Promise<StudentProfile> => {
+	const query = buildProfileQuery(filters);
+	const suffix = query ? `?${query}` : '';
+	return fetch(`${WEBUI_API_BASE_URL}/me/writing/profile${suffix}`, {
 		method: 'GET',
 		headers: withAuth(token)
 	}).then(handleJson);

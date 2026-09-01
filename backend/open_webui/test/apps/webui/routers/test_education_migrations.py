@@ -17,6 +17,7 @@ EDUCATION_TABLES = {
     "provenance_segment",
     "submission",
     "submission_review",
+    "student_profile_snapshot",
     "writing_session",
     "writing_version",
 }
@@ -60,5 +61,18 @@ def test_fresh_database_upgrades_to_head(tmp_path, monkeypatch):
         }
         assert "rubric_scores" in review_columns
         assert "rubric_json" not in review_columns
+        snapshot_columns = {
+            column["name"]
+            for column in schema.get_columns("student_profile_snapshot")
+        }
+        assert {
+            "submission_id",
+            "student_id",
+            "assignment_id",
+            "round_no",
+            "submitted_at",
+            "metric_version",
+            "snapshot_json",
+        } <= snapshot_columns
     finally:
         engine.dispose()

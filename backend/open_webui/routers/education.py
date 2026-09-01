@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import NamedTuple, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
@@ -83,7 +83,10 @@ from open_webui.services.education.analysis import (
     get_or_build_submission_analyses,
     get_prompt_timeline,
 )
-from open_webui.services.education.profile import build_student_profile
+from open_webui.services.education.profile_snapshots import (
+    build_student_profile,
+    refresh_student_profile_snapshot,
+)
 from open_webui.models.notes import NoteForm, Notes
 from open_webui.models.users import Users
 from open_webui.socket.main import emit_to_users
@@ -1747,8 +1750,17 @@ async def export_classroom_progress(
 async def get_student_profile(
     student_user_id: str,
     classroom: ClassroomModel = Depends(require_teacher_classroom),
+    start_at: Optional[int] = Query(default=None, ge=0),
+    end_at: Optional[int] = Query(default=None, ge=0),
+    assignment_id: Optional[str] = Query(default=None, min_length=1),
+    round_no: Optional[int] = Query(default=None, ge=1),
     db: Session = Depends(get_session),
 ):
+    if start_at is not None and end_at is not None and start_at > end_at:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="start_at must not be later than end_at",
+        )
     member = Education.get_classroom_member(classroom.id, student_user_id, db=db)
     if member is None or member.member_role != "student":
         raise HTTPException(
@@ -1759,7 +1771,15 @@ async def get_student_profile(
     student = await Users.get_user_by_id(student_user_id, db=db)
     assignments = Education.get_assignments_by_classroom(classroom.id, db=db)
     return await build_student_profile(
-        student, student_user_id, classroom, assignments, db
+        student,
+        student_user_id,
+        classroom,
+        assignments,
+        db,
+        start_at=start_at,
+        end_at=end_at,
+        assignment_id=assignment_id,
+        round_no=round_no,
     )
 
 
@@ -2452,6 +2472,9 @@ async def submit_assignment(
         submission_id=submission.id,
         db=db,
     )
+    refresh_student_profile_snapshot(
+        submission, assignment, db, analysis_payload=analysis_payload
+    )
     await _send_education_notifications(
         [assignment.teacher_id],
         "submission_created",
@@ -2859,6 +2882,7 @@ async def save_submission_review(
         form_data,
         db=db,
     )
+    refresh_student_profile_snapshot(submission, assignment, db)
     if form_data.review_status == "returned":
         Education.set_writing_session_status(
             submission.writing_session_id, "draft", db=db
@@ -2954,8 +2978,17 @@ async def get_teacher_dashboard(
 @router.get("/me/writing/profile", response_model=StudentProfileResponse)
 async def get_my_writing_profile(
     user=Depends(get_verified_user),
+    start_at: Optional[int] = Query(default=None, ge=0),
+    end_at: Optional[int] = Query(default=None, ge=0),
+    assignment_id: Optional[str] = Query(default=None, min_length=1),
+    round_no: Optional[int] = Query(default=None, ge=1),
     db: Session = Depends(get_session),
 ):
+    if start_at is not None and end_at is not None and start_at > end_at:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="start_at must not be later than end_at",
+        )
     membership = Education.get_classroom_member_by_user_id(user.id, db=db)
     classroom = (
         Education.get_classroom_by_id(membership.classroom_id, db=db)
@@ -2965,7 +2998,17 @@ async def get_my_writing_profile(
     assignments = Education.get_assignments_by_student(user.id, db=db)[
         :MAX_STUDENT_ASSIGNMENTS
     ]
-    return await build_student_profile(user, user.id, classroom, assignments, db)
+    return await build_student_profile(
+        user,
+        user.id,
+        classroom,
+        assignments,
+        db,
+        start_at=start_at,
+        end_at=end_at,
+        assignment_id=assignment_id,
+        round_no=round_no,
+    )
 
 
 @router.get("/me/writing/assignments", response_model=list[StudentAssignmentListItem])

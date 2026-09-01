@@ -694,6 +694,9 @@ def build_submission_analysis(submission, session, versions, provenance_segments
 
     return {
         "summary": {
+            # 只有编辑器来源映射完整覆盖终稿时，画像才能把 AI/手写占比中的 0
+            # 当作真实的 0；回退推断只用于风险页，不进入成长画像。
+            "source_tracking_complete": source_map_highlights is not None,
             "total_chars": len(final_text),
             "typed_chars": typed_chars,
             "typed_ratio": round(typed_chars / max(len(final_text), 1), 4),

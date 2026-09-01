@@ -5,9 +5,18 @@ from sqlalchemy.orm import Session
 
 from open_webui.models.education import (
     Education,
+    StudentProfileCollaborationFormula,
+    StudentProfileFormulaTerm,
+    StudentProfileHelpTypeShift,
+    StudentProfileHelpTypeSummary,
+    StudentProfileIndexFormula,
     StudentProfileAssignmentItem,
     StudentProfileInsight,
     StudentProfileMetricTrend,
+    StudentProfileProcessFormula,
+    StudentProfileReflectionFormula,
+    StudentProfileReflectionFormulaTerm,
+    StudentProfileReflectionQuality,
     StudentProfileResponse,
     StudentProfileRoundProgress,
     StudentProfileTimelinePoint,
@@ -44,6 +53,7 @@ _PROFILE_MAX_INSIGHTS = 5
 _TREND_FLAT_TOLERANCE = 0.05
 _TREND_MIN_SAMPLES = 3
 _TREND_MAX_WINDOW = 3
+PROFILE_METRIC_VERSION = "2026-09-01.1"
 
 # 学生自报的 AI 用途分两类:让 AI「生成」内容,和让 AI「打磨」自己的内容。
 # 从前者迁移到后者是很强的成长信号。
@@ -76,41 +86,46 @@ _PROFILE_TREND_KEYS = (
     "reflection_quality",
 )
 
-def _profile_index_formula() -> dict:
+def _profile_index_formula() -> StudentProfileIndexFormula:
     """把两个合成指数的构成如实返回,前端可展开查看,避免出现黑箱分数。"""
-    return {
-        "process_index": {
-            "revision_depth": {
-                "metric": "revised_chars / inserted_chars",
-                "target": _PROCESS_TARGET_REVISION_RATIO,
-                "weight": 1 / 3,
-            },
-            "span_effort": {
-                "metric": "writing_span_seconds",
-                "target": _PROCESS_TARGET_SPAN_SECONDS,
-                "weight": 1 / 3,
-            },
-            "pacing": {
-                "metric": "end_loaded_ratio",
-                "inverted": True,
-                "weight": 1 / 3,
-            },
-        },
-        "collaboration_index": {
-            "digestion": {"metric": "digestion_ratio", "weight": 1 / 3},
-            "inquiry": {
-                "metric": "prompt_count",
-                "target": _COLLABORATION_TARGET_PROMPTS,
-                "weight": 1 / 3,
-            },
-            "reflection": {"metric": "reflection_quality", "weight": 1 / 3},
-            "note": "no_ai_usage_falls_back_to_reflection_only",
-        },
-        "reflection_quality": {
-            key: {"target_chars": target, "max": weight}
-            for key, (target, weight) in _REFLECTION_EVIDENCE_TARGETS.items()
-        },
-    }
+    return StudentProfileIndexFormula(
+        process_index=StudentProfileProcessFormula(
+            revision_depth=StudentProfileFormulaTerm(
+                metric="revised_chars / inserted_chars",
+                target=_PROCESS_TARGET_REVISION_RATIO,
+                weight=1 / 3,
+            ),
+            span_effort=StudentProfileFormulaTerm(
+                metric="writing_span_seconds",
+                target=_PROCESS_TARGET_SPAN_SECONDS,
+                weight=1 / 3,
+            ),
+            pacing=StudentProfileFormulaTerm(
+                metric="end_loaded_ratio", inverted=True, weight=1 / 3
+            ),
+        ),
+        collaboration_index=StudentProfileCollaborationFormula(
+            digestion=StudentProfileFormulaTerm(
+                metric="digestion_ratio", weight=1 / 3
+            ),
+            inquiry=StudentProfileFormulaTerm(
+                metric="prompt_count",
+                target=_COLLABORATION_TARGET_PROMPTS,
+                weight=1 / 3,
+            ),
+            reflection=StudentProfileFormulaTerm(
+                metric="reflection_quality", weight=1 / 3
+            ),
+        ),
+        reflection_quality=StudentProfileReflectionFormula(
+            **{
+                key: StudentProfileReflectionFormulaTerm(
+                    target_chars=target, max_score=weight
+                )
+                for key, (target, weight) in _REFLECTION_EVIDENCE_TARGETS.items()
+            }
+        ),
+    )
 
 
 def _estimate_active_writing_seconds(marks: list[int]) -> Optional[int]:
@@ -211,14 +226,18 @@ def _compute_process_index(
 
 
 def _compute_collaboration_index(
-    digestion_ratio: int,
-    prompt_count: int,
+    digestion_ratio: Optional[int],
+    prompt_count: Optional[int],
     reflection_quality: int,
-    ai_ratio: float,
-) -> int:
+    ai_ratio: Optional[float],
+    ai_used: bool,
+) -> Optional[int]:
     # 没用 AI 的提交不该被「消化度 0」拖成低分,这一维退化为只看反思质量。
-    if ai_ratio <= 0 and prompt_count <= 0:
+    if not ai_used:
         return int(round(reflection_quality))
+
+    if digestion_ratio is None or prompt_count is None or ai_ratio is None:
+        return None
 
     inquiry = min(prompt_count / _COLLABORATION_TARGET_PROMPTS, 1.0) * 100
     return int(round((digestion_ratio + inquiry + reflection_quality) / 3))
@@ -267,7 +286,7 @@ def _build_trend(key: str, values: list[float]) -> Optional[StudentProfileMetric
     )
 
 
-def _summarize_help_types(points: list) -> dict:
+def _summarize_help_types(points: list) -> StudentProfileHelpTypeSummary:
     generative = 0
     refining = 0
     for point in points:
@@ -277,19 +296,19 @@ def _summarize_help_types(points: list) -> dict:
             elif help_type in _AI_HELP_REFINING_TYPES:
                 refining += 1
     total = generative + refining
-    return {
-        "generative": generative,
-        "refining": refining,
-        "refining_ratio": round(refining / total, 4) if total else 0.0,
-    }
+    return StudentProfileHelpTypeSummary(
+        generative=generative,
+        refining=refining,
+        refining_ratio=round(refining / total, 4) if total else None,
+    )
 
 
 def _build_profile_insights(
     timeline: list,
     round_progress: list,
     trends: dict,
-    help_shift: dict,
-    reflection_quality: dict,
+    help_shift: StudentProfileHelpTypeShift,
+    reflection_quality: StudentProfileReflectionQuality,
 ) -> list[StudentProfileInsight]:
     candidates: list[StudentProfileInsight] = []
     if len(timeline) < _TREND_MIN_SAMPLES:
@@ -315,7 +334,12 @@ def _build_profile_insights(
                 action_code="keep_rewriting_ai_text",
             )
         )
-    elif latest.ai_ratio >= 0.3 and latest.digestion_ratio < 20:
+    elif (
+        latest.ai_ratio is not None
+        and latest.digestion_ratio is not None
+        and latest.ai_ratio >= 0.3
+        and latest.digestion_ratio < 20
+    ):
         candidates.append(
             StudentProfileInsight(
                 code="digestion_low",
@@ -365,12 +389,15 @@ def _build_profile_insights(
             )
         )
 
-    if help_shift.get("refining_ratio_delta", 0) >= 0.2:
+    if (
+        help_shift.refining_ratio_delta is not None
+        and help_shift.refining_ratio_delta >= 0.2
+    ):
         candidates.append(
             StudentProfileInsight(
                 code="help_type_shift_refining",
                 tone="positive",
-                params={"delta": help_shift.get("refining_ratio_delta", 0)},
+                params={"delta": help_shift.refining_ratio_delta},
                 action_code="continue_refining_own_writing",
             )
         )
@@ -400,12 +427,15 @@ def _build_profile_insights(
             )
         )
 
-    if reflection_quality.get("average_score", 0) < 40:
+    if (
+        reflection_quality.average_score is not None
+        and reflection_quality.average_score < 40
+    ):
         candidates.append(
             StudentProfileInsight(
                 code="reflection_thin",
                 tone="warning",
-                params={"average_score": reflection_quality.get("average_score", 0)},
+                params={"average_score": reflection_quality.average_score},
                 action_code="add_specific_reflection_evidence",
                 submission_id=latest.submission_id,
             )
