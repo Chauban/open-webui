@@ -737,8 +737,8 @@
 		disableContextActions={false}
 		allowAssignmentWorkspaceChat={isAssignment}
 		showRightPanel={!$mobile}
-		rightPanelDefaultSize={34}
-		rightPanelMinSize={26}
+		rightPanelWidth={520}
+		rightPanelMinWidth={400}
 		rightPanelClassName="hidden lg:flex"
 	>
 		<div

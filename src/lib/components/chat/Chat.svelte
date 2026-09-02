@@ -110,6 +110,7 @@
 	import Messages from '$lib/components/chat/Messages.svelte';
 	import Navbar from '$lib/components/chat/Navbar.svelte';
 	import ChatControls from './ChatControls.svelte';
+	import ResizableSidePanel from '../common/ResizableSidePanel.svelte';
 	import EventConfirmDialog from '../common/ConfirmDialog.svelte';
 	import DeleteConfirmDialog from '../common/ConfirmDialog.svelte';
 	import WebSearchConfirmDialog from '../common/ConfirmDialog.svelte';
@@ -151,8 +152,8 @@
 	export let allowAssignmentWorkspaceChat = false;
 	export let projectBaseUrl = '';
 	export let showRightPanel = false;
-	export let rightPanelDefaultSize = 36;
-	export let rightPanelMinSize = 24;
+	export let rightPanelWidth = 480;
+	export let rightPanelMinWidth = 360;
 	export let rightPanelClassName = '';
 
 	// The workspace clears chatIdProp to start a fresh conversation in place;
@@ -4641,76 +4642,70 @@
 										{$i18n.t('This assignment conversation is read-only after submission.')}
 									</div>
 								{:else}
-								<Placeholder
-									{history}
-									bind:selectedModels
-									bind:messageInput
-									bind:files
-									bind:prompt
-									bind:autoScroll
-									bind:selectedToolIds
-									bind:selectedSkillIds
-									bind:selectedFilterIds
-									bind:imageGenerationEnabled
-									bind:codeInterpreterEnabled
-									bind:webSearchEnabled
-									bind:atSelectedModel
-									bind:showCommands
-									bind:dragged
-									{toolApprovalMode}
-									onToolApprovalModeChange={handleToolApprovalModeChange}
-									{pendingOAuthTools}
-									{oauthRedirectHandler}
-									{stopResponse}
-									{createMessagePair}
-									{onSelect}
-									{onUpload}
-									{onUpdate}
-									messageQueue={$chatRequestQueues[$chatId] ?? []}
-									askUser={savedAskUserPrompt ?? socketAskUserPrompt}
-									onQueueSendNow={sendQueuedMessageNow}
-									onQueueEdit={editQueuedMessage}
-									onQueueDelete={deleteQueuedMessage}
-									onWebSearchToggle={handleWebSearchToggle}
-									on:chatVariables={() => {
-										showChatVariablesModal = true;
-									}}
-									onChange={(data: any) => {
-										if (!$temporaryChatEnabled) {
-											saveDraft(data, getDraftChatId());
-										}
-									}}
-									on:submit={async (e) => {
-										clearDraft();
-										if (e.detail || files.length > 0) {
-											await tick();
-											submitHandler(withSelectedText(e.detail));
-										}
-									}}
-								/>
+									<Placeholder
+										{history}
+										bind:selectedModels
+										bind:messageInput
+										bind:files
+										bind:prompt
+										bind:autoScroll
+										bind:selectedToolIds
+										bind:selectedSkillIds
+										bind:selectedFilterIds
+										bind:imageGenerationEnabled
+										bind:codeInterpreterEnabled
+										bind:webSearchEnabled
+										bind:atSelectedModel
+										bind:showCommands
+										bind:dragged
+										{toolApprovalMode}
+										onToolApprovalModeChange={handleToolApprovalModeChange}
+										{pendingOAuthTools}
+										{oauthRedirectHandler}
+										{stopResponse}
+										{createMessagePair}
+										{onSelect}
+										{onUpload}
+										{onUpdate}
+										messageQueue={$chatRequestQueues[$chatId] ?? []}
+										askUser={savedAskUserPrompt ?? socketAskUserPrompt}
+										onQueueSendNow={sendQueuedMessageNow}
+										onQueueEdit={editQueuedMessage}
+										onQueueDelete={deleteQueuedMessage}
+										onWebSearchToggle={handleWebSearchToggle}
+										on:chatVariables={() => {
+											showChatVariablesModal = true;
+										}}
+										onChange={(data: any) => {
+											if (!$temporaryChatEnabled) {
+												saveDraft(data, getDraftChatId());
+											}
+										}}
+										on:submit={async (e) => {
+											clearDraft();
+											if (e.detail || files.length > 0) {
+												await tick();
+												submitHandler(withSelectedText(e.detail));
+											}
+										}}
+									/>
 								{/if}
 							</div>
 						{/if}
 					</div>
 				</div>
 
-				{#if showRightPanel}
-					<PaneResizer
-						class="relative flex items-center justify-center group border-l border-gray-50 dark:border-gray-850/30 hover:border-gray-200 dark:hover:border-gray-800 transition z-20"
-					>
-						<div
-							class="absolute -left-1.5 -right-1.5 -top-0 -bottom-0 z-20 cursor-col-resize bg-transparent"
-						></div>
-					</PaneResizer>
-
-					<Pane
-						defaultSize={rightPanelDefaultSize}
-						minSize={rightPanelMinSize}
-						class={`h-full min-w-0 ${rightPanelClassName}`}
-					>
-						<slot name="right-panel" />
-					</Pane>
-				{/if}
+				<ResizableSidePanel
+					open={showRightPanel}
+					bind:width={rightPanelWidth}
+					minWidth={rightPanelMinWidth}
+					minSiblingWidth={360}
+					storageKey="writingRightPanelSize"
+					resizerId="right-panel-resizer"
+					className={`h-full min-w-0 ${rightPanelClassName}`}
+				>
+					<slot name="right-panel" />
+				</ResizableSidePanel>
 
 				{#if !embedded}
 					<ChatControls
