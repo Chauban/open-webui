@@ -67,6 +67,7 @@ from open_webui.models.education import (
     TeacherStudentNoteCreateForm,
     TeacherStudentNoteModel,
     TeacherStudentNoteUpdateForm,
+    TeacherStudentProfileResponse,
     UnifiedWritingWorkspaceResponse,
     UnsubmittedStudentItem,
     VersionCreateForm,
@@ -1724,7 +1725,7 @@ async def export_classroom_progress(
 
 @router.get(
     "/teacher/classrooms/{classroom_id}/students/{student_user_id}/profile",
-    response_model=StudentProfileResponse,
+    response_model=TeacherStudentProfileResponse,
 )
 async def get_student_profile(
     student_user_id: str,
@@ -1734,6 +1735,9 @@ async def get_student_profile(
     end_at: Optional[int] = Query(default=None, ge=0),
     assignment_id: Optional[str] = Query(default=None, min_length=1),
     round_no: Optional[int] = Query(default=None, ge=1),
+    metric_version: Optional[str] = Query(default=None, min_length=1),
+    limit: int = Query(default=200, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_session),
 ):
     if start_at is not None and end_at is not None and start_at > end_at:
@@ -1760,6 +1764,9 @@ async def get_student_profile(
         end_at=end_at,
         assignment_id=assignment_id,
         round_no=round_no,
+        metric_version=metric_version,
+        limit=limit,
+        offset=offset,
         teacher_notes=(
             Education.get_teacher_student_notes(
                 user.id, classroom.id, student_user_id, db=db
@@ -2436,38 +2443,50 @@ async def submit_assignment(
             final_version.id,
             stats,
             reflection.id,
+            commit=False,
             db=db,
         )
+        analysis_payload = build_submission_analysis(
+            submission,
+            session,
+            versions,
+            Education.get_provenance_segments(session.id, db=db),
+            Education.get_editor_operations(session.id, db=db),
+            prompt_timeline,
+        )
+        Education.upsert_analysis_result(
+            session.id,
+            "submission_analysis",
+            analysis_payload,
+            submission_id=submission.id,
+            commit=False,
+            db=db,
+        )
+        refresh_student_profile_snapshot(
+            submission,
+            assignment,
+            db,
+            analysis_payload=analysis_payload,
+            commit=False,
+        )
+        db.commit()
     except SubmissionAlreadyReviewedError:
+        db.rollback()
         # 上面已提前拦过一次,这里兜住「批改与提交并发」的窄窗口。
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Submission has already been reviewed",
         )
     except IntegrityError:
+        db.rollback()
         # 唯一约束 (assignment_id, student_id, round_no):同一轮已被并发请求写入。
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="A submission for this round is already being processed",
         )
-    analysis_payload = build_submission_analysis(
-        submission,
-        session,
-        versions,
-        Education.get_provenance_segments(session.id, db=db),
-        Education.get_editor_operations(session.id, db=db),
-        prompt_timeline,
-    )
-    Education.upsert_analysis_result(
-        session.id,
-        "submission_analysis",
-        analysis_payload,
-        submission_id=submission.id,
-        db=db,
-    )
-    refresh_student_profile_snapshot(
-        submission, assignment, db, analysis_payload=analysis_payload
-    )
+    except Exception:
+        db.rollback()
+        raise
     await _send_education_notifications(
         [assignment.teacher_id],
         "submission_created",
@@ -2868,18 +2887,29 @@ async def save_submission_review(
                 detail="A future resubmit due time is required when returning",
             )
 
-    review = Education.upsert_submission_review(
-        submission.id,
-        assignment.id,
-        user.id,
-        form_data,
-        db=db,
-    )
-    refresh_student_profile_snapshot(submission, assignment, db)
-    if form_data.review_status == "returned":
-        Education.set_writing_session_status(
-            submission.writing_session_id, "draft", db=db
+    try:
+        review = Education.upsert_submission_review(
+            submission.id,
+            assignment.id,
+            user.id,
+            form_data,
+            commit=False,
+            db=db,
         )
+        if form_data.review_status == "returned":
+            Education.set_writing_session_status(
+                submission.writing_session_id,
+                "draft",
+                commit=False,
+                db=db,
+            )
+        refresh_student_profile_snapshot(
+            submission, assignment, db, commit=False
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
     if form_data.review_status == "reviewed":
         await _send_education_notifications(
@@ -2971,9 +3001,13 @@ async def get_teacher_dashboard(
 @router.get("/me/writing/goals", response_model=list[StudentGrowthGoalModel])
 async def get_my_growth_goals(
     user=Depends(get_verified_user),
+    limit: int = Query(default=100, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_session),
 ):
-    return Education.get_student_growth_goals(user.id, db=db)
+    return Education.get_student_growth_goals(
+        user.id, limit=limit, offset=offset, db=db
+    )
 
 
 @router.post("/me/writing/goals", response_model=StudentGrowthGoalModel)
@@ -3040,6 +3074,8 @@ async def get_student_profile_notes(
     student_user_id: str,
     classroom: ClassroomModel = Depends(require_teacher_classroom),
     user=Depends(get_verified_user),
+    limit: int = Query(default=100, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_session),
 ):
     member = Education.get_classroom_member(classroom.id, student_user_id, db=db)
@@ -3051,7 +3087,12 @@ async def get_student_profile_notes(
     if user.id != classroom.teacher_id:
         return []
     return Education.get_teacher_student_notes(
-        user.id, classroom.id, student_user_id, db=db
+        user.id,
+        classroom.id,
+        student_user_id,
+        limit=limit,
+        offset=offset,
+        db=db,
     )
 
 
@@ -3120,6 +3161,9 @@ async def get_my_writing_profile(
     end_at: Optional[int] = Query(default=None, ge=0),
     assignment_id: Optional[str] = Query(default=None, min_length=1),
     round_no: Optional[int] = Query(default=None, ge=1),
+    metric_version: Optional[str] = Query(default=None, min_length=1),
+    limit: int = Query(default=200, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_session),
 ):
     if start_at is not None and end_at is not None and start_at > end_at:
@@ -3150,6 +3194,9 @@ async def get_my_writing_profile(
         end_at=end_at,
         assignment_id=assignment_id,
         round_no=round_no,
+        metric_version=metric_version,
+        limit=limit,
+        offset=offset,
     )
 
 

@@ -3648,5 +3648,16 @@
 	"AI use, rewriting, reflection, revision depth, and score evidence point in the same productive direction.": "AI使用、消化改写、反思、修改深度与得分证据共同呈现积极变化。",
 	"High AI share currently coincides with shallow rewriting, reflection, and revision without score improvement.": "当前较高的AI占比同时伴随较浅的消化改写、反思和修改，且尚未体现为得分提升。",
 	"Next: repeat this pattern—question, rewrite, reflect, and verify the result against the rubric.": "下一步：继续复用提问、改写、反思并对照量规验证的协作方式。",
-	"Next: reduce generated text in one section and rebuild it through deeper revision and evidence.": "下一步：选择一个段落减少生成内容，并通过更深入的修改和证据重新完成。"
+	"Next: reduce generated text in one section and rebuild it through deeper revision and evidence.": "下一步：选择一个段落减少生成内容，并通过更深入的修改和证据重新完成。",
+	"Metric version": "指标版本",
+	"Visible Data Points": "当前数据点",
+	"Visible Assignments": "当前作业数",
+	"Reviewed Points": "已评分数据点",
+	"Filtered Average Score (%)": "筛选结果平均得分率",
+	"{{count}} data point(s) use another metric version and are excluded.": "另有 {{count}} 个数据点使用其他指标版本，未纳入当前比较。",
+	"Priority": "优先级",
+	"Pending": "待完成",
+	"Not applicable": "不适用",
+	"Delete this private teacher note?": "确定删除这条教师私有备注吗？",
+	"Edited": "已编辑"
 }

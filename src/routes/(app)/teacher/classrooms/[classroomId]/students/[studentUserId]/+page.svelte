@@ -6,37 +6,43 @@
 	import { toast } from 'svelte-sonner';
 
 	import { getStudentProfile } from '$lib/apis/education';
-	import type { StudentProfile, StudentProfileFilters } from '$lib/apis/education';
+	import type { StudentProfileFilters, TeacherStudentProfile } from '$lib/apis/education';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
 	import EduButton from '$lib/components/education/EduButton.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 	import StudentGrowthProfile from '$lib/components/education/StudentGrowthProfile.svelte';
 	import { getClassroomDisplayName } from '$lib/utils/education';
+	import { createLatestRequestGate } from '$lib/utils/latest-request';
 
 	const i18n = getContext('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
 
-	let profile: StudentProfile | null = null;
+	let profile: TeacherStudentProfile | null = null;
 	let filters: StudentProfileFilters = {};
 	let loading = true;
 	let loadError = '';
+	const profileRequestGate = createLatestRequestGate();
 
 	const loadProfile = async (nextFilters: StudentProfileFilters = filters) => {
+		const requestId = profileRequestGate.next();
 		filters = nextFilters;
 		loadError = '';
 		try {
-			profile = await getStudentProfile(
+			const nextProfile = await getStudentProfile(
 				localStorage.token,
 				$page.params.classroomId,
 				$page.params.studentUserId,
 				filters
 			);
+			if (!profileRequestGate.isLatest(requestId)) return;
+			profile = nextProfile;
 		} catch (error) {
+			if (!profileRequestGate.isLatest(requestId)) return;
 			loadError = `${error?.detail ?? error}`;
 			toast.error(loadError);
 		} finally {
-			loading = false;
+			if (profileRequestGate.isLatest(requestId)) loading = false;
 		}
 	};
 

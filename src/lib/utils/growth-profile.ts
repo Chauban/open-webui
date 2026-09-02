@@ -29,3 +29,31 @@ export const buildTrendPath = (
 	});
 	return path.trim();
 };
+
+export type RubricDimension = {
+	signature: string;
+	key: string;
+	label: string;
+};
+
+export const rubricDimensionSignature = (key: string, label: string) =>
+	`${key}::${label.trim().toLocaleLowerCase().replace(/\s+/g, ' ')}`;
+
+export const buildRubricDimensions = (
+	points: Array<{ assignment_id: string; rubric: Record<string, number> | null }>,
+	criteriaByAssignment: Record<
+		string,
+		Record<string, { key: string; label: string; max_score: number }>
+	>
+): RubricDimension[] => {
+	const dimensions = new Map<string, RubricDimension>();
+	for (const point of points) {
+		for (const key of Object.keys(point.rubric ?? {})) {
+			const criterion = criteriaByAssignment[point.assignment_id]?.[key];
+			if (!criterion) continue;
+			const signature = rubricDimensionSignature(key, criterion.label);
+			dimensions.set(signature, { signature, key, label: criterion.label });
+		}
+	}
+	return [...dimensions.values()];
+};

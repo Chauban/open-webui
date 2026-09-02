@@ -1,4 +1,6 @@
-import { render } from 'svelte/server';
+// @vitest-environment jsdom
+
+import { render } from '@testing-library/svelte';
 import { readable } from 'svelte/store';
 import { describe, expect, test } from 'vitest';
 
@@ -15,7 +17,7 @@ const context = new Map([
 
 describe('EduTrendChart', () => {
 	test('renders keyboard targets, full point labels, and a data-table control', () => {
-		const { body } = render(EduTrendChart, {
+		const { container } = render(EduTrendChart, {
 			context,
 			props: {
 				labels: ['Essay · Round 1 · 9/1', 'Essay · Round 2 · 9/2'],
@@ -26,8 +28,11 @@ describe('EduTrendChart', () => {
 			}
 		});
 
+		const body = container.innerHTML;
 		expect(body).toContain('tabindex="0"');
 		expect(body).toContain('role="button"');
+		expect(body).toContain('role="group"');
+		expect(body).toContain('r="22"');
 		expect(body).toContain('Essay · Round 1 · 9/1');
 		expect(body).toContain('Show data table');
 		expect(body).toContain('9/1');

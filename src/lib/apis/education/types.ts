@@ -11,6 +11,7 @@ export type AIHelpType =
 	| 'Other';
 
 export type ProfileReviewStatus = 'unsubmitted' | 'pending' | 'reviewed' | 'returned';
+export type ProfileCompletenessStatus = 'complete' | 'missing' | 'pending' | 'not_applicable';
 export type ProfileMetricKey =
 	| 'total_chars'
 	| 'normalized_score'
@@ -37,10 +38,10 @@ export type ProfileAssignment = {
 };
 
 export type ProfileDataCompleteness = {
-	version_data_complete: boolean;
-	editor_operations_complete: boolean;
-	source_tracking_complete: boolean;
-	scoring_comparable: boolean;
+	version_data: ProfileCompletenessStatus;
+	editor_operations: ProfileCompletenessStatus;
+	source_tracking: ProfileCompletenessStatus;
+	scoring: ProfileCompletenessStatus;
 };
 
 export type StudentProfileTimelinePoint = {
@@ -57,10 +58,10 @@ export type StudentProfileTimelinePoint = {
 	normalized_score: number | null;
 	rubric: Record<string, number> | null;
 	review_status: Exclude<ProfileReviewStatus, 'unsubmitted'>;
-	inserted_chars: number;
-	revised_chars: number;
+	inserted_chars: number | null;
+	revised_chars: number | null;
 	revision_depth: number | null;
-	writing_span_seconds: number;
+	writing_span_seconds: number | null;
 	active_writing_seconds: number | null;
 	lead_time_seconds: number | null;
 	end_loaded_ratio: number | null;
@@ -75,8 +76,8 @@ export type StudentProfileTimelinePoint = {
 	reflection_quality: number;
 	ai_help_types: AIHelpType[];
 	collaboration_index: number | null;
-	burst_count: number;
-	suspected_unmarked_import_count: number;
+	burst_count: number | null;
+	suspected_unmarked_import_count: number | null;
 };
 
 export type StudentProfileMetricTrend = {
@@ -116,6 +117,16 @@ export type StudentProfileInsight = {
 	sample_count: number;
 	data_completeness: number;
 	teaching_value: number;
+	priority_score: number;
+	evidence_codes: Array<
+		| 'sample_size'
+		| 'version_evidence'
+		| 'editor_evidence'
+		| 'source_evidence'
+		| 'scoring_evidence'
+		| 'reflection_evidence'
+		| 'round_evidence'
+	>;
 };
 
 export type StudentProfileRoundProgress = {
@@ -149,6 +160,7 @@ export type TeacherStudentNote = {
 	student_id: string;
 	content: string;
 	observed_at: number;
+	edited_at: number | null;
 	created_at: number;
 	updated_at: number;
 };
@@ -180,16 +192,29 @@ export type StudentProfileIndexFormula = {
 
 export type StudentProfile = {
 	metric_version: string;
+	insight_version: string;
+	available_metric_versions: string[];
+	excluded_snapshot_count: number;
 	student_id: string;
 	student_name: string | null;
 	student_email: string | null;
 	classrooms: Array<{ id: string; name: string } & Record<string, unknown>>;
-	assignment_count: number;
-	submitted_count: number;
-	unsubmitted_count: number;
-	reviewed_count: number;
-	returned_count: number;
-	average_score_percent: number | null;
+	portfolio_summary: {
+		assignment_count: number;
+		submitted_count: number;
+		unsubmitted_count: number;
+		reviewed_count: number;
+		returned_count: number;
+		average_score_percent: number | null;
+	};
+	filtered_summary: {
+		point_count: number;
+		assignment_count: number;
+		reviewed_point_count: number;
+		average_score_percent: number | null;
+	};
+	filters_applied: boolean;
+	timeline_pagination: { total: number; limit: number; offset: number };
 	assignments: Array<{
 		assignment: ProfileAssignment;
 		submission_id: string | null;
@@ -199,6 +224,7 @@ export type StudentProfile = {
 		score: number | null;
 	}>;
 	timeline: StudentProfileTimelinePoint[];
+	cross_assignment_timeline: StudentProfileTimelinePoint[];
 	round_progress: StudentProfileRoundProgress[];
 	trends: StudentProfileMetricTrend[];
 	ai_help_type_distribution: Partial<Record<AIHelpType, number>>;
@@ -217,12 +243,21 @@ export type StudentProfile = {
 	data_completeness: {
 		point_count: number;
 		version_complete_count: number;
+		version_missing_count: number;
 		editor_operations_complete_count: number;
+		editor_operations_missing_count: number;
 		source_tracking_complete_count: number;
+		source_tracking_missing_count: number;
 		scoring_comparable_count: number;
+		scoring_pending_count: number;
+		scoring_not_applicable_count: number;
+		scoring_missing_count: number;
 		overall_ratio: number | null;
 	};
 	growth_goals: StudentGrowthGoal[];
+};
+
+export type TeacherStudentProfile = StudentProfile & {
 	teacher_notes: TeacherStudentNote[];
 };
 
@@ -231,4 +266,7 @@ export type StudentProfileFilters = {
 	end_at?: number;
 	assignment_id?: string;
 	round_no?: number;
+	metric_version?: string;
+	limit?: number;
+	offset?: number;
 };

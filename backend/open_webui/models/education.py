@@ -212,9 +212,16 @@ class SubmissionReview(Base):
 
 class StudentProfileSnapshot(Base):
     __tablename__ = "student_profile_snapshot"
+    __table_args__ = (
+        UniqueConstraint(
+            "submission_id",
+            "metric_version",
+            name="student_profile_snapshot_submission_metric_idx",
+        ),
+    )
 
     id = Column(Text, primary_key=True, unique=True)
-    submission_id = Column(Text, nullable=False, unique=True)
+    submission_id = Column(Text, nullable=False)
     student_id = Column(Text, nullable=False)
     assignment_id = Column(Text, nullable=False)
     round_no = Column(BigInteger, nullable=False)
@@ -248,8 +255,22 @@ class TeacherStudentNote(Base):
     student_id = Column(Text, nullable=False)
     content = Column(Text, nullable=False)
     observed_at = Column(BigInteger, nullable=False)
+    edited_at = Column(BigInteger, nullable=True)
+    deleted_at = Column(BigInteger, nullable=True)
     created_at = Column(BigInteger, nullable=False)
     updated_at = Column(BigInteger, nullable=False)
+
+
+class TeacherStudentNoteRevision(Base):
+    __tablename__ = "teacher_student_note_revision"
+
+    id = Column(Text, primary_key=True, unique=True)
+    note_id = Column(Text, nullable=False)
+    teacher_id = Column(Text, nullable=False)
+    content = Column(Text, nullable=False)
+    observed_at = Column(BigInteger, nullable=False)
+    action = Column(Text, nullable=False)
+    created_at = Column(BigInteger, nullable=False)
 
 
 class EducationNotification(Base):
@@ -858,6 +879,7 @@ class TeacherReviewResponse(BaseModel):
 
 ProfileReviewStatus = Literal["unsubmitted", "pending", "reviewed", "returned"]
 ProfileTrendDirection = Literal["up", "down", "flat"]
+ProfileCompletenessStatus = Literal["complete", "missing", "pending", "not_applicable"]
 ProfileInsightTone = Literal["positive", "warning", "neutral"]
 ProfileInsightCode = Literal[
     "not_enough_data",
@@ -916,18 +938,24 @@ class StrictProfileModel(BaseModel):
 
 
 class StudentProfileDataCompleteness(StrictProfileModel):
-    version_data_complete: bool
-    editor_operations_complete: bool
-    source_tracking_complete: bool
-    scoring_comparable: bool
+    version_data: ProfileCompletenessStatus
+    editor_operations: ProfileCompletenessStatus
+    source_tracking: ProfileCompletenessStatus
+    scoring: ProfileCompletenessStatus
 
 
 class StudentProfileCompletenessSummary(StrictProfileModel):
     point_count: int = 0
     version_complete_count: int = 0
+    version_missing_count: int = 0
     editor_operations_complete_count: int = 0
+    editor_operations_missing_count: int = 0
     source_tracking_complete_count: int = 0
+    source_tracking_missing_count: int = 0
     scoring_comparable_count: int = 0
+    scoring_pending_count: int = 0
+    scoring_not_applicable_count: int = 0
+    scoring_missing_count: int = 0
     overall_ratio: Optional[float] = None
 
 
@@ -963,10 +991,10 @@ class StudentProfileTimelinePoint(StrictProfileModel):
 
     # 过程维。不用版本数:一个版本 = 一次 1.2 秒防抖自动保存,衡量的是打字时长
     # 而不是「改了几版」,拿它当修改投入会被打字速度带偏。
-    inserted_chars: int = 0
-    revised_chars: int = 0
+    inserted_chars: Optional[int] = None
+    revised_chars: Optional[int] = None
     revision_depth: Optional[int] = None
-    writing_span_seconds: int = 0
+    writing_span_seconds: Optional[int] = None
     active_writing_seconds: Optional[int] = None
     lead_time_seconds: Optional[int] = None
     end_loaded_ratio: Optional[float] = None
@@ -985,8 +1013,8 @@ class StudentProfileTimelinePoint(StrictProfileModel):
     collaboration_index: Optional[int] = None
 
     # 风险信号:只做展示,不参与任何成长指数。
-    burst_count: int = 0
-    suspected_unmarked_import_count: int = 0
+    burst_count: Optional[int] = None
+    suspected_unmarked_import_count: Optional[int] = None
 
 
 class StudentProfileRoundProgress(StrictProfileModel):
@@ -1042,6 +1070,18 @@ class StudentProfileInsight(StrictProfileModel):
     sample_count: int = Field(default=0, ge=0)
     data_completeness: float = Field(default=0, ge=0, le=1)
     teaching_value: int = Field(default=1, ge=1, le=5)
+    priority_score: float = Field(default=0, ge=0)
+    evidence_codes: list[
+        Literal[
+            "sample_size",
+            "version_evidence",
+            "editor_evidence",
+            "source_evidence",
+            "scoring_evidence",
+            "reflection_evidence",
+            "round_evidence",
+        ]
+    ] = Field(default_factory=list)
 
 
 class StudentGrowthGoalCreateForm(StrictProfileModel):
@@ -1130,8 +1170,31 @@ class TeacherStudentNoteModel(StrictProfileModel):
     student_id: str
     content: str
     observed_at: int
+    edited_at: Optional[int] = None
     created_at: int
     updated_at: int
+
+
+class StudentProfilePortfolioSummary(StrictProfileModel):
+    assignment_count: int = 0
+    submitted_count: int = 0
+    unsubmitted_count: int = 0
+    reviewed_count: int = 0
+    returned_count: int = 0
+    average_score_percent: Optional[float] = None
+
+
+class StudentProfileFilteredSummary(StrictProfileModel):
+    point_count: int = 0
+    assignment_count: int = 0
+    reviewed_point_count: int = 0
+    average_score_percent: Optional[float] = None
+
+
+class StudentProfilePagination(StrictProfileModel):
+    total: int = 0
+    limit: int = Field(ge=1, le=500)
+    offset: int = Field(ge=0)
 
 
 class StudentProfileHelpTypeSummary(StrictProfileModel):
@@ -1213,18 +1276,22 @@ class StudentProfileSnapshotModel(StrictProfileModel):
 
 class StudentProfileResponse(StrictProfileModel):
     metric_version: str
+    insight_version: str
+    available_metric_versions: list[str] = Field(default_factory=list)
+    excluded_snapshot_count: int = 0
     student_id: str
     student_name: Optional[str] = None
     student_email: Optional[str] = None
     classrooms: list[ClassroomModel] = Field(default_factory=list)
-    assignment_count: int = 0
-    submitted_count: int = 0
-    unsubmitted_count: int = 0
-    reviewed_count: int = 0
-    returned_count: int = 0
-    average_score_percent: Optional[float] = None
+    portfolio_summary: StudentProfilePortfolioSummary
+    filtered_summary: StudentProfileFilteredSummary
+    filters_applied: bool = False
+    timeline_pagination: StudentProfilePagination
     assignments: list[StudentProfileAssignmentItem] = Field(default_factory=list)
     timeline: list[StudentProfileTimelinePoint] = Field(default_factory=list)
+    cross_assignment_timeline: list[StudentProfileTimelinePoint] = Field(
+        default_factory=list
+    )
     round_progress: list[StudentProfileRoundProgress] = Field(default_factory=list)
     trends: list[StudentProfileMetricTrend] = Field(default_factory=list)
     ai_help_type_distribution: dict[AIHelpType, int] = Field(default_factory=dict)
@@ -1234,6 +1301,9 @@ class StudentProfileResponse(StrictProfileModel):
     insights: list[StudentProfileInsight] = Field(default_factory=list)
     data_completeness: StudentProfileCompletenessSummary
     growth_goals: list[StudentGrowthGoalModel] = Field(default_factory=list)
+
+
+class TeacherStudentProfileResponse(StudentProfileResponse):
     teacher_notes: list[TeacherStudentNoteModel] = Field(default_factory=list)
 
 
@@ -2151,6 +2221,7 @@ class EducationTable:
         result_type: str,
         payload_json: dict,
         submission_id: Optional[str] = None,
+        commit: bool = True,
         db: Optional[Session] = None,
     ) -> AnalysisResultModel:
         with get_db_context(db) as db:
@@ -2178,7 +2249,10 @@ class EducationTable:
                 result.payload_json = payload_json
                 result.updated_at = now
 
-            db.commit()
+            if commit:
+                db.commit()
+            else:
+                db.flush()
             db.refresh(result)
             return AnalysisResultModel.model_validate(result)
 
@@ -2259,13 +2333,17 @@ class EducationTable:
         submission: SubmissionModel,
         metric_version: str,
         payload: StudentProfileSnapshotPayload,
+        commit: bool = True,
         db: Optional[Session] = None,
     ) -> StudentProfileSnapshotModel:
         with get_db_context(db) as db:
             now = int(time.time())
             snapshot = (
                 db.query(StudentProfileSnapshot)
-                .filter(StudentProfileSnapshot.submission_id == submission.id)
+                .filter(
+                    StudentProfileSnapshot.submission_id == submission.id,
+                    StudentProfileSnapshot.metric_version == metric_version,
+                )
                 .first()
             )
             if snapshot is None:
@@ -2290,7 +2368,10 @@ class EducationTable:
                 snapshot.metric_version = metric_version
                 snapshot.snapshot_json = payload.model_dump(mode="json")
                 snapshot.updated_at = now
-            db.commit()
+            if commit:
+                db.commit()
+            else:
+                db.flush()
             db.refresh(snapshot)
             return StudentProfileSnapshotModel.model_validate(snapshot)
 
@@ -2302,6 +2383,8 @@ class EducationTable:
         start_at: Optional[int] = None,
         end_at: Optional[int] = None,
         round_no: Optional[int] = None,
+        limit: int = 200,
+        offset: int = 0,
         db: Optional[Session] = None,
     ) -> list[StudentProfileSnapshotModel]:
         if assignment_ids is not None and not assignment_ids:
@@ -2322,12 +2405,56 @@ class EducationTable:
             if round_no is not None:
                 query = query.filter(StudentProfileSnapshot.round_no == round_no)
             rows = query.order_by(
-                StudentProfileSnapshot.submitted_at.asc(),
-                StudentProfileSnapshot.round_no.asc(),
-            ).all()
+                StudentProfileSnapshot.submitted_at.desc(),
+                StudentProfileSnapshot.round_no.desc(),
+            ).offset(offset).limit(limit).all()
+            rows.reverse()
             return [
                 StudentProfileSnapshotModel.model_validate(row) for row in rows
             ]
+
+    def count_student_profile_snapshots(
+        self,
+        student_id: str,
+        metric_version: str,
+        assignment_ids: Optional[list[str]] = None,
+        start_at: Optional[int] = None,
+        end_at: Optional[int] = None,
+        round_no: Optional[int] = None,
+        db: Optional[Session] = None,
+    ) -> int:
+        if assignment_ids is not None and not assignment_ids:
+            return 0
+        with get_db_context(db) as db:
+            query = db.query(StudentProfileSnapshot).filter(
+                StudentProfileSnapshot.student_id == student_id,
+                StudentProfileSnapshot.metric_version == metric_version,
+            )
+            if assignment_ids is not None:
+                query = query.filter(StudentProfileSnapshot.assignment_id.in_(assignment_ids))
+            if start_at is not None:
+                query = query.filter(StudentProfileSnapshot.submitted_at >= start_at)
+            if end_at is not None:
+                query = query.filter(StudentProfileSnapshot.submitted_at <= end_at)
+            if round_no is not None:
+                query = query.filter(StudentProfileSnapshot.round_no == round_no)
+            return query.count()
+
+    def get_student_profile_metric_versions(
+        self,
+        student_id: str,
+        assignment_ids: Optional[list[str]] = None,
+        db: Optional[Session] = None,
+    ) -> list[str]:
+        if assignment_ids is not None and not assignment_ids:
+            return []
+        with get_db_context(db) as db:
+            query = db.query(StudentProfileSnapshot.metric_version).filter(
+                StudentProfileSnapshot.student_id == student_id
+            )
+            if assignment_ids is not None:
+                query = query.filter(StudentProfileSnapshot.assignment_id.in_(assignment_ids))
+            return sorted({row[0] for row in query.distinct().all()}, reverse=True)
 
     def get_micro_reflections_by_ids(
         self, reflection_ids: list[str], db: Optional[Session] = None
@@ -2352,6 +2479,7 @@ class EducationTable:
         final_version_id: str,
         stats_json: dict,
         micro_reflection_id: str,
+        commit: bool = True,
         db: Optional[Session] = None,
     ) -> SubmissionModel:
         with get_db_context(db) as db:
@@ -2419,15 +2547,18 @@ class EducationTable:
                     ).delete(synchronize_session=False)
                 submission = current
 
-            db.commit()
-            db.refresh(submission)
+            db.flush()
 
             session = db.get(WritingSession, writing_session_id)
             if session is not None:
                 session.status = "submitted"
                 session.submitted_submission_id = submission.id
                 session.updated_at = int(time.time())
+            if commit:
                 db.commit()
+            else:
+                db.flush()
+            db.refresh(submission)
 
             return SubmissionModel.model_validate(submission)
 
@@ -2523,14 +2654,21 @@ class EducationTable:
             }
 
     def set_writing_session_status(
-        self, session_id: str, status: str, db: Optional[Session] = None
+        self,
+        session_id: str,
+        status: str,
+        commit: bool = True,
+        db: Optional[Session] = None,
     ) -> None:
         with get_db_context(db) as db:
             session = db.get(WritingSession, session_id)
             if session is not None:
                 session.status = status
                 session.updated_at = int(time.time())
-                db.commit()
+                if commit:
+                    db.commit()
+                else:
+                    db.flush()
 
     def get_submission_review_by_submission_id(
         self, submission_id: str, db: Optional[Session] = None
@@ -2565,6 +2703,7 @@ class EducationTable:
         assignment_id: str,
         reviewer_id: str,
         form_data: SubmissionReviewForm,
+        commit: bool = True,
         db: Optional[Session] = None,
     ) -> SubmissionReviewModel:
         with get_db_context(db) as db:
@@ -2604,7 +2743,10 @@ class EducationTable:
                 )
                 review.updated_at = now
 
-            db.commit()
+            if commit:
+                db.commit()
+            else:
+                db.flush()
             db.refresh(review)
             return SubmissionReviewModel.model_validate(review)
 
@@ -2630,6 +2772,8 @@ class EducationTable:
         student_id: str,
         classroom_ids: Optional[list[str]] = None,
         include_archived: bool = False,
+        limit: int = 100,
+        offset: int = 0,
         db: Optional[Session] = None,
     ) -> list[StudentGrowthGoalModel]:
         with get_db_context(db) as db:
@@ -2645,7 +2789,7 @@ class EducationTable:
                 query = query.filter(StudentGrowthGoal.status != "archived")
             goals = query.order_by(
                 StudentGrowthGoal.status.asc(), StudentGrowthGoal.updated_at.desc()
-            ).all()
+            ).offset(offset).limit(limit).all()
             return [StudentGrowthGoalModel.model_validate(goal) for goal in goals]
 
     def insert_student_growth_goal(
@@ -2699,6 +2843,8 @@ class EducationTable:
         teacher_id: str,
         classroom_id: str,
         student_id: str,
+        limit: int = 100,
+        offset: int = 0,
         db: Optional[Session] = None,
     ) -> list[TeacherStudentNoteModel]:
         with get_db_context(db) as db:
@@ -2708,8 +2854,11 @@ class EducationTable:
                     TeacherStudentNote.teacher_id == teacher_id,
                     TeacherStudentNote.classroom_id == classroom_id,
                     TeacherStudentNote.student_id == student_id,
+                    TeacherStudentNote.deleted_at.is_(None),
                 )
                 .order_by(TeacherStudentNote.observed_at.desc())
+                .offset(offset)
+                .limit(limit)
                 .all()
             )
             return [TeacherStudentNoteModel.model_validate(note) for note in notes]
@@ -2748,13 +2897,25 @@ class EducationTable:
     ) -> Optional[TeacherStudentNoteModel]:
         with get_db_context(db) as db:
             note = db.get(TeacherStudentNote, note_id)
-            if note is None or note.teacher_id != teacher_id:
+            if note is None or note.teacher_id != teacher_id or note.deleted_at is not None:
                 return None
+            db.add(
+                TeacherStudentNoteRevision(
+                    id=str(uuid.uuid4()),
+                    note_id=note.id,
+                    teacher_id=teacher_id,
+                    content=note.content,
+                    observed_at=note.observed_at,
+                    action="update",
+                    created_at=int(time.time()),
+                )
+            )
             if "content" in form_data.model_fields_set:
                 note.content = form_data.content
             if "observed_at" in form_data.model_fields_set:
                 note.observed_at = form_data.observed_at
-            note.updated_at = int(time.time())
+            note.edited_at = int(time.time())
+            note.updated_at = note.edited_at
             db.commit()
             db.refresh(note)
             return TeacherStudentNoteModel.model_validate(note)
@@ -2766,16 +2927,33 @@ class EducationTable:
         db: Optional[Session] = None,
     ) -> bool:
         with get_db_context(db) as db:
-            deleted = (
+            note = (
                 db.query(TeacherStudentNote)
                 .filter(
                     TeacherStudentNote.id == note_id,
                     TeacherStudentNote.teacher_id == teacher_id,
+                    TeacherStudentNote.deleted_at.is_(None),
                 )
-                .delete()
+                .first()
             )
+            if note is None:
+                return False
+            now = int(time.time())
+            db.add(
+                TeacherStudentNoteRevision(
+                    id=str(uuid.uuid4()),
+                    note_id=note.id,
+                    teacher_id=teacher_id,
+                    content=note.content,
+                    observed_at=note.observed_at,
+                    action="delete",
+                    created_at=now,
+                )
+            )
+            note.deleted_at = now
+            note.updated_at = now
             db.commit()
-            return deleted > 0
+            return True
 
     def insert_notifications(
         self,

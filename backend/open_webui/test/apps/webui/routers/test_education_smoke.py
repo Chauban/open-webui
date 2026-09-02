@@ -1,6 +1,7 @@
 import asyncio
 import tempfile
 import time
+import uuid
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -43,6 +44,7 @@ from open_webui.models.education import (
     StudentProfileReflectionQuality,
     StudentProfileSnapshot,
     TeacherStudentNote,
+    TeacherStudentNoteRevision,
     WritingSession,
     WritingVersion,
 )
@@ -478,6 +480,7 @@ def education_client():
             StudentProfileSnapshot.__table__,
             StudentGrowthGoal.__table__,
             TeacherStudentNote.__table__,
+            TeacherStudentNoteRevision.__table__,
             EducationNotification.__table__,
         ]:
             table.create(bind=engine, checkfirst=True)
@@ -1077,7 +1080,7 @@ def test_student_assignment_and_profile_views(education_client):
     assert profile_res.status_code == 200, profile_res.text
     profile = profile_res.json()
     assert profile["student_id"] == student.id
-    assert profile["submitted_count"] == 1
+    assert profile["portfolio_summary"]["submitted_count"] == 1
     assert len(profile["timeline"]) == 1
     point = profile["timeline"][0]
     assert point["submission_id"] == submission_id
@@ -1086,10 +1089,10 @@ def test_student_assignment_and_profile_views(education_client):
     assert point["reflection_quality"] > 0
     assert point["process_index"] is None or 0 <= point["process_index"] <= 100
     assert point["data_completeness"] == {
-        "version_data_complete": True,
-        "editor_operations_complete": True,
-        "source_tracking_complete": False,
-        "scoring_comparable": False,
+        "version_data": "complete",
+        "editor_operations": "complete",
+        "source_tracking": "missing",
+        "scoring": "pending",
     }
     # 来源证据缺失不是「AI 占比为 0」；所有依赖来源追踪的值都必须为空。
     assert point["ai_ratio"] is None
@@ -2675,7 +2678,7 @@ def test_profile_normalizes_scores_by_assignment_maximum(education_client):
     ).json()
     assert profile["timeline"][0]["score_max"] == 50
     assert profile["timeline"][0]["normalized_score"] == 80
-    assert profile["average_score_percent"] == 80
+    assert profile["portfolio_summary"]["average_score_percent"] == 80
 
 
 def test_versions_up_to_stops_at_the_round_final_version():
@@ -2745,22 +2748,24 @@ def test_student_profile_tracks_round_progress_and_trends(
     assert profile_res.status_code == 200, profile_res.text
     profile = profile_res.json()
 
-    assert profile["metric_version"] == "2026-09-01.2"
+    assert profile["metric_version"] == "2026-09-01.3"
 
     # 两轮都进时间线:成长看的是轮次之间的变化,历史轮不能丢。
     assert [point["round_no"] for point in profile["timeline"]] == [1, 2]
     assert [point["score"] for point in profile["timeline"]] == [70, 88]
     assert profile["timeline"][0]["is_current"] is False
     assert profile["timeline"][1]["is_current"] is True
+    assert [point["round_no"] for point in profile["cross_assignment_timeline"]] == [2]
     # 客户端确认编辑事件采集链路已完整落盘时，零条操作是真实的 0，
     # 不能再被误判成采集缺失。
-    assert profile["timeline"][0]["data_completeness"][
-        "editor_operations_complete"
-    ] is True
+    assert (
+        profile["timeline"][0]["data_completeness"]["editor_operations"]
+        == "complete"
+    )
     assert profile["timeline"][0]["active_writing_seconds"] == 0
     # 当前轮才计入作业统计与平均分
-    assert profile["submitted_count"] == 1
-    assert profile["average_score_percent"] == 88
+    assert profile["portfolio_summary"]["submitted_count"] == 1
+    assert profile["portfolio_summary"]["average_score_percent"] == 88
 
     assert len(profile["round_progress"]) == 1
     progress = profile["round_progress"][0]
@@ -2797,6 +2802,19 @@ def test_student_profile_tracks_round_progress_and_trends(
     )
     assert invalid_range.status_code == 422
 
+    paged = client.get(
+        f"/api/v1/teacher/classrooms/{classroom_id}/students/{student.id}/profile",
+        params={"limit": 1},
+    )
+    assert paged.status_code == 200, paged.text
+    assert paged.json()["timeline_pagination"] == {
+        "total": 2,
+        "limit": 1,
+        "offset": 0,
+    }
+    assert len(paged.json()["timeline"]) == 1
+    assert paged.json()["filtered_summary"]["point_count"] == 1
+
     # 历史轮的分析必须停在自己那一版正文上,不能读到第二轮的字数
     assert profile["timeline"][0]["total_chars"] < profile["timeline"][1]["total_chars"]
 
@@ -2820,8 +2838,137 @@ def test_student_profile_requires_classroom_membership(education_client):
     assert forbidden.status_code == 403, forbidden.text
 
 
+def test_profile_snapshot_failure_rolls_back_review(education_client, monkeypatch):
+    client, teacher, _, student, _, session_local = education_client
+    assignment, _, submission_id = _setup_submitted_assignment(
+        client, teacher, student, "Atomic Review"
+    )
+
+    def fail_snapshot(*args, **kwargs):
+        raise RuntimeError("snapshot failed")
+
+    monkeypatch.setattr(
+        education_router_module, "refresh_student_profile_snapshot", fail_snapshot
+    )
+    UserContext.current_user = teacher
+    with pytest.raises(RuntimeError, match="snapshot failed"):
+        client.post(
+            f"/api/v1/teacher/submissions/{submission_id}/review",
+            json={
+                "review_status": "reviewed",
+                "score": 80,
+                "rubric_scores": {"ideas": 27, "structure": 27, "evidence": 26},
+            },
+        )
+
+    with session_local() as session:
+        assert (
+            session.query(SubmissionReview)
+            .filter(SubmissionReview.submission_id == submission_id)
+            .first()
+            is None
+        )
+
+
+def test_profile_snapshot_failure_rolls_back_new_submission_round(
+    education_client, monkeypatch
+):
+    client, teacher, _, student, _, session_local = education_client
+    assignment, session_id, first_submission_id = _setup_submitted_assignment(
+        client, teacher, student, "Atomic Submission"
+    )
+    UserContext.current_user = teacher
+    returned = client.post(
+        f"/api/v1/teacher/submissions/{first_submission_id}/review",
+        json={
+            "review_status": "returned",
+            "score": 70,
+            "rubric_scores": {"ideas": 24, "structure": 23, "evidence": 23},
+            "returned_comment": "Revise evidence",
+            "resubmit_due_at": 2100000000,
+        },
+    )
+    assert returned.status_code == 200, returned.text
+
+    def fail_snapshot(*args, **kwargs):
+        raise RuntimeError("snapshot failed")
+
+    monkeypatch.setattr(
+        education_router_module, "refresh_student_profile_snapshot", fail_snapshot
+    )
+    UserContext.current_user = student
+    with pytest.raises(RuntimeError, match="snapshot failed"):
+        client.post(
+            f"/api/v1/assignments/{assignment['id']}/submit",
+            json=_submit_body(session_id, "A revised draft that should roll back"),
+        )
+
+    with session_local() as session:
+        rows = (
+            session.query(Submission)
+            .filter(
+                Submission.assignment_id == assignment["id"],
+                Submission.student_id == student.id,
+            )
+            .all()
+        )
+        assert len(rows) == 1
+        assert rows[0].id == first_submission_id
+        assert rows[0].is_current == 1
+
+
+def test_profile_snapshots_keep_multiple_metric_versions(education_client):
+    client, teacher, _, student, _, session_local = education_client
+    assignment, _, submission_id = _setup_submitted_assignment(
+        client, teacher, student, "Versioned Snapshot"
+    )
+    with session_local() as session:
+        original = (
+            session.query(StudentProfileSnapshot)
+            .filter(StudentProfileSnapshot.submission_id == submission_id)
+            .one()
+        )
+        copied_payload = dict(original.snapshot_json)
+        copied_payload["metric_version"] = "future-metric"
+        session.add(
+            StudentProfileSnapshot(
+                id=str(uuid.uuid4()),
+                submission_id=original.submission_id,
+                student_id=original.student_id,
+                assignment_id=original.assignment_id,
+                round_no=original.round_no,
+                submitted_at=original.submitted_at,
+                metric_version="future-metric",
+                snapshot_json=copied_payload,
+                created_at=original.created_at,
+                updated_at=original.updated_at,
+            )
+        )
+        session.commit()
+        assert (
+            session.query(StudentProfileSnapshot)
+            .filter(StudentProfileSnapshot.submission_id == submission_id)
+            .count()
+            == 2
+        )
+
+    UserContext.current_user = teacher
+    classroom_id = assignment["classroom_id"]
+    profile = client.get(
+        f"/api/v1/teacher/classrooms/{classroom_id}/students/{student.id}/profile",
+        params={"metric_version": "future-metric"},
+    )
+    assert profile.status_code == 200, profile.text
+    assert profile.json()["metric_version"] == "future-metric"
+    assert profile.json()["excluded_snapshot_count"] == 1
+    assert set(profile.json()["available_metric_versions"]) == {
+        "2026-09-01.3",
+        "future-metric",
+    }
+
+
 def test_multi_class_assignments_growth_goals_and_teacher_notes(education_client):
-    client, teacher, _, student, _, _ = education_client
+    client, teacher, _, student, _, session_local = education_client
     UserContext.current_user = teacher
 
     classrooms = []
@@ -2896,7 +3043,7 @@ def test_multi_class_assignments_growth_goals_and_teacher_notes(education_client
         classrooms[1]["id"],
     }
     assert student_profile.json()["growth_goals"][0]["id"] == goal["id"]
-    assert student_profile.json()["teacher_notes"] == []
+    assert "teacher_notes" not in student_profile.json()
 
     UserContext.current_user = teacher
     note_response = client.post(
@@ -2920,6 +3067,16 @@ def test_multi_class_assignments_growth_goals_and_teacher_notes(education_client
     assert updated_note.status_code == 200, updated_note.text
     deleted_note = client.delete(f"/api/v1/teacher/profile-notes/{note['id']}")
     assert deleted_note.status_code == 200, deleted_note.text
+    with session_local() as session:
+        revisions = (
+            session.query(TeacherStudentNoteRevision)
+            .filter(TeacherStudentNoteRevision.note_id == note["id"])
+            .order_by(TeacherStudentNoteRevision.created_at.asc())
+            .all()
+        )
+        assert [revision.action for revision in revisions] == ["update", "delete"]
+        stored_note = session.get(TeacherStudentNote, note["id"])
+        assert stored_note.deleted_at is not None
 
 
 def test_analysis_payload_usability_treats_history_as_immutable():
@@ -3038,10 +3195,10 @@ def test_profile_trend_compares_early_and_recent_windows():
 
 def test_profile_insights_rank_confidence_and_combine_ai_evidence():
     completeness = SimpleNamespace(
-        version_data_complete=True,
-        editor_operations_complete=True,
-        source_tracking_complete=True,
-        scoring_comparable=True,
+        version_data="complete",
+        editor_operations="complete",
+        source_tracking="complete",
+        scoring="complete",
     )
     timeline = [
         SimpleNamespace(

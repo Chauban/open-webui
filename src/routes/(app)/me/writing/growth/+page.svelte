@@ -13,6 +13,7 @@
 	import EduButton from '$lib/components/education/EduButton.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 	import StudentGrowthProfile from '$lib/components/education/StudentGrowthProfile.svelte';
+	import { createLatestRequestGate } from '$lib/utils/latest-request';
 
 	// 学生看自己的成长画像。教师端看到的是同一个组件、同一套指标——
 	// 学生看不到自己的成长，这个模块的教育价值就少一半。
@@ -22,17 +23,22 @@
 	let filters: StudentProfileFilters = {};
 	let loaded = false;
 	let loadError = '';
+	const profileRequestGate = createLatestRequestGate();
 
 	const loadProfile = async (nextFilters: StudentProfileFilters = filters) => {
+		const requestId = profileRequestGate.next();
 		filters = nextFilters;
 		loadError = '';
 		try {
-			profile = await getMyWritingProfile(localStorage.token, filters);
+			const nextProfile = await getMyWritingProfile(localStorage.token, filters);
+			if (!profileRequestGate.isLatest(requestId)) return;
+			profile = nextProfile;
 		} catch (error) {
+			if (!profileRequestGate.isLatest(requestId)) return;
 			loadError = `${error?.detail ?? error}`;
 			toast.error(loadError);
 		} finally {
-			loaded = true;
+			if (profileRequestGate.isLatest(requestId)) loaded = true;
 		}
 	};
 

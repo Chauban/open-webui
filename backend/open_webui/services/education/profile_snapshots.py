@@ -9,16 +9,21 @@ from open_webui.models.education import (
     StudentProfileAssignmentItem,
     StudentProfileCompletenessSummary,
     StudentProfileDataCompleteness,
+    StudentProfileFilteredSummary,
     StudentProfileHelpTypeShift,
+    StudentProfilePagination,
+    StudentProfilePortfolioSummary,
     StudentProfileReflectionQuality,
     StudentProfileResponse,
     StudentProfileRoundProgress,
     StudentProfileSnapshotPayload,
     StudentProfileTimelinePoint,
+    TeacherStudentProfileResponse,
 )
 from open_webui.services.education.analysis import build_version_diffs
 from open_webui.services.education.profile import (
     PROFILE_METRIC_VERSION,
+    PROFILE_INSIGHT_VERSION,
     _PROFILE_TREND_KEYS,
     _build_profile_insights,
     _build_trend,
@@ -40,6 +45,7 @@ def refresh_student_profile_snapshot(
     assignment,
     db: Session,
     analysis_payload: Optional[dict] = None,
+    commit: bool = True,
 ):
     """Create the immutable metric point for one submission, or update its grading fields.
 
@@ -99,8 +105,16 @@ def refresh_student_profile_snapshot(
     previous_final_text = (previous_final_version.note_snapshot_text or "") if previous_final_version else ""
     final_text = (final_version.note_snapshot_text or "") if final_version else ""
     version_diffs = build_version_diffs(round_versions, previous_final_text) if version_data_complete else []
-    inserted_chars = sum(diff.get("inserted_length", 0) for diff in version_diffs) if version_data_complete else 0
-    revised_chars = sum(diff.get("deleted_length", 0) for diff in version_diffs) if version_data_complete else 0
+    inserted_chars = (
+        sum(diff.get("inserted_length", 0) for diff in version_diffs)
+        if version_data_complete
+        else None
+    )
+    revised_chars = (
+        sum(diff.get("deleted_length", 0) for diff in version_diffs)
+        if version_data_complete
+        else None
+    )
     revision_depth = _compute_revision_depth(revised_chars, inserted_chars) if version_data_complete else None
 
     operations = [
@@ -114,7 +128,11 @@ def refresh_student_profile_snapshot(
         if editor_operations_complete
         else None
     )
-    writing_span_seconds = max(submission.submitted_at - window_start_at, 0) if version_data_complete else 0
+    writing_span_seconds = (
+        max(submission.submitted_at - window_start_at, 0)
+        if version_data_complete
+        else None
+    )
     round_due_at = (
         previous_review.resubmit_due_at
         if previous_review and previous_review.resubmit_due_at is not None
@@ -147,6 +165,15 @@ def refresh_student_profile_snapshot(
     reflection_score = _score_reflection(reflection.reflection_json if reflection else None)
     ai_used = reflection.ai_used if reflection else False
     scoring_comparable = bool(review and review.score is not None and review.rubric_scores is not None)
+    scoring_status = (
+        "complete"
+        if scoring_comparable
+        else "pending"
+        if review is None or review.review_status == "pending"
+        else "not_applicable"
+        if review.review_status == "returned"
+        else "missing"
+    )
 
     point = StudentProfileTimelinePoint(
         submission_id=submission.id,
@@ -156,10 +183,12 @@ def refresh_student_profile_snapshot(
         is_current=submission.is_current == 1,
         submitted_at=submission.submitted_at,
         data_completeness=StudentProfileDataCompleteness(
-            version_data_complete=version_data_complete,
-            editor_operations_complete=editor_operations_complete,
-            source_tracking_complete=source_tracking_complete,
-            scoring_comparable=scoring_comparable,
+            version_data="complete" if version_data_complete else "missing",
+            editor_operations=(
+                "complete" if editor_operations_complete else "missing"
+            ),
+            source_tracking="complete" if source_tracking_complete else "missing",
+            scoring=scoring_status,
         ),
         total_chars=len(final_text) if version_data_complete else int(summary.get("total_chars", 0)),
         score=review.score if scoring_comparable else None,
@@ -197,9 +226,15 @@ def refresh_student_profile_snapshot(
             ai_ratio,
             ai_used,
         ),
-        burst_count=int(summary.get("burst_count", 0)) if analysis else 0,
+        burst_count=(
+            int(summary.get("burst_count", 0))
+            if analysis and editor_operations_complete
+            else None
+        ),
         suspected_unmarked_import_count=(
-            int(summary.get("suspected_unmarked_import_count", 0)) if source_tracking_complete else 0
+            int(summary.get("suspected_unmarked_import_count", 0))
+            if source_tracking_complete
+            else None
         ),
     )
 
@@ -230,7 +265,13 @@ def refresh_student_profile_snapshot(
         point=point,
         round_progress=round_progress,
     )
-    return Education.upsert_student_profile_snapshot(submission, PROFILE_METRIC_VERSION, payload, db=db)
+    return Education.upsert_student_profile_snapshot(
+        submission,
+        PROFILE_METRIC_VERSION,
+        payload,
+        commit=commit,
+        db=db,
+    )
 
 
 async def build_student_profile(
@@ -244,25 +285,65 @@ async def build_student_profile(
     end_at: Optional[int] = None,
     assignment_id: Optional[str] = None,
     round_no: Optional[int] = None,
+    metric_version: Optional[str] = None,
+    limit: int = 200,
+    offset: int = 0,
     teacher_notes: Optional[list] = None,
-) -> StudentProfileResponse:
+) -> StudentProfileResponse | TeacherStudentProfileResponse:
     assignment_by_id = {assignment.id: assignment for assignment in assignments}
     if assignment_id is not None:
-        assignment_by_id = {key: value for key, value in assignment_by_id.items() if key == assignment_id}
+        assignment_by_id = {
+            key: value for key, value in assignment_by_id.items() if key == assignment_id
+        }
     scoped_assignments = list(assignment_by_id.values())
-    snapshots = Education.get_student_profile_snapshots(
+    assignment_ids = list(assignment_by_id)
+    available_metric_versions = Education.get_student_profile_metric_versions(
+        student_id, assignment_ids=assignment_ids, db=db
+    )
+    selected_metric_version = metric_version or PROFILE_METRIC_VERSION
+    if selected_metric_version not in available_metric_versions:
+        available_metric_versions = [
+            selected_metric_version,
+            *available_metric_versions,
+        ]
+
+    total = Education.count_student_profile_snapshots(
         student_id,
-        PROFILE_METRIC_VERSION,
-        assignment_ids=list(assignment_by_id),
+        selected_metric_version,
+        assignment_ids=assignment_ids,
         start_at=start_at,
         end_at=end_at,
         round_no=round_no,
         db=db,
     )
+    snapshots = Education.get_student_profile_snapshots(
+        student_id,
+        selected_metric_version,
+        assignment_ids=assignment_ids,
+        start_at=start_at,
+        end_at=end_at,
+        round_no=round_no,
+        limit=limit,
+        offset=offset,
+        db=db,
+    )
+    excluded_snapshot_count = sum(
+        Education.count_student_profile_snapshots(
+            student_id,
+            version,
+            assignment_ids=assignment_ids,
+            start_at=start_at,
+            end_at=end_at,
+            round_no=round_no,
+            db=db,
+        )
+        for version in available_metric_versions
+        if version != selected_metric_version
+    )
     current_submissions = {
         submission.assignment_id: submission
         for submission in Education.get_current_submissions_by_student(
-            student_id, list(assignment_by_id), db=db
+            student_id, assignment_ids, db=db
         )
     }
     reviews = Education.get_submission_reviews_by_submission_ids(
@@ -272,105 +353,157 @@ async def build_student_profile(
     timeline = [
         snapshot.snapshot_json.point.model_copy(
             update={
-                "is_current": current_submissions.get(snapshot.assignment_id) is not None
-                and current_submissions[snapshot.assignment_id].id == snapshot.submission_id
+                "is_current": current_submissions.get(snapshot.assignment_id)
+                is not None
+                and current_submissions[snapshot.assignment_id].id
+                == snapshot.submission_id
             }
         )
         for snapshot in snapshots
     ]
     timeline.sort(key=lambda point: (point.submitted_at, point.round_no))
+    cross_assignment_timeline = [point for point in timeline if point.is_current]
     round_progress = [
         snapshot.snapshot_json.round_progress
         for snapshot in snapshots
         if snapshot.snapshot_json.round_progress is not None
     ]
 
-    # 跨作业成长只比较每份作业的当前轮；同一作业的重交变化由
-    # round_progress 单独表达，不能混入跨作业趋势样本。
-    cross_assignment_points = [point for point in timeline if point.is_current]
     trends = {}
     for key in _PROFILE_TREND_KEYS:
         trend = _build_trend(
-            key, [getattr(point, key) for point in cross_assignment_points]
+            key,
+            [getattr(point, key) for point in cross_assignment_timeline],
         )
         if trend is not None:
             trends[key] = trend
 
-    half = len(timeline) // 2
-    early_help = _summarize_help_types(timeline[:half] if half else [])
-    recent_help = _summarize_help_types(timeline[half:] if half else timeline)
+    half = len(cross_assignment_timeline) // 2
+    early_help = _summarize_help_types(
+        cross_assignment_timeline[:half] if half else []
+    )
+    recent_help = _summarize_help_types(
+        cross_assignment_timeline[half:]
+        if half
+        else cross_assignment_timeline
+    )
     help_shift = StudentProfileHelpTypeShift(
         early=early_help,
         recent=recent_help,
         refining_ratio_delta=(
             round(recent_help.refining_ratio - early_help.refining_ratio, 4)
-            if early_help.refining_ratio is not None and recent_help.refining_ratio is not None
+            if early_help.refining_ratio is not None
+            and recent_help.refining_ratio is not None
             else None
         ),
     )
 
     help_distribution = {}
-    for point in timeline:
+    for point in cross_assignment_timeline:
         for help_type in point.ai_help_types:
             help_distribution[help_type] = help_distribution.get(help_type, 0) + 1
-    reflection_scores = [point.reflection_quality for point in timeline]
+    reflection_scores = [
+        point.reflection_quality for point in cross_assignment_timeline
+    ]
     reflection_quality = StudentProfileReflectionQuality(
         count=len(reflection_scores),
-        average_score=(int(round(sum(reflection_scores) / len(reflection_scores))) if reflection_scores else None),
+        average_score=(
+            int(round(sum(reflection_scores) / len(reflection_scores)))
+            if reflection_scores
+            else None
+        ),
         average_chars=(
-            int(round(sum(point.reflection_char_count for point in timeline) / len(timeline))) if timeline else None
+            int(
+                round(
+                    sum(
+                        point.reflection_char_count
+                        for point in cross_assignment_timeline
+                    )
+                    / len(cross_assignment_timeline)
+                )
+            )
+            if cross_assignment_timeline
+            else None
         ),
     )
+
+    def status_count(field: str, expected: str) -> int:
+        return sum(
+            getattr(point.data_completeness, field) == expected
+            for point in timeline
+        )
+
+    applicable_statuses = []
+    for point in timeline:
+        applicable_statuses.extend(
+            [
+                point.data_completeness.version_data,
+                point.data_completeness.editor_operations,
+                point.data_completeness.source_tracking,
+            ]
+        )
+        if point.data_completeness.scoring not in {
+            "pending",
+            "not_applicable",
+        }:
+            applicable_statuses.append(point.data_completeness.scoring)
+
     completeness = StudentProfileCompletenessSummary(
         point_count=len(timeline),
-        version_complete_count=sum(
-            point.data_completeness.version_data_complete for point in timeline
+        version_complete_count=status_count("version_data", "complete"),
+        version_missing_count=status_count("version_data", "missing"),
+        editor_operations_complete_count=status_count(
+            "editor_operations", "complete"
         ),
-        editor_operations_complete_count=sum(
-            point.data_completeness.editor_operations_complete for point in timeline
+        editor_operations_missing_count=status_count(
+            "editor_operations", "missing"
         ),
-        source_tracking_complete_count=sum(
-            point.data_completeness.source_tracking_complete for point in timeline
+        source_tracking_complete_count=status_count(
+            "source_tracking", "complete"
         ),
-        scoring_comparable_count=sum(
-            point.data_completeness.scoring_comparable for point in timeline
+        source_tracking_missing_count=status_count(
+            "source_tracking", "missing"
         ),
+        scoring_comparable_count=status_count("scoring", "complete"),
+        scoring_pending_count=status_count("scoring", "pending"),
+        scoring_not_applicable_count=status_count(
+            "scoring", "not_applicable"
+        ),
+        scoring_missing_count=status_count("scoring", "missing"),
         overall_ratio=(
             round(
-                sum(
-                    sum(
-                        (
-                            point.data_completeness.version_data_complete,
-                            point.data_completeness.editor_operations_complete,
-                            point.data_completeness.source_tracking_complete,
-                            point.data_completeness.scoring_comparable,
-                        )
-                    )
-                    for point in timeline
-                )
-                / (len(timeline) * 4),
+                sum(status == "complete" for status in applicable_statuses)
+                / len(applicable_statuses),
                 4,
             )
-            if timeline
+            if applicable_statuses
             else None
         ),
     )
 
     assignment_items = []
     submitted_count = reviewed_count = returned_count = 0
-    normalized_scores = []
+    portfolio_scores = []
     for assignment in scoped_assignments:
         current = current_submissions.get(assignment.id)
         if current is None:
-            assignment_items.append(StudentProfileAssignmentItem(assignment=assignment))
+            assignment_items.append(
+                StudentProfileAssignmentItem(assignment=assignment)
+            )
             continue
         review = reviews.get(current.id)
         review_status = review.review_status if review else "pending"
         submitted_count += 1
         reviewed_count += int(review_status == "reviewed")
         returned_count += int(review_status == "returned")
-        if review_status == "reviewed" and review and review.score is not None:
-            normalized_scores.append(review.score / assignment.score_max * 100)
+        if (
+            review_status == "reviewed"
+            and review
+            and review.score is not None
+        ):
+            portfolio_scores.append(
+                review.score / assignment.score_max * 100
+            )
         assignment_items.append(
             StudentProfileAssignmentItem(
                 assignment=assignment,
@@ -378,38 +511,97 @@ async def build_student_profile(
                 submitted_at=current.submitted_at,
                 round_no=current.round_no,
                 review_status=review_status,
-                score=review.score if review_status == "reviewed" and review else None,
+                score=(
+                    review.score
+                    if review_status == "reviewed" and review
+                    else None
+                ),
             )
         )
 
-    return StudentProfileResponse(
-        metric_version=PROFILE_METRIC_VERSION,
+    filtered_scores = [
+        point.normalized_score
+        for point in timeline
+        if point.normalized_score is not None
+    ]
+    response_data = dict(
+        metric_version=selected_metric_version,
+        insight_version=PROFILE_INSIGHT_VERSION,
+        available_metric_versions=available_metric_versions,
+        excluded_snapshot_count=excluded_snapshot_count,
         student_id=student_id,
         student_name=student.name if student else student_id,
         student_email=student.email if student else None,
         classrooms=classrooms,
-        assignment_count=len(scoped_assignments),
-        submitted_count=submitted_count,
-        unsubmitted_count=len(scoped_assignments) - submitted_count,
-        reviewed_count=reviewed_count,
-        returned_count=returned_count,
-        average_score_percent=(
-            round(sum(normalized_scores) / len(normalized_scores), 1) if normalized_scores else None
+        portfolio_summary=StudentProfilePortfolioSummary(
+            assignment_count=len(scoped_assignments),
+            submitted_count=submitted_count,
+            unsubmitted_count=len(scoped_assignments) - submitted_count,
+            reviewed_count=reviewed_count,
+            returned_count=returned_count,
+            average_score_percent=(
+                round(sum(portfolio_scores) / len(portfolio_scores), 1)
+                if portfolio_scores
+                else None
+            ),
+        ),
+        filtered_summary=StudentProfileFilteredSummary(
+            point_count=len(timeline),
+            assignment_count=len(
+                {point.assignment_id for point in timeline}
+            ),
+            reviewed_point_count=sum(
+                point.normalized_score is not None for point in timeline
+            ),
+            average_score_percent=(
+                round(sum(filtered_scores) / len(filtered_scores), 1)
+                if filtered_scores
+                else None
+            ),
+        ),
+        filters_applied=any(
+            value is not None
+            for value in (
+                start_at,
+                end_at,
+                assignment_id,
+                round_no,
+                metric_version,
+            )
+        )
+        or offset > 0,
+        timeline_pagination=StudentProfilePagination(
+            total=total,
+            limit=limit,
+            offset=offset,
         ),
         assignments=assignment_items,
         timeline=timeline,
+        cross_assignment_timeline=cross_assignment_timeline,
         round_progress=round_progress,
         trends=list(trends.values()),
         ai_help_type_distribution=help_distribution,
         ai_help_type_shift=help_shift,
         reflection_quality=reflection_quality,
         index_formula=_profile_index_formula(),
-        insights=_build_profile_insights(timeline, round_progress, trends, help_shift, reflection_quality),
+        insights=_build_profile_insights(
+            cross_assignment_timeline,
+            round_progress,
+            trends,
+            help_shift,
+            reflection_quality,
+        ),
         data_completeness=completeness,
         growth_goals=Education.get_student_growth_goals(
             student_id,
             classroom_ids=[classroom.id for classroom in classrooms],
+            limit=100,
             db=db,
         ),
-        teacher_notes=teacher_notes or [],
     )
+    if teacher_notes is not None:
+        return TeacherStudentProfileResponse(
+            **response_data,
+            teacher_notes=teacher_notes,
+        )
+    return StudentProfileResponse(**response_data)

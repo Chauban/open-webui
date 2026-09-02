@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import { buildProfileQuery, buildTrendPath } from './growth-profile';
+import { buildProfileQuery, buildRubricDimensions, buildTrendPath } from './growth-profile';
 
 describe('growth profile filters', () => {
 	test('serializes only explicit filters', () => {
@@ -22,5 +22,25 @@ describe('trend path', () => {
 
 	test('does not invent a path for entirely missing data', () => {
 		expect(buildTrendPath([null, null], 2, 0, 100, toX, toY)).toBe('');
+	});
+});
+
+describe('rubric dimensions', () => {
+	test('does not merge equal keys with different teaching meanings', () => {
+		const dimensions = buildRubricDimensions(
+			[
+				{ assignment_id: 'a1', rubric: { evidence: 8 } },
+				{ assignment_id: 'a2', rubric: { evidence: 9 } }
+			],
+			{
+				a1: { evidence: { key: 'evidence', label: 'Source Evidence', max_score: 10 } },
+				a2: { evidence: { key: 'evidence', label: 'Reasoning Evidence', max_score: 10 } }
+			}
+		);
+
+		expect(dimensions.map((item) => item.signature)).toEqual([
+			'evidence::source evidence',
+			'evidence::reasoning evidence'
+		]);
 	});
 });

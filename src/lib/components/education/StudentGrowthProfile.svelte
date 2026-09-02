@@ -16,14 +16,17 @@
 		StudentProfile,
 		StudentProfileFilters,
 		StudentProfileInsight,
-		StudentProfileInsightParams
+		StudentProfileInsightParams,
+		TeacherStudentProfile
 	} from '$lib/apis/education/types';
 	import {
 		createGrowthGoal,
 		createTeacherStudentNote,
 		deleteTeacherStudentNote,
-		updateGrowthGoal
+		updateGrowthGoal,
+		updateTeacherStudentNote
 	} from '$lib/apis/education';
+	import { buildRubricDimensions, rubricDimensionSignature } from '$lib/utils/growth-profile';
 	import {
 		formatDuration,
 		formatRatioPercent,
@@ -35,7 +38,7 @@
 	// 教师端与学生端共用同一份画像视图：同一套指标、同一套解释，
 	// 只有「能不能点进某次提交」不同。教师看到的和学生看到的必须一致，
 	// 否则老师没法拿着这页跟学生讲。
-	export let profile: StudentProfile | null;
+	export let profile: StudentProfile | TeacherStudentProfile | null;
 	export let variant: 'teacher' | 'student' = 'teacher';
 	export let filters: StudentProfileFilters = {};
 
@@ -54,14 +57,21 @@
 	let endDate = filters.end_at ? new Date(filters.end_at * 1000).toISOString().slice(0, 10) : '';
 	let assignmentFilter = filters.assignment_id ?? '';
 	let roundFilter = filters.round_no ? `${filters.round_no}` : '';
+	let metricVersionFilter = filters.metric_version ?? '';
 	let assignmentOptions: StudentProfile['assignments'] = [];
+	let roundOptions: number[] = [];
 	let goalText = '';
 	let goalTargetDate = '';
 	let goalClassroomId = '';
 	let noteContent = '';
 	let savingGoal = false;
 	let savingNote = false;
-	type CompletenessItem = { label: string; complete: boolean };
+	let editingNoteId = '';
+	let editingNoteContent = '';
+	type CompletenessItem = {
+		label: string;
+		status: 'complete' | 'missing' | 'pending' | 'not_applicable';
+	};
 
 	const sections: Array<{ key: Section; label: string }> = [
 		{ key: 'overview', label: 'Overview' },
@@ -163,38 +173,37 @@
 	};
 
 	$: timeline = profile?.timeline ?? [];
-	$: labels = timeline.map(
+	$: crossTimeline = profile?.cross_assignment_timeline ?? [];
+	$: labels = crossTimeline.map(
 		(point) =>
 			`${point.assignment_title} · ${t('Round {{round}}', { round: point.round_no })} · ${formatShortDate(point.submitted_at)}`
 	);
-	$: axisLabels = timeline.map((point) => formatShortDate(point.submitted_at));
+	$: axisLabels = crossTimeline.map((point) => formatShortDate(point.submitted_at));
 	$: trends = Object.fromEntries((profile?.trends ?? []).map((trend) => [trend.key, trend]));
-	$: latest = timeline.at(-1) ?? null;
+	$: latest = crossTimeline.at(-1) ?? timeline.at(-1) ?? null;
 	$: completenessItems = latest
 		? ([
-				{ label: 'Version data', complete: latest.data_completeness.version_data_complete },
+				{ label: 'Version data', status: latest.data_completeness.version_data },
 				{
 					label: 'Editing operations',
-					complete: latest.data_completeness.editor_operations_complete
+					status: latest.data_completeness.editor_operations
 				},
-				{ label: 'Source tracking', complete: latest.data_completeness.source_tracking_complete },
-				{ label: 'Comparable score', complete: latest.data_completeness.scoring_comparable }
+				{ label: 'Source tracking', status: latest.data_completeness.source_tracking },
+				{ label: 'Comparable score', status: latest.data_completeness.scoring }
 			] satisfies CompletenessItem[])
 		: [];
 	$: if ((profile?.assignments?.length ?? 0) > assignmentOptions.length) {
 		assignmentOptions = profile?.assignments ?? [];
 	}
+	$: if (profile && !metricVersionFilter) metricVersionFilter = profile.metric_version;
+	$: if (profile?.timeline) {
+		roundOptions = Array.from(
+			new Set([...roundOptions, ...profile.timeline.map((point) => point.round_no)])
+		).sort((left, right) => left - right);
+	}
+	$: teacherNotes = profile && 'teacher_notes' in profile ? profile.teacher_notes : [];
 
 	// rubric 各维度直接从时间线上取，未评的那次留空，折线自然断开。
-	$: rubricKeys = Array.from(
-		new Set(
-			timeline.flatMap((point) =>
-				Object.entries(point.rubric ?? {})
-					.filter(([, value]) => typeof value === 'number')
-					.map(([key]) => key)
-			)
-		)
-	);
 	$: rubricCriteriaByAssignment = Object.fromEntries(
 		(profile?.assignments ?? []).map((item) => [
 			item.assignment.id,
@@ -206,14 +215,7 @@
 			)
 		])
 	);
-	$: rubricLabels = Object.fromEntries(
-		(profile?.assignments ?? []).flatMap((item) =>
-			(item.assignment.rubric_schema?.criteria ?? []).map((criterion) => [
-				criterion.key,
-				criterion.label
-			])
-		)
-	);
+	$: rubricDimensions = buildRubricDimensions(crossTimeline, rubricCriteriaByAssignment);
 	const RUBRIC_TONES = ['sky', 'emerald', 'violet', 'amber', 'rose'];
 
 	$: helpDistribution = Object.entries(profile?.ai_help_type_distribution ?? {}).sort(
@@ -230,7 +232,7 @@
 		key,
 		label: t(label),
 		tone,
-		values: timeline.map((point) => {
+		values: crossTimeline.map((point) => {
 			const value = point[key];
 			return typeof value === 'number' ? mapper(value) : null;
 		})
@@ -257,7 +259,10 @@
 			start_at: dateToSeconds(startDate),
 			end_at: dateToSeconds(endDate, true),
 			assignment_id: assignmentFilter || undefined,
-			round_no: roundFilter ? Number(roundFilter) : undefined
+			round_no: roundFilter ? Number(roundFilter) : undefined,
+			metric_version: metricVersionFilter || undefined,
+			limit: filters.limit ?? 200,
+			offset: 0
 		});
 	};
 
@@ -266,7 +271,20 @@
 		endDate = '';
 		assignmentFilter = '';
 		roundFilter = '';
+		metricVersionFilter = '';
 		dispatch('filter', {});
+	};
+
+	const goToOffset = (offset: number) => {
+		dispatch('filter', {
+			start_at: dateToSeconds(startDate),
+			end_at: dateToSeconds(endDate, true),
+			assignment_id: assignmentFilter || undefined,
+			round_no: roundFilter ? Number(roundFilter) : undefined,
+			metric_version: metricVersionFilter || undefined,
+			limit: profile?.timeline_pagination.limit ?? 200,
+			offset: Math.max(offset, 0)
+		});
 	};
 
 	const addGoal = async () => {
@@ -318,7 +336,9 @@
 				profile.student_id,
 				{ content: noteContent.trim() }
 			);
-			profile.teacher_notes = [note, ...profile.teacher_notes];
+			if ('teacher_notes' in profile) {
+				profile.teacher_notes = [note, ...profile.teacher_notes];
+			}
 			profile = profile;
 			noteContent = '';
 			toast.success(t('Teacher note added'));
@@ -331,10 +351,41 @@
 
 	const removeTeacherNote = async (noteId: string) => {
 		if (!profile) return;
+		if (!window.confirm(t('Delete this private teacher note?'))) return;
 		try {
 			await deleteTeacherStudentNote(localStorage.token, noteId);
-			profile.teacher_notes = profile.teacher_notes.filter((note) => note.id !== noteId);
+			if ('teacher_notes' in profile) {
+				profile.teacher_notes = profile.teacher_notes.filter((note) => note.id !== noteId);
+			}
 			profile = profile;
+		} catch (error) {
+			toast.error(`${error?.detail ?? error}`);
+		}
+	};
+
+	const startEditingNote = (noteId: string, content: string) => {
+		editingNoteId = noteId;
+		editingNoteContent = content;
+	};
+
+	const cancelEditingNote = () => {
+		editingNoteId = '';
+		editingNoteContent = '';
+	};
+
+	const saveTeacherNote = async () => {
+		if (!profile || !editingNoteId || editingNoteContent.trim().length < 2) return;
+		try {
+			const updated = await updateTeacherStudentNote(localStorage.token, editingNoteId, {
+				content: editingNoteContent.trim()
+			});
+			if ('teacher_notes' in profile) {
+				profile.teacher_notes = profile.teacher_notes.map((note) =>
+					note.id === updated.id ? updated : note
+				);
+			}
+			profile = profile;
+			cancelEditingNote();
 		} catch (error) {
 			toast.error(`${error?.detail ?? error}`);
 		}
@@ -346,7 +397,7 @@
 {:else}
 	<div class="space-y-8">
 		<EduCard tone="muted">
-			<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+			<div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
 				<label class="text-xs text-gray-600 dark:text-gray-300">
 					<span class="mb-1 block">{$i18n.t('Start date')}</span>
 					<input
@@ -382,8 +433,19 @@
 						bind:value={roundFilter}
 					>
 						<option value="">{$i18n.t('All rounds')}</option>
-						{#each Array.from(new Set((profile.timeline ?? []).map((point) => point.round_no))).sort() as round}
+						{#each roundOptions as round}
 							<option value={round}>{$i18n.t('Round {{round}}', { round })}</option>
+						{/each}
+					</select>
+				</label>
+				<label class="text-xs text-gray-600 dark:text-gray-300">
+					<span class="mb-1 block">{$i18n.t('Metric version')}</span>
+					<select
+						class="w-full rounded-lg border border-gray-200 bg-transparent px-3 py-2 dark:border-gray-700"
+						bind:value={metricVersionFilter}
+					>
+						{#each profile.available_metric_versions as version}
+							<option value={version}>{version}</option>
 						{/each}
 					</select>
 				</label>
@@ -392,6 +454,33 @@
 					<EduButton on:click={clearFilters}>{$i18n.t('Clear')}</EduButton>
 				</div>
 			</div>
+			{#if profile.timeline_pagination.total > profile.timeline_pagination.limit}
+				<div class="mt-3 flex flex-wrap items-center justify-end gap-2 text-xs text-gray-500">
+					<span>
+						{profile.timeline_pagination.offset + 1}–{Math.min(
+							profile.timeline_pagination.offset + profile.timeline_pagination.limit,
+							profile.timeline_pagination.total
+						)} / {profile.timeline_pagination.total}
+					</span>
+					<EduButton
+						size="sm"
+						disabled={profile.timeline_pagination.offset === 0}
+						on:click={() =>
+							goToOffset(profile.timeline_pagination.offset - profile.timeline_pagination.limit)}
+					>
+						{$i18n.t('Previous')}
+					</EduButton>
+					<EduButton
+						size="sm"
+						disabled={profile.timeline_pagination.offset + profile.timeline_pagination.limit >=
+							profile.timeline_pagination.total}
+						on:click={() =>
+							goToOffset(profile.timeline_pagination.offset + profile.timeline_pagination.limit)}
+					>
+						{$i18n.t('Next')}
+					</EduButton>
+				</div>
+			{/if}
 		</EduCard>
 
 		<nav
@@ -414,20 +503,52 @@
 		</nav>
 
 		{#if activeSection === 'overview'}
-			<div class="grid gap-4 md:grid-cols-5">
-				<EduStatCard label="Assignments" value={profile.assignment_count} />
-				<EduStatCard label="Submitted" value={profile.submitted_count} />
-				<EduStatCard label="Unsubmitted" value={profile.unsubmitted_count} />
-				<EduStatCard label="Reviewed" value={profile.reviewed_count} />
-				<EduStatCard
-					label="Average Score (%)"
-					value={profile.average_score_percent != null ? `${profile.average_score_percent}%` : '—'}
-				/>
-			</div>
+			{#if profile.filters_applied}
+				<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+					<EduStatCard label="Visible Data Points" value={profile.filtered_summary.point_count} />
+					<EduStatCard
+						label="Visible Assignments"
+						value={profile.filtered_summary.assignment_count}
+					/>
+					<EduStatCard
+						label="Reviewed Points"
+						value={profile.filtered_summary.reviewed_point_count}
+					/>
+					<EduStatCard
+						label="Filtered Average Score (%)"
+						value={profile.filtered_summary.average_score_percent != null
+							? `${profile.filtered_summary.average_score_percent}%`
+							: '—'}
+					/>
+				</div>
+			{:else}
+				<div class="grid gap-4 md:grid-cols-5">
+					<EduStatCard label="Assignments" value={profile.portfolio_summary.assignment_count} />
+					<EduStatCard label="Submitted" value={profile.portfolio_summary.submitted_count} />
+					<EduStatCard label="Unsubmitted" value={profile.portfolio_summary.unsubmitted_count} />
+					<EduStatCard label="Reviewed" value={profile.portfolio_summary.reviewed_count} />
+					<EduStatCard
+						label="Average Score (%)"
+						value={profile.portfolio_summary.average_score_percent != null
+							? `${profile.portfolio_summary.average_score_percent}%`
+							: '—'}
+					/>
+				</div>
+			{/if}
+			{#if profile.excluded_snapshot_count > 0}
+				<div class="mt-2 text-xs text-amber-600 dark:text-amber-400">
+					{$i18n.t('{{count}} data point(s) use another metric version and are excluded.', {
+						count: profile.excluded_snapshot_count
+					})}
+				</div>
+			{/if}
 
 			{#if profile.insights?.length}
 				<EduCard>
-					<div class="mb-3 text-sm font-semibold">{$i18n.t('What the data shows')}</div>
+					<div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+						<div class="text-sm font-semibold">{$i18n.t('What the data shows')}</div>
+						<span class="text-xs text-gray-500">insight {profile.insight_version}</span>
+					</div>
 					<ul class="space-y-2">
 						{#each profile.insights as insight}
 							<li class="flex items-start gap-2.5 text-sm">
@@ -452,6 +573,7 @@
 											)}%</span
 										>
 										<span>{$i18n.t('Confidence')}: {Math.round(insight.confidence * 100)}%</span>
+										<span>{$i18n.t('Priority')}: {insight.priority_score.toFixed(2)}</span>
 									</div>
 									{#if insight.action_code && INSIGHT_ACTION_TEXT[insight.action_code]}
 										<div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
@@ -574,21 +696,54 @@
 							{$i18n.t('Add note')}
 						</EduButton>
 					</div>
-					{#if profile.teacher_notes.length}
+					{#if teacherNotes.length}
 						<div class="space-y-2">
-							{#each profile.teacher_notes as note}
+							{#each teacherNotes as note}
 								<div
 									class="flex items-start justify-between gap-3 rounded-lg border border-gray-200 px-3 py-2 dark:border-gray-800"
 								>
-									<div>
-										<div class="whitespace-pre-wrap text-sm">{note.content}</div>
+									<div class="min-w-0 flex-1">
+										{#if editingNoteId === note.id}
+											<textarea
+												class="min-h-20 w-full rounded-lg border border-gray-200 bg-transparent px-3 py-2 text-sm dark:border-gray-700"
+												bind:value={editingNoteContent}
+												maxlength="2000"
+											></textarea>
+										{:else}
+											<div class="whitespace-pre-wrap text-sm">{note.content}</div>
+										{/if}
 										<div class="mt-1 text-xs text-gray-500">
 											{new Date(note.observed_at * 1000).toLocaleString()}
+											{#if note.edited_at}
+												· {$i18n.t('Edited')}{/if}
 										</div>
 									</div>
-									<EduButton size="sm" variant="danger" on:click={() => removeTeacherNote(note.id)}>
-										{$i18n.t('Delete')}
-									</EduButton>
+									<div class="flex shrink-0 flex-wrap gap-1">
+										{#if editingNoteId === note.id}
+											<EduButton
+												size="sm"
+												variant="primary"
+												disabled={editingNoteContent.trim().length < 2}
+												on:click={saveTeacherNote}
+											>
+												{$i18n.t('Save')}
+											</EduButton>
+											<EduButton size="sm" on:click={cancelEditingNote}
+												>{$i18n.t('Cancel')}</EduButton
+											>
+										{:else}
+											<EduButton size="sm" on:click={() => startEditingNote(note.id, note.content)}>
+												{$i18n.t('Edit')}
+											</EduButton>
+											<EduButton
+												size="sm"
+												variant="danger"
+												on:click={() => removeTeacherNote(note.id)}
+											>
+												{$i18n.t('Delete')}
+											</EduButton>
+										{/if}
+									</div>
 								</div>
 							{/each}
 						</div>
@@ -609,11 +764,21 @@
 							<div class="rounded-lg border border-gray-200 px-3 py-2 text-xs dark:border-gray-800">
 								<div class="font-medium">{$i18n.t(item.label)}</div>
 								<div
-									class={item.complete
+									class={item.status === 'complete'
 										? 'text-emerald-600 dark:text-emerald-400'
-										: 'text-amber-600 dark:text-amber-400'}
+										: item.status === 'missing'
+											? 'text-amber-600 dark:text-amber-400'
+											: 'text-gray-500 dark:text-gray-400'}
 								>
-									{$i18n.t(item.complete ? 'Complete' : 'Data missing')}
+									{$i18n.t(
+										item.status === 'complete'
+											? 'Complete'
+											: item.status === 'missing'
+												? 'Data missing'
+												: item.status === 'pending'
+													? 'Pending'
+													: 'Not applicable'
+									)}
 								</div>
 							</div>
 						{/each}
@@ -684,7 +849,7 @@
 					</div>
 				</div>
 
-				{#if rubricKeys.length}
+				{#if rubricDimensions.length}
 					<div class="mt-8">
 						<div class="mb-2 text-xs font-medium text-gray-500 dark:text-gray-400">
 							{$i18n.t('Rubric')}
@@ -694,14 +859,20 @@
 							{axisLabels}
 							min={0}
 							max={100}
-							series={rubricKeys.map((key, index) => ({
-								key,
-								label: rubricLabels[key] ?? key,
+							series={rubricDimensions.map((dimension, index) => ({
+								key: dimension.signature,
+								label: dimension.label,
 								tone: RUBRIC_TONES[index % RUBRIC_TONES.length],
-								values: timeline.map((point) => {
-									const score = point.rubric?.[key];
-									const maximum = rubricCriteriaByAssignment[point.assignment_id]?.[key]?.max_score;
-									return typeof score === 'number' && maximum ? (score / maximum) * 100 : null;
+								values: crossTimeline.map((point) => {
+									const criterion =
+										rubricCriteriaByAssignment[point.assignment_id]?.[dimension.key];
+									const score = point.rubric?.[dimension.key];
+									return criterion &&
+										rubricDimensionSignature(dimension.key, criterion.label) ===
+											dimension.signature &&
+										typeof score === 'number'
+										? (score / criterion.max_score) * 100
+										: null;
 								})
 							}))}
 							formatValue={(value) => `${Math.round(value)}%`}

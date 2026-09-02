@@ -3,7 +3,8 @@ import type {
 	StudentGrowthGoal,
 	StudentProfile,
 	StudentProfileFilters,
-	TeacherStudentNote
+	TeacherStudentNote,
+	TeacherStudentProfile
 } from './types';
 import { buildProfileQuery } from '$lib/utils/growth-profile';
 
@@ -545,7 +546,7 @@ export const getStudentProfile = async (
 	classroomId: string,
 	studentUserId: string,
 	filters: StudentProfileFilters = {}
-): Promise<StudentProfile> => {
+): Promise<TeacherStudentProfile> => {
 	const query = buildProfileQuery(filters);
 	const suffix = query ? `?${query}` : '';
 	return fetch(

@@ -92,7 +92,7 @@
 		<svg
 			viewBox="0 0 {VIEW_WIDTH} {VIEW_HEIGHT}"
 			class="h-auto w-full min-w-[320px]"
-			role="img"
+			role="group"
 			aria-label={series.map((item) => item.label).join(', ')}
 		>
 			{#each gridValues as gridValue}
@@ -138,9 +138,10 @@
 							<circle
 								cx={toX(index, pointCount)}
 								cy={toY(value, scaleLow, scaleHigh)}
-								r="14"
+								r="22"
 								fill="transparent"
 								stroke="transparent"
+								class="focus:stroke-current focus:stroke-2 focus:outline-none"
 								tabindex="0"
 								role="button"
 								aria-label={`${item.label} · ${labels[index] ?? index + 1}: ${formatValue(value)}`}

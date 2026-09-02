@@ -76,10 +76,6 @@ def run_migrations():
         log.exception(f'Error running migrations: {e}')
 
 
-if ENABLE_DB_MIGRATIONS:
-    run_migrations()
-
-
 async def import_legacy_config_json():
     """Migrate legacy config.json → database on first run."""
     if not os.path.exists(f'{DATA_DIR}/config.json'):
@@ -3215,3 +3211,9 @@ Config.configure(
     enable_persistent=ENABLE_PERSISTENT_CONFIG,
     enable_oauth_persistent=ENABLE_OAUTH_PERSISTENT_CONFIG,
 )
+
+# Run Alembic only after every configuration symbol is initialized. Migration
+# metadata imports automation and retrieval modules which themselves import
+# this module; running earlier exposes a partially initialized config module.
+if ENABLE_DB_MIGRATIONS:
+    run_migrations()

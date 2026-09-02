@@ -41,7 +41,8 @@ _PROFILE_MAX_INSIGHTS = 5
 _TREND_FLAT_TOLERANCE = 0.05
 _TREND_MIN_SAMPLES = 3
 _TREND_MAX_WINDOW = 3
-PROFILE_METRIC_VERSION = "2026-09-01.2"
+PROFILE_METRIC_VERSION = "2026-09-01.3"
+PROFILE_INSIGHT_VERSION = "2026-09-01.1"
 
 _INSIGHT_META = {
     "not_enough_data": ("low", 5, "all"),
@@ -307,6 +308,36 @@ def _summarize_help_types(points: list) -> StudentProfileHelpTypeSummary:
     )
 
 
+def _point_completeness_ratio(point) -> float:
+    statuses = [
+        point.data_completeness.version_data,
+        point.data_completeness.editor_operations,
+        point.data_completeness.source_tracking,
+    ]
+    if point.data_completeness.scoring not in {"pending", "not_applicable"}:
+        statuses.append(point.data_completeness.scoring)
+    return sum(status == "complete" for status in statuses) / len(statuses)
+
+
+def _insight_evidence_codes(evidence_kind: str) -> list[str]:
+    codes = {
+        "all": ["sample_size"],
+        "source": ["sample_size", "source_evidence"],
+        "version": ["sample_size", "version_evidence"],
+        "process": ["sample_size", "version_evidence", "editor_evidence"],
+        "reflection": ["sample_size", "reflection_evidence"],
+        "round": ["round_evidence", "scoring_evidence"],
+        "combined": [
+            "sample_size",
+            "version_evidence",
+            "source_evidence",
+            "scoring_evidence",
+            "reflection_evidence",
+        ],
+    }
+    return codes[evidence_kind]
+
+
 def _build_profile_insights(
     timeline: list,
     round_progress: list,
@@ -328,6 +359,8 @@ def _build_profile_insights(
                 sample_count=assignment_sample_count,
                 data_completeness=0,
                 teaching_value=5,
+                priority_score=15,
+                evidence_codes=["sample_size"],
             )
         )
     if not timeline:
@@ -520,18 +553,7 @@ def _build_profile_insights(
         if insight.code == "not_enough_data":
             relevant = [point for point in timeline if point.is_current]
             completeness = (
-                sum(
-                    sum(
-                        (
-                            point.data_completeness.version_data_complete,
-                            point.data_completeness.editor_operations_complete,
-                            point.data_completeness.source_tracking_complete,
-                            point.data_completeness.scoring_comparable,
-                        )
-                    )
-                    / 4
-                    for point in relevant
-                )
+                sum(_point_completeness_ratio(point) for point in relevant)
                 / len(relevant)
                 if relevant
                 else 0
@@ -543,6 +565,8 @@ def _build_profile_insights(
                     "sample_count": assignment_sample_count,
                     "data_completeness": round(completeness, 2),
                     "teaching_value": 5,
+                    "priority_score": 15,
+                    "evidence_codes": ["sample_size"],
                 }
             )
         if evidence_kind == "round":
@@ -561,51 +585,45 @@ def _build_profile_insights(
                 relevant = [
                     point
                     for point in timeline
-                    if point.data_completeness.source_tracking_complete
-                    and point.data_completeness.version_data_complete
-                    and point.data_completeness.scoring_comparable
+                    if point.data_completeness.source_tracking == "complete"
+                    and point.data_completeness.version_data == "complete"
+                    and point.data_completeness.scoring == "complete"
                 ]
             elif evidence_kind == "source":
                 relevant = [
                     point
                     for point in timeline
-                    if point.data_completeness.source_tracking_complete
+                    if point.data_completeness.source_tracking == "complete"
                 ]
             elif evidence_kind == "version":
                 relevant = [
                     point
                     for point in timeline
-                    if point.data_completeness.version_data_complete
+                    if point.data_completeness.version_data == "complete"
                 ]
             elif evidence_kind == "process":
                 relevant = [
                     point
                     for point in timeline
-                    if point.data_completeness.version_data_complete
-                    and point.data_completeness.editor_operations_complete
+                    if point.data_completeness.version_data == "complete"
+                    and point.data_completeness.editor_operations == "complete"
                 ]
             else:
                 relevant = timeline
             count = len(relevant)
             completeness = (
-                sum(
-                    sum(
-                        (
-                            point.data_completeness.version_data_complete,
-                            point.data_completeness.editor_operations_complete,
-                            point.data_completeness.source_tracking_complete,
-                            point.data_completeness.scoring_comparable,
-                        )
-                    )
-                    / 4
-                    for point in relevant
-                )
+                sum(_point_completeness_ratio(point) for point in relevant)
                 / count
                 if count
                 else 0
             )
         confidence = min(count / _TREND_MIN_SAMPLES, 1.0) * completeness
         severity, teaching_value, _ = _INSIGHT_META[insight.code]
+        priority_score = (
+            _INSIGHT_SEVERITY_WEIGHT[severity] * 10
+            + teaching_value * 2
+            + confidence
+        )
         return insight.model_copy(
             update={
                 "severity": severity,
@@ -613,16 +631,14 @@ def _build_profile_insights(
                 "sample_count": count,
                 "data_completeness": round(completeness, 2),
                 "teaching_value": teaching_value,
+                "priority_score": round(priority_score, 2),
+                "evidence_codes": _insight_evidence_codes(evidence_kind),
             }
         )
 
     enriched = [evidence_for(insight) for insight in candidates]
     enriched.sort(
-        key=lambda insight: (
-            _INSIGHT_SEVERITY_WEIGHT[insight.severity],
-            insight.teaching_value,
-            insight.confidence,
-        ),
+        key=lambda insight: insight.priority_score,
         reverse=True,
     )
     return enriched[:_PROFILE_MAX_INSIGHTS]

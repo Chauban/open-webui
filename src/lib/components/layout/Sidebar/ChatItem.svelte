@@ -45,8 +45,7 @@
 		tags,
 		selectedFolder,
 		settings,
-		user,
-		activeChatIds
+		user
 	} from '$lib/stores';
 	import { refreshChatList } from '$lib/stores/chatList';
 

@@ -1,4 +1,5 @@
 // import { version } from '../../package.json';
+import { browser, dev } from '$app/environment';
 
 declare const APP_VERSION: string;
 declare const APP_BUILD_HASH: string;

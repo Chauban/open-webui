@@ -1,5 +1,6 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
+import { svelteTesting } from '@testing-library/svelte/vite';
 
 import { viteStaticCopy } from 'vite-plugin-static-copy';
 
@@ -8,6 +9,7 @@ const backendTarget = process.env.WEBUI_BACKEND_URL || 'http://localhost:8080';
 export default defineConfig({
 	plugins: [
 		sveltekit(),
+		svelteTesting(),
 		viteStaticCopy({
 			targets: [
 				{
