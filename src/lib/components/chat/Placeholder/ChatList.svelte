@@ -38,9 +38,7 @@
 	export let chats: ChatListItem[] = [];
 
 	export let chatListLoading = false;
-	export let allChatsLoaded = false;
 
-	export let loadHandler: Function = null;
 	// RightWrite: writing projects link their chats into the workspace.
 	export let hrefBuilder: Function = (chat) => `/c/${chat.id}`;
 	export let showOwnerInfo = false;

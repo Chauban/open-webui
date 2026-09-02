@@ -216,9 +216,7 @@
 				<ChatList
 					{chats}
 					{chatListLoading}
-					{allChatsLoaded}
 					{hrefBuilder}
-					loadHandler={loadChats}
 					{showOwnerInfo}
 					{page}
 					total={totalChats}
