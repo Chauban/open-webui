@@ -294,7 +294,9 @@
 			const hasPendingAssignments = (home?.assignment_items ?? []).some(
 				(item) => item.status !== 'submitted'
 			);
-			activeTab = hasPendingAssignments ? 'assignment' : 'personal';
+			// 还没加入班级的学生要先落在作业页，邀请码入口就在这一屏。
+			const hasClassroom = (home?.classrooms ?? []).length > 0;
+			activeTab = hasPendingAssignments || !hasClassroom ? 'assignment' : 'personal';
 		} else {
 			activeTab = 'personal';
 		}
@@ -445,17 +447,17 @@
 											"You have not joined a classroom yet. Enter your teacher's invite code to unlock assignments."
 										)}
 									</div>
-									<div class="mt-4 flex flex-col gap-3 md:flex-row">
-										<input
-											bind:value={inviteCode}
-											class="flex-1 {EDU_FIELD_CLASS}"
-											placeholder={$i18n.t('Enter classroom invite code')}
-										/>
-										<EduButton variant="primary" on:click={joinCurrentClassroom} disabled={joining}>
-											{joining ? $i18n.t('Joining...') : $i18n.t('Join Classroom')}
-										</EduButton>
-									</div>
 								{/if}
+								<div class="mt-4 flex flex-col gap-3 md:flex-row">
+									<input
+										bind:value={inviteCode}
+										class="flex-1 {EDU_FIELD_CLASS}"
+										placeholder={$i18n.t('Enter classroom invite code')}
+									/>
+									<EduButton variant="primary" on:click={joinCurrentClassroom} disabled={joining}>
+										{joining ? $i18n.t('Joining...') : $i18n.t('Join Classroom')}
+									</EduButton>
+								</div>
 							</EduCard>
 
 							<div class="mb-4">
