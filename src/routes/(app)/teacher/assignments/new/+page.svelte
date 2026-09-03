@@ -13,7 +13,7 @@
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 	import RubricCriteriaEditor from '$lib/components/education/RubricCriteriaEditor.svelte';
 	import { EDU_FIELD_CLASS, eduSegmentClass } from '$lib/components/education/styles';
-	import { getClassroomDisplayName } from '$lib/utils/education';
+	import { formatDateTimeInput, getClassroomDisplayName, resolveErrorMessage } from '$lib/utils/education';
 
 	const i18n = getContext('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
@@ -32,6 +32,8 @@
 	];
 	let loading = true;
 	let saving = false;
+
+	$: dueAtPreview = formatDateTimeInput(dueAt);
 	let loadError = '';
 
 	const toggleClassroom = (id: string) => {
@@ -66,7 +68,7 @@
 						selectedClassroomIds = new Set([source.assignment.classroom_id]);
 					}
 				} catch (error) {
-					toast.error(`${error?.detail ?? error}`);
+					toast.error(resolveErrorMessage(error, t));
 				}
 			}
 
@@ -77,7 +79,7 @@
 				}
 			}
 		} catch (error) {
-			loadError = `${error?.detail ?? error}`;
+			loadError = resolveErrorMessage(error, t);
 			toast.error(loadError);
 		} finally {
 			loading = false;
@@ -142,7 +144,7 @@
 				goto('/teacher/assignments');
 			}
 		} catch (error) {
-			toast.error(`${error?.detail ?? error}`);
+			toast.error(resolveErrorMessage(error, t));
 		} finally {
 			saving = false;
 		}
@@ -211,6 +213,9 @@
 				<div>
 					<div class="mb-2 text-sm font-semibold">{$i18n.t('Due At')}</div>
 					<input bind:value={dueAt} type="datetime-local" required class="w-full {EDU_FIELD_CLASS}" />
+					{#if dueAtPreview}
+						<div class="mt-1.5 text-xs text-gray-400 dark:text-gray-500">{dueAtPreview}</div>
+					{/if}
 				</div>
 				<div>
 					<div class="mb-2 text-sm font-semibold">{$i18n.t('Maximum Score')}</div>

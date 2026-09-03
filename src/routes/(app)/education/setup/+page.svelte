@@ -6,6 +6,7 @@
 
 	import { user } from '$lib/stores';
 	import { createClassroom, getMyClassroom, getTeacherClassrooms, joinClassroom } from '$lib/apis/education';
+	import { resolveErrorMessage } from '$lib/utils/education';
 	import LoadingState from '$lib/components/education/LoadingState.svelte';
 	import EduButton from '$lib/components/education/EduButton.svelte';
 	import EduCard from '$lib/components/education/EduCard.svelte';
@@ -80,7 +81,7 @@
 
 			await goto('/me/writing');
 		} catch (error) {
-			toast.error(`${error?.detail ?? error}`);
+			toast.error(resolveErrorMessage(error, t));
 		} finally {
 			submitting = false;
 		}

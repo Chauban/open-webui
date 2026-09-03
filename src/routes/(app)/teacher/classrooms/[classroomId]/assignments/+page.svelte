@@ -11,7 +11,7 @@
 	import EduButton from '$lib/components/education/EduButton.svelte';
 	import EduCard from '$lib/components/education/EduCard.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
-	import { getClassroomDisplayName } from '$lib/utils/education';
+	import { getClassroomDisplayName, resolveErrorMessage } from '$lib/utils/education';
 
 	const i18n = getContext('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
@@ -42,7 +42,7 @@
 			}
 			assignments = await getTeacherClassroomAssignments(localStorage.token, classroomId());
 		} catch (error) {
-			loadError = `${error?.detail ?? error}`;
+			loadError = resolveErrorMessage(error, t);
 			toast.error(loadError);
 		} finally {
 			loading = false;

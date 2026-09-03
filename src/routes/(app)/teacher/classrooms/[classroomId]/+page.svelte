@@ -22,7 +22,7 @@
 	import EduStatCard from '$lib/components/education/EduStatCard.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 	import EduTile from '$lib/components/education/EduTile.svelte';
-	import { getClassroomDisplayName } from '$lib/utils/education';
+	import { getClassroomDisplayName, resolveErrorMessage } from '$lib/utils/education';
 
 	const i18n = getContext('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
@@ -59,7 +59,7 @@
 			classroom = response.classroom;
 			toast.success(t('Invite code regenerated.'));
 		} catch (error) {
-			toast.error(`${error?.detail ?? error}`);
+			toast.error(resolveErrorMessage(error, t));
 		}
 	};
 
@@ -74,7 +74,7 @@
 			link.click();
 			URL.revokeObjectURL(url);
 		} catch (error) {
-			toast.error(`${error?.detail ?? error}`);
+			toast.error(resolveErrorMessage(error, t));
 		}
 	};
 
@@ -94,7 +94,7 @@
 		try {
 			await loadData();
 		} catch (error) {
-			loadError = `${error?.detail ?? error}`;
+			loadError = resolveErrorMessage(error, t);
 			toast.error(loadError);
 		} finally {
 			loading = false;

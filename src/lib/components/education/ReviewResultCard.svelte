@@ -1,5 +1,8 @@
 <script lang="ts">
 	import { getContext } from 'svelte';
+
+	import { formatEpoch } from '$lib/utils/education';
+
 	const i18n = getContext('i18n');
 
 	export let review: {
@@ -14,9 +17,6 @@
 		reviewed_at?: number | null;
 	};
 	export let onRevise: (() => void) | null = null;
-
-	const formatTime = (ts: number | null | undefined) =>
-		ts ? new Date(ts * 1000).toLocaleString() : '';
 </script>
 
 {#if review.review_status === 'returned'}
@@ -31,7 +31,7 @@
 		{/if}
 		{#if review.resubmit_due_at}
 			<div class="mt-2 text-sm font-medium">
-				{$i18n.t('Resubmit before')}: {formatTime(review.resubmit_due_at)}
+				{$i18n.t('Resubmit before')}: {formatEpoch(review.resubmit_due_at)}
 			</div>
 		{/if}
 		{#if onRevise}
@@ -65,7 +65,9 @@
 		{#if review.overall_comment}
 			<p class="mt-2 text-sm whitespace-pre-wrap">{review.overall_comment}</p>
 		{/if}
-		<div class="mt-2 text-xs text-gray-500 dark:text-gray-400">{formatTime(review.reviewed_at)}</div>
+		<div class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+			{formatEpoch(review.reviewed_at)}
+		</div>
 	</div>
 {:else}
 	<div
@@ -73,6 +75,6 @@
 	>
 		{$i18n.t('Submitted, awaiting review')} · {$i18n.t('Round {{round}}', {
 			round: review.round_no
-		})} · {formatTime(review.submitted_at)}
+		})} · {formatEpoch(review.submitted_at)}
 	</div>
 {/if}

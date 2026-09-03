@@ -6,6 +6,7 @@
 	import { toast } from 'svelte-sonner';
 
 	import { getTeacherDashboard } from '$lib/apis/education';
+	import { resolveErrorMessage } from '$lib/utils/education';
 	import { educationNotificationSummary } from '$lib/stores';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
@@ -37,7 +38,7 @@
 			dashboard = await getTeacherDashboard(localStorage.token, $page.params.assignmentId);
 			loadError = '';
 		} catch (error) {
-			loadError = `${error?.detail ?? error}`;
+			loadError = resolveErrorMessage(error, t);
 			toast.error(loadError);
 		} finally {
 			refreshing = false;

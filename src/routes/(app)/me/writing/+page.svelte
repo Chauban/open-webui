@@ -22,7 +22,7 @@
 		getWritingHome,
 		joinClassroom
 	} from '$lib/apis/education';
-	import { getClassroomDisplayName } from '$lib/utils/education';
+	import { formatEpoch, getClassroomDisplayName, resolveErrorMessage } from '$lib/utils/education';
 	import LoadingState from '$lib/components/education/LoadingState.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import EduBadge from '$lib/components/education/EduBadge.svelte';
@@ -67,7 +67,7 @@
 			return t('Unknown');
 		}
 
-		return date.toLocaleString();
+		return formatEpoch(timestamp);
 	};
 
 	// Returns due-date display info for a non-returned assignment card, or null when
@@ -150,7 +150,7 @@
 			});
 			await goto(`/writing/${workspace.writing_session.id}`);
 		} catch (error) {
-			toast.error(`${error?.detail ?? error}`);
+			toast.error(resolveErrorMessage(error, t));
 		} finally {
 			creatingPersonal = false;
 		}
@@ -190,7 +190,7 @@
 			deleteResult = await deletePersonalWriting(localStorage.token, sessionId);
 		} catch (error) {
 			if (!isPersonalWritingAlreadyDeleted(error)) {
-				toast.error(`${error?.detail ?? error}`);
+				toast.error(resolveErrorMessage(error, t));
 				return;
 			}
 		} finally {
@@ -253,7 +253,7 @@
 			await loadData();
 			toast.success(t('Joined classroom.'));
 		} catch (error) {
-			toast.error(`${error?.detail ?? error}`);
+			toast.error(resolveErrorMessage(error, t));
 		} finally {
 			joining = false;
 		}
@@ -274,7 +274,7 @@
 			home = data;
 			return { role };
 		} catch (error) {
-			loadError = `${error?.detail ?? error}`;
+			loadError = resolveErrorMessage(error, t);
 			toast.error(loadError);
 			return null;
 		} finally {

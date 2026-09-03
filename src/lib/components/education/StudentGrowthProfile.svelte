@@ -29,10 +29,13 @@
 	import { buildRubricDimensions, rubricDimensionSignature } from '$lib/utils/growth-profile';
 	import {
 		formatDuration,
+		formatEpoch,
+		formatEpochDate,
 		formatRatioPercent,
 		formatShortDate,
 		getAiHelpTypeLabel,
-		getReviewStatusLabel
+		getReviewStatusLabel,
+		resolveErrorMessage
 	} from '$lib/utils/education';
 
 	// 教师端与学生端共用同一份画像视图：同一套指标、同一套解释，
@@ -305,7 +308,7 @@
 			goalClassroomId = '';
 			toast.success(t('Growth goal added'));
 		} catch (error) {
-			toast.error(`${error?.detail ?? error}`);
+			toast.error(resolveErrorMessage(error, t));
 		} finally {
 			savingGoal = false;
 		}
@@ -322,7 +325,7 @@
 			);
 			profile = profile;
 		} catch (error) {
-			toast.error(`${error?.detail ?? error}`);
+			toast.error(resolveErrorMessage(error, t));
 		}
 	};
 
@@ -343,7 +346,7 @@
 			noteContent = '';
 			toast.success(t('Teacher note added'));
 		} catch (error) {
-			toast.error(`${error?.detail ?? error}`);
+			toast.error(resolveErrorMessage(error, t));
 		} finally {
 			savingNote = false;
 		}
@@ -359,7 +362,7 @@
 			}
 			profile = profile;
 		} catch (error) {
-			toast.error(`${error?.detail ?? error}`);
+			toast.error(resolveErrorMessage(error, t));
 		}
 	};
 
@@ -387,7 +390,7 @@
 			profile = profile;
 			cancelEditingNote();
 		} catch (error) {
-			toast.error(`${error?.detail ?? error}`);
+			toast.error(resolveErrorMessage(error, t));
 		}
 	};
 </script>
@@ -420,7 +423,7 @@
 						class="w-full rounded-lg border border-gray-200 bg-transparent px-3 py-2 dark:border-gray-700"
 						bind:value={assignmentFilter}
 					>
-						<option value="">{$i18n.t('All assignments')}</option>
+						<option value="">{$i18n.t('All Assignments')}</option>
 						{#each assignmentOptions as item}
 							<option value={item.assignment.id}>{item.assignment.title}</option>
 						{/each}
@@ -445,7 +448,11 @@
 						bind:value={metricVersionFilter}
 					>
 						{#each profile.available_metric_versions as version}
-							<option value={version}>{version}</option>
+							<option value={version}
+								>{version} · {$i18n.t(
+									version === profile.active_metric_version ? 'Current' : 'Historical'
+								)}</option
+							>
 						{/each}
 					</select>
 				</label>
@@ -651,8 +658,7 @@
 								<div class:line-through={goal.status === 'completed'} class="text-sm">
 									{goal.goal_text}
 									{#if goal.target_at}
-										<span class="ml-2 text-xs text-gray-500"
-											>{new Date(goal.target_at * 1000).toLocaleDateString()}</span
+										<span class="ml-2 text-xs text-gray-500">{formatEpochDate(goal.target_at)}</span
 										>
 									{/if}
 								</div>
@@ -713,7 +719,7 @@
 											<div class="whitespace-pre-wrap text-sm">{note.content}</div>
 										{/if}
 										<div class="mt-1 text-xs text-gray-500">
-											{new Date(note.observed_at * 1000).toLocaleString()}
+											{formatEpoch(note.observed_at)}
 											{#if note.edited_at}
 												· {$i18n.t('Edited')}{/if}
 										</div>
@@ -756,7 +762,13 @@
 			<EduCard>
 				<div class="mb-3 flex flex-wrap items-center justify-between gap-2">
 					<div class="text-sm font-semibold">{$i18n.t('Latest data completeness')}</div>
-					<span class="text-xs text-gray-500">metric {profile.metric_version}</span>
+					<span class="text-xs text-gray-500"
+						>metric {profile.metric_version} · {$i18n.t(
+							profile.metric_version === profile.active_metric_version ? 'Current' : 'Historical'
+						)}{profile.aggregate_materialized && profile.aggregate_revision
+							? ` · aggregate r${profile.aggregate_revision}`
+							: ''}</span
+					>
 				</div>
 				{#if latest}
 					<div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
@@ -1150,7 +1162,7 @@
 											{/if}
 											{#if item.submitted_at}
 												<span class="text-gray-500 dark:text-gray-400">
-													{new Date(item.submitted_at * 1000).toLocaleString()}
+													{formatEpoch(item.submitted_at)}
 												</span>
 											{/if}
 										</div>

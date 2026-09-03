@@ -25,7 +25,7 @@
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 	import EduTile from '$lib/components/education/EduTile.svelte';
 	import { EDU_FIELD_CLASS } from '$lib/components/education/styles';
-	import { getClassroomDisplayName } from '$lib/utils/education';
+	import { getClassroomDisplayName, resolveErrorMessage } from '$lib/utils/education';
 
 	const i18n = getContext('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
@@ -63,7 +63,7 @@
 			members = memberList;
 			selectedIds = new Set();
 		} catch (error) {
-			loadError = `${error?.detail ?? error}`;
+			loadError = resolveErrorMessage(error, t);
 			toast.error(loadError);
 		} finally {
 			loading = false;
@@ -108,7 +108,7 @@
 					!existingMemberIds.has(item.id)
 			);
 		} catch (error) {
-			toast.error(`${error?.detail ?? error}`);
+			toast.error(resolveErrorMessage(error, t));
 		} finally {
 			searching = false;
 		}
@@ -128,7 +128,7 @@
 			members = await getClassroomMembers(localStorage.token, classroomId());
 			toast.success(t('Student added.'));
 		} catch (error) {
-			toast.error(`${error?.detail ?? error}`);
+			toast.error(resolveErrorMessage(error, t));
 		} finally {
 			addingStudentId = '';
 		}
@@ -147,7 +147,7 @@
 			selectedIds = new Set([...selectedIds].filter((id) => id !== pendingRemoveId));
 			toast.success(t('Student removed.'));
 		} catch (error) {
-			toast.error(`${error?.detail ?? error}`);
+			toast.error(resolveErrorMessage(error, t));
 		} finally {
 			pendingRemoveId = '';
 		}
@@ -161,7 +161,7 @@
 			toast.success(t('{{count}} students removed.', { count: result.affected_count }));
 			await loadData();
 		} catch (error) {
-			toast.error(`${error?.detail ?? error}`);
+			toast.error(resolveErrorMessage(error, t));
 		}
 	};
 
@@ -175,7 +175,7 @@
 			toast.success(t('{{count}} students transferred.', { count: result.affected_count }));
 			await loadData();
 		} catch (error) {
-			toast.error(`${error?.detail ?? error}`);
+			toast.error(resolveErrorMessage(error, t));
 		}
 	};
 
@@ -207,7 +207,7 @@
 				})
 			);
 		} catch (error) {
-			toast.error(`${error?.detail ?? error}`);
+			toast.error(resolveErrorMessage(error, t));
 		} finally {
 			importing = false;
 		}

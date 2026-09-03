@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { getContext, onMount } from 'svelte';
+	import { get } from 'svelte/store';
 	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
 
@@ -9,6 +10,7 @@
 
 	import { getMyWritingProfile } from '$lib/apis/education';
 	import type { StudentProfile, StudentProfileFilters } from '$lib/apis/education';
+	import { resolveErrorMessage } from '$lib/utils/education';
 	import LoadingState from '$lib/components/education/LoadingState.svelte';
 	import EduButton from '$lib/components/education/EduButton.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
@@ -18,6 +20,7 @@
 	// 学生看自己的成长画像。教师端看到的是同一个组件、同一套指标——
 	// 学生看不到自己的成长，这个模块的教育价值就少一半。
 	const i18n = getContext('i18n');
+	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
 
 	let profile: StudentProfile | null = null;
 	let filters: StudentProfileFilters = {};
@@ -35,7 +38,7 @@
 			profile = nextProfile;
 		} catch (error) {
 			if (!profileRequestGate.isLatest(requestId)) return;
-			loadError = `${error?.detail ?? error}`;
+			loadError = resolveErrorMessage(error, t);
 			toast.error(loadError);
 		} finally {
 			if (profileRequestGate.isLatest(requestId)) loaded = true;

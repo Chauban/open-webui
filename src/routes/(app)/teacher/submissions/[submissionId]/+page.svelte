@@ -18,7 +18,14 @@
 	import SourceHighlightedText from '$lib/components/education/SourceHighlightedText.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
 	import { buildSubmissionReviewOverview } from '$lib/utils/submission-review';
-	import { getAiHelpTypeLabel, toLocalDateTimeInput } from '$lib/utils/education';
+	import {
+		formatDateTimeInput,
+		formatEpoch,
+		formatEpochTime,
+		getAiHelpTypeLabel,
+		resolveErrorMessage,
+		toLocalDateTimeInput
+	} from '$lib/utils/education';
 	import LoadingState from '$lib/components/education/LoadingState.svelte';
 	import EduBadge from '$lib/components/education/EduBadge.svelte';
 	import EduButton from '$lib/components/education/EduButton.svelte';
@@ -88,6 +95,7 @@
 	// datetime-local expects a LOCAL "YYYY-MM-DDTHH:mm" string; toISOString() would shift to UTC.
 
 	$: submissionId = $page.params.submissionId;
+	$: resubmitDuePreview = formatDateTimeInput(resubmitDueLocal);
 	$: isHistoricalRound = detail ? !detail.submission.is_current : false;
 
 	$: queueIndex = queueIds.indexOf(submissionId);
@@ -167,7 +175,7 @@
 	].sort((a, b) => (a.created_at ?? 0) - (b.created_at ?? 0));
 
 	$: lastSavedStr = lastSavedAt
-		? lastSavedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+		? formatEpochTime(Math.floor(lastSavedAt.getTime() / 1000))
 		: null;
 
 	const syncReview = () => {
@@ -263,7 +271,7 @@
 			toast.success(t('Review saved.'));
 			return true;
 		} catch (error) {
-			toast.error(`${error?.detail ?? error}`);
+			toast.error(resolveErrorMessage(error, t));
 			return false;
 		} finally {
 			saving = false;
@@ -305,7 +313,7 @@
 			await loadDetail(detail.submission.id);
 			toast.success(t('Analysis recomputed.'));
 		} catch (error) {
-			toast.error(`${error?.detail ?? error}`);
+			toast.error(resolveErrorMessage(error, t));
 		} finally {
 			recomputing = false;
 		}
@@ -321,7 +329,7 @@
 			try {
 				fullVersions = await getSubmissionVersions(localStorage.token, detail.submission.id);
 			} catch (error) {
-				toast.error(`${error?.detail ?? error}`);
+				toast.error(resolveErrorMessage(error, t));
 				loadingVersions = false;
 				return;
 			}
@@ -340,7 +348,7 @@
 			diffData = response;
 		} catch (error) {
 			if (seq !== diffSeq) return;
-			toast.error(`${error?.detail ?? error}`);
+			toast.error(resolveErrorMessage(error, t));
 		} finally {
 			diffLoading = false;
 		}
@@ -373,7 +381,7 @@
 			);
 		} catch (error) {
 			activeSegmentDetail = null;
-			toast.error(`${error?.detail ?? error}`);
+			toast.error(resolveErrorMessage(error, t));
 		}
 		requestAnimationFrame(() => {
 			const target = document.querySelector(`[data-segment-id="${segmentId}"]`);
@@ -400,7 +408,7 @@
 			syncReview();
 		} catch (error) {
 			if (seq !== loadSeq) return;
-			loadError = `${error?.detail ?? error}`;
+			loadError = resolveErrorMessage(error, t);
 			toast.error(loadError);
 		} finally {
 			if (seq === loadSeq) {
@@ -462,9 +470,7 @@
 						<div class="mt-1.5 flex flex-wrap gap-1.5 text-xs text-gray-600 dark:text-gray-400">
 							<span class="rounded-full bg-gray-100 dark:bg-gray-800 px-3 py-1">{detail.student_name}</span>
 							<span class="rounded-full bg-gray-100 dark:bg-gray-800 px-3 py-1">
-								{$i18n.t('Submitted At')}: {new Date(
-									detail.submission.submitted_at * 1000
-								).toLocaleString()}
+								{$i18n.t('Submitted At')}: {formatEpoch(detail.submission.submitted_at)}
 							</span>
 							<span
 								class="rounded-full px-3 py-1 {reviewStatus === 'reviewed'
@@ -757,6 +763,9 @@
 										disabled={isHistoricalRound}
 										class="w-full rounded-2xl border border-gray-200 dark:border-gray-800 px-4 py-3 text-sm outline-none focus:border-gray-400 transition-colors disabled:opacity-50"
 									/>
+									{#if resubmitDuePreview}
+										<div class="mt-1.5 text-xs text-gray-400 dark:text-gray-500">{resubmitDuePreview}</div>
+									{/if}
 								</div>
 
 								<!-- Actions + persistent save status -->
@@ -930,7 +939,7 @@
 														</span>
 														{#if item.created_at}
 															<span class="text-gray-400 tabular-nums">
-																{new Date(item.created_at * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+																{formatEpochTime(item.created_at)}
 															</span>
 														{/if}
 													</div>
@@ -1057,8 +1066,8 @@
 													{/if}
 													<span class="text-xs text-gray-400 tabular-nums">
 														{isAutosave
-															? new Date(version.created_at * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-															: new Date(version.created_at * 1000).toLocaleString()}
+															? formatEpochTime(version.created_at)
+															: formatEpoch(version.created_at)}
 													</span>
 												</div>
 											</div>

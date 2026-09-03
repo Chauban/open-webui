@@ -18,6 +18,7 @@
 	import { prepareAssistantContentForWriting } from '$lib/utils/writing-content';
 	import { createSerializedSaveRunner } from '$lib/utils/save-coordinator';
 	import { getStructuredReflectionError } from '$lib/utils/structured-reflection';
+	import { formatEpoch, resolveErrorMessage } from '$lib/utils/education';
 	import {
 		applySourceMapChange,
 		normalizeSourceRuns,
@@ -40,6 +41,7 @@
 	export let loadWorkspace: () => Promise<any>;
 
 	const i18n = getContext('i18n');
+	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
 
 	let loaded = false;
 	let loadError = '';
@@ -168,7 +170,7 @@
 	};
 
 	$: isResubmitDeadline = review?.review_status === 'returned';
-	$: formattedDueAt = effectiveDueAt ? new Date(effectiveDueAt * 1000).toLocaleString() : '';
+	$: formattedDueAt = formatEpoch(effectiveDueAt);
 	$: dueCountdown =
 		isAssignment && effectiveDueAt ? computeDueCountdown(effectiveDueAt, nowTick) : null;
 	$: dueLabelKey = isResubmitDeadline ? 'Resubmit before' : 'Due At';
@@ -635,7 +637,7 @@
 			toast.success($i18n.t('Assignment submitted'));
 			await goto('/me/writing');
 		} catch (error) {
-			toast.error(`${error?.detail ?? error}`);
+			toast.error(resolveErrorMessage(error, t));
 		} finally {
 			isSubmitting = false;
 		}
@@ -665,7 +667,7 @@
 			await selectedFolder.set(workspaceProject);
 			loaded = true;
 		} catch (error) {
-			loadError = `${error?.detail ?? error}`;
+			loadError = resolveErrorMessage(error, t);
 			toast.error(loadError);
 		}
 	};

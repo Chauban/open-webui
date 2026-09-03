@@ -19,7 +19,7 @@
 	import EduCard from '$lib/components/education/EduCard.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 	import { eduSegmentClass } from '$lib/components/education/styles';
-	import { getAiHelpTypeLabel, getReviewStatusLabel } from '$lib/utils/education';
+	import { formatEpoch, getAiHelpTypeLabel, getReviewStatusLabel, resolveErrorMessage } from '$lib/utils/education';
 
 	const i18n = getContext('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
@@ -48,7 +48,7 @@
 			]);
 			loadError = '';
 		} catch (error) {
-			loadError = `${error?.detail ?? error}`;
+			loadError = resolveErrorMessage(error, t);
 			toast.error(loadError);
 		} finally {
 			loaded = true;
@@ -64,7 +64,7 @@
 			);
 			toast.success(t('Reminder sent to {{count}} students.', { count: result.reminded_count }));
 		} catch (error) {
-			toast.error(`${error?.detail ?? error}`);
+			toast.error(resolveErrorMessage(error, t));
 		} finally {
 			remindingAll = false;
 		}
@@ -78,7 +78,7 @@
 			});
 			toast.success(t('Reminder sent.'));
 		} catch (error) {
-			toast.error(`${error?.detail ?? error}`);
+			toast.error(resolveErrorMessage(error, t));
 		} finally {
 			remindingIds = new Set([...remindingIds].filter((id) => id !== userId));
 		}
@@ -238,7 +238,7 @@
 						{#each filteredItems as item}
 							<tr class="border-t border-gray-100 dark:border-gray-800 text-sm">
 								<td class="px-4 py-4">{item.student_name}</td>
-								<td class="px-4 py-4">{new Date(item.submission.submitted_at * 1000).toLocaleString()}</td>
+								<td class="px-4 py-4">{formatEpoch(item.submission.submitted_at)}</td>
 								<td class="px-4 py-4">
 									{item.reflection?.ai_help_types?.length
 										? item.reflection.ai_help_types.map(getAiHelpTypeLabel).join(' / ')

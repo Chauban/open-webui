@@ -3,7 +3,7 @@
 	import { get } from 'svelte/store';
 	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
-	import dayjs from 'dayjs';
+	import dayjs from '$lib/dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
 
 	import { getTeacherOverview } from '$lib/apis/education';
@@ -15,16 +15,35 @@
 	import EduCard from '$lib/components/education/EduCard.svelte';
 	import EduEmpty from '$lib/components/education/EduEmpty.svelte';
 	import EduStatCard from '$lib/components/education/EduStatCard.svelte';
+	import EduRiskBadges from '$lib/components/education/EduRiskBadges.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 	import EduTile from '$lib/components/education/EduTile.svelte';
-	import { getClassroomDisplayName } from '$lib/utils/education';
+	import {
+		formatEpoch,
+		getClassroomDisplayName,
+		getReviewStatusLabel,
+		resolveErrorMessage
+	} from '$lib/utils/education';
 
 	dayjs.extend(relativeTime);
 
 	const i18n = getContext('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
 
+	// 相对时间跟随界面语言：dayjs 默认只有英文，中文界面里会渲染成 "2 hours ago"。
+	// 语言包里没有的地区变体 dayjs 会自己降为基础语种（en-US → en）。
+	$: formatRelative = (timestamp: number) =>
+		dayjs(timestamp * 1000)
+			.locale($i18n.language)
+			.fromNow();
+
 	const DAY_MS = 24 * 60 * 60 * 1000;
+
+	const REVIEW_STATUS_TONES = {
+		pending: 'amber',
+		reviewed: 'emerald',
+		returned: 'sky'
+	};
 
 	let overview = null;
 	let loading = true;
@@ -32,16 +51,12 @@
 	let unsubscribeNotifications;
 	let notificationsInitialized = false;
 
-
-	const formatRelative = (timestamp: number) => dayjs(timestamp * 1000).fromNow();
-	const formatAbsolute = (timestamp: number) => new Date(timestamp * 1000).toLocaleString();
-
 	const loadOverview = async () => {
 		try {
 			overview = await getTeacherOverview(localStorage.token);
 			loadError = '';
 		} catch (error) {
-			loadError = `${error?.detail ?? error}`;
+			loadError = resolveErrorMessage(error, t);
 			toast.error(loadError);
 		} finally {
 			loading = false;
@@ -79,119 +94,65 @@
 			<EduStateCard>{$i18n.t('Loading teaching overview...')}</EduStateCard>
 		{:else}
 			<div class="mb-8 grid gap-4 md:grid-cols-4">
-				<EduStatCard label="Classrooms" value={overview.classroom_count} />
-				<EduStatCard label="Assignments" value={overview.assignment_count} />
-				<EduStatCard label="To Review" value={overview.pending_review_count} />
-				<EduStatCard label="Unsubmitted" value={overview.unsubmitted_count} />
-			</div>
-
-			<div class="mb-8 grid gap-4 lg:grid-cols-[1.05fr_0.95fr]">
-				<EduCard>
-					<div class="mb-4 flex items-center justify-between">
-						<div class="text-sm font-semibold">{$i18n.t('To Review')}</div>
-						<EduButton variant="link" on:click={() => goto('/teacher/review')}>
-							{$i18n.t('Open review queue')}
-						</EduButton>
-					</div>
-					{#if overview.pending_review_items.length === 0}
-						<EduEmpty>{$i18n.t('No submissions to review yet.')}</EduEmpty>
-					{:else}
-						<div class="space-y-3">
-							{#each overview.pending_review_items as item}
-								<EduTile
-									interactive
-									on:click={() => goto(`/teacher/submissions/${item.submission.id}`)}
-								>
-									<div class="font-medium text-gray-900 dark:text-gray-100">{item.student_name}</div>
-									<div class="mt-1 text-gray-500 dark:text-gray-400">{item.assignment.title}</div>
-									<div class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500 dark:text-gray-400">
-										<div>{item.classroom ? getClassroomDisplayName(item.classroom.name, t) : t('Unknown')}</div>
-										<div title={formatAbsolute(item.submission.submitted_at)}>
-											{formatRelative(item.submission.submitted_at)}
-										</div>
-									</div>
-									<div class="mt-3 flex flex-wrap gap-2 text-xs">
-										<EduBadge tone="rose">
-											{$i18n.t('Suspected Unmarked Imports')}: {item.risk_summary
-												?.suspected_unmarked_import_count ?? 0}
-										</EduBadge>
-										<EduBadge tone="amber">
-											{$i18n.t('Large Bursts')}: {item.risk_summary?.burst_count ?? 0}
-										</EduBadge>
-									</div>
-								</EduTile>
-							{/each}
-						</div>
-					{/if}
-				</EduCard>
-
-				<EduCard>
-					<div class="mb-4 flex items-center justify-between">
-						<div class="text-sm font-semibold">{$i18n.t('Recent Submissions')}</div>
-						<EduButton variant="link" on:click={() => goto('/teacher/assignments')}>
-							{$i18n.t('Open assignments')}
-						</EduButton>
-					</div>
-					{#if overview.recent_submissions.length === 0}
-						<EduEmpty>{$i18n.t('No submissions yet.')}</EduEmpty>
-					{:else}
-						<div class="space-y-3">
-							{#each overview.recent_submissions as item}
-								<EduTile
-									interactive
-									on:click={() => goto(`/teacher/submissions/${item.submission.id}`)}
-								>
-									<div class="font-medium text-gray-900 dark:text-gray-100">{item.student_name}</div>
-									<div class="mt-1 text-gray-500 dark:text-gray-400">{item.assignment.title}</div>
-									<div class="mt-3 text-xs text-gray-500 dark:text-gray-400" title={formatAbsolute(item.submission.submitted_at)}>
-										{formatRelative(item.submission.submitted_at)}
-									</div>
-									<div class="mt-3 flex flex-wrap gap-2 text-xs">
-										<EduBadge tone="sky">
-											{$i18n.t('AI pasted')}: {item.risk_summary?.ai_pasted_chars ?? 0}
-										</EduBadge>
-										<EduBadge tone="amber">
-											{$i18n.t('Large Bursts')}: {item.risk_summary?.burst_count ?? 0}
-										</EduBadge>
-									</div>
-								</EduTile>
-							{/each}
-						</div>
-					{/if}
-				</EduCard>
+				<EduStatCard
+					label="Classrooms"
+					value={overview.classroom_count}
+					hint="Classrooms you manage"
+				/>
+				<EduStatCard
+					label="Assignments"
+					value={overview.assignment_count}
+					hint="Assignments you published"
+				/>
+				<EduStatCard
+					label="To Review"
+					value={overview.pending_review_count}
+					hint="Submissions awaiting feedback"
+				/>
+				<EduStatCard
+					label="Unsubmitted"
+					value={overview.unsubmitted_count}
+					hint="Student-assignment pairs not submitted"
+				/>
 			</div>
 
 			<EduCard class="mb-8">
 				<div class="mb-4 flex items-center justify-between">
-					<div class="text-sm font-semibold">{$i18n.t('Upcoming Due')}</div>
-					<EduButton variant="link" on:click={() => goto('/teacher/assignments')}>
-						{$i18n.t('View all')}
+					<div class="text-sm font-semibold">{$i18n.t('Recent Submissions')}</div>
+					<EduButton variant="link" on:click={() => goto('/teacher/review')}>
+						{$i18n.t('Open review queue')}
 					</EduButton>
 				</div>
-				{#if (overview.upcoming_due_assignments ?? []).length === 0}
-					<EduEmpty>{$i18n.t('No upcoming due assignments.')}</EduEmpty>
+				{#if overview.recent_submissions.length === 0}
+					<EduEmpty>{$i18n.t('No submissions yet.')}</EduEmpty>
 				{:else}
-					<div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-						{#each overview.upcoming_due_assignments as item}
+					<div class="space-y-3">
+						{#each overview.recent_submissions as item}
 							<EduTile
 								interactive
-								on:click={() => goto(`/teacher/assignments/${item.assignment.id}`)}
+								on:click={() => goto(`/teacher/submissions/${item.submission.id}`)}
 							>
-								<div class="font-medium text-gray-900 dark:text-gray-100">{item.assignment.title}</div>
-								<div class="mt-1 text-gray-500 dark:text-gray-400">
-									{item.classroom ? getClassroomDisplayName(item.classroom.name, t) : t('Unassigned classroom')}
-								</div>
-								<div class="mt-3 flex flex-wrap items-center gap-2 text-xs">
-									<EduBadge
-										tone={item.assignment.due_at * 1000 - Date.now() < DAY_MS ? 'amber' : 'gray'}
-										title={formatAbsolute(item.assignment.due_at)}
-									>
-										{$i18n.t('Due')} {formatRelative(item.assignment.due_at)}
+								<div class="flex flex-wrap items-center gap-2">
+									<span class="font-medium text-gray-900 dark:text-gray-100">
+										{item.student_name}
+									</span>
+									<span class="text-gray-400 dark:text-gray-500">·</span>
+									<span class="text-gray-500 dark:text-gray-400">{item.assignment.title}</span>
+									<EduBadge soft tone={REVIEW_STATUS_TONES[item.review_status] ?? 'gray'}>
+										{getReviewStatusLabel(item.review_status, t)}
 									</EduBadge>
-									<div class="text-gray-500 dark:text-gray-400">
-										{$i18n.t('Submissions')}: {item.submission_count}/{item.student_count}
+								</div>
+								<div class="mt-2 flex flex-wrap gap-3 text-xs text-gray-500 dark:text-gray-400">
+									<div>
+										{item.classroom
+											? getClassroomDisplayName(item.classroom.name, t)
+											: t('Unknown')}
+									</div>
+									<div title={formatEpoch(item.submission.submitted_at)}>
+										{formatRelative(item.submission.submitted_at)}
 									</div>
 								</div>
+								<EduRiskBadges class="mt-3" summary={item.risk_summary} showClear />
 							</EduTile>
 						{/each}
 					</div>
@@ -200,7 +161,7 @@
 
 			<EduCard class="mb-8">
 				<div class="mb-4 flex items-center justify-between">
-					<div class="text-sm font-semibold">{$i18n.t('Recent Assignments')}</div>
+					<div class="text-sm font-semibold">{$i18n.t('Assignments')}</div>
 					<EduButton variant="link" on:click={() => goto('/teacher/assignments')}>
 						{$i18n.t('View all')}
 					</EduButton>
@@ -214,22 +175,28 @@
 								interactive
 								on:click={() => goto(`/teacher/assignments/${item.assignment.id}`)}
 							>
-								<div class="font-medium text-gray-900 dark:text-gray-100">{item.assignment.title}</div>
+								<div class="font-medium text-gray-900 dark:text-gray-100">
+									{item.assignment.title}
+								</div>
 								<div class="mt-1 text-gray-500 dark:text-gray-400">
-									{item.classroom ? getClassroomDisplayName(item.classroom.name, t) : t('Unassigned classroom')}
+									{item.classroom
+										? getClassroomDisplayName(item.classroom.name, t)
+										: t('Unassigned classroom')}
 								</div>
-								<div class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500 dark:text-gray-400">
-									<div>{$i18n.t('Students')}: {item.student_count}</div>
-									<div>{$i18n.t('Submissions')}: {item.submission_count}</div>
-								</div>
-								<div class="mt-3 flex flex-wrap gap-2 text-xs">
-									<EduBadge tone="rose">
-										{$i18n.t('Suspected Unmarked Imports')}: {item.risk_summary
-											?.suspected_unmarked_import_count ?? 0}
-									</EduBadge>
-									<EduBadge tone="amber">
-										{$i18n.t('Large Bursts')}: {item.risk_summary?.burst_count ?? 0}
-									</EduBadge>
+								<div class="mt-3 flex flex-wrap items-center gap-2 text-xs">
+									{#if item.assignment.due_at}
+										<EduBadge
+											soft
+											tone={item.assignment.due_at * 1000 - Date.now() < DAY_MS ? 'amber' : 'gray'}
+											title={formatEpoch(item.assignment.due_at)}
+										>
+											{$i18n.t('Due')}
+											{formatRelative(item.assignment.due_at)}
+										</EduBadge>
+									{/if}
+									<div class="text-gray-500 dark:text-gray-400">
+										{$i18n.t('Submissions')}: {item.submission_count}/{item.student_count}
+									</div>
 								</div>
 							</EduTile>
 						{/each}
@@ -259,15 +226,6 @@
 								<div class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500 dark:text-gray-400">
 									<div>{$i18n.t('Students')}: {item.student_count}</div>
 									<div>{$i18n.t('Assignments')}: {item.assignment_count}</div>
-								</div>
-								<div class="mt-3 flex flex-wrap gap-2 text-xs">
-									<EduBadge tone="rose">
-										{$i18n.t('Suspected Unmarked Imports')}: {item.risk_summary
-											?.suspected_unmarked_import_count ?? 0}
-									</EduBadge>
-									<EduBadge tone="amber">
-										{$i18n.t('Large Bursts')}: {item.risk_summary?.burst_count ?? 0}
-									</EduBadge>
 								</div>
 							</EduTile>
 						{/each}

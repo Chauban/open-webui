@@ -9,6 +9,23 @@ export type AIHelpType =
 	| "Help Break Through Writer's Block"
 	| 'Strengthen Reasoning'
 	| 'Other';
+export type WritingSourceType =
+	| 'ai_inserted'
+	| 'ai_pasted'
+	| 'user_typed'
+	| 'external_paste'
+	| 'suspected_unmarked_import'
+	| 'unknown';
+export type WritingVersionTrigger = 'autosave' | 'manual' | 'submit' | 'submit_preflight';
+export type EditorOperationType =
+	| 'keyboard_input'
+	| 'replace'
+	| 'delete_text'
+	| 'ai_insert_clicked'
+	| 'paste_detected'
+	| 'platform_ai_insert'
+	| 'ai_reply_selection_copied'
+	| 'ai_copy_button_clicked';
 
 export type ProfileReviewStatus = 'unsubmitted' | 'pending' | 'reviewed' | 'returned';
 export type ProfileCompletenessStatus = 'complete' | 'missing' | 'pending' | 'not_applicable';
@@ -25,8 +42,50 @@ export type ProfileMetricKey =
 	| 'digestion_ratio'
 	| 'prompt_count'
 	| 'reflection_quality';
+export type ProfileInsightCode =
+	| 'not_enough_data'
+	| 'digestion_up'
+	| 'digestion_low'
+	| 'ai_share_changed'
+	| 'round_improvement'
+	| 'round_revision_thin'
+	| 'help_type_shift_refining'
+	| 'deadline_rush'
+	| 'process_up'
+	| 'reflection_thin'
+	| 'ai_revision_productive'
+	| 'ai_use_needs_review';
+export type ProfileInsightActionCode =
+	| 'complete_more_submissions'
+	| 'keep_rewriting_ai_text'
+	| 'rewrite_one_ai_section'
+	| 'review_ai_use_pattern'
+	| 'reuse_successful_revision'
+	| 'revise_feedback_deeply'
+	| 'continue_refining_own_writing'
+	| 'start_next_assignment_earlier'
+	| 'keep_current_process'
+	| 'add_specific_reflection_evidence'
+	| 'repeat_productive_ai_revision'
+	| 'reduce_ai_share_and_deepen_revision';
+export type ProfileFormulaMetric =
+	| 'revised_chars / inserted_chars'
+	| 'writing_span_seconds'
+	| 'end_loaded_ratio'
+	| 'digestion_ratio'
+	| 'prompt_count'
+	| 'reflection_quality';
 
 export type RubricCriterion = { key: string; label: string; max_score: number };
+export type ProfileClassroom = {
+	id: string;
+	name: string;
+	teacher_id: string;
+	invite_code: string;
+	status: 'active' | 'archived';
+	created_at: number;
+	updated_at: number;
+};
 export type ProfileAssignment = {
 	id: string;
 	title: string;
@@ -34,7 +93,12 @@ export type ProfileAssignment = {
 	due_at?: number | null;
 	score_max: number;
 	rubric_schema: { criteria: RubricCriterion[] };
-	[key: string]: unknown;
+	teacher_id: string;
+	classroom_id: string | null;
+	status: 'active' | 'archived';
+	archived_at: number | null;
+	created_at: number;
+	updated_at: number;
 };
 
 export type ProfileDataCompleteness = {
@@ -107,10 +171,10 @@ export type StudentProfileInsightParams = {
 };
 
 export type StudentProfileInsight = {
-	code: string;
+	code: ProfileInsightCode;
 	tone: 'positive' | 'warning' | 'neutral';
 	params: StudentProfileInsightParams;
-	action_code: string | null;
+	action_code: ProfileInsightActionCode | null;
 	submission_id: string | null;
 	severity: 'low' | 'medium' | 'high';
 	confidence: number;
@@ -166,7 +230,7 @@ export type TeacherStudentNote = {
 };
 
 export type ProfileFormulaTerm = {
-	metric: string;
+	metric: ProfileFormulaMetric;
 	weight: number;
 	target: number | null;
 	inverted: boolean;
@@ -192,13 +256,16 @@ export type StudentProfileIndexFormula = {
 
 export type StudentProfile = {
 	metric_version: string;
+	active_metric_version: string;
 	insight_version: string;
+	aggregate_materialized: boolean;
+	aggregate_revision: number | null;
 	available_metric_versions: string[];
 	excluded_snapshot_count: number;
 	student_id: string;
 	student_name: string | null;
 	student_email: string | null;
-	classrooms: Array<{ id: string; name: string } & Record<string, unknown>>;
+	classrooms: ProfileClassroom[];
 	portfolio_summary: {
 		assignment_count: number;
 		submitted_count: number;

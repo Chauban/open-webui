@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { get } from 'svelte/store';
 	import { toast } from 'svelte-sonner';
-	import dayjs from 'dayjs';
+	import dayjs from '$lib/dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
 
 	import {
@@ -21,12 +21,17 @@
 	import EduCard from '$lib/components/education/EduCard.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 	import { EDU_FIELD_CLASS, eduFilterClass, eduSegmentClass } from '$lib/components/education/styles';
-	import { getClassroomDisplayName, getReviewStatusLabel } from '$lib/utils/education';
+	import { formatEpoch, getClassroomDisplayName, getReviewStatusLabel, resolveErrorMessage } from '$lib/utils/education';
 
 	dayjs.extend(relativeTime);
 
 	const i18n = getContext('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
+
+	// 相对时间跟随界面语言：dayjs 默认只有英文，中文界面里会渲染成 "2 hours ago"。
+	// 语言包里没有的地区变体 dayjs 会自己降为基础语种（en-US → en）。
+	$: formatRelative = (timestamp: number) =>
+		dayjs(timestamp * 1000).locale($i18n.language).fromNow();
 	const getRiskTone = (item) => {
 		if ((item.risk_summary?.suspected_unmarked_import_count ?? 0) > 0) return 'rose';
 		if ((item.risk_summary?.burst_count ?? 0) > 0) return 'amber';
@@ -90,7 +95,7 @@
 			loadError = '';
 		} catch (error) {
 			if (seq !== loadSeq) return;
-			loadError = `${error?.detail ?? error}`;
+			loadError = resolveErrorMessage(error, t);
 			toast.error(loadError);
 		} finally {
 			if (seq === loadSeq) {
@@ -109,7 +114,7 @@
 			total = res.total ?? total;
 		} catch (error) {
 			if (seq !== loadSeq) return;
-			toast.error(`${error?.detail ?? error}`);
+			toast.error(resolveErrorMessage(error, t));
 		} finally {
 			if (seq === loadSeq) {
 				loadingMore = false;
@@ -255,8 +260,8 @@
 										{item.classroom ? getClassroomDisplayName(item.classroom.name, t) : t('Unknown')}
 									</div>
 									<div>{$i18n.t('Status')}: {getReviewStatusLabel(item.review_status, t)}</div>
-									<div title={new Date(item.submission.submitted_at * 1000).toLocaleString()}>
-										{dayjs(item.submission.submitted_at * 1000).fromNow()}
+									<div title={formatEpoch(item.submission.submitted_at)}>
+										{formatRelative(item.submission.submitted_at)}
 									</div>
 								</div>
 								<div class="mt-3 flex flex-wrap gap-2 text-xs">

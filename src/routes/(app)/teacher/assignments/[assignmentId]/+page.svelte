@@ -21,7 +21,14 @@
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 	import RubricCriteriaEditor from '$lib/components/education/RubricCriteriaEditor.svelte';
 	import { EDU_FIELD_CLASS } from '$lib/components/education/styles';
-	import { getAssignmentStatusLabel, getClassroomDisplayName, toLocalDateTimeInput } from '$lib/utils/education';
+	import {
+		formatDateTimeInput,
+		formatEpoch,
+		getAssignmentStatusLabel,
+		getClassroomDisplayName,
+		resolveErrorMessage,
+		toLocalDateTimeInput
+	} from '$lib/utils/education';
 
 	const i18n = getContext('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
@@ -47,6 +54,7 @@
 		item?.assignment?.status === 'active' &&
 		item?.assignment?.due_at &&
 		item.assignment.due_at * 1000 < Date.now();
+	$: dueAtPreview = formatDateTimeInput(dueAt);
 
 	// datetime-local expects a LOCAL "YYYY-MM-DDTHH:mm" string; toISOString() would shift to UTC.
 
@@ -136,7 +144,7 @@
 			await loadData();
 			toast.success(t('Assignment updated.'));
 		} catch (error) {
-			toast.error(`${error?.detail ?? error}`);
+			toast.error(resolveErrorMessage(error, t));
 		} finally {
 			saving = false;
 		}
@@ -148,7 +156,7 @@
 			await loadData();
 			toast.success(t('Assignment archived.'));
 		} catch (error) {
-			toast.error(`${error?.detail ?? error}`);
+			toast.error(resolveErrorMessage(error, t));
 		}
 	};
 
@@ -158,7 +166,7 @@
 			toast.success(t('Assignment deleted.'));
 			goto('/teacher/assignments');
 		} catch (error) {
-			toast.error(`${error?.detail ?? error}`);
+			toast.error(resolveErrorMessage(error, t));
 		}
 	};
 
@@ -166,7 +174,7 @@
 		try {
 			await loadData();
 		} catch (error) {
-			loadError = `${error?.detail ?? error}`;
+			loadError = resolveErrorMessage(error, t);
 			toast.error(loadError);
 		} finally {
 			loading = false;
@@ -218,7 +226,7 @@
 				<EduCard>
 					<div class="text-xs uppercase tracking-[0.16em] text-gray-500 dark:text-gray-400">{$i18n.t('Due At')}</div>
 					<div class="mt-2 text-sm font-medium text-gray-900 dark:text-gray-100">
-						{item.assignment.due_at ? new Date(item.assignment.due_at * 1000).toLocaleString() : t('Not set')}
+						{item.assignment.due_at ? formatEpoch(item.assignment.due_at) : t('Not set')}
 					</div>
 				</EduCard>
 			</div>
@@ -247,13 +255,16 @@
 							<div>
 								<div class="mb-2 text-sm font-medium">{$i18n.t('Status')}</div>
 								<select bind:value={status} class="w-full {EDU_FIELD_CLASS}">
-									<option value="active">{$i18n.t('Active')}</option>
+									<option value="active">{$i18n.t('Ongoing')}</option>
 									<option value="archived">{$i18n.t('Archived')}</option>
 								</select>
 							</div>
 							<div>
 								<div class="mb-2 text-sm font-medium">{$i18n.t('Due At')}</div>
 								<input bind:value={dueAt} type="datetime-local" required class="w-full {EDU_FIELD_CLASS}" />
+								{#if dueAtPreview}
+									<div class="mt-1.5 text-xs text-gray-400 dark:text-gray-500">{dueAtPreview}</div>
+								{/if}
 							</div>
 							<div>
 								<div class="mb-2 text-sm font-medium">{$i18n.t('Maximum Score')}</div>

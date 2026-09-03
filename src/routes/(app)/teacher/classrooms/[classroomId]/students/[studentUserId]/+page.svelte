@@ -12,7 +12,7 @@
 	import EduButton from '$lib/components/education/EduButton.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 	import StudentGrowthProfile from '$lib/components/education/StudentGrowthProfile.svelte';
-	import { getClassroomDisplayName } from '$lib/utils/education';
+	import { getClassroomDisplayName, resolveErrorMessage } from '$lib/utils/education';
 	import { createLatestRequestGate } from '$lib/utils/latest-request';
 
 	const i18n = getContext('i18n');
@@ -39,7 +39,7 @@
 			profile = nextProfile;
 		} catch (error) {
 			if (!profileRequestGate.isLatest(requestId)) return;
-			loadError = `${error?.detail ?? error}`;
+			loadError = resolveErrorMessage(error, t);
 			toast.error(loadError);
 		} finally {
 			if (profileRequestGate.isLatest(requestId)) loading = false;

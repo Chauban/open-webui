@@ -12,7 +12,12 @@
 	import EduCard from '$lib/components/education/EduCard.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 	import { EDU_FIELD_CLASS, eduFilterClass } from '$lib/components/education/styles';
-	import { getAssignmentStatusLabel, getClassroomDisplayName } from '$lib/utils/education';
+	import {
+		formatEpoch,
+		getAssignmentStatusLabel,
+		getClassroomDisplayName,
+		resolveErrorMessage
+	} from '$lib/utils/education';
 
 	const i18n = getContext('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
@@ -79,7 +84,7 @@
 		try {
 			assignments = await getTeacherAssignments(localStorage.token);
 		} catch (error) {
-			loadError = `${error?.detail ?? error}`;
+			loadError = resolveErrorMessage(error, t);
 			toast.error(loadError);
 		} finally {
 			loading = false;
@@ -122,7 +127,7 @@
 			</select>
 			<select class={EDU_FIELD_CLASS} bind:value={selectedStatus}>
 				<option value="all">{$i18n.t('All')}</option>
-				<option value="active">{$i18n.t('Active')}</option>
+				<option value="active">{$i18n.t('Ongoing')}</option>
 				<option value="past_due">{$i18n.t('Past Due')}</option>
 				<option value="archived">{$i18n.t('Archived')}</option>
 				<option value="needs_review">{$i18n.t('Has submissions')}</option>
@@ -190,13 +195,13 @@
 									{#if item.assignment.due_at}
 										<div>
 											{$i18n.t('Due At')}:
-											{new Date(item.assignment.due_at * 1000).toLocaleString()}
+											{formatEpoch(item.assignment.due_at)}
 										</div>
 									{/if}
 									<div>
 										{$i18n.t('Latest Activity')}:
 										{item.latest_submission_at
-											? new Date(item.latest_submission_at * 1000).toLocaleString()
+											? formatEpoch(item.latest_submission_at)
 											: t('No submissions yet.')}
 									</div>
 								</div>

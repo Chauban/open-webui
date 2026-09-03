@@ -29,9 +29,12 @@ const context = new Map([
 ]);
 
 const makeProfile = (teacher = false): any => ({
-	metric_version: '2026-09-01.3',
+	metric_version: '2026-09-03.1',
+	active_metric_version: '2026-09-03.1',
+	aggregate_materialized: true,
+	aggregate_revision: 1,
 	insight_version: '2026-09-01.1',
-	available_metric_versions: ['2026-09-01.3'],
+	available_metric_versions: ['2026-09-03.1'],
 	excluded_snapshot_count: 0,
 	student_id: 'student-1',
 	student_name: 'Student',

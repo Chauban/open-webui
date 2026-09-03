@@ -6,6 +6,8 @@
 	// 每处自己拼 uppercase tracking 与配色。
 	export let label = '';
 	export let value: string | number = 0;
+	// 口径说明：数字本身分不清「份/人次/个」，统计卡下方补一行小字。
+	export let hint = '';
 	export let tone: 'default' | 'rose' | 'amber' | 'sky' = 'default';
 
 	const i18n = getContext('i18n');
@@ -30,4 +32,7 @@
 <EduCard tone={cardTone}>
 	<div class="text-xs uppercase tracking-[0.16em] {LABEL_TONES[tone]}">{$i18n.t(label)}</div>
 	<div class="mt-2 text-3xl font-semibold {VALUE_TONES[tone]}">{value}</div>
+	{#if hint}
+		<div class="mt-1 text-xs text-gray-400 dark:text-gray-500">{$i18n.t(hint)}</div>
+	{/if}
 </EduCard>

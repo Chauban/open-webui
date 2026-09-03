@@ -1,10 +1,13 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 import type {
+	EditorOperationType,
 	StudentGrowthGoal,
 	StudentProfile,
 	StudentProfileFilters,
 	TeacherStudentNote,
-	TeacherStudentProfile
+	TeacherStudentProfile,
+	WritingSourceType,
+	WritingVersionTrigger
 } from './types';
 import { buildProfileQuery } from '$lib/utils/growth-profile';
 
@@ -311,7 +314,7 @@ export const createWritingVersion = async (
 	token: string,
 	sessionId: string,
 	payload: {
-		trigger_type: string;
+		trigger_type: WritingVersionTrigger;
 		content_json: object | null;
 		content_text: string;
 	}
@@ -330,7 +333,7 @@ export const createProvenanceSegments = async (
 		version_id?: string | null;
 		segments: Array<{
 			segment_id: string;
-			source_type: string;
+			source_type: WritingSourceType;
 			segment_text: string;
 			source_message_id?: string | null;
 			start_offset?: number | null;
@@ -352,13 +355,15 @@ export const createEditorOperations = async (
 	sessionId: string,
 	payload: {
 		operations: Array<{
-			op_type: string;
-			source_type: string;
+			op_type: EditorOperationType;
+			source_type: WritingSourceType;
 			start_offset?: number | null;
 			end_offset?: number | null;
 			inserted_text?: string | null;
 			deleted_text?: string | null;
 			batch_id: string;
+			occurred_at_ms: number;
+			client_sequence: number;
 			metadata_json?: Record<string, unknown> | null;
 		}>;
 	}
