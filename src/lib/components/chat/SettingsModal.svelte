@@ -702,7 +702,6 @@
 			title: 'Connections',
 			keywords: [
 				'connections',
-				'ollama',
 				'openai',
 				'api',
 				'base url',

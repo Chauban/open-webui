@@ -5,24 +5,6 @@ import sys
 
 from fastapi import Request
 
-from open_webui.socket.utils import RedisDict
-from open_webui.routers import openai
-from open_webui.functions import get_function_models
-
-
-from open_webui.models.functions import Functions
-from open_webui.models.models import Models
-from open_webui.models.access_grants import AccessGrants
-from open_webui.models.groups import Groups
-
-
-from open_webui.utils.plugin import (
-    load_function_module_by_id,
-    get_function_module_from_cache,
-)
-from open_webui.utils.access_control import has_access, has_base_model_access
-
-
 from open_webui.config import (
     BYPASS_ADMIN_ACCESS_CONTROL,
     DEFAULT_ARENA_MODEL,
@@ -34,15 +16,16 @@ from open_webui.models.config import Config
 from open_webui.models.functions import Functions
 from open_webui.models.groups import Groups
 from open_webui.models.models import Models
-from open_webui.utils.chat_variables import get_chat_variables_schema
 from open_webui.models.users import UserModel
 from open_webui.routers import openai
 from open_webui.socket.utils import RedisDict
 from open_webui.utils.access_control import has_access, has_base_model_access
+from open_webui.utils.chat_variables import get_chat_variables_schema
 from open_webui.utils.json_codec import JSONCodec
 from open_webui.utils.plugin import (
-    get_functions_cache,
     get_function_module_from_cache,
+    get_functions_cache,
+    load_function_module_by_id,
 )
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
@@ -77,7 +60,6 @@ async def get_all_models(request, refresh: bool = False, user: UserModel = None)
     )
     if refresh:
         await openai.get_all_models.cache.clear()
-        await ollama.get_all_models.cache.clear()
         redis = getattr(request.app.state, 'redis', None)
         if redis is not None:
             await redis.delete(BASE_MODELS_CACHE_KEY)
@@ -94,7 +76,6 @@ async def get_all_models(request, refresh: bool = False, user: UserModel = None)
             request.app.state.BASE_MODELS = base_models
         else:
             await openai.get_all_models.cache.clear()
-            await ollama.get_all_models.cache.clear()
     elif use_cache and request.app.state.MODELS and request.app.state.BASE_MODELS:
         base_models = request.app.state.BASE_MODELS
 
@@ -168,12 +149,8 @@ async def get_all_models(request, refresh: bool = False, user: UserModel = None)
 
     custom_models = await Models.get_all_models()
 
-    # Single O(1) lookup: Ollama base names first, then exact IDs (exact wins).
-    base_model_lookup = {}
-    for model in models:
-        if model.get('owned_by') == 'ollama':
-            base_model_lookup.setdefault(model['id'].split(':')[0], model)
-        base_model_lookup[model['id']] = model
+    # Single O(1) lookup by model ID.
+    base_model_lookup = {model['id']: model for model in models}
 
     existing_ids = {m['id'] for m in models}
 

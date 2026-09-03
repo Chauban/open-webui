@@ -163,7 +163,6 @@ from open_webui.routers import (
     models,
     notes,
     notifications,
-    ollama,
     openai,
     pipelines,
     prompts,
@@ -931,61 +930,15 @@ async def unload_model(request: Request, form_data: ModelUnloadForm, user=Depend
     """
     model_id = form_data.model
 
-    ollama_models = getattr(request.app.state, 'OLLAMA_MODELS', None) or {}
     openai_models = getattr(request.app.state, 'OPENAI_MODELS', None) or {}
 
     seen = set()
-    while model_id not in ollama_models and model_id not in openai_models and model_id not in seen:
+    while model_id not in openai_models and model_id not in seen:
         seen.add(model_id)
         model_info = await Models.get_model_by_id(model_id)
         if not model_info or not model_info.base_model_id:
             break
         model_id = model_info.base_model_id
-
-    # --- Ollama provider ---
-    if model_id in ollama_models:
-        ollama_config = await Config.get_many('ollama.base_urls', 'ollama.api_configs')
-        ollama_base_urls = ollama_config.get('ollama.base_urls') or []
-        ollama_api_configs = ollama_config.get('ollama.api_configs') or {}
-        url_indices = ollama_models[model_id].get('urls', [])
-        errors = []
-        for idx in url_indices:
-            url = ollama_base_urls[idx]
-            api_config = ollama_api_configs.get(
-                str(idx),
-                ollama_api_configs.get(url, {}),
-            )
-            key = api_config.get('key', None)
-
-            prefix_id = api_config.get('prefix_id', None)
-            actual_model = strip_provider_model_prefix(model_id, prefix_id)
-
-            payload = JSONCodec.dumps({'model': actual_model, 'keep_alive': 0, 'prompt': ''})
-
-            try:
-                timeout = aiohttp.ClientTimeout(total=30)
-                async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
-                    headers = {
-                        'Content-Type': 'application/json',
-                        **({'Authorization': f'Bearer {key}'} if key else {}),
-                    }
-                    async with session.post(
-                        f'{url}/api/generate',
-                        data=payload,
-                        headers=headers,
-                    ) as r:
-                        if not r.ok:
-                            errors.append({'url_idx': idx, 'error': await r.text()})
-            except Exception as e:
-                log.exception(f'Failed to unload model on Ollama node {idx}: {e}')
-                errors.append({'url_idx': idx, 'error': str(e)})
-
-        if errors:
-            raise HTTPException(
-                status_code=500,
-                detail=f'Failed to unload model on {len(errors)} node(s): {errors}',
-            )
-        return {'status': True}
 
     # --- OpenAI-compatible providers ---
     if model_id in openai_models:

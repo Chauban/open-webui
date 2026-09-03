@@ -4,8 +4,6 @@ import base64
 import logging
 import os
 import shutil
-import socket
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Union
@@ -222,87 +220,6 @@ if CUSTOM_NAME:
 ####################################
 
 ENABLE_DIRECT_CONNECTIONS = os.getenv('ENABLE_DIRECT_CONNECTIONS', 'False').lower() == 'true'
-
-####################################
-# OLLAMA_BASE_URL
-####################################
-
-ENABLE_OLLAMA_API = os.getenv('ENABLE_OLLAMA_API', 'True').lower() == 'true'
-
-OLLAMA_API_BASE_URL = os.getenv('OLLAMA_API_BASE_URL', 'http://localhost:11434/api')
-
-OLLAMA_BASE_URL = os.getenv('OLLAMA_BASE_URL', '')
-if OLLAMA_BASE_URL:
-    # Remove trailing slash
-    OLLAMA_BASE_URL = OLLAMA_BASE_URL[:-1] if OLLAMA_BASE_URL.endswith('/') else OLLAMA_BASE_URL
-
-
-K8S_FLAG = os.getenv('K8S_FLAG', '')
-USE_OLLAMA_DOCKER = os.getenv('USE_OLLAMA_DOCKER', 'false')
-
-if OLLAMA_BASE_URL == '' and OLLAMA_API_BASE_URL != '':
-    OLLAMA_BASE_URL = OLLAMA_API_BASE_URL[:-4] if OLLAMA_API_BASE_URL.endswith('/api') else OLLAMA_API_BASE_URL
-
-if ENV == 'prod':
-    if OLLAMA_BASE_URL == '/ollama' and not K8S_FLAG:
-        if USE_OLLAMA_DOCKER.lower() == 'true':
-            # if you use all-in-one docker container (Open WebUI + Ollama)
-            # with the docker build arg USE_OLLAMA=true (--build-arg="USE_OLLAMA=true") this only works with http://localhost:11434
-            OLLAMA_BASE_URL = 'http://localhost:11434'
-        else:
-            OLLAMA_BASE_URL = 'http://host.docker.internal:11434'
-    elif K8S_FLAG:
-        OLLAMA_BASE_URL = 'http://ollama-service.open-webui.svc.cluster.local:11434'
-
-
-def _resolve_ollama_base_url(url: str) -> str:
-    """If the default Ollama port (11434) is unreachable, try the fallback port (12434)."""
-
-    def reachable(host: str, port: int) -> bool:
-        try:
-            with socket.create_connection((host, port), timeout=1.0):
-                return True
-        except (OSError, TimeoutError):
-            return False
-
-    host = urlparse(url).hostname or 'localhost'
-
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        default = pool.submit(reachable, host, 11434)
-        fallback = pool.submit(reachable, host, 12434)
-
-    if not default.result() and fallback.result():
-        url = url.replace(':11434', ':12434')
-        log.info('Ollama port 11434 unreachable on %s, falling back to 12434', host)
-    elif not default.result():
-        log.info('Ollama ports 11434 and 12434 both unreachable on %s', host)
-
-    return url
-
-
-# Auto-resolve Ollama port when no explicit URL was provided by the user.
-# The Dockerfile default is "/ollama" which the block above rewrites to :11434.
-if os.getenv('OLLAMA_BASE_URL', '') in ('', '/ollama') and not os.getenv('OLLAMA_BASE_URLS', ''):
-    OLLAMA_BASE_URL = _resolve_ollama_base_url(OLLAMA_BASE_URL)
-
-
-OLLAMA_BASE_URLS = os.getenv('OLLAMA_BASE_URLS', '')
-OLLAMA_BASE_URLS = OLLAMA_BASE_URLS if OLLAMA_BASE_URLS != '' else OLLAMA_BASE_URL
-
-OLLAMA_BASE_URLS = [url.strip() for url in OLLAMA_BASE_URLS.split(';')]
-OLLAMA_BASE_URLS = OLLAMA_BASE_URLS
-
-OLLAMA_API_CONFIGS = {}
-_ollama_api_configs = os.getenv('OLLAMA_API_CONFIGS', '')
-if _ollama_api_configs:
-    try:
-        parsed = JSONCodec.loads(_ollama_api_configs)
-        if isinstance(parsed, dict):
-            OLLAMA_API_CONFIGS = parsed
-        else:
-            log.warning('OLLAMA_API_CONFIGS must be a JSON object, ignoring')
-    except (JSONCodec.JSONDecodeError, TypeError):
-        log.warning('OLLAMA_API_CONFIGS is not valid JSON, ignoring')
 
 ####################################
 # OPENAI_API
@@ -2818,6 +2735,31 @@ ENABLE_LDAP_GROUP_CREATION = os.getenv('ENABLE_LDAP_GROUP_CREATION', 'False').lo
 
 LDAP_ATTRIBUTE_FOR_GROUPS = os.getenv('LDAP_ATTRIBUTE_FOR_GROUPS', 'memberOf')
 
+####################################
+# Education (成长写作教学模块)
+####################################
+
+# 作业写作区的辅导风格提示词。教师按作业选择档位，管理员在此改写每档的措辞。
+# 留空的档位不追加任何辅导约束，作业提示词退回纯上下文。
+DEFAULT_EDUCATION_COACHING_PROMPTS = {
+    'socratic': """【辅导方式】严格提问式。
+- 学生动笔前，先弄清三件事：写什么主题、写给谁看、写成什么文体（记叙 / 议论 / 说明 / 应用）。任何一件不清楚就先问，不要替他假设。
+- 追问只围绕教学维度：立意、读者、结构、论据、材料取舍。不要问文风偏好、语气这类没有教学价值的问题。
+- 一次最多问 3 个问题，每个问题给 2-3 个选项，并且允许学生自己填写。学生自己写出来的答案比选选项更有价值，遇到就顺着往下追问。
+- 不提供可以直接粘贴进正文的成段文字。可以给提纲、可以指出问题出在哪、可以举一个与学生题目无关的例子来说明写法，成段正文由学生自己写。
+- 学生直接要求代写时，把这个请求转成一个问题还给他，并说明这次作业采用的是提问式辅导。""",
+    'balanced': """【辅导方式】平衡。
+- 学生动笔前，先弄清三件事：写什么主题、写给谁看、写成什么文体（记叙 / 议论 / 说明 / 应用）。任何一件不清楚就先问，不要替他假设。
+- 追问只围绕教学维度：立意、读者、结构、论据、材料取舍。不要问文风偏好、语气这类没有教学价值的问题。
+- 一次最多问 3 个问题，每个问题给 2-3 个选项，并且允许学生自己填写。
+- 优先给方向、提纲、示例和修改意见，其次才是替他把话写出来。学生已经写出内容时，先点评他自己写的，再示范怎么改。
+- 示范片段写法之后要说明这样改的理由，让学生知道为什么更好。整篇正文优先由学生自己完成。""",
+    'hands_off': """【辅导方式】放手。
+- 按学生的要求提供帮助，不额外设限。
+- 主题、读者或文体不清楚时仍先问一轮再动笔，避免写偏。
+- 给出成段文字时，简要说明这样写的思路，便于学生判断要不要采用、哪些地方要改成自己的话。""",
+}
+
 DEFAULT_CONFIG = {
     'direct.enable': ENABLE_DIRECT_CONNECTIONS,
     'openai.enable': ENABLE_OPENAI_API,
@@ -3200,6 +3142,7 @@ DEFAULT_CONFIG = {
     'ldap.group.enable_management': ENABLE_LDAP_GROUP_MANAGEMENT,
     'ldap.group.enable_creation': ENABLE_LDAP_GROUP_CREATION,
     'ldap.server.attribute_for_groups': LDAP_ATTRIBUTE_FOR_GROUPS,
+    'education.coaching_prompts': DEFAULT_EDUCATION_COACHING_PROMPTS,
 }
 
 

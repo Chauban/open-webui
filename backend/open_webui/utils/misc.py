@@ -341,8 +341,7 @@ def convert_output_to_messages(
              follow-ups.
         reasoning_format: How to include reasoning blocks in the output:
             - None: skip reasoning (default, safe for strict providers).
-            - ``'thinking'``: set as ``thinking`` top-level field
-              (for native Ollama).
+            - ``'thinking'``: set as ``thinking`` top-level field.
             - ``'think_tags'``: wrap in ``<think>`` tags inside content
               (for legacy providers that expect reasoning as tagged content).
             - ``'reasoning_content'``: set as ``reasoning_content`` top-level field

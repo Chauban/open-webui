@@ -12,10 +12,10 @@
 
 	import { createEventDispatcher, onMount, getContext, tick } from 'svelte';
 
-	import { deleteModel, getOllamaVersion, pullModel } from '$lib/apis/ollama';
 	import { deleteModelById } from '$lib/apis/models';
 	import { unloadModel } from '$lib/apis';
 	import {
+		deleteProviderModel,
 		downloadProviderModel,
 		getErrorMessage,
 		getOpenAIConfig,
@@ -198,7 +198,6 @@
 			searchValue = '';
 			listScrollTop = 0;
 			if (!selectionOnly) {
-				setOllamaVersion();
 				setProviderDownloadConnections();
 			}
 			resetView();
@@ -262,7 +261,6 @@
 	let selectedFilter = '';
 	let modelFilterItems = [];
 
-	let ollamaVersion = null;
 	let providerDownloadConnections = [];
 	let selectedModelIdx = 0;
 
@@ -373,20 +371,6 @@
 	$: downloadTargets =
 		!selectionOnly && sanitizedSearchValue && $user?.role === 'admin'
 			? [
-					...(ollamaVersion
-						? [
-								{
-									id: 'ollama',
-									label: $i18n.t('Ollama'),
-									poolKey: sanitizedSearchValue,
-									download: $MODEL_DOWNLOAD_POOL[sanitizedSearchValue],
-									actionLabel: $i18n.t(`Pull "{{searchValue}}" from Ollama.com`, {
-										searchValue: searchValue
-									}),
-									type: 'ollama'
-								}
-							]
-						: []),
 					...providerDownloadConnections.map((connection) => {
 						const poolKey = getProviderPoolKey(connection, sanitizedSearchValue);
 						return {
@@ -518,139 +502,6 @@
 		await onSetDefault();
 	};
 
-	const pullModelHandler = async () => {
-		const sanitizedModelTag = searchValue.trim().replace(/^ollama\s+(run|pull)\s+/, '');
-
-		console.log($MODEL_DOWNLOAD_POOL);
-		if ($MODEL_DOWNLOAD_POOL[sanitizedModelTag]) {
-			toast.error(
-				$i18n.t(`Model '{{modelTag}}' is already in queue for downloading.`, {
-					modelTag: sanitizedModelTag
-				})
-			);
-			return;
-		}
-		if (Object.keys($MODEL_DOWNLOAD_POOL).length === 3) {
-			toast.error(
-				$i18n.t('Maximum of 3 models can be downloaded simultaneously. Please try again later.')
-			);
-			return;
-		}
-
-		const [res, controller] = await pullModel(localStorage.token, sanitizedModelTag, '0').catch(
-			(error) => {
-				toast.error(`${error}`);
-				return null;
-			}
-		);
-
-		if (res) {
-			const reader = res.body
-				.pipeThrough(new TextDecoderStream())
-				.pipeThrough(splitStream('\n'))
-				.getReader();
-
-			MODEL_DOWNLOAD_POOL.set({
-				...$MODEL_DOWNLOAD_POOL,
-				[sanitizedModelTag]: {
-					...$MODEL_DOWNLOAD_POOL[sanitizedModelTag],
-					abortController: controller,
-					reader,
-					model: sanitizedModelTag,
-					done: false
-				}
-			});
-
-			while (true) {
-				try {
-					const { value, done } = await reader.read();
-					if (done) break;
-
-					let lines = value.split('\n');
-
-					for (const line of lines) {
-						if (line !== '') {
-							let data = JSON.parse(line);
-							console.log(data);
-							if (data.error) {
-								throw data.error;
-							}
-							if (data.detail) {
-								throw data.detail;
-							}
-
-							if (data.status) {
-								if (data.digest) {
-									let downloadProgress = 0;
-									if (data.completed) {
-										downloadProgress = Math.round((data.completed / data.total) * 1000) / 10;
-									} else {
-										downloadProgress = 100;
-									}
-
-									MODEL_DOWNLOAD_POOL.set({
-										...$MODEL_DOWNLOAD_POOL,
-										[sanitizedModelTag]: {
-											...$MODEL_DOWNLOAD_POOL[sanitizedModelTag],
-											pullProgress: downloadProgress,
-											digest: data.digest
-										}
-									});
-								} else {
-									toast.success(data.status);
-
-									MODEL_DOWNLOAD_POOL.set({
-										...$MODEL_DOWNLOAD_POOL,
-										[sanitizedModelTag]: {
-											...$MODEL_DOWNLOAD_POOL[sanitizedModelTag],
-											done: data.status === 'success'
-										}
-									});
-								}
-							}
-						}
-					}
-				} catch (error) {
-					console.log(error);
-					if (typeof error !== 'string') {
-						error = error.message;
-					}
-
-					toast.error(getErrorMessage(error));
-					// opts.callback({ success: false, error, modelName: opts.modelName });
-					break;
-				}
-			}
-
-			if ($MODEL_DOWNLOAD_POOL[sanitizedModelTag].done) {
-				toast.success(
-					$i18n.t(`Model '{{modelName}}' has been successfully downloaded.`, {
-						modelName: sanitizedModelTag
-					})
-				);
-
-				models.set(
-					await getModels(
-						localStorage.token,
-						$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-					)
-				);
-			} else {
-				toast.error($i18n.t('Download canceled'));
-			}
-
-			delete $MODEL_DOWNLOAD_POOL[sanitizedModelTag];
-
-			MODEL_DOWNLOAD_POOL.set({
-				...$MODEL_DOWNLOAD_POOL
-			});
-		}
-	};
-
-	const setOllamaVersion = async () => {
-		ollamaVersion = await getOllamaVersion(localStorage.token).catch((error) => false);
-	};
-
 	const downloadProviderModelHandler = async (connection) => {
 		const model = sanitizedSearchValue;
 		const poolKey = getProviderPoolKey(connection, model);
@@ -777,11 +628,6 @@
 	};
 
 	const downloadModelHandler = (target) => {
-		if (target.type === 'ollama') {
-			pullModelHandler();
-			return;
-		}
-
 		downloadProviderModelHandler(target);
 	};
 
@@ -835,30 +681,21 @@
 	});
 
 	const cancelModelPullHandler = async (model: string) => {
-		const { reader, abortController, providerLabel } = $MODEL_DOWNLOAD_POOL[model];
+		const { abortController, providerLabel } = $MODEL_DOWNLOAD_POOL[model];
 		if (abortController) {
 			abortController.abort();
 		}
-		if (reader) {
-			await reader.cancel();
-			delete $MODEL_DOWNLOAD_POOL[model];
-			MODEL_DOWNLOAD_POOL.set({
-				...$MODEL_DOWNLOAD_POOL
-			});
-			await deleteModel(localStorage.token, model);
-			toast.success($i18n.t('{{model}} download has been canceled', { model: model }));
-		} else {
-			const displayModel = $MODEL_DOWNLOAD_POOL[model]?.model ?? model;
-			delete $MODEL_DOWNLOAD_POOL[model];
-			MODEL_DOWNLOAD_POOL.set({
-				...$MODEL_DOWNLOAD_POOL
-			});
-			toast.success(
-				$i18n.t('{{model}} download has been canceled', {
-					model: providerLabel ? `${displayModel} (${providerLabel})` : displayModel
-				})
-			);
-		}
+
+		const displayModel = $MODEL_DOWNLOAD_POOL[model]?.model ?? model;
+		delete $MODEL_DOWNLOAD_POOL[model];
+		MODEL_DOWNLOAD_POOL.set({
+			...$MODEL_DOWNLOAD_POOL
+		});
+		toast.success(
+			$i18n.t('{{model}} download has been canceled', {
+				model: providerLabel ? `${displayModel} (${providerLabel})` : displayModel
+			})
+		);
 	};
 
 	const unloadModelHandler = async (model: string) => {
@@ -899,11 +736,13 @@
 			});
 			success = !!res;
 		} else {
-			// Base Ollama model: delete from Ollama directly
-			const res = await deleteModel(localStorage.token, model.id).catch((error) => {
-				toast.error($i18n.t('Error deleting model: {{error}}', { error }));
-				return null;
-			});
+			// Base model: delete through the provider that serves it
+			const res = await deleteProviderModel(localStorage.token, model.urlIdx, model.id).catch(
+				(error) => {
+					toast.error($i18n.t('Error deleting model: {{error}}', { error }));
+					return null;
+				}
+			);
 			success = !!res;
 		}
 

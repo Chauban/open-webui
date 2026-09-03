@@ -157,7 +157,7 @@ async def generate_chat_completion(
         bypass_filter = True
 
     # Propagate bypass_filter and bypass_system_prompt via request.state so that
-    # downstream route handlers (openai/ollama) can read them without exposing
+    # downstream route handlers (openai) can read them without exposing
     # them as query parameters.
     request.state.bypass_filter = bypass_filter
     request.state.bypass_system_prompt = bypass_system_prompt

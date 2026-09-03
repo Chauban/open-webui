@@ -292,9 +292,7 @@ async def create_new_model(
             if base_model.get('preset') or not base_model_id:
                 continue
 
-            if form_data.id == base_model_id or (
-                base_model.get('owned_by') == 'ollama' and form_data.id == base_model_id.split(':', 1)[0]
-            ):
+            if form_data.id == base_model_id:
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail=ERROR_MESSAGES.MODEL_ID_TAKEN,
@@ -512,8 +510,6 @@ async def import_models(
                                         continue
 
                                     base_model_ids.add(base_model_id)
-                                    if base_model.get('owned_by') == 'ollama':
-                                        base_model_ids.add(base_model_id.split(':', 1)[0])
 
                             if model_id in base_model_ids:
                                 log.warning(
