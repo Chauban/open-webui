@@ -30,10 +30,15 @@ from open_webui.models.education import (
     Classroom,
     ClassroomMember,
     EditorOperation,
+    EditorOperationInput,
     Education,
     EducationNotification,
     MicroReflection,
     ProvenanceSegment,
+    ProfileAlgorithmRelease,
+    ProfileEvidenceSnapshot,
+    ProfileMetricProjection,
+    ProfileProjectionRun,
     Submission,
     SubmissionCreateForm,
     SubmissionReview,
@@ -42,7 +47,8 @@ from open_webui.models.education import (
     StudentProfileHelpTypeSummary,
     StudentProfileMetricTrend,
     StudentProfileReflectionQuality,
-    StudentProfileSnapshot,
+    StudentProfileAggregateProjection,
+    SubmissionReviewEvent,
     TeacherStudentNote,
     TeacherStudentNoteRevision,
     WritingSession,
@@ -56,12 +62,24 @@ from open_webui.models.users import User, UserModel
 import open_webui.routers.education as education_router_module
 import open_webui.services.education.analysis as education_analysis_module
 import open_webui.services.education.profile as education_profile_module
+import open_webui.services.education.profile_snapshots as profile_snapshots_module
+import open_webui.services.education.profile_recompute as profile_recompute_module
 from open_webui.routers.education import router as education_router
 from open_webui.routers.chats import router as chats_router
 from open_webui.routers.notes import router as notes_router
 from open_webui.services.education.analysis import (
     build_submission_analysis,
     filter_segments_for_final_text,
+)
+from open_webui.services.education.profile_recompute import (
+    recompute_profile_projections,
+)
+from open_webui.services.education.profile_evidence import (
+    build_analysis_from_evidence,
+    canonical_json_hash,
+)
+from open_webui.services.education.profile_aggregates import (
+    materialize_student_profile_aggregate,
 )
 from open_webui.utils.auth import get_verified_user
 
@@ -397,6 +415,8 @@ def _prepare_assignment_flow(client, teacher, student):
                     "inserted_text": "AI outline draft.",
                     "deleted_text": "",
                     "batch_id": "batch-ai-seed",
+                    "occurred_at_ms": int(time.time() * 1000),
+                    "client_sequence": 0,
                 },
                 {
                     "op_type": "keyboard_input",
@@ -406,6 +426,8 @@ def _prepare_assignment_flow(client, teacher, student):
                     "inserted_text": "This looks like a very large typed burst that should be treated as suspicious imported text for teacher review.",
                     "deleted_text": "",
                     "batch_id": "batch-suspected-seed",
+                    "occurred_at_ms": int(time.time() * 1000),
+                    "client_sequence": 1,
                 },
             ]
         },
@@ -473,11 +495,16 @@ def education_client():
             WritingVersion.__table__,
             ProvenanceSegment.__table__,
             EditorOperation.__table__,
-            AnalysisResult.__table__,
             MicroReflection.__table__,
             Submission.__table__,
+            AnalysisResult.__table__,
             SubmissionReview.__table__,
-            StudentProfileSnapshot.__table__,
+            ProfileEvidenceSnapshot.__table__,
+            SubmissionReviewEvent.__table__,
+            ProfileAlgorithmRelease.__table__,
+            ProfileProjectionRun.__table__,
+            ProfileMetricProjection.__table__,
+            StudentProfileAggregateProjection.__table__,
             StudentGrowthGoal.__table__,
             TeacherStudentNote.__table__,
             TeacherStudentNoteRevision.__table__,
@@ -902,12 +929,11 @@ def test_teacher_overview_and_assignment_listing(education_client):
     assert overview["classroom_count"] == 1
     assert overview["assignment_count"] == 1
     assert overview["submission_count"] == 1
-    assert overview["review_count"] == 1
     assert overview["pending_review_count"] == 1
     assert overview["unsubmitted_count"] == 0
     assert overview["recent_assignments"][0]["assignment"]["id"] == assignment["id"]
     assert overview["recent_submissions"][0]["submission"]["id"] == submission_id
-    assert overview["pending_review_items"][0]["submission"]["id"] == submission_id
+    assert overview["recent_submissions"][0]["review_status"] == "pending"
     assert overview["recent_submissions"][0]["risk_summary"]["burst_count"] >= 1
 
     review_res = client.get("/api/v1/teacher/review")
@@ -1367,7 +1393,13 @@ def test_invite_regeneration_and_assignment_errors(education_client):
 
     blank_assignment_res = client.post(
         "/api/v1/assignments",
-        json={"title": "   ", "description": "x", "classroom_ids": [classroom["id"]], "score_max": 100, "rubric_schema": _rubric_schema()},
+        json={
+            "title": "   ",
+            "description": "x",
+            "classroom_ids": [classroom["id"]],
+            "score_max": 100,
+            "rubric_schema": _rubric_schema(),
+        },
     )
     assert blank_assignment_res.status_code == 400, blank_assignment_res.text
 
@@ -1817,18 +1849,28 @@ def _submit_body(session_id: str, text: str):
     }
 
 
-def _setup_submitted_assignment(client, teacher, student, title="Round Essay", score_max=100):
+def _setup_submitted_assignment(
+    client, teacher, student, title="Round Essay", score_max=100
+):
     UserContext.current_user = teacher
     classroom = client.post("/api/v1/classrooms", json={"name": f"CR {title}"}).json()[
         "classroom"
     ]
     UserContext.current_user = student
-    client.post("/api/v1/classrooms/join", json={"invite_code": classroom["invite_code"]})
+    client.post(
+        "/api/v1/classrooms/join", json={"invite_code": classroom["invite_code"]}
+    )
 
     UserContext.current_user = teacher
     assignment = client.post(
         "/api/v1/assignments",
-        json={"title": title, "classroom_ids": [classroom["id"]], "due_at": 2000000000, "score_max": score_max, "rubric_schema": _rubric_schema(score_max)},
+        json={
+            "title": title,
+            "classroom_ids": [classroom["id"]],
+            "due_at": 2000000000,
+            "score_max": score_max,
+            "rubric_schema": _rubric_schema(score_max),
+        },
     ).json()[0]
 
     UserContext.current_user = student
@@ -1907,7 +1949,7 @@ def test_student_workspace_exposes_returned_state(education_client):
 
 
 def test_resubmit_before_review_overwrites_same_round(education_client):
-    client, teacher, _, student, _, _ = education_client
+    client, teacher, _, student, _, session_local = education_client
     assignment, session_id, submission_id = _setup_submitted_assignment(
         client, teacher, student, "Overwrite Round"
     )
@@ -1925,6 +1967,22 @@ def test_resubmit_before_review_overwrites_same_round(education_client):
     ).json()
     assert len(submissions) == 1
     assert submissions[0]["submission"]["round_no"] == 1
+
+    with session_local() as session:
+        evidence = (
+            session.query(ProfileEvidenceSnapshot)
+            .filter(ProfileEvidenceSnapshot.submission_id == submission_id)
+            .order_by(ProfileEvidenceSnapshot.evidence_revision.asc())
+            .all()
+        )
+        assert [item.evidence_revision for item in evidence] == [1, 2]
+        assert evidence[0].evidence_hash != evidence[1].evidence_hash
+
+    profile = client.get(
+        f"/api/v1/teacher/classrooms/{assignment['classroom_id']}/students/{student.id}/profile"
+    )
+    assert profile.status_code == 200, profile.text
+    assert profile.json()["timeline_pagination"]["total"] == 1
 
 
 def test_returned_submission_opens_new_round_and_keeps_history(education_client):
@@ -1987,16 +2045,20 @@ def test_returned_submission_opens_new_round_and_keeps_history(education_client)
     )
     assert historic_save.status_code == 400, historic_save.text
 
-    # 历史轮禁止重算分析:重算会用当前会话数据覆盖该轮的 analysis_result
+    # 历史轮从自己冻结的 evidence 显式重算，不读取后续轮次会话数据。
     historic_recompute = client.post(
         f"/api/v1/teacher/submissions/{submission_id}/analysis"
     )
-    assert historic_recompute.status_code == 409, historic_recompute.text
+    assert historic_recompute.status_code == 200, historic_recompute.text
 
     current_recompute = client.post(
         f"/api/v1/teacher/submissions/{new_submission_id}/analysis"
     )
     assert current_recompute.status_code == 200, current_recompute.text
+    assert (
+        historic_recompute.json()["summary"]["total_chars"]
+        < current_recompute.json()["summary"]["total_chars"]
+    )
 
 
 def test_reviewed_submission_cannot_be_resubmitted(education_client):
@@ -2114,7 +2176,9 @@ def test_teacher_sees_rounds_and_diff(education_client):
     UserContext.current_user = student
     resubmit = client.post(
         f"/api/v1/assignments/{assignment['id']}/submit",
-        json=_submit_body(session_id, "first draft text for the round essay with a new ending"),
+        json=_submit_body(
+            session_id, "first draft text for the round essay with a new ending"
+        ),
     )
     second_submission_id = resubmit.json()["submission_id"]
 
@@ -2125,9 +2189,7 @@ def test_teacher_sees_rounds_and_diff(education_client):
     assert rounds[0]["is_current"] == 1
     assert rounds[1]["review_status"] == "returned"
 
-    diff = client.get(
-        f"/api/v1/teacher/submissions/{second_submission_id}/diff"
-    ).json()
+    diff = client.get(f"/api/v1/teacher/submissions/{second_submission_id}/diff").json()
     assert diff["has_previous"] is True
     assert diff["previous_round_no"] == 1
     ops = {block["op"] for block in diff["blocks"]}
@@ -2246,8 +2308,7 @@ def test_my_assignment_submissions_returns_rounds_with_content_and_review(
     assert first_round["review"]["returned_comment"] == "Please add more evidence"
     assert first_round["review"]["resubmit_due_at"] == 2100000000
     assert (
-        first_round["content"]["content_text"]
-        == "first draft text for the round essay"
+        first_round["content"]["content_text"] == "first draft text for the round essay"
     )
 
     assert second_round["submission_id"] == second_submission_id
@@ -2272,9 +2333,7 @@ def test_my_assignment_submissions_access_control(education_client):
 
     # 未加入班级的学生完全无访问权限
     UserContext.current_user = outsider
-    outsider_res = client.get(
-        f"/api/v1/assignments/{assignment['id']}/me/submissions"
-    )
+    outsider_res = client.get(f"/api/v1/assignments/{assignment['id']}/me/submissions")
     assert outsider_res.status_code == 403, outsider_res.text
 
     # 加入同一班级但未提交过的学生只应看到自己的空历史,不会拿到别的学生的数据
@@ -2405,9 +2464,9 @@ def test_unsubmitted_listing_and_reminder_targets_only_unsubmitted(education_cli
 
     # student 提交,outsider 未提交
     UserContext.current_user = student
-    session_id = client.get(
-        f"/api/v1/assignments/{assignment['id']}/workspace"
-    ).json()["writing_session"]["id"]
+    session_id = client.get(f"/api/v1/assignments/{assignment['id']}/workspace").json()[
+        "writing_session"
+    ]["id"]
     submit_res = client.post(
         f"/api/v1/assignments/{assignment['id']}/submit",
         json=_submit_body(session_id, "submitted draft for the reminder test"),
@@ -2642,6 +2701,37 @@ def test_submission_form_allows_no_ai_and_rejects_unknown_help_types():
             data_completeness=_evidence_completeness(),
             reflection=_reflection_payload(),
         )
+    with pytest.raises(ValueError):
+        SubmissionCreateForm(
+            writing_session_id="session",
+            final_content_text="draft",
+            ai_used=False,
+            ai_help_types=[],
+            data_completeness=_evidence_completeness(),
+            reflection=_reflection_payload(),
+            legacy_reflection_text="not accepted",
+        )
+
+
+def test_editor_operation_requires_client_event_ordering():
+    operation = EditorOperationInput(
+        op_type="keyboard_input",
+        source_type="user_typed",
+        start_offset=0,
+        end_offset=1,
+        inserted_text="a",
+        batch_id="batch",
+        occurred_at_ms=1_700_000_000_000,
+        client_sequence=7,
+    )
+    assert operation.occurred_at_ms == 1_700_000_000_000
+    assert operation.client_sequence == 7
+    with pytest.raises(ValueError):
+        EditorOperationInput(
+            op_type="keyboard_input",
+            source_type="user_typed",
+            batch_id="batch",
+        )
 
 
 def test_profile_normalizes_scores_by_assignment_maximum(education_client):
@@ -2679,21 +2769,6 @@ def test_profile_normalizes_scores_by_assignment_maximum(education_client):
     assert profile["timeline"][0]["score_max"] == 50
     assert profile["timeline"][0]["normalized_score"] == 80
     assert profile["portfolio_summary"]["average_score_percent"] == 80
-
-
-def test_versions_up_to_stops_at_the_round_final_version():
-    versions = [
-        SimpleNamespace(id="v1"),
-        SimpleNamespace(id="v2"),
-        SimpleNamespace(id="v3"),
-    ]
-
-    assert [
-        version.id
-        for version in education_analysis_module._versions_up_to(versions, "v2")
-    ] == ["v1", "v2"]
-    # 找不到定稿版本时退回全量,不要静默丢数据。
-    assert len(education_analysis_module._versions_up_to(versions, "missing")) == 3
 
 
 def test_student_profile_tracks_round_progress_and_trends(
@@ -2748,7 +2823,7 @@ def test_student_profile_tracks_round_progress_and_trends(
     assert profile_res.status_code == 200, profile_res.text
     profile = profile_res.json()
 
-    assert profile["metric_version"] == "2026-09-01.3"
+    assert profile["metric_version"] == "2026-09-03.1"
 
     # 两轮都进时间线:成长看的是轮次之间的变化,历史轮不能丢。
     assert [point["round_no"] for point in profile["timeline"]] == [1, 2]
@@ -2759,8 +2834,7 @@ def test_student_profile_tracks_round_progress_and_trends(
     # 客户端确认编辑事件采集链路已完整落盘时，零条操作是真实的 0，
     # 不能再被误判成采集缺失。
     assert (
-        profile["timeline"][0]["data_completeness"]["editor_operations"]
-        == "complete"
+        profile["timeline"][0]["data_completeness"]["editor_operations"] == "complete"
     )
     assert profile["timeline"][0]["active_writing_seconds"] == 0
     # 当前轮才计入作业统计与平均分
@@ -2789,6 +2863,9 @@ def test_student_profile_tracks_round_progress_and_trends(
 
     monkeypatch.setattr(Education, "get_versions", fail_live_aggregation)
     monkeypatch.setattr(Education, "get_submissions_by_student", fail_live_aggregation)
+    monkeypatch.setattr(
+        Education, "get_profile_evidence_snapshots", fail_live_aggregation
+    )
     second_round_only = client.get(
         f"/api/v1/teacher/classrooms/{classroom_id}/students/{student.id}/profile",
         params={"assignment_id": assignment["id"], "round_no": 2},
@@ -2813,7 +2890,10 @@ def test_student_profile_tracks_round_progress_and_trends(
         "offset": 0,
     }
     assert len(paged.json()["timeline"]) == 1
-    assert paged.json()["filtered_summary"]["point_count"] == 1
+    # 分页只裁剪明细，不能改变完整筛选集合上的汇总与洞察。
+    assert paged.json()["filtered_summary"]["point_count"] == 2
+    assert paged.json()["filtered_summary"] == profile["filtered_summary"]
+    assert paged.json()["insights"] == profile["insights"]
 
     # 历史轮的分析必须停在自己那一版正文上,不能读到第二轮的字数
     assert profile["timeline"][0]["total_chars"] < profile["timeline"][1]["total_chars"]
@@ -2838,6 +2918,31 @@ def test_student_profile_requires_classroom_membership(education_client):
     assert forbidden.status_code == 403, forbidden.text
 
 
+def test_default_profile_reads_materialized_aggregate(
+    education_client, monkeypatch
+):
+    client, teacher, _, student, _, _ = education_client
+    assignment, _, _ = _setup_submitted_assignment(
+        client, teacher, student, "Materialized Aggregate"
+    )
+
+    def fail_request_time_aggregation(*args, **kwargs):
+        raise AssertionError("default profile must use its materialized aggregate")
+
+    monkeypatch.setattr(
+        profile_snapshots_module,
+        "build_student_profile_aggregate",
+        fail_request_time_aggregation,
+    )
+    UserContext.current_user = teacher
+    response = client.get(
+        f"/api/v1/teacher/classrooms/{assignment['classroom_id']}/students/{student.id}/profile"
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["aggregate_materialized"] is True
+    assert response.json()["aggregate_revision"] == 1
+
+
 def test_profile_snapshot_failure_rolls_back_review(education_client, monkeypatch):
     client, teacher, _, student, _, session_local = education_client
     assignment, _, submission_id = _setup_submitted_assignment(
@@ -2848,7 +2953,7 @@ def test_profile_snapshot_failure_rolls_back_review(education_client, monkeypatc
         raise RuntimeError("snapshot failed")
 
     monkeypatch.setattr(
-        education_router_module, "refresh_student_profile_snapshot", fail_snapshot
+        education_router_module, "project_profile_evidence", fail_snapshot
     )
     UserContext.current_user = teacher
     with pytest.raises(RuntimeError, match="snapshot failed"):
@@ -2867,6 +2972,18 @@ def test_profile_snapshot_failure_rolls_back_review(education_client, monkeypatc
             .filter(SubmissionReview.submission_id == submission_id)
             .first()
             is None
+        )
+        assert (
+            session.query(SubmissionReviewEvent)
+            .filter(SubmissionReviewEvent.submission_id == submission_id)
+            .count()
+            == 0
+        )
+        assert (
+            session.query(ProfileMetricProjection)
+            .filter(ProfileMetricProjection.submission_id == submission_id)
+            .count()
+            == 1
         )
 
 
@@ -2890,11 +3007,18 @@ def test_profile_snapshot_failure_rolls_back_new_submission_round(
     )
     assert returned.status_code == 200, returned.text
 
+    with session_local() as session:
+        version_count_before = session.query(WritingVersion).count()
+        reflection_count_before = session.query(MicroReflection).count()
+        evidence_count_before = session.query(ProfileEvidenceSnapshot).count()
+        writing_session = session.get(WritingSession, session_id)
+        note_before = dict(session.get(Note, writing_session.note_id).data)
+
     def fail_snapshot(*args, **kwargs):
         raise RuntimeError("snapshot failed")
 
     monkeypatch.setattr(
-        education_router_module, "refresh_student_profile_snapshot", fail_snapshot
+        education_router_module, "project_profile_evidence", fail_snapshot
     )
     UserContext.current_user = student
     with pytest.raises(RuntimeError, match="snapshot failed"):
@@ -2915,6 +3039,40 @@ def test_profile_snapshot_failure_rolls_back_new_submission_round(
         assert len(rows) == 1
         assert rows[0].id == first_submission_id
         assert rows[0].is_current == 1
+        assert session.query(WritingVersion).count() == version_count_before
+        assert session.query(MicroReflection).count() == reflection_count_before
+        assert session.query(ProfileEvidenceSnapshot).count() == evidence_count_before
+        writing_session = session.get(WritingSession, session_id)
+        assert session.get(Note, writing_session.note_id).data == note_before
+
+
+def test_submission_transaction_works_with_session_sharing_disabled(
+    education_client,
+):
+    client, teacher, _, student, _, session_local = education_client
+    original = internal_db.DATABASE_ENABLE_SESSION_SHARING
+    internal_db.DATABASE_ENABLE_SESSION_SHARING = False
+    try:
+        assignment, _, submission_id = _setup_submitted_assignment(
+            client, teacher, student, "Default Session Transaction"
+        )
+    finally:
+        internal_db.DATABASE_ENABLE_SESSION_SHARING = original
+
+    with session_local() as session:
+        assert session.get(Submission, submission_id) is not None
+        evidence = (
+            session.query(ProfileEvidenceSnapshot)
+            .filter(ProfileEvidenceSnapshot.submission_id == submission_id)
+            .one()
+        )
+        assert evidence.assignment_id == assignment["id"]
+        assert (
+            session.query(ProfileMetricProjection)
+            .filter(ProfileMetricProjection.evidence_snapshot_id == evidence.id)
+            .count()
+            == 1
+        )
 
 
 def test_profile_snapshots_keep_multiple_metric_versions(education_client):
@@ -2924,30 +3082,63 @@ def test_profile_snapshots_keep_multiple_metric_versions(education_client):
     )
     with session_local() as session:
         original = (
-            session.query(StudentProfileSnapshot)
-            .filter(StudentProfileSnapshot.submission_id == submission_id)
+            session.query(ProfileMetricProjection)
+            .filter(ProfileMetricProjection.submission_id == submission_id)
             .one()
         )
-        copied_payload = dict(original.snapshot_json)
+        copied_payload = dict(original.projection_json)
         copied_payload["metric_version"] = "future-metric"
         session.add(
-            StudentProfileSnapshot(
+            ProfileAlgorithmRelease(
                 id=str(uuid.uuid4()),
+                metric_version="future-metric",
+                insight_version="future-insight",
+                evidence_schema_versions=["2026-09-03.1"],
+                formula_config_json=session.query(ProfileAlgorithmRelease)
+                .filter(ProfileAlgorithmRelease.metric_version == "2026-09-03.1")
+                .one()
+                .formula_config_json,
+                code_commit_sha="test",
+                code_checksum="future-checksum",
+                status="retired",
+                created_by="test",
+                created_at=original.generated_at,
+                activated_at=None,
+            )
+        )
+        session.flush()
+        session.add(
+            ProfileMetricProjection(
+                id=str(uuid.uuid4()),
+                evidence_snapshot_id=original.evidence_snapshot_id,
                 submission_id=original.submission_id,
                 student_id=original.student_id,
                 assignment_id=original.assignment_id,
                 round_no=original.round_no,
                 submitted_at=original.submitted_at,
+                review_revision=original.review_revision,
                 metric_version="future-metric",
-                snapshot_json=copied_payload,
-                created_at=original.created_at,
-                updated_at=original.updated_at,
+                projection_json=copied_payload,
+                input_hash="1" * 64,
+                output_hash=canonical_json_hash(copied_payload),
+                run_id=None,
+                generated_at=original.generated_at,
             )
+        )
+        session.flush()
+        materialize_student_profile_aggregate(
+            student_id=student.id,
+            assignment_ids=[assignment["id"]],
+            scope_kind="classroom",
+            scope_id=assignment["classroom_id"],
+            metric_version="future-metric",
+            db=session,
+            commit=False,
         )
         session.commit()
         assert (
-            session.query(StudentProfileSnapshot)
-            .filter(StudentProfileSnapshot.submission_id == submission_id)
+            session.query(ProfileMetricProjection)
+            .filter(ProfileMetricProjection.submission_id == submission_id)
             .count()
             == 2
         )
@@ -2962,9 +3153,228 @@ def test_profile_snapshots_keep_multiple_metric_versions(education_client):
     assert profile.json()["metric_version"] == "future-metric"
     assert profile.json()["excluded_snapshot_count"] == 1
     assert set(profile.json()["available_metric_versions"]) == {
-        "2026-09-01.3",
+        "2026-09-03.1",
         "future-metric",
     }
+    unknown = client.get(
+        f"/api/v1/teacher/classrooms/{classroom_id}/students/{student.id}/profile",
+        params={"metric_version": "not-registered"},
+    )
+    assert unknown.status_code == 422
+
+
+def test_explicit_profile_recompute_is_audited_and_idempotent(education_client):
+    client, teacher, _, student, _, session_local = education_client
+    _, _, submission_id = _setup_submitted_assignment(
+        client, teacher, student, "Explicit Projection Run"
+    )
+
+    with session_local() as session:
+        original = (
+            session.query(ProfileMetricProjection)
+            .filter(ProfileMetricProjection.submission_id == submission_id)
+            .one()
+        )
+        original_output_hash = original.output_hash
+        run_id = recompute_profile_projections(
+            session,
+            requested_by=teacher.id,
+            activate=True,
+            batch_size=10,
+        )
+        run = session.get(ProfileProjectionRun, run_id)
+        assert run.status == "completed"
+        assert run.expected_count == 1
+        assert run.succeeded_count == 1
+        assert run.failed_count == 0
+        rows = (
+            session.query(ProfileMetricProjection)
+            .filter(ProfileMetricProjection.submission_id == submission_id)
+            .all()
+        )
+        assert len(rows) == 1
+        assert rows[0].output_hash == original_output_hash
+
+
+def test_failed_profile_recompute_is_audited_without_activation(
+    education_client, monkeypatch
+):
+    client, teacher, _, student, _, session_local = education_client
+    _setup_submitted_assignment(client, teacher, student, "Failed Projection Run")
+
+    def fail_projection(*args, **kwargs):
+        raise RuntimeError("deterministic projection failure")
+
+    monkeypatch.setattr(
+        profile_recompute_module, "project_profile_evidence", fail_projection
+    )
+    with session_local() as session:
+        active_before = Education.get_active_profile_metric_version(db=session)
+        with pytest.raises(RuntimeError, match="coverage is incomplete"):
+            recompute_profile_projections(
+                session,
+                requested_by=teacher.id,
+                activate=True,
+                batch_size=10,
+            )
+        run = (
+            session.query(ProfileProjectionRun)
+            .order_by(ProfileProjectionRun.created_at.desc())
+            .first()
+        )
+        assert run.status == "failed"
+        assert run.failed_count == 1
+        assert run.error_json[0]["error_type"] == "RuntimeError"
+        assert Education.get_active_profile_metric_version(db=session) == active_before
+
+
+def test_profile_evidence_and_projections_reject_mutation(education_client):
+    client, teacher, _, student, _, session_local = education_client
+    _, _, submission_id = _setup_submitted_assignment(
+        client, teacher, student, "Immutable Profile Facts"
+    )
+
+    with session_local() as session:
+        evidence = (
+            session.query(ProfileEvidenceSnapshot)
+            .filter(ProfileEvidenceSnapshot.submission_id == submission_id)
+            .one()
+        )
+        assert evidence.evidence_json["evidence_schema_version"] == "2026-09-03.1"
+        assert (
+            evidence.evidence_json["assignment"]["title"] == "Immutable Profile Facts"
+        )
+        assert (
+            evidence.evidence_json["document"]["content_text"]
+            == "first draft text for the round essay"
+        )
+        assert len(evidence.evidence_json["document"]["content_hash"]) == 64
+        assert evidence.evidence_json["capture_manifest"]["collector_version"]
+        evidence.evidence_hash = "0" * 64
+        with pytest.raises(ValueError, match="immutable"):
+            session.commit()
+        session.rollback()
+
+        session.execute(
+            ProfileEvidenceSnapshot.__table__.update()
+            .where(ProfileEvidenceSnapshot.id == evidence.id)
+            .values(evidence_hash="0" * 64)
+        )
+        session.commit()
+        session.expire_all()
+        tampered = Education.get_latest_profile_evidence_snapshot(
+            submission_id, db=session
+        )
+        with pytest.raises(ValueError, match="hash verification failed"):
+            build_analysis_from_evidence(tampered)
+
+        projection = (
+            session.query(ProfileMetricProjection)
+            .filter(ProfileMetricProjection.submission_id == submission_id)
+            .one()
+        )
+        projection.output_hash = "0" * 64
+        with pytest.raises(ValueError, match="immutable"):
+            session.commit()
+        session.rollback()
+
+
+def test_profile_read_rejects_tampered_projection(education_client):
+    client, teacher, _, student, _, session_local = education_client
+    assignment, _, submission_id = _setup_submitted_assignment(
+        client, teacher, student, "Tampered Projection"
+    )
+    with session_local() as session:
+        session.execute(
+            ProfileMetricProjection.__table__.update()
+            .where(ProfileMetricProjection.submission_id == submission_id)
+            .values(output_hash="0" * 64)
+        )
+        session.commit()
+
+    UserContext.current_user = teacher
+    response = client.get(
+        f"/api/v1/teacher/classrooms/{assignment['classroom_id']}/students/{student.id}/profile"
+    )
+    assert response.status_code == 422, response.text
+    assert "hash verification failed" in response.json()["detail"]
+
+
+def test_profile_read_rejects_tampered_aggregate(education_client):
+    client, teacher, _, student, _, session_local = education_client
+    assignment, _, _ = _setup_submitted_assignment(
+        client, teacher, student, "Tampered Aggregate"
+    )
+    with session_local() as session:
+        aggregate = (
+            session.query(StudentProfileAggregateProjection)
+            .filter(
+                StudentProfileAggregateProjection.student_id == student.id,
+                StudentProfileAggregateProjection.scope_kind == "classroom",
+                StudentProfileAggregateProjection.scope_id
+                == assignment["classroom_id"],
+            )
+            .one()
+        )
+        session.execute(
+            StudentProfileAggregateProjection.__table__.update()
+            .where(StudentProfileAggregateProjection.id == aggregate.id)
+            .values(output_hash="0" * 64)
+        )
+        session.commit()
+
+    UserContext.current_user = teacher
+    response = client.get(
+        f"/api/v1/teacher/classrooms/{assignment['classroom_id']}/students/{student.id}/profile"
+    )
+    assert response.status_code == 422, response.text
+    assert "aggregate hash verification failed" in response.json()["detail"]
+
+
+def test_submission_review_events_are_append_only(education_client):
+    client, teacher, _, student, _, session_local = education_client
+    _, _, submission_id = _setup_submitted_assignment(
+        client, teacher, student, "Review Event History"
+    )
+    UserContext.current_user = teacher
+    pending = client.post(
+        f"/api/v1/teacher/submissions/{submission_id}/review",
+        json={"review_status": "pending"},
+    )
+    assert pending.status_code == 200, pending.text
+    reviewed = client.post(
+        f"/api/v1/teacher/submissions/{submission_id}/review",
+        json={
+            "review_status": "reviewed",
+            "score": 80,
+            "rubric_scores": {"ideas": 27, "structure": 27, "evidence": 26},
+        },
+    )
+    assert reviewed.status_code == 200, reviewed.text
+
+    with session_local() as session:
+        events = (
+            session.query(SubmissionReviewEvent)
+            .filter(SubmissionReviewEvent.submission_id == submission_id)
+            .order_by(SubmissionReviewEvent.review_revision.asc())
+            .all()
+        )
+        assert [event.review_revision for event in events] == [1, 2]
+        assert [event.review_status for event in events] == ["pending", "reviewed"]
+        assert events[0].score is None
+        assert events[1].score == 80
+        aggregate_revisions = (
+            session.query(StudentProfileAggregateProjection)
+            .filter(
+                StudentProfileAggregateProjection.student_id == student.id,
+                StudentProfileAggregateProjection.scope_kind == "classroom",
+            )
+            .order_by(
+                StudentProfileAggregateProjection.aggregate_revision.asc()
+            )
+            .all()
+        )
+        assert [item.aggregate_revision for item in aggregate_revisions] == [1, 2, 3]
 
 
 def test_multi_class_assignments_growth_goals_and_teacher_notes(education_client):
@@ -3084,24 +3494,50 @@ def test_analysis_payload_usability_treats_history_as_immutable():
     current_round = SimpleNamespace(is_current=1)
     historical_round = SimpleNamespace(is_current=0)
 
-    # 当前轮跟着 logic_version 走:数据还在,重算是对的。
+    # GET 对当前轮和历史轮都只返回已物化结果；版本升级必须显式 POST/任务重算。
     assert (
         education_analysis_module._is_analysis_payload_usable(current_round, stale)
-        is False
+        is True
     )
-    # 历史轮的 provenance 已被后续轮次覆盖,重算只会算错,存档一律直接用。
     assert (
         education_analysis_module._is_analysis_payload_usable(historical_round, stale)
         is True
     )
-    # 没有存档只能重算,不管是哪一轮。
+    # 缺少物化结果不会触发 GET 自动补建。
     assert (
         education_analysis_module._is_analysis_payload_usable(historical_round, None)
         is False
     )
 
 
-def test_historical_round_analysis_survives_logic_version_bump(education_client):
+def test_analysis_get_does_not_repair_missing_materialization(education_client):
+    client, teacher, _, student, _, session_local = education_client
+    _, _, submission_id = _setup_submitted_assignment(
+        client, teacher, student, "Missing Materialized Analysis"
+    )
+    with session_local() as session:
+        session.query(AnalysisResult).filter(
+            AnalysisResult.submission_id == submission_id
+        ).delete()
+        session.commit()
+
+    UserContext.current_user = teacher
+    response = client.get(
+        f"/api/v1/teacher/submissions/{submission_id}/analysis/summary"
+    )
+    assert response.status_code == 409, response.text
+    with session_local() as session:
+        assert (
+            session.query(AnalysisResult)
+            .filter(AnalysisResult.submission_id == submission_id)
+            .count()
+            == 0
+        )
+
+
+def test_historical_round_analysis_survives_logic_version_bump(
+    education_client, monkeypatch
+):
     client, teacher, _, student, _, session_local = education_client
     assignment, session_id, first_submission_id = _setup_submitted_assignment(
         client, teacher, student, "Immutable History"
@@ -3128,6 +3564,13 @@ def test_historical_round_analysis_survives_logic_version_bump(education_client)
     assert resubmit.status_code == 200, resubmit.text
 
     UserContext.current_user = teacher
+
+    def fail_live_rebuild(*args, **kwargs):
+        raise AssertionError("analysis GET must not rebuild from live writing data")
+
+    monkeypatch.setattr(Education, "get_versions", fail_live_rebuild)
+    monkeypatch.setattr(Education, "get_provenance_segments", fail_live_rebuild)
+    monkeypatch.setattr(Education, "get_editor_operations", fail_live_rebuild)
     stored_first = client.get(
         f"/api/v1/teacher/submissions/{first_submission_id}/analysis/summary"
     ).json()

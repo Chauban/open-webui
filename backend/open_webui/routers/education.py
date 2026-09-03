@@ -79,22 +79,29 @@ from open_webui.models.education import (
 from open_webui.services.education.analysis import (
     NormalizedSegment,
     accumulate_risk_summary,
-    build_submission_analysis,
     build_source_map_highlights,
     compute_stats,
     compute_stats_from_highlights,
     empty_risk_summary,
     filter_segments_for_final_text,
     finalize_risk_summary,
-    get_or_build_submission_analysis,
-    get_or_build_submission_analyses,
+    get_materialized_submission_analysis,
+    get_materialized_submission_analyses,
     get_prompt_timeline,
 )
 from open_webui.services.education.profile_snapshots import (
     build_student_profile,
-    refresh_student_profile_snapshot,
 )
-from open_webui.models.notes import NoteForm, Notes
+from open_webui.services.education.profile import PROFILE_METRIC_VERSION
+from open_webui.services.education.profile_aggregates import (
+    refresh_student_profile_aggregates,
+)
+from open_webui.services.education.profile_evidence import (
+    build_analysis_from_evidence,
+    capture_profile_evidence,
+    project_profile_evidence,
+)
+from open_webui.models.notes import Note, NoteForm, Notes, sanitize_note_data
 from open_webui.models.users import Users
 from open_webui.socket.main import emit_to_users
 from open_webui.utils.auth import get_verified_user
@@ -194,7 +201,7 @@ async def _build_teacher_assignment_list_item(assignment, db: Session):
     sessions = Education.get_writing_sessions_by_ids(
         [submission.writing_session_id for submission in submissions], db=db
     )
-    analyses = await get_or_build_submission_analyses(submissions, sessions, db)
+    analyses = await get_materialized_submission_analyses(submissions, sessions, db)
     for submission in submissions:
         analysis = analyses.get(submission.id) or {}
         accumulate_risk_summary(risk_summary, analysis.get("summary"))
@@ -221,7 +228,7 @@ async def _build_submission_list_item(submission, assignment, db: Session):
         if assignment.classroom_id
         else None
     )
-    analysis = await get_or_build_submission_analysis(submission, session, db)
+    analysis = await get_materialized_submission_analysis(submission, session, db)
     return SubmissionListItem(
         submission=submission,
         session=session,
@@ -303,6 +310,32 @@ def _get_project_mode_from_session(session) -> str:
         if session.scope == "assignment"
         else PROJECT_MODE_PERSONAL_WRITING
     )
+
+
+def _refresh_profile_aggregates_after_scope_change(
+    student_ids: list[str], db: Session
+) -> None:
+    active_metric_version = Education.get_active_profile_metric_version(db=db)
+    if active_metric_version is None:
+        return
+    for student_id in dict.fromkeys(student_ids):
+        if student_id:
+            refresh_student_profile_aggregates(
+                student_id,
+                active_metric_version,
+                db,
+                commit=False,
+            )
+    db.commit()
+
+
+def _get_classroom_student_ids(classroom_id: str, db: Session) -> list[str]:
+    return [
+        member.user_id
+        for member in Education.get_classroom_members(
+            classroom_id, member_role="student", db=db
+        )
+    ]
 
 
 def _make_default_note(title: str, assignment_id: str) -> NoteForm:
@@ -774,6 +807,7 @@ async def create_assignment(
         classrooms.append(classroom)
 
     assignments = []
+    affected_student_ids = []
     for classroom in classrooms:
         assignment = Education.insert_assignment(
             user.id, classroom.id, form_data, db=db
@@ -784,6 +818,7 @@ async def create_assignment(
                 assignment.classroom_id, member_role="student", db=db
             )
         ]
+        affected_student_ids.extend(student_ids)
         await _send_education_notifications(
             student_ids,
             "assignment_published",
@@ -795,6 +830,7 @@ async def create_assignment(
             db,
         )
         assignments.append(assignment)
+    _refresh_profile_aggregates_after_scope_change(affected_student_ids, db)
     return assignments
 
 
@@ -857,6 +893,7 @@ async def update_assignment(
             )
 
     previous_due_at = assignment.due_at
+    previous_classroom_id = assignment.classroom_id
     try:
         updated_assignment = Education.update_assignment(
             assignment_id, form_data, db=db
@@ -893,6 +930,17 @@ async def update_assignment(
             },
             db,
         )
+    if updated_assignment.classroom_id != previous_classroom_id:
+        affected_student_ids = []
+        if previous_classroom_id:
+            affected_student_ids.extend(
+                _get_classroom_student_ids(previous_classroom_id, db)
+            )
+        if updated_assignment.classroom_id:
+            affected_student_ids.extend(
+                _get_classroom_student_ids(updated_assignment.classroom_id, db)
+            )
+        _refresh_profile_aggregates_after_scope_change(affected_student_ids, db)
     return updated_assignment
 
 
@@ -925,8 +973,14 @@ async def delete_assignment(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Assignments with student writing activity cannot be deleted; archive instead",
         )
+    affected_student_ids = (
+        _get_classroom_student_ids(assignment.classroom_id, db)
+        if assignment.classroom_id
+        else []
+    )
     Education.delete_assignment_notifications(assignment.id, db=db)
     Education.delete_assignment(assignment.id, db=db)
+    _refresh_profile_aggregates_after_scope_change(affected_student_ids, db)
     return {"ok": True}
 
 
@@ -1083,6 +1137,7 @@ async def join_classroom(
     membership = Education.ensure_classroom_member(
         classroom.id, user.id, "student", db=db
     )
+    _refresh_profile_aggregates_after_scope_change([user.id], db)
     return ClassroomResponse(classroom=classroom, membership=membership)
 
 
@@ -1125,7 +1180,7 @@ async def get_teacher_classrooms(
         sessions = Education.get_writing_sessions_by_ids(
             [submission.writing_session_id for submission in submissions], db=db
         )
-        analyses = await get_or_build_submission_analyses(submissions, sessions, db)
+        analyses = await get_materialized_submission_analyses(submissions, sessions, db)
         for submission in submissions:
             analysis = analyses.get(submission.id) or {}
             accumulate_risk_summary(risk_summary, analysis.get("summary"))
@@ -1175,7 +1230,7 @@ async def get_teacher_overview(
     assignment_items = []
     submission_items = []
     unsubmitted_count = 0
-    pending_review_items = []
+    pending_review_count = 0
 
     for classroom in classrooms:
         assignments = Education.get_assignments_by_classroom(classroom.id, db=db)
@@ -1210,7 +1265,7 @@ async def get_teacher_overview(
                     classroom_risk_summary, submission_item.risk_summary or {}
                 )
                 if submission_item.review_status == "pending":
-                    pending_review_items.append(submission_item)
+                    pending_review_count += 1
 
             assignment_items.append(
                 TeacherAssignmentListItem(
@@ -1230,42 +1285,35 @@ async def get_teacher_overview(
             classroom_risk_summary
         )
 
-    assignment_items.sort(
-        key=lambda item: max(
-            item.latest_submission_at or 0,
-            item.assignment.updated_at,
-            item.assignment.created_at,
-        ),
-        reverse=True,
-    )
-    submission_items.sort(key=lambda item: item.submission.submitted_at, reverse=True)
-    pending_review_items.sort(
-        key=lambda item: item.submission.submitted_at, reverse=True
-    )
     now_ts = int(time.time())
-    due_assignments = sorted(
-        [
-            item
-            for item in assignment_items
-            if item.assignment.due_at is not None
-            and item.assignment.status == "active"
-            and item.assignment.due_at >= now_ts
-        ],
-        key=lambda item: item.assignment.due_at or 0,
-    )
+
+    def overview_assignment_order(item: TeacherAssignmentListItem):
+        # 概述页只留一份作业清单:未截止的按截止时间由近到远排在前面(替代原来
+        # 单独的「临近截止」板块),已截止和已归档的按最近活动排在后面。
+        due_at = item.assignment.due_at
+        if due_at is not None and item.assignment.status == "active" and due_at >= now_ts:
+            return (0, due_at)
+        return (
+            1,
+            -max(
+                item.latest_submission_at or 0,
+                item.assignment.updated_at,
+                item.assignment.created_at,
+            ),
+        )
+
+    assignment_items.sort(key=overview_assignment_order)
+    submission_items.sort(key=lambda item: item.submission.submitted_at, reverse=True)
 
     return TeacherOverviewResponse(
         classroom_count=len(classroom_items),
         assignment_count=len(assignment_items),
         submission_count=len(submission_items),
-        review_count=len(pending_review_items),
-        pending_review_count=len(pending_review_items),
+        pending_review_count=pending_review_count,
         unsubmitted_count=unsubmitted_count,
         classrooms=classroom_items[:5],
         recent_assignments=assignment_items[:5],
         recent_submissions=submission_items[:5],
-        pending_review_items=pending_review_items[:5],
-        upcoming_due_assignments=due_assignments[:5],
     )
 
 
@@ -1417,6 +1465,7 @@ async def add_classroom_member(
     member = Education.ensure_classroom_member(
         classroom.id, member_user.id, "student", db=db
     )
+    _refresh_profile_aggregates_after_scope_change([member_user.id], db)
     return await _build_classroom_member_detail(member, db)
 
 
@@ -1438,6 +1487,8 @@ async def delete_classroom_member(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Classroom member not found",
         )
+
+    _refresh_profile_aggregates_after_scope_change([member_user_id], db)
 
     return {"ok": True}
 
@@ -1497,6 +1548,7 @@ async def bulk_import_classroom_members(
     result.added_count = len(result.added_users)
     result.skipped_count = len(result.skipped_users)
     result.failed_count = len(result.failed_users)
+    _refresh_profile_aggregates_after_scope_change(result.added_users, db)
     return result
 
 
@@ -1518,6 +1570,9 @@ async def bulk_remove_classroom_members(
             result.affected_count += 1
         else:
             result.skipped_users.append(user_id)
+    _refresh_profile_aggregates_after_scope_change(
+        [user_id for user_id in form_data.user_ids if user_id], db
+    )
     return result
 
 
@@ -1559,6 +1614,9 @@ async def transfer_classroom_members(
         Education.delete_classroom_member(classroom.id, user_id, db=db)
         Education.ensure_classroom_member(target_classroom.id, user_id, "student", db=db)
         result.affected_count += 1
+    _refresh_profile_aggregates_after_scope_change(
+        [user_id for user_id in form_data.user_ids if user_id], db
+    )
     return result
 
 
@@ -1596,7 +1654,7 @@ async def get_classroom_progress(
     sessions = Education.get_writing_sessions_by_ids(
         [submission.writing_session_id for submission in all_submissions], db=db
     )
-    analyses = await get_or_build_submission_analyses(all_submissions, sessions, db)
+    analyses = await get_materialized_submission_analyses(all_submissions, sessions, db)
 
     for assignment in assignments:
         submissions = submissions_by_assignment[assignment.id]
@@ -1783,27 +1841,32 @@ async def get_student_profile(
 
     student = await Users.get_user_by_id(student_user_id, db=db)
     assignments = Education.get_assignments_by_classroom(classroom.id, db=db)
-    return await build_student_profile(
-        student,
-        student_user_id,
-        [classroom],
-        assignments,
-        db,
-        start_at=start_at,
-        end_at=end_at,
-        assignment_id=assignment_id,
-        round_no=round_no,
-        metric_version=metric_version,
-        limit=limit,
-        offset=offset,
-        teacher_notes=(
-            Education.get_teacher_student_notes(
-                user.id, classroom.id, student_user_id, db=db
-            )
-            if user.id == classroom.teacher_id
-            else []
-        ),
-    )
+    try:
+        return await build_student_profile(
+            student,
+            student_user_id,
+            [classroom],
+            assignments,
+            db,
+            start_at=start_at,
+            end_at=end_at,
+            assignment_id=assignment_id,
+            round_no=round_no,
+            metric_version=metric_version,
+            limit=limit,
+            offset=offset,
+            teacher_notes=(
+                Education.get_teacher_student_notes(
+                    user.id, classroom.id, student_user_id, db=db
+                )
+                if user.id == classroom.teacher_id
+                else []
+            ),
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
 
 
 @router.get(
@@ -2391,36 +2454,61 @@ async def submit_assignment(
             detail="Assignment due time has passed",
         )
 
+    previous_round_submission = None
+    if current_submission is not None:
+        if current_review is not None and current_review.review_status == "returned":
+            previous_round_submission = current_submission
+        elif current_submission.round_no > 1:
+            previous_round_submission = next(
+                (
+                    item
+                    for item in Education.get_submission_rounds(
+                        assignment.id, session.owner_user_id, db=db
+                    )
+                    if item.round_no == current_submission.round_no - 1
+                ),
+                None,
+            )
+
     note = await Notes.get_note_by_id(session.note_id, db=db)
     if note is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Writing note is missing"
         )
-    await Notes.update_note_by_id(
-        session.note_id,
-        NoteForm(
-            title=note.title,
-            data={
-                "content": {
-                    "json": form_data.final_content_json,
-                    "html": form_data.final_content_html,
-                    "md": form_data.final_content_text,
-                }
-            },
-            meta=note.meta,
-            access_grants=note.access_grants,
-        ),
-        db=db,
-    )
+    stored_note = db.get(Note, session.note_id)
+    if stored_note is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Writing note is missing"
+        )
+    stored_note.data = {
+        **(sanitize_note_data(stored_note.data) or {}),
+        "content": {
+            "json": form_data.final_content_json,
+            "html": form_data.final_content_html,
+            "md": form_data.final_content_text,
+        },
+    }
+    stored_note.updated_at = int(time.time_ns())
 
     final_version = Education.insert_version(
         session.id,
         "submit",
         form_data.final_content_json,
         form_data.final_content_text,
+        commit=False,
         db=db,
     )
-    versions = Education.get_versions(session.id, db=db)
+    versions = Education.get_submission_window_versions(
+        session.id,
+        final_version.id,
+        previous_final_version_id=(
+            previous_round_submission.final_version_id
+            if previous_round_submission is not None
+            else None
+        ),
+        db=db,
+    )
+    version_count = Education.count_versions(session.id, db=db)
     provenance_segments = Education.get_provenance_segments(session.id, db=db)
     normalized_segments = [
         NormalizedSegment(segment) for segment in provenance_segments
@@ -2445,14 +2533,14 @@ async def submit_assignment(
             form_data.final_content_text,
             source_map_highlights,
             prompt_count=prompt_count,
-            version_count=len(versions),
+            version_count=version_count,
         )
     else:
         stats = compute_stats(
             form_data.final_content_text,
             segments,
             prompt_count=prompt_count,
-            version_count=len(versions),
+            version_count=version_count,
         )
     stats["data_completeness"] = form_data.data_completeness.model_dump()
     reflection = Education.insert_micro_reflection(
@@ -2462,6 +2550,7 @@ async def submit_assignment(
         form_data.ai_used,
         form_data.ai_help_types,
         form_data.reflection,
+        commit=False,
         db=db,
     )
     try:
@@ -2475,13 +2564,25 @@ async def submit_assignment(
             commit=False,
             db=db,
         )
-        analysis_payload = build_submission_analysis(
-            submission,
-            session,
-            versions,
-            Education.get_provenance_segments(session.id, db=db),
-            Education.get_editor_operations(session.id, db=db),
-            prompt_timeline,
+        evidence = capture_profile_evidence(
+            submission=submission,
+            assignment=assignment,
+            writing_session=session,
+            final_version=final_version,
+            reflection=reflection,
+            versions=versions,
+            provenance_segments=provenance_segments,
+            operations=Education.get_editor_operations(session.id, db=db),
+            prompt_timeline=prompt_timeline,
+            effective_due_at=effective_due_at,
+            previous_submission=previous_round_submission,
+            db=db,
+        )
+        _, analysis_payload = project_profile_evidence(
+            evidence,
+            None,
+            db,
+            commit=False,
         )
         Education.upsert_analysis_result(
             session.id,
@@ -2491,11 +2592,10 @@ async def submit_assignment(
             commit=False,
             db=db,
         )
-        refresh_student_profile_snapshot(
-            submission,
-            assignment,
+        refresh_student_profile_aggregates(
+            submission.student_id,
+            PROFILE_METRIC_VERSION,
             db,
-            analysis_payload=analysis_payload,
             commit=False,
         )
         db.commit()
@@ -2616,7 +2716,7 @@ async def get_submission_detail(
     submission, assignment = scope
     session = _get_workspace_session_or_404(submission.writing_session_id, db)
     versions = Education.get_versions(session.id, db=db)
-    analysis = await get_or_build_submission_analysis(submission, session, db)
+    analysis = await get_materialized_submission_analysis(submission, session, db)
     provenance_segments = filter_segments_for_final_text(
         (versions[-1].note_snapshot_text if versions else "") or "",
         Education.get_provenance_segments(session.id, db=db),
@@ -2741,25 +2841,15 @@ async def recompute_submission_analysis(
     db: Session = Depends(get_session),
 ):
     submission = scope.submission
-    if submission.is_current != 1:
-        # 历史轮只读:重算会用当前会话数据覆盖该轮的 analysis_result
+    evidence = Education.get_latest_profile_evidence_snapshot(submission.id, db=db)
+    if evidence is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Historical submission rounds are read-only",
+            detail="Submission evidence is not materialized",
         )
-    session = _get_workspace_session_or_404(submission.writing_session_id, db)
-    versions = Education.get_versions(session.id, db=db)
-    prompt_timeline = await get_prompt_timeline(session, db)
-    payload = build_submission_analysis(
-        submission,
-        session,
-        versions,
-        Education.get_provenance_segments(session.id, db=db),
-        Education.get_editor_operations(session.id, db=db),
-        prompt_timeline,
-    )
+    payload = build_analysis_from_evidence(evidence)
     Education.upsert_analysis_result(
-        session.id,
+        submission.writing_session_id,
         "submission_analysis",
         payload,
         submission_id=submission.id,
@@ -2772,7 +2862,12 @@ async def _load_submission_analysis(
     scope: TeacherSubmissionScope, db: Session
 ) -> dict:
     session = _get_workspace_session_or_404(scope.submission.writing_session_id, db)
-    return await get_or_build_submission_analysis(scope.submission, session, db)
+    try:
+        return await get_materialized_submission_analysis(scope.submission, session, db)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
 
 
 @router.get("/teacher/submissions/{submission_id}/analysis")
@@ -2925,6 +3020,12 @@ async def save_submission_review(
             commit=False,
             db=db,
         )
+        evidence = Education.get_latest_profile_evidence_snapshot(submission.id, db=db)
+        if evidence is None:
+            raise RuntimeError("Submission evidence snapshot is missing")
+        review_event = Education.append_submission_review_event(
+            review, evidence.id, commit=False, db=db
+        )
         if form_data.review_status == "returned":
             Education.set_writing_session_status(
                 submission.writing_session_id,
@@ -2932,8 +3033,26 @@ async def save_submission_review(
                 commit=False,
                 db=db,
             )
-        refresh_student_profile_snapshot(
-            submission, assignment, db, commit=False
+        stored_analysis = Education.get_analysis_result(
+            submission.writing_session_id,
+            "submission_analysis",
+            submission_id=submission.id,
+            db=db,
+        )
+        project_profile_evidence(
+            evidence,
+            review_event,
+            db,
+            analysis_payload=(
+                stored_analysis.payload_json if stored_analysis is not None else None
+            ),
+            commit=False,
+        )
+        refresh_student_profile_aggregates(
+            submission.student_id,
+            PROFILE_METRIC_VERSION,
+            db,
+            commit=False,
         )
         db.commit()
     except Exception:
@@ -2996,7 +3115,7 @@ async def get_teacher_dashboard(
     reflections = Education.get_micro_reflections_by_ids(
         [submission.micro_reflection_id for submission in submissions], db=db
     )
-    analyses = await get_or_build_submission_analyses(submissions, sessions, db)
+    analyses = await get_materialized_submission_analyses(submissions, sessions, db)
     for submission in submissions:
         student = students.get(submission.student_id)
         analysis = analyses.get(submission.id) or {}
@@ -3213,20 +3332,25 @@ async def get_my_writing_profile(
     assignments = Education.get_assignments_by_student(user.id, db=db)[
         :MAX_STUDENT_ASSIGNMENTS
     ]
-    return await build_student_profile(
-        user,
-        user.id,
-        classrooms,
-        assignments,
-        db,
-        start_at=start_at,
-        end_at=end_at,
-        assignment_id=assignment_id,
-        round_no=round_no,
-        metric_version=metric_version,
-        limit=limit,
-        offset=offset,
-    )
+    try:
+        return await build_student_profile(
+            user,
+            user.id,
+            classrooms,
+            assignments,
+            db,
+            start_at=start_at,
+            end_at=end_at,
+            assignment_id=assignment_id,
+            round_no=round_no,
+            metric_version=metric_version,
+            limit=limit,
+            offset=offset,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
 
 
 @router.get("/me/writing/assignments", response_model=list[StudentAssignmentListItem])

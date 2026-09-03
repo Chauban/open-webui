@@ -736,80 +736,34 @@ def build_submission_analysis(submission, session, versions, provenance_segments
     }
 
 
-def _versions_up_to(versions, final_version_id: Optional[str]) -> list:
-    for index, version in enumerate(versions):
-        if version.id == final_version_id:
-            return versions[: index + 1]
-    return versions
-
-
 def _is_analysis_payload_usable(submission, payload: Optional[dict]) -> bool:
-    """存档的分析结果还能不能直接用。
+    """GET paths accept any explicitly materialized analysis and never rebuild it."""
 
-    历史轮是一条记录,不是一个派生视图:它依赖的 provenance(source map 按会话
-    整体覆盖)已经被后续轮次改写,重算只会算错。所以只要历史轮有存档就一律直接
-    返回,哪怕 logic_version 已经升级 —— payload 里带着 logic_version,调用方
-    自己知道这份结果由哪一版逻辑算出。当前轮才跟着 logic_version 走。
-
-    (真要对历史轮做追溯重算,payload 里的 highlights 已经是那一轮终稿的完整
-    分段来源,不需要再回头找 provenance_segment 表。)
-    """
-    if not payload:
-        return False
-    if submission.is_current != 1:
-        return True
-    return payload.get("logic_version") == _ANALYSIS_LOGIC_VERSION
+    del submission
+    return bool(payload)
 
 
-async def get_or_build_submission_analysis(
+async def get_materialized_submission_analysis(
     submission,
     session,
     db: Session,
     cached_payloads: Optional[dict] = None,
 ) -> dict:
-    """取一份提交的分析结果。
-
-    ``cached_payloads`` 由调用方批量预取(见 ``get_or_build_submission_analyses``);
-    传 None 表示这里自己查一次。
-    """
+    """Read a materialized analysis without reconstructing facts on a GET path."""
     if cached_payloads is None:
         cached = Education.get_analysis_result(session.id, "submission_analysis", submission_id=submission.id, db=db)
         payload = cached.payload_json if cached is not None else None
     else:
         payload = cached_payloads.get(submission.id)
 
-    if _is_analysis_payload_usable(submission, payload):
-        return payload
-
-    # 分析的终稿必须停在本轮的定稿版本上:重交会往同一个会话继续追加版本,
-    # 拿 versions[-1] 会让历史轮的分析读到后面几轮的正文。
-    versions = _versions_up_to(Education.get_versions(session.id, db=db), submission.final_version_id)
-    provenance_segments = Education.get_provenance_segments(session.id, db=db)
-    operations = Education.get_editor_operations(session.id, db=db)
-    prompt_timeline = await get_prompt_timeline(session, db)
-    payload = build_submission_analysis(
-        submission,
-        session,
-        versions,
-        provenance_segments,
-        operations,
-        prompt_timeline,
-    )
-    Education.upsert_analysis_result(
-        session.id,
-        "submission_analysis",
-        payload,
-        submission_id=submission.id,
-        db=db,
-    )
+    del session
+    if not _is_analysis_payload_usable(submission, payload):
+        raise ValueError("Submission analysis is not materialized")
     return payload
 
 
-async def get_or_build_submission_analyses(submissions: list, sessions: dict, db: Session) -> dict[str, dict]:
-    """批量版本:存档一次查完,只有缺失/过期的那几份才真正重算。
-
-    看板、班级进度、学生画像都要对几十份提交取分析,逐份查缓存就是 N 次查询。
-    """
+async def get_materialized_submission_analyses(submissions: list, sessions: dict, db: Session) -> dict[str, dict]:
+    """批量读取已经物化的提交分析，避免列表页产生 N 次查询或隐式写入。"""
     cached_payloads = Education.get_analysis_results_by_submission_ids(
         [submission.id for submission in submissions],
         "submission_analysis",
@@ -820,7 +774,7 @@ async def get_or_build_submission_analyses(submissions: list, sessions: dict, db
         session = sessions.get(submission.writing_session_id)
         if session is None:
             continue
-        analyses[submission.id] = await get_or_build_submission_analysis(
+        analyses[submission.id] = await get_materialized_submission_analysis(
             submission, session, db, cached_payloads=cached_payloads
         )
     return analyses
@@ -901,6 +855,10 @@ async def get_prompt_timeline(session, db: Session) -> list[dict]:
                         "role": message.role,
                         "content": message.content,
                         "created_at": message.created_at,
+                        "parent_id": message.parent_id,
+                        "model_id": message.model_id,
+                        "output": message.output,
+                        "usage": message.usage,
                     }
                     for message in chat_messages
                 ]
@@ -915,6 +873,10 @@ async def get_prompt_timeline(session, db: Session) -> list[dict]:
                     "role": message.get("role"),
                     "content": message.get("content"),
                     "created_at": message.get("timestamp"),
+                    "parent_id": message.get("parentId"),
+                    "model_id": message.get("model"),
+                    "output": message.get("output"),
+                    "usage": message.get("usage"),
                 }
                 for message in _get_chat_history_messages(chat)
             ]

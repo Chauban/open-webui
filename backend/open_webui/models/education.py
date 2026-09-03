@@ -1,12 +1,43 @@
 import time
 import uuid
-from typing import Literal, Optional
+from contextlib import contextmanager
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from sqlalchemy import BigInteger, Boolean, Column, Integer, Text, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    Column,
+    ForeignKey,
+    Index,
+    Integer,
+    Text,
+    UniqueConstraint,
+    and_,
+    event,
+    func,
+)
 from sqlalchemy.orm import Session
 
-from open_webui.internal.db import Base, JSONField, get_db_context
+from open_webui.internal.db import Base, JSONField, get_db_context as _get_db_context
+
+
+@contextmanager
+def get_db_context(db: Optional[Session] = None):
+    """Education writes must honor the caller's unit-of-work session.
+
+    The application-wide helper may intentionally ignore a supplied session when
+    session sharing is disabled. That behavior is useful for unrelated read paths,
+    but it makes a multi-record education transaction impossible. Education model
+    methods therefore always reuse an explicitly supplied sync session.
+    """
+
+    if isinstance(db, Session):
+        yield db
+    else:
+        with _get_db_context() as owned_db:
+            yield owned_db
 
 
 ASSIGNMENT_STATUSES = ("active", "archived")
@@ -22,6 +53,25 @@ AIHelpType = Literal[
     "Strengthen Reasoning",
     "Other",
 ]
+WritingSourceType = Literal[
+    "ai_inserted",
+    "ai_pasted",
+    "user_typed",
+    "external_paste",
+    "suspected_unmarked_import",
+    "unknown",
+]
+WritingVersionTrigger = Literal["autosave", "manual", "submit", "submit_preflight"]
+EditorOperationType = Literal[
+    "keyboard_input",
+    "replace",
+    "delete_text",
+    "ai_insert_clicked",
+    "paste_detected",
+    "platform_ai_insert",
+    "ai_reply_selection_copied",
+    "ai_copy_button_clicked",
+]
 
 
 class SubmissionAlreadyReviewedError(Exception):
@@ -30,6 +80,12 @@ class SubmissionAlreadyReviewedError(Exception):
 
 class Assignment(Base):
     __tablename__ = "assignment"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('active', 'archived')", name="assignment_status_check"
+        ),
+        CheckConstraint("score_max > 0", name="assignment_score_max_check"),
+    )
 
     id = Column(Text, primary_key=True, unique=True)
     title = Column(Text, nullable=False)
@@ -100,6 +156,18 @@ class WritingSession(Base):
 
 class WritingVersion(Base):
     __tablename__ = "writing_version"
+    __table_args__ = (
+        UniqueConstraint(
+            "writing_session_id",
+            "version_no",
+            name="writing_version_session_number_idx",
+        ),
+        CheckConstraint("version_no >= 1", name="writing_version_number_check"),
+        CheckConstraint(
+            "trigger_type IN ('autosave', 'manual', 'submit', 'submit_preflight')",
+            name="writing_version_trigger_check",
+        ),
+    )
 
     id = Column(Text, primary_key=True, unique=True)
     writing_session_id = Column(Text, nullable=False)
@@ -112,6 +180,13 @@ class WritingVersion(Base):
 
 class ProvenanceSegment(Base):
     __tablename__ = "provenance_segment"
+    __table_args__ = (
+        UniqueConstraint(
+            "writing_session_id",
+            "segment_id",
+            name="provenance_session_segment_idx",
+        ),
+    )
 
     id = Column(Text, primary_key=True, unique=True)
     writing_session_id = Column(Text, nullable=False)
@@ -128,6 +203,21 @@ class ProvenanceSegment(Base):
 
 class EditorOperation(Base):
     __tablename__ = "editor_operation"
+    __table_args__ = (
+        Index(
+            "editor_operation_session_occurred_idx",
+            "writing_session_id",
+            "occurred_at_ms",
+            "client_sequence",
+        ),
+        CheckConstraint(
+            "occurred_at_ms >= 0", name="editor_operation_occurred_at_check"
+        ),
+        CheckConstraint(
+            "client_sequence >= 0",
+            name="editor_operation_client_sequence_check",
+        ),
+    )
 
     id = Column(Text, primary_key=True, unique=True)
     writing_session_id = Column(Text, nullable=False)
@@ -139,16 +229,28 @@ class EditorOperation(Base):
     inserted_text = Column(Text, nullable=True)
     deleted_text = Column(Text, nullable=True)
     batch_id = Column(Text, nullable=False)
+    occurred_at_ms = Column(BigInteger, nullable=False)
+    client_sequence = Column(BigInteger, nullable=False)
     metadata_json = Column(JSONField, nullable=True)
     created_at = Column(BigInteger, nullable=False)
 
 
 class AnalysisResult(Base):
     __tablename__ = "analysis_result"
+    __table_args__ = (
+        UniqueConstraint(
+            "writing_session_id",
+            "submission_id",
+            "result_type",
+            name="analysis_result_scope_type_idx",
+        ),
+    )
 
     id = Column(Text, primary_key=True, unique=True)
     writing_session_id = Column(Text, nullable=False)
-    submission_id = Column(Text, nullable=True)
+    submission_id = Column(
+        Text, ForeignKey("submission.id", ondelete="CASCADE"), nullable=False
+    )
     result_type = Column(Text, nullable=False)
     payload_json = Column(JSONField, nullable=False, default={})
     created_at = Column(BigInteger, nullable=False)
@@ -157,6 +259,9 @@ class AnalysisResult(Base):
 
 class MicroReflection(Base):
     __tablename__ = "micro_reflection"
+    __table_args__ = (
+        CheckConstraint("ai_used IN (0, 1)", name="micro_reflection_ai_used_check"),
+    )
 
     id = Column(Text, primary_key=True, unique=True)
     assignment_id = Column(Text, nullable=False)
@@ -178,6 +283,8 @@ class Submission(Base):
             "round_no",
             name="submission_assignment_student_round_idx",
         ),
+        CheckConstraint("round_no >= 1", name="submission_round_check"),
+        CheckConstraint("is_current IN (0, 1)", name="submission_current_check"),
     )
 
     id = Column(Text, primary_key=True, unique=True)
@@ -194,6 +301,15 @@ class Submission(Base):
 
 class SubmissionReview(Base):
     __tablename__ = "submission_review"
+    __table_args__ = (
+        CheckConstraint(
+            "review_status IN ('pending', 'reviewed', 'returned')",
+            name="submission_review_status_check",
+        ),
+        CheckConstraint(
+            "score IS NULL OR score >= 0", name="submission_review_score_check"
+        ),
+    )
 
     id = Column(Text, primary_key=True, unique=True)
     submission_id = Column(Text, nullable=False, unique=True)
@@ -210,26 +326,264 @@ class SubmissionReview(Base):
     updated_at = Column(BigInteger, nullable=False)
 
 
-class StudentProfileSnapshot(Base):
-    __tablename__ = "student_profile_snapshot"
+class ProfileEvidenceSnapshot(Base):
+    """Immutable, algorithm-independent facts captured for one submit attempt."""
+
+    __tablename__ = "profile_evidence_snapshot"
     __table_args__ = (
         UniqueConstraint(
             "submission_id",
-            "metric_version",
-            name="student_profile_snapshot_submission_metric_idx",
+            "evidence_revision",
+            name="profile_evidence_submission_revision_idx",
+        ),
+        CheckConstraint(
+            "evidence_revision >= 1", name="profile_evidence_revision_check"
+        ),
+        CheckConstraint("round_no >= 1", name="profile_evidence_round_check"),
+        CheckConstraint(
+            "length(evidence_hash) = 64", name="profile_evidence_hash_check"
         ),
     )
 
-    id = Column(Text, primary_key=True, unique=True)
-    submission_id = Column(Text, nullable=False)
+    id = Column(Text, primary_key=True)
+    submission_id = Column(
+        Text, ForeignKey("submission.id", ondelete="CASCADE"), nullable=False
+    )
+    evidence_revision = Column(BigInteger, nullable=False)
+    evidence_schema_version = Column(Text, nullable=False)
     student_id = Column(Text, nullable=False)
-    assignment_id = Column(Text, nullable=False)
+    assignment_id = Column(
+        Text, ForeignKey("assignment.id", ondelete="RESTRICT"), nullable=False
+    )
     round_no = Column(BigInteger, nullable=False)
     submitted_at = Column(BigInteger, nullable=False)
-    metric_version = Column(Text, nullable=False)
-    snapshot_json = Column(JSONField, nullable=False)
+    evidence_json = Column(JSONField, nullable=False)
+    evidence_hash = Column(Text, nullable=False)
     created_at = Column(BigInteger, nullable=False)
-    updated_at = Column(BigInteger, nullable=False)
+
+
+class SubmissionReviewEvent(Base):
+    """Append-only review facts; the mutable review row is only a current-state index."""
+
+    __tablename__ = "submission_review_event"
+    __table_args__ = (
+        UniqueConstraint(
+            "submission_id",
+            "review_revision",
+            name="submission_review_event_revision_idx",
+        ),
+        CheckConstraint(
+            "review_revision >= 1", name="submission_review_event_revision_check"
+        ),
+        CheckConstraint(
+            "review_status IN ('pending', 'reviewed', 'returned')",
+            name="submission_review_event_status_check",
+        ),
+        CheckConstraint(
+            "score IS NULL OR score >= 0", name="submission_review_event_score_check"
+        ),
+    )
+
+    id = Column(Text, primary_key=True)
+    submission_id = Column(
+        Text, ForeignKey("submission.id", ondelete="CASCADE"), nullable=False
+    )
+    evidence_snapshot_id = Column(
+        Text,
+        ForeignKey("profile_evidence_snapshot.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    review_revision = Column(BigInteger, nullable=False)
+    assignment_id = Column(
+        Text, ForeignKey("assignment.id", ondelete="RESTRICT"), nullable=False
+    )
+    reviewer_id = Column(Text, nullable=False)
+    review_status = Column(Text, nullable=False)
+    score = Column(BigInteger, nullable=True)
+    rubric_scores = Column(JSONField, nullable=True)
+    overall_comment = Column(Text, nullable=True)
+    returned_comment = Column(Text, nullable=True)
+    resubmit_due_at = Column(BigInteger, nullable=True)
+    reviewed_at = Column(BigInteger, nullable=True)
+    created_at = Column(BigInteger, nullable=False)
+
+
+class ProfileAlgorithmRelease(Base):
+    __tablename__ = "profile_algorithm_release"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('draft', 'active', 'retired')",
+            name="profile_algorithm_release_status_check",
+        ),
+    )
+
+    id = Column(Text, primary_key=True)
+    metric_version = Column(Text, nullable=False, unique=True)
+    insight_version = Column(Text, nullable=False)
+    evidence_schema_versions = Column(JSONField, nullable=False)
+    formula_config_json = Column(JSONField, nullable=False)
+    code_commit_sha = Column(Text, nullable=False)
+    code_checksum = Column(Text, nullable=False)
+    status = Column(Text, nullable=False)
+    created_by = Column(Text, nullable=False)
+    created_at = Column(BigInteger, nullable=False)
+    activated_at = Column(BigInteger, nullable=True)
+
+
+class ProfileProjectionRun(Base):
+    __tablename__ = "profile_projection_run"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'running', 'completed', 'failed')",
+            name="profile_projection_run_status_check",
+        ),
+        CheckConstraint(
+            "expected_count >= 0 AND succeeded_count >= 0 AND failed_count >= 0",
+            name="profile_projection_run_count_check",
+        ),
+    )
+
+    id = Column(Text, primary_key=True)
+    metric_version = Column(
+        Text, ForeignKey("profile_algorithm_release.metric_version"), nullable=False
+    )
+    scope_json = Column(JSONField, nullable=False)
+    expected_count = Column(BigInteger, nullable=False, default=0)
+    succeeded_count = Column(BigInteger, nullable=False, default=0)
+    failed_count = Column(BigInteger, nullable=False, default=0)
+    error_json = Column(JSONField, nullable=False, default=[])
+    status = Column(Text, nullable=False)
+    requested_by = Column(Text, nullable=False)
+    code_commit_sha = Column(Text, nullable=False)
+    config_hash = Column(Text, nullable=False)
+    started_at = Column(BigInteger, nullable=True)
+    finished_at = Column(BigInteger, nullable=True)
+    created_at = Column(BigInteger, nullable=False)
+
+
+class ProfileMetricProjection(Base):
+    __tablename__ = "profile_metric_projection"
+    __table_args__ = (
+        UniqueConstraint(
+            "evidence_snapshot_id",
+            "review_revision",
+            "metric_version",
+            name="profile_metric_projection_identity_idx",
+        ),
+        CheckConstraint(
+            "review_revision >= 0", name="profile_metric_projection_review_check"
+        ),
+        CheckConstraint("round_no >= 1", name="profile_metric_projection_round_check"),
+        CheckConstraint(
+            "length(input_hash) = 64 AND length(output_hash) = 64",
+            name="profile_metric_projection_hash_check",
+        ),
+    )
+
+    id = Column(Text, primary_key=True)
+    evidence_snapshot_id = Column(
+        Text,
+        ForeignKey("profile_evidence_snapshot.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    submission_id = Column(
+        Text, ForeignKey("submission.id", ondelete="CASCADE"), nullable=False
+    )
+    student_id = Column(Text, nullable=False)
+    assignment_id = Column(
+        Text, ForeignKey("assignment.id", ondelete="RESTRICT"), nullable=False
+    )
+    round_no = Column(BigInteger, nullable=False)
+    submitted_at = Column(BigInteger, nullable=False)
+    review_revision = Column(BigInteger, nullable=False, default=0)
+    metric_version = Column(
+        Text, ForeignKey("profile_algorithm_release.metric_version"), nullable=False
+    )
+    projection_json = Column(JSONField, nullable=False)
+    input_hash = Column(Text, nullable=False)
+    output_hash = Column(Text, nullable=False)
+    run_id = Column(Text, ForeignKey("profile_projection_run.id"), nullable=True)
+    generated_at = Column(BigInteger, nullable=False)
+
+
+class StudentProfileAggregateProjection(Base):
+    __tablename__ = "student_profile_aggregate_projection"
+    __table_args__ = (
+        Index(
+            "student_profile_aggregate_latest_idx",
+            "student_id",
+            "scope_kind",
+            "scope_id",
+            "metric_version",
+            "aggregate_revision",
+        ),
+        UniqueConstraint(
+            "student_id",
+            "scope_kind",
+            "scope_id",
+            "metric_version",
+            "input_hash",
+            name="student_profile_aggregate_identity_idx",
+        ),
+        UniqueConstraint(
+            "student_id",
+            "scope_kind",
+            "scope_id",
+            "metric_version",
+            "aggregate_revision",
+            name="student_profile_aggregate_revision_idx",
+        ),
+        CheckConstraint(
+            "scope_kind IN ('global', 'classroom')",
+            name="student_profile_aggregate_scope_check",
+        ),
+        CheckConstraint(
+            "length(input_hash) = 64 AND length(output_hash) = 64",
+            name="student_profile_aggregate_hash_check",
+        ),
+        CheckConstraint(
+            "aggregate_revision >= 1",
+            name="student_profile_aggregate_revision_check",
+        ),
+    )
+
+    id = Column(Text, primary_key=True)
+    student_id = Column(Text, nullable=False)
+    scope_kind = Column(Text, nullable=False)
+    scope_id = Column(Text, nullable=False)
+    metric_version = Column(
+        Text, ForeignKey("profile_algorithm_release.metric_version"), nullable=False
+    )
+    aggregate_revision = Column(BigInteger, nullable=False)
+    projection_count = Column(BigInteger, nullable=False)
+    input_hash = Column(Text, nullable=False)
+    output_hash = Column(Text, nullable=False)
+    aggregate_json = Column(JSONField, nullable=False)
+    run_id = Column(Text, ForeignKey("profile_projection_run.id"), nullable=True)
+    generated_at = Column(BigInteger, nullable=False)
+
+
+def _reject_immutable_profile_record_change(mapper, connection, target) -> None:
+    del mapper, connection, target
+    raise ValueError("Profile evidence and published projections are immutable")
+
+
+for _immutable_profile_model in (
+    ProfileEvidenceSnapshot,
+    SubmissionReviewEvent,
+    ProfileMetricProjection,
+    StudentProfileAggregateProjection,
+):
+    event.listen(
+        _immutable_profile_model,
+        "before_update",
+        _reject_immutable_profile_record_change,
+    )
+    event.listen(
+        _immutable_profile_model,
+        "before_delete",
+        _reject_immutable_profile_record_change,
+    )
 
 
 class StudentGrowthGoal(Base):
@@ -418,6 +772,8 @@ class EditorOperationModel(BaseModel):
     inserted_text: Optional[str] = None
     deleted_text: Optional[str] = None
     batch_id: str
+    occurred_at_ms: int
+    client_sequence: int
     metadata_json: Optional[dict] = None
     created_at: int
 
@@ -427,7 +783,7 @@ class AnalysisResultModel(BaseModel):
 
     id: str
     writing_session_id: str
-    submission_id: Optional[str] = None
+    submission_id: str
     result_type: str
     payload_json: dict
     created_at: int
@@ -435,6 +791,8 @@ class AnalysisResultModel(BaseModel):
 
 
 class StructuredReflection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     action: str = Field(min_length=10, max_length=1000)
     location: str = Field(min_length=2, max_length=300)
     judgement: str = Field(min_length=10, max_length=1000)
@@ -485,7 +843,7 @@ class SubmissionReviewModel(BaseModel):
     assignment_id: str
     reviewer_id: str
     review_status: str
-    score: Optional[int] = None
+    score: Optional[int] = Field(default=None, ge=0)
     overall_comment: Optional[str] = None
     rubric_scores: Optional[dict[str, int]] = None
     returned_comment: Optional[str] = None
@@ -517,7 +875,9 @@ class AssignmentCreateForm(BaseModel):
     @model_validator(mode="after")
     def validate_rubric_total(self):
         if self.rubric_schema.total_score != self.score_max:
-            raise ValueError("Rubric maximum scores must add up to assignment maximum score")
+            raise ValueError(
+                "Rubric maximum scores must add up to assignment maximum score"
+            )
         return self
 
 
@@ -537,7 +897,9 @@ class AssignmentUpdateForm(BaseModel):
             and self.rubric_schema is not None
             and self.rubric_schema.total_score != self.score_max
         ):
-            raise ValueError("Rubric maximum scores must add up to assignment maximum score")
+            raise ValueError(
+                "Rubric maximum scores must add up to assignment maximum score"
+            )
         return self
 
 
@@ -671,39 +1033,79 @@ class AutosaveForm(BaseModel):
 
 
 class VersionCreateForm(BaseModel):
-    trigger_type: str
+    model_config = ConfigDict(extra="forbid")
+
+    trigger_type: WritingVersionTrigger
     content_json: Optional[dict] = None
-    content_text: str = ""
+    content_text: str = Field(default="", max_length=1_000_000)
 
 
 class ProvenanceSegmentInput(BaseModel):
-    segment_id: str
-    source_type: str
-    segment_text: str
+    model_config = ConfigDict(extra="forbid")
+
+    segment_id: str = Field(min_length=1, max_length=200)
+    source_type: WritingSourceType
+    segment_text: str = Field(max_length=1_000_000)
     source_message_id: Optional[str] = None
-    start_offset: Optional[int] = None
-    end_offset: Optional[int] = None
+    start_offset: Optional[int] = Field(default=None, ge=0)
+    end_offset: Optional[int] = Field(default=None, ge=0)
     metadata_json: Optional[dict] = None
+
+    @model_validator(mode="after")
+    def validate_offsets(self):
+        if (self.start_offset is None) != (self.end_offset is None):
+            raise ValueError("start_offset and end_offset must be supplied together")
+        if (
+            self.start_offset is not None
+            and self.end_offset is not None
+            and self.end_offset < self.start_offset
+        ):
+            raise ValueError("end_offset must not precede start_offset")
+        return self
 
 
 class EditorOperationInput(BaseModel):
-    op_type: str
-    source_type: str
-    start_offset: Optional[int] = None
-    end_offset: Optional[int] = None
+    model_config = ConfigDict(extra="forbid")
+
+    op_type: EditorOperationType
+    source_type: WritingSourceType
+    start_offset: Optional[int] = Field(default=None, ge=0)
+    end_offset: Optional[int] = Field(default=None, ge=0)
     inserted_text: Optional[str] = None
     deleted_text: Optional[str] = None
-    batch_id: str
+    batch_id: str = Field(min_length=1, max_length=200)
+    occurred_at_ms: int = Field(ge=0)
+    client_sequence: int = Field(ge=0)
     metadata_json: Optional[dict] = None
+
+    @model_validator(mode="after")
+    def validate_offsets(self):
+        if (self.start_offset is None) != (self.end_offset is None):
+            raise ValueError("start_offset and end_offset must be supplied together")
+        if (
+            self.start_offset is not None
+            and self.end_offset is not None
+            and self.end_offset < self.start_offset
+        ):
+            raise ValueError("end_offset must not precede start_offset")
+        return self
 
 
 class EditorOperationCreateForm(BaseModel):
-    operations: list[EditorOperationInput] = Field(default_factory=list)
+    model_config = ConfigDict(extra="forbid")
+
+    operations: list[EditorOperationInput] = Field(
+        default_factory=list, max_length=1000
+    )
 
 
 class ProvenanceCreateForm(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     version_id: Optional[str] = None
-    segments: list[ProvenanceSegmentInput] = Field(default_factory=list)
+    segments: list[ProvenanceSegmentInput] = Field(
+        default_factory=list, max_length=10000
+    )
     replace_existing: bool = False
 
 
@@ -716,10 +1118,12 @@ class SubmissionEvidenceCompleteness(BaseModel):
 
 
 class SubmissionCreateForm(BaseModel):
-    writing_session_id: str
+    model_config = ConfigDict(extra="forbid")
+
+    writing_session_id: str = Field(min_length=1)
     final_content_json: Optional[dict] = None
     final_content_html: Optional[str] = None
-    final_content_text: str
+    final_content_text: str = Field(max_length=1_000_000)
     ai_used: bool
     ai_help_types: list[AIHelpType] = Field(default_factory=list)
     reflection: StructuredReflection
@@ -727,6 +1131,8 @@ class SubmissionCreateForm(BaseModel):
 
     @model_validator(mode="after")
     def validate_ai_reflection(self):
+        if len(self.ai_help_types) != len(set(self.ai_help_types)):
+            raise ValueError("AI help types must be unique")
         if self.ai_used and not self.ai_help_types:
             raise ValueError("At least one AI help type is required when AI was used")
         if not self.ai_used and self.ai_help_types:
@@ -739,7 +1145,9 @@ class SubmissionCreateForm(BaseModel):
 
 
 class SubmissionReviewForm(BaseModel):
-    review_status: str = "reviewed"
+    model_config = ConfigDict(extra="forbid")
+
+    review_status: Literal["pending", "reviewed", "returned"] = "reviewed"
     score: Optional[int] = Field(default=None, ge=0)
     overall_comment: Optional[str] = None
     rubric_scores: Optional[dict[str, int]] = None
@@ -860,16 +1268,12 @@ class TeacherOverviewResponse(BaseModel):
     classroom_count: int
     assignment_count: int
     submission_count: int
-    review_count: int
     pending_review_count: int = 0
     unsubmitted_count: int = 0
     classrooms: list[TeacherClassroomListItem]
+    # 概述页只保留三份清单：提交（含批改状态与风险）、作业（含截止与进度）、班级。
     recent_assignments: list[TeacherAssignmentListItem]
     recent_submissions: list[SubmissionListItem]
-    pending_review_items: list[SubmissionListItem] = Field(default_factory=list)
-    upcoming_due_assignments: list[TeacherAssignmentListItem] = Field(
-        default_factory=list
-    )
 
 
 class TeacherReviewResponse(BaseModel):
@@ -937,6 +1341,163 @@ class StrictProfileModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class ProfileEvidenceAssignmentContext(StrictProfileModel):
+    title: str = Field(min_length=1, max_length=200)
+    description: Optional[str] = None
+    classroom_id: Optional[str] = None
+    score_max: int = Field(gt=0, le=10000)
+    rubric_schema: RubricSchema
+    assignment_due_at: Optional[int] = Field(default=None, ge=0)
+    effective_due_at: Optional[int] = Field(default=None, ge=0)
+
+
+class ProfileEvidenceDocument(StrictProfileModel):
+    final_version_id: str = Field(min_length=1)
+    content_text: str
+    content_json: Optional[dict[str, Any]] = None
+    content_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class ProfileEvidenceVersionEvent(StrictProfileModel):
+    id: str = Field(min_length=1)
+    version_no: int = Field(ge=1)
+    trigger_type: str = Field(min_length=1, max_length=40)
+    content_text: str
+    content_json: Optional[dict[str, Any]] = None
+    created_at: int = Field(ge=0)
+
+
+class ProfileEvidenceEditorEvent(StrictProfileModel):
+    id: str = Field(min_length=1)
+    user_id: str = Field(min_length=1)
+    op_type: str = Field(min_length=1, max_length=40)
+    source_type: str = Field(min_length=1, max_length=40)
+    start_offset: Optional[int] = Field(default=None, ge=0)
+    end_offset: Optional[int] = Field(default=None, ge=0)
+    inserted_text: Optional[str] = None
+    deleted_text: Optional[str] = None
+    batch_id: str = Field(min_length=1)
+    occurred_at_ms: int = Field(ge=0)
+    client_sequence: int = Field(ge=0)
+    metadata_json: Optional[dict[str, Any]] = None
+    created_at: int = Field(ge=0)
+
+
+class ProfileEvidenceProvenanceEvent(StrictProfileModel):
+    id: str = Field(min_length=1)
+    version_id: Optional[str] = None
+    source_type: str = Field(min_length=1, max_length=40)
+    source_message_id: Optional[str] = None
+    segment_id: str = Field(min_length=1)
+    segment_text: str
+    start_offset: Optional[int] = Field(default=None, ge=0)
+    end_offset: Optional[int] = Field(default=None, ge=0)
+    metadata_json: Optional[dict[str, Any]] = None
+    created_at: int = Field(ge=0)
+
+
+class ProfileEvidenceConversationEvent(StrictProfileModel):
+    id: str = Field(min_length=1)
+    role: Literal["user", "assistant", "system", "tool"]
+    content: Any
+    created_at: int = Field(ge=0)
+    parent_id: Optional[str] = None
+    model_id: Optional[str] = None
+    output: Any = None
+    usage: Optional[dict[str, Any]] = None
+
+
+class ProfileEvidenceReflection(StrictProfileModel):
+    id: str = Field(min_length=1)
+    ai_used: bool
+    ai_help_types: list[AIHelpType] = Field(default_factory=list)
+    reflection: StructuredReflection
+    created_at: int = Field(ge=0)
+
+
+class ProfileEvidenceCaptureStream(StrictProfileModel):
+    status: Literal["complete", "missing"]
+    observed_count: int = Field(ge=0)
+    missing_reason: Optional[str] = Field(default=None, max_length=200)
+
+
+class ProfileEvidenceCaptureManifest(StrictProfileModel):
+    collector_version: str = Field(min_length=1, max_length=80)
+    application_build: str = Field(min_length=1, max_length=200)
+    captured_from_at: int = Field(ge=0)
+    captured_until_at: int = Field(ge=0)
+    version_window_started_at: int = Field(ge=0)
+    version_data: ProfileEvidenceCaptureStream
+    editor_operations: ProfileEvidenceCaptureStream
+    source_tracking: ProfileEvidenceCaptureStream
+    conversation: ProfileEvidenceCaptureStream
+
+    @model_validator(mode="after")
+    def validate_capture_window(self):
+        if self.captured_until_at < self.captured_from_at:
+            raise ValueError("captured_until_at must not precede captured_from_at")
+        if (
+            not self.captured_from_at
+            <= self.version_window_started_at
+            <= self.captured_until_at
+        ):
+            raise ValueError(
+                "version_window_started_at must be inside the capture window"
+            )
+        return self
+
+
+class ProfileEvidencePreviousRound(StrictProfileModel):
+    submission_id: str = Field(min_length=1)
+    round_no: int = Field(ge=1)
+    final_content_text: str
+    submitted_at: int = Field(ge=0)
+    reviewed_at: Optional[int] = Field(default=None, ge=0)
+    score: Optional[int] = Field(default=None, ge=0)
+    review_status: Optional[Literal["pending", "reviewed", "returned"]] = None
+    rubric_scores: Optional[dict[str, int]] = None
+    overall_comment: Optional[str] = None
+    returned_comment: Optional[str] = None
+    resubmit_due_at: Optional[int] = Field(default=None, ge=0)
+
+
+class ProfileEvidencePayload(StrictProfileModel):
+    evidence_schema_version: Literal["2026-09-03.1"] = "2026-09-03.1"
+    submission_id: str = Field(min_length=1)
+    student_id: str = Field(min_length=1)
+    assignment_id: str = Field(min_length=1)
+    writing_session_id: str = Field(min_length=1)
+    evidence_revision: int = Field(ge=1)
+    round_no: int = Field(ge=1)
+    submitted_at: int = Field(ge=0)
+    previous_submission_id: Optional[str] = None
+    previous_round: Optional[ProfileEvidencePreviousRound] = None
+    assignment: ProfileEvidenceAssignmentContext
+    document: ProfileEvidenceDocument
+    versions: list[ProfileEvidenceVersionEvent]
+    editor_operations: list[ProfileEvidenceEditorEvent]
+    provenance: list[ProfileEvidenceProvenanceEvent]
+    conversation: list[ProfileEvidenceConversationEvent]
+    reflection: ProfileEvidenceReflection
+    capture_manifest: ProfileEvidenceCaptureManifest
+
+
+class ProfileEvidenceSnapshotModel(StrictProfileModel):
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    id: str
+    submission_id: str
+    evidence_revision: int
+    evidence_schema_version: str
+    student_id: str
+    assignment_id: str
+    round_no: int
+    submitted_at: int
+    evidence_json: ProfileEvidencePayload
+    evidence_hash: str
+    created_at: int
+
+
 class StudentProfileDataCompleteness(StrictProfileModel):
     version_data: ProfileCompletenessStatus
     editor_operations: ProfileCompletenessStatus
@@ -976,45 +1537,45 @@ class StudentProfileTimelinePoint(StrictProfileModel):
     submission_id: str
     assignment_id: str
     assignment_title: str
-    round_no: int = 1
+    round_no: int = Field(default=1, ge=1)
     is_current: bool = True
-    submitted_at: int
+    submitted_at: int = Field(ge=0)
     data_completeness: StudentProfileDataCompleteness
 
     # 产出维:保留教师评分原值，并用作业明确声明的满分生成可比较百分比。
-    total_chars: int = 0
-    score: Optional[int] = None
-    score_max: int
-    normalized_score: Optional[float] = None
+    total_chars: int = Field(default=0, ge=0)
+    score: Optional[int] = Field(default=None, ge=0)
+    score_max: int = Field(gt=0, le=10000)
+    normalized_score: Optional[float] = Field(default=None, ge=0, le=100)
     rubric: Optional[dict[str, int]] = None
     review_status: ProfileReviewStatus = "pending"
 
     # 过程维。不用版本数:一个版本 = 一次 1.2 秒防抖自动保存,衡量的是打字时长
     # 而不是「改了几版」,拿它当修改投入会被打字速度带偏。
-    inserted_chars: Optional[int] = None
-    revised_chars: Optional[int] = None
-    revision_depth: Optional[int] = None
-    writing_span_seconds: Optional[int] = None
-    active_writing_seconds: Optional[int] = None
+    inserted_chars: Optional[int] = Field(default=None, ge=0)
+    revised_chars: Optional[int] = Field(default=None, ge=0)
+    revision_depth: Optional[int] = Field(default=None, ge=0, le=100)
+    writing_span_seconds: Optional[int] = Field(default=None, ge=0)
+    active_writing_seconds: Optional[int] = Field(default=None, ge=0)
     lead_time_seconds: Optional[int] = None
-    end_loaded_ratio: Optional[float] = None
-    deadline_window_ratio: Optional[float] = None
-    process_index: Optional[int] = None
+    end_loaded_ratio: Optional[float] = Field(default=None, ge=0, le=1)
+    deadline_window_ratio: Optional[float] = Field(default=None, ge=0, le=1)
+    process_index: Optional[int] = Field(default=None, ge=0, le=100)
 
     # AI 协作维
-    typed_ratio: Optional[float] = None
-    ai_ratio: Optional[float] = None
-    unknown_ratio: Optional[float] = None
-    prompt_count: Optional[int] = None
-    digestion_ratio: Optional[int] = None
-    reflection_char_count: int = 0
-    reflection_quality: int = 0
+    typed_ratio: Optional[float] = Field(default=None, ge=0, le=1)
+    ai_ratio: Optional[float] = Field(default=None, ge=0, le=1)
+    unknown_ratio: Optional[float] = Field(default=None, ge=0, le=1)
+    prompt_count: Optional[int] = Field(default=None, ge=0)
+    digestion_ratio: Optional[int] = Field(default=None, ge=0, le=100)
+    reflection_char_count: int = Field(default=0, ge=0)
+    reflection_quality: int = Field(default=0, ge=0, le=100)
     ai_help_types: list[AIHelpType] = Field(default_factory=list)
-    collaboration_index: Optional[int] = None
+    collaboration_index: Optional[int] = Field(default=None, ge=0, le=100)
 
     # 风险信号:只做展示,不参与任何成长指数。
-    burst_count: Optional[int] = None
-    suspected_unmarked_import_count: Optional[int] = None
+    burst_count: Optional[int] = Field(default=None, ge=0)
+    suspected_unmarked_import_count: Optional[int] = Field(default=None, ge=0)
 
 
 class StudentProfileRoundProgress(StrictProfileModel):
@@ -1062,7 +1623,9 @@ class StudentProfileInsight(StrictProfileModel):
 
     code: ProfileInsightCode
     tone: ProfileInsightTone = "neutral"
-    params: StudentProfileInsightParams = Field(default_factory=StudentProfileInsightParams)
+    params: StudentProfileInsightParams = Field(
+        default_factory=StudentProfileInsightParams
+    )
     action_code: Optional[ProfileInsightActionCode] = None
     submission_id: Optional[str] = None
     severity: Literal["low", "medium", "high"] = "low"
@@ -1253,30 +1816,91 @@ class StudentProfileIndexFormula(StrictProfileModel):
     reflection_quality: StudentProfileReflectionFormula
 
 
-class StudentProfileSnapshotPayload(StrictProfileModel):
+class ProfileMetricProjectionPayload(StrictProfileModel):
     metric_version: str
     point: StudentProfileTimelinePoint
     round_progress: Optional[StudentProfileRoundProgress] = None
 
 
-class StudentProfileSnapshotModel(StrictProfileModel):
+class SubmissionReviewEventModel(StrictProfileModel):
     model_config = ConfigDict(from_attributes=True, extra="forbid")
 
     id: str
+    submission_id: str
+    evidence_snapshot_id: str
+    review_revision: int
+    assignment_id: str
+    reviewer_id: str
+    review_status: Literal["pending", "reviewed", "returned"]
+    score: Optional[int] = Field(default=None, ge=0)
+    rubric_scores: Optional[dict[str, int]] = None
+    overall_comment: Optional[str] = None
+    returned_comment: Optional[str] = None
+    resubmit_due_at: Optional[int] = None
+    reviewed_at: Optional[int] = None
+    created_at: int
+
+
+class ProfileMetricProjectionModel(StrictProfileModel):
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    id: str
+    evidence_snapshot_id: str
     submission_id: str
     student_id: str
     assignment_id: str
     round_no: int
     submitted_at: int
+    review_revision: int
     metric_version: str
-    snapshot_json: StudentProfileSnapshotPayload
-    created_at: int
-    updated_at: int
+    projection_json: ProfileMetricProjectionPayload
+    input_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    output_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    run_id: Optional[str] = None
+    generated_at: int
+
+
+class StudentProfileAggregatePayload(StrictProfileModel):
+    metric_version: str
+    insight_version: str
+    assignment_ids: list[str] = Field(default_factory=list)
+    projection_count: int = Field(ge=0)
+    cross_assignment_timeline: list[StudentProfileTimelinePoint] = Field(
+        default_factory=list
+    )
+    round_progress: list[StudentProfileRoundProgress] = Field(default_factory=list)
+    trends: list[StudentProfileMetricTrend] = Field(default_factory=list)
+    ai_help_type_distribution: dict[AIHelpType, int] = Field(default_factory=dict)
+    ai_help_type_shift: StudentProfileHelpTypeShift
+    reflection_quality: StudentProfileReflectionQuality
+    insights: list[StudentProfileInsight] = Field(default_factory=list)
+    data_completeness: StudentProfileCompletenessSummary
+    filtered_summary: StudentProfileFilteredSummary
+
+
+class StudentProfileAggregateProjectionModel(StrictProfileModel):
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    id: str
+    student_id: str
+    scope_kind: Literal["global", "classroom"]
+    scope_id: str
+    metric_version: str
+    aggregate_revision: int = Field(ge=1)
+    projection_count: int
+    input_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    output_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    aggregate_json: StudentProfileAggregatePayload
+    run_id: Optional[str] = None
+    generated_at: int
 
 
 class StudentProfileResponse(StrictProfileModel):
     metric_version: str
+    active_metric_version: str
     insight_version: str
+    aggregate_materialized: bool
+    aggregate_revision: Optional[int] = None
     available_metric_versions: list[str] = Field(default_factory=list)
     excluded_snapshot_count: int = 0
     student_id: str
@@ -1945,10 +2569,7 @@ class EducationTable:
                         for folder in sync_db.query(Folder)
                         .filter_by(user_id=owner_user_id)
                         .all()
-                        if (
-                            (folder.meta or {}).get("writing_session_id")
-                            == session.id
-                        )
+                        if ((folder.meta or {}).get("writing_session_id") == session.id)
                     }
                     | {folder_id}
                 )
@@ -2019,6 +2640,7 @@ class EducationTable:
         trigger_type: str,
         content_json: Optional[dict],
         content_text: str,
+        commit: bool = True,
         db: Optional[Session] = None,
     ) -> WritingVersionModel:
         with get_db_context(db) as db:
@@ -2037,7 +2659,10 @@ class EducationTable:
                 created_at=int(time.time()),
             )
             db.add(version)
-            db.commit()
+            if commit:
+                db.commit()
+            else:
+                db.flush()
             db.refresh(version)
             return WritingVersionModel.model_validate(version)
 
@@ -2052,6 +2677,54 @@ class EducationTable:
                 .all()
             )
             return [WritingVersionModel.model_validate(version) for version in versions]
+
+    def get_submission_window_versions(
+        self,
+        session_id: str,
+        final_version_id: str,
+        previous_final_version_id: Optional[str] = None,
+        db: Optional[Session] = None,
+    ) -> list[WritingVersionModel]:
+        with get_db_context(db) as db:
+            final_version = db.get(WritingVersion, final_version_id)
+            if (
+                final_version is None
+                or final_version.writing_session_id != session_id
+            ):
+                raise ValueError("Final writing version is missing from the session")
+            previous_version_no = 0
+            if previous_final_version_id is not None:
+                previous_version = db.get(WritingVersion, previous_final_version_id)
+                if (
+                    previous_version is None
+                    or previous_version.writing_session_id != session_id
+                    or previous_version.version_no >= final_version.version_no
+                ):
+                    raise ValueError("Previous final version is invalid")
+                previous_version_no = previous_version.version_no
+            versions = (
+                db.query(WritingVersion)
+                .filter(
+                    WritingVersion.writing_session_id == session_id,
+                    WritingVersion.version_no > previous_version_no,
+                    WritingVersion.version_no <= final_version.version_no,
+                )
+                .order_by(WritingVersion.version_no.asc())
+                .all()
+            )
+            return [
+                WritingVersionModel.model_validate(version) for version in versions
+            ]
+
+    def count_versions(
+        self, session_id: str, db: Optional[Session] = None
+    ) -> int:
+        with get_db_context(db) as db:
+            return (
+                db.query(WritingVersion)
+                .filter(WritingVersion.writing_session_id == session_id)
+                .count()
+            )
 
     def get_versions_by_session_ids(
         self, session_ids: list[str], db: Optional[Session] = None
@@ -2173,6 +2846,8 @@ class EducationTable:
                     inserted_text=operation.inserted_text,
                     deleted_text=operation.deleted_text,
                     batch_id=operation.batch_id,
+                    occurred_at_ms=operation.occurred_at_ms,
+                    client_sequence=operation.client_sequence,
                     metadata_json=operation.metadata_json,
                     created_at=now,
                 )
@@ -2189,7 +2864,11 @@ class EducationTable:
             operations = (
                 db.query(EditorOperation)
                 .filter(EditorOperation.writing_session_id == session_id)
-                .order_by(EditorOperation.created_at.asc(), EditorOperation.id.asc())
+                .order_by(
+                    EditorOperation.occurred_at_ms.asc(),
+                    EditorOperation.client_sequence.asc(),
+                    EditorOperation.id.asc(),
+                )
                 .all()
             )
             return [
@@ -2205,14 +2884,17 @@ class EducationTable:
             return {}
         with get_db_context(db) as db:
             rows = (
-                db.query(EditorOperation.writing_session_id, EditorOperation.created_at)
+                db.query(
+                    EditorOperation.writing_session_id,
+                    EditorOperation.occurred_at_ms,
+                )
                 .filter(EditorOperation.writing_session_id.in_(session_ids))
-                .order_by(EditorOperation.created_at.asc())
+                .order_by(EditorOperation.occurred_at_ms.asc())
                 .all()
             )
             grouped: dict[str, list[int]] = {}
-            for session_id, created_at in rows:
-                grouped.setdefault(session_id, []).append(created_at)
+            for session_id, occurred_at_ms in rows:
+                grouped.setdefault(session_id, []).append(occurred_at_ms // 1000)
             return grouped
 
     def upsert_analysis_result(
@@ -2220,7 +2902,7 @@ class EducationTable:
         session_id: str,
         result_type: str,
         payload_json: dict,
-        submission_id: Optional[str] = None,
+        submission_id: str,
         commit: bool = True,
         db: Optional[Session] = None,
     ) -> AnalysisResultModel:
@@ -2229,8 +2911,7 @@ class EducationTable:
                 AnalysisResult.writing_session_id == session_id,
                 AnalysisResult.result_type == result_type,
             )
-            if submission_id is not None:
-                query = query.filter(AnalysisResult.submission_id == submission_id)
+            query = query.filter(AnalysisResult.submission_id == submission_id)
             result = query.first()
             now = int(time.time())
             if result is None:
@@ -2260,7 +2941,7 @@ class EducationTable:
         self,
         session_id: str,
         result_type: str,
-        submission_id: Optional[str] = None,
+        submission_id: str,
         db: Optional[Session] = None,
     ) -> Optional[AnalysisResultModel]:
         with get_db_context(db) as db:
@@ -2268,8 +2949,7 @@ class EducationTable:
                 AnalysisResult.writing_session_id == session_id,
                 AnalysisResult.result_type == result_type,
             )
-            if submission_id is not None:
-                query = query.filter(AnalysisResult.submission_id == submission_id)
+            query = query.filter(AnalysisResult.submission_id == submission_id)
             result = query.first()
             return AnalysisResultModel.model_validate(result) if result else None
 
@@ -2281,6 +2961,7 @@ class EducationTable:
         ai_used: bool,
         ai_help_types: list[AIHelpType],
         reflection: StructuredReflection,
+        commit: bool = True,
         db: Optional[Session] = None,
     ) -> MicroReflectionModel:
         with get_db_context(db) as db:
@@ -2295,7 +2976,10 @@ class EducationTable:
                 created_at=int(time.time()),
             )
             db.add(reflection)
-            db.commit()
+            if commit:
+                db.commit()
+            else:
+                db.flush()
             db.refresh(reflection)
             return MicroReflectionModel.model_validate(reflection)
 
@@ -2328,54 +3012,537 @@ class EducationTable:
             )
             return {row.submission_id: row.payload_json for row in rows}
 
-    def upsert_student_profile_snapshot(
+    def insert_profile_evidence_snapshot(
         self,
-        submission: SubmissionModel,
-        metric_version: str,
-        payload: StudentProfileSnapshotPayload,
+        payload: ProfileEvidencePayload,
+        evidence_hash: str,
         commit: bool = True,
         db: Optional[Session] = None,
-    ) -> StudentProfileSnapshotModel:
+    ) -> ProfileEvidenceSnapshotModel:
+        """Append one immutable evidence revision for a successful submit attempt."""
+
         with get_db_context(db) as db:
-            now = int(time.time())
-            snapshot = (
-                db.query(StudentProfileSnapshot)
+            existing = (
+                db.query(ProfileEvidenceSnapshot)
                 .filter(
-                    StudentProfileSnapshot.submission_id == submission.id,
-                    StudentProfileSnapshot.metric_version == metric_version,
+                    ProfileEvidenceSnapshot.submission_id == payload.submission_id,
+                    ProfileEvidenceSnapshot.evidence_revision
+                    == payload.evidence_revision,
                 )
                 .first()
             )
-            if snapshot is None:
-                snapshot = StudentProfileSnapshot(
-                    id=str(uuid.uuid4()),
-                    submission_id=submission.id,
-                    student_id=submission.student_id,
-                    assignment_id=submission.assignment_id,
-                    round_no=submission.round_no,
-                    submitted_at=submission.submitted_at,
-                    metric_version=metric_version,
-                    snapshot_json=payload.model_dump(mode="json"),
-                    created_at=now,
-                    updated_at=now,
-                )
-                db.add(snapshot)
-            else:
-                snapshot.student_id = submission.student_id
-                snapshot.assignment_id = submission.assignment_id
-                snapshot.round_no = submission.round_no
-                snapshot.submitted_at = submission.submitted_at
-                snapshot.metric_version = metric_version
-                snapshot.snapshot_json = payload.model_dump(mode="json")
-                snapshot.updated_at = now
+            if existing is not None:
+                if existing.evidence_hash != evidence_hash:
+                    raise ValueError("Evidence revision is immutable")
+                return ProfileEvidenceSnapshotModel.model_validate(existing)
+
+            snapshot = ProfileEvidenceSnapshot(
+                id=str(uuid.uuid4()),
+                submission_id=payload.submission_id,
+                evidence_revision=payload.evidence_revision,
+                evidence_schema_version=payload.evidence_schema_version,
+                student_id=payload.student_id,
+                assignment_id=payload.assignment_id,
+                round_no=payload.round_no,
+                submitted_at=payload.submitted_at,
+                evidence_json=payload.model_dump(mode="json"),
+                evidence_hash=evidence_hash,
+                created_at=int(time.time()),
+            )
+            db.add(snapshot)
             if commit:
                 db.commit()
             else:
                 db.flush()
             db.refresh(snapshot)
-            return StudentProfileSnapshotModel.model_validate(snapshot)
+            return ProfileEvidenceSnapshotModel.model_validate(snapshot)
 
-    def get_student_profile_snapshots(
+    def get_next_profile_evidence_revision(
+        self, submission_id: str, db: Optional[Session] = None
+    ) -> int:
+        with get_db_context(db) as db:
+            current = (
+                db.query(func.max(ProfileEvidenceSnapshot.evidence_revision))
+                .filter(ProfileEvidenceSnapshot.submission_id == submission_id)
+                .scalar()
+            )
+            return int(current or 0) + 1
+
+    def get_latest_profile_evidence_snapshot(
+        self, submission_id: str, db: Optional[Session] = None
+    ) -> Optional[ProfileEvidenceSnapshotModel]:
+        with get_db_context(db) as db:
+            row = (
+                db.query(ProfileEvidenceSnapshot)
+                .filter(ProfileEvidenceSnapshot.submission_id == submission_id)
+                .order_by(ProfileEvidenceSnapshot.evidence_revision.desc())
+                .first()
+            )
+            return ProfileEvidenceSnapshotModel.model_validate(row) if row else None
+
+    def get_profile_evidence_snapshots(
+        self,
+        *,
+        student_id: Optional[str] = None,
+        assignment_id: Optional[str] = None,
+        after_id: Optional[str] = None,
+        limit: int = 200,
+        db: Optional[Session] = None,
+    ) -> list[ProfileEvidenceSnapshotModel]:
+        with get_db_context(db) as db:
+            query = db.query(ProfileEvidenceSnapshot)
+            if student_id is not None:
+                query = query.filter(ProfileEvidenceSnapshot.student_id == student_id)
+            if assignment_id is not None:
+                query = query.filter(
+                    ProfileEvidenceSnapshot.assignment_id == assignment_id
+                )
+            if after_id is not None:
+                query = query.filter(ProfileEvidenceSnapshot.id > after_id)
+            rows = query.order_by(ProfileEvidenceSnapshot.id.asc()).limit(limit).all()
+            return [ProfileEvidenceSnapshotModel.model_validate(row) for row in rows]
+
+    def _latest_profile_evidence_query(
+        self,
+        db: Session,
+        *,
+        student_id: Optional[str] = None,
+        assignment_id: Optional[str] = None,
+    ):
+        latest_revision = (
+            db.query(
+                ProfileEvidenceSnapshot.submission_id.label("submission_id"),
+                func.max(ProfileEvidenceSnapshot.evidence_revision).label(
+                    "evidence_revision"
+                ),
+            )
+            .group_by(ProfileEvidenceSnapshot.submission_id)
+            .subquery()
+        )
+        query = db.query(ProfileEvidenceSnapshot).join(
+            latest_revision,
+            and_(
+                latest_revision.c.submission_id
+                == ProfileEvidenceSnapshot.submission_id,
+                latest_revision.c.evidence_revision
+                == ProfileEvidenceSnapshot.evidence_revision,
+            ),
+        )
+        if student_id is not None:
+            query = query.filter(ProfileEvidenceSnapshot.student_id == student_id)
+        if assignment_id is not None:
+            query = query.filter(
+                ProfileEvidenceSnapshot.assignment_id == assignment_id
+            )
+        return query
+
+    def count_latest_profile_evidence_snapshots(
+        self,
+        *,
+        student_id: Optional[str] = None,
+        assignment_id: Optional[str] = None,
+        db: Optional[Session] = None,
+    ) -> int:
+        with get_db_context(db) as db:
+            return self._latest_profile_evidence_query(
+                db,
+                student_id=student_id,
+                assignment_id=assignment_id,
+            ).count()
+
+    def get_latest_profile_evidence_batch(
+        self,
+        *,
+        student_id: Optional[str] = None,
+        assignment_id: Optional[str] = None,
+        after_id: Optional[str] = None,
+        limit: int = 200,
+        db: Optional[Session] = None,
+    ) -> list[ProfileEvidenceSnapshotModel]:
+        with get_db_context(db) as db:
+            query = self._latest_profile_evidence_query(
+                db,
+                student_id=student_id,
+                assignment_id=assignment_id,
+            )
+            if after_id is not None:
+                query = query.filter(ProfileEvidenceSnapshot.id > after_id)
+            rows = query.order_by(ProfileEvidenceSnapshot.id.asc()).limit(limit).all()
+            return [ProfileEvidenceSnapshotModel.model_validate(row) for row in rows]
+
+    def append_submission_review_event(
+        self,
+        review: SubmissionReviewModel,
+        evidence_snapshot_id: str,
+        commit: bool = True,
+        db: Optional[Session] = None,
+    ) -> SubmissionReviewEventModel:
+        with get_db_context(db) as db:
+            revision = (
+                db.query(func.max(SubmissionReviewEvent.review_revision))
+                .filter(SubmissionReviewEvent.submission_id == review.submission_id)
+                .scalar()
+                or 0
+            ) + 1
+            event = SubmissionReviewEvent(
+                id=str(uuid.uuid4()),
+                submission_id=review.submission_id,
+                evidence_snapshot_id=evidence_snapshot_id,
+                review_revision=revision,
+                assignment_id=review.assignment_id,
+                reviewer_id=review.reviewer_id,
+                review_status=review.review_status,
+                score=review.score,
+                rubric_scores=review.rubric_scores,
+                overall_comment=review.overall_comment,
+                returned_comment=review.returned_comment,
+                resubmit_due_at=review.resubmit_due_at,
+                reviewed_at=review.reviewed_at,
+                created_at=int(time.time()),
+            )
+            db.add(event)
+            if commit:
+                db.commit()
+            else:
+                db.flush()
+            db.refresh(event)
+            return SubmissionReviewEventModel.model_validate(event)
+
+    def get_latest_submission_review_event(
+        self,
+        submission_id: str,
+        evidence_snapshot_id: Optional[str] = None,
+        db: Optional[Session] = None,
+    ) -> Optional[SubmissionReviewEventModel]:
+        with get_db_context(db) as db:
+            query = db.query(SubmissionReviewEvent).filter(
+                SubmissionReviewEvent.submission_id == submission_id
+            )
+            if evidence_snapshot_id is not None:
+                query = query.filter(
+                    SubmissionReviewEvent.evidence_snapshot_id == evidence_snapshot_id
+                )
+            row = query.order_by(SubmissionReviewEvent.review_revision.desc()).first()
+            return SubmissionReviewEventModel.model_validate(row) if row else None
+
+    def ensure_profile_algorithm_release(
+        self,
+        *,
+        metric_version: str,
+        insight_version: str,
+        evidence_schema_version: str,
+        formula_config: dict,
+        code_commit_sha: str,
+        code_checksum: str,
+        created_by: str,
+        db: Optional[Session] = None,
+    ) -> None:
+        with get_db_context(db) as db:
+            existing = (
+                db.query(ProfileAlgorithmRelease)
+                .filter(ProfileAlgorithmRelease.metric_version == metric_version)
+                .first()
+            )
+            if existing is not None:
+                if (
+                    existing.code_checksum != code_checksum
+                    or existing.formula_config_json != formula_config
+                ):
+                    raise ValueError(
+                        "Published profile algorithm releases are immutable"
+                    )
+                return
+            now = int(time.time())
+            has_active = (
+                db.query(ProfileAlgorithmRelease.id)
+                .filter(ProfileAlgorithmRelease.status == "active")
+                .first()
+                is not None
+            )
+            db.add(
+                ProfileAlgorithmRelease(
+                    id=str(uuid.uuid4()),
+                    metric_version=metric_version,
+                    insight_version=insight_version,
+                    evidence_schema_versions=[evidence_schema_version],
+                    formula_config_json=formula_config,
+                    code_commit_sha=code_commit_sha,
+                    code_checksum=code_checksum,
+                    status="draft" if has_active else "active",
+                    created_by=created_by,
+                    created_at=now,
+                    activated_at=None if has_active else now,
+                )
+            )
+            db.flush()
+
+    def get_active_profile_metric_version(
+        self, db: Optional[Session] = None
+    ) -> Optional[str]:
+        with get_db_context(db) as db:
+            row = (
+                db.query(ProfileAlgorithmRelease.metric_version)
+                .filter(ProfileAlgorithmRelease.status == "active")
+                .order_by(ProfileAlgorithmRelease.activated_at.desc())
+                .first()
+            )
+            return row[0] if row else None
+
+    def get_profile_insight_version(
+        self, metric_version: str, db: Optional[Session] = None
+    ) -> Optional[str]:
+        with get_db_context(db) as db:
+            row = (
+                db.query(ProfileAlgorithmRelease.insight_version)
+                .filter(ProfileAlgorithmRelease.metric_version == metric_version)
+                .first()
+            )
+            return row[0] if row else None
+
+    def get_profile_formula_config(
+        self, metric_version: str, db: Optional[Session] = None
+    ) -> Optional[dict]:
+        with get_db_context(db) as db:
+            row = (
+                db.query(ProfileAlgorithmRelease.formula_config_json)
+                .filter(ProfileAlgorithmRelease.metric_version == metric_version)
+                .first()
+            )
+            return row[0] if row else None
+
+    def activate_profile_algorithm_release(
+        self, metric_version: str, db: Optional[Session] = None
+    ) -> None:
+        with get_db_context(db) as db:
+            release = (
+                db.query(ProfileAlgorithmRelease)
+                .filter(ProfileAlgorithmRelease.metric_version == metric_version)
+                .first()
+            )
+            if release is None:
+                raise ValueError("Profile algorithm release does not exist")
+            db.query(ProfileAlgorithmRelease).filter(
+                ProfileAlgorithmRelease.status == "active"
+            ).update({"status": "retired"}, synchronize_session=False)
+            release.status = "active"
+            release.activated_at = int(time.time())
+            db.flush()
+
+    def insert_profile_metric_projection(
+        self,
+        evidence: ProfileEvidenceSnapshotModel,
+        review_revision: int,
+        metric_version: str,
+        payload: ProfileMetricProjectionPayload,
+        input_hash: str,
+        output_hash: str,
+        *,
+        run_id: Optional[str] = None,
+        commit: bool = True,
+        db: Optional[Session] = None,
+    ) -> ProfileMetricProjectionModel:
+        if payload.metric_version != metric_version:
+            raise ValueError("Projection payload version does not match its release")
+        with get_db_context(db) as db:
+            existing = (
+                db.query(ProfileMetricProjection)
+                .filter(
+                    ProfileMetricProjection.evidence_snapshot_id == evidence.id,
+                    ProfileMetricProjection.review_revision == review_revision,
+                    ProfileMetricProjection.metric_version == metric_version,
+                )
+                .first()
+            )
+            if existing is not None:
+                if (
+                    existing.input_hash != input_hash
+                    or existing.output_hash != output_hash
+                ):
+                    raise ValueError("Metric projection is immutable")
+                return ProfileMetricProjectionModel.model_validate(existing)
+            row = ProfileMetricProjection(
+                id=str(uuid.uuid4()),
+                evidence_snapshot_id=evidence.id,
+                submission_id=evidence.submission_id,
+                student_id=evidence.student_id,
+                assignment_id=evidence.assignment_id,
+                round_no=evidence.round_no,
+                submitted_at=evidence.submitted_at,
+                review_revision=review_revision,
+                metric_version=metric_version,
+                projection_json=payload.model_dump(mode="json"),
+                input_hash=input_hash,
+                output_hash=output_hash,
+                run_id=run_id,
+                generated_at=int(time.time()),
+            )
+            db.add(row)
+            if commit:
+                db.commit()
+            else:
+                db.flush()
+            db.refresh(row)
+            return ProfileMetricProjectionModel.model_validate(row)
+
+    def insert_student_profile_aggregate_projection(
+        self,
+        *,
+        student_id: str,
+        scope_kind: Literal["global", "classroom"],
+        scope_id: str,
+        metric_version: str,
+        input_hash: str,
+        output_hash: str,
+        payload: StudentProfileAggregatePayload,
+        run_id: Optional[str] = None,
+        commit: bool = True,
+        db: Optional[Session] = None,
+    ) -> StudentProfileAggregateProjectionModel:
+        if payload.metric_version != metric_version:
+            raise ValueError("Aggregate payload version does not match its release")
+        with get_db_context(db) as db:
+            existing = (
+                db.query(StudentProfileAggregateProjection)
+                .filter(
+                    StudentProfileAggregateProjection.student_id == student_id,
+                    StudentProfileAggregateProjection.scope_kind == scope_kind,
+                    StudentProfileAggregateProjection.scope_id == scope_id,
+                    StudentProfileAggregateProjection.metric_version == metric_version,
+                    StudentProfileAggregateProjection.input_hash == input_hash,
+                )
+                .first()
+            )
+            if existing is not None:
+                if existing.output_hash != output_hash:
+                    raise ValueError("Aggregate projection is immutable")
+                return StudentProfileAggregateProjectionModel.model_validate(existing)
+            aggregate_revision = (
+                db.query(
+                    func.max(
+                        StudentProfileAggregateProjection.aggregate_revision
+                    )
+                )
+                .filter(
+                    StudentProfileAggregateProjection.student_id == student_id,
+                    StudentProfileAggregateProjection.scope_kind == scope_kind,
+                    StudentProfileAggregateProjection.scope_id == scope_id,
+                    StudentProfileAggregateProjection.metric_version == metric_version,
+                )
+                .scalar()
+                or 0
+            ) + 1
+            row = StudentProfileAggregateProjection(
+                id=str(uuid.uuid4()),
+                student_id=student_id,
+                scope_kind=scope_kind,
+                scope_id=scope_id,
+                metric_version=metric_version,
+                aggregate_revision=aggregate_revision,
+                projection_count=payload.projection_count,
+                input_hash=input_hash,
+                output_hash=output_hash,
+                aggregate_json=payload.model_dump(mode="json"),
+                run_id=run_id,
+                generated_at=int(time.time()),
+            )
+            db.add(row)
+            if commit:
+                db.commit()
+            else:
+                db.flush()
+            db.refresh(row)
+            return StudentProfileAggregateProjectionModel.model_validate(row)
+
+    def get_latest_student_profile_aggregate_projection(
+        self,
+        *,
+        student_id: str,
+        scope_kind: Literal["global", "classroom"],
+        scope_id: str,
+        metric_version: str,
+        db: Optional[Session] = None,
+    ) -> Optional[StudentProfileAggregateProjectionModel]:
+        with get_db_context(db) as db:
+            row = (
+                db.query(StudentProfileAggregateProjection)
+                .filter(
+                    StudentProfileAggregateProjection.student_id == student_id,
+                    StudentProfileAggregateProjection.scope_kind == scope_kind,
+                    StudentProfileAggregateProjection.scope_id == scope_id,
+                    StudentProfileAggregateProjection.metric_version == metric_version,
+                )
+                .order_by(
+                    StudentProfileAggregateProjection.aggregate_revision.desc(),
+                )
+                .first()
+            )
+            return (
+                StudentProfileAggregateProjectionModel.model_validate(row)
+                if row
+                else None
+            )
+
+    def _latest_profile_projection_query(
+        self,
+        db: Session,
+        student_id: str,
+        metric_version: str,
+    ):
+        latest_evidence = (
+            db.query(
+                ProfileEvidenceSnapshot.submission_id.label("submission_id"),
+                func.max(ProfileEvidenceSnapshot.evidence_revision).label(
+                    "evidence_revision"
+                ),
+            )
+            .group_by(ProfileEvidenceSnapshot.submission_id)
+            .subquery()
+        )
+        latest_review = (
+            db.query(
+                ProfileMetricProjection.evidence_snapshot_id.label(
+                    "evidence_snapshot_id"
+                ),
+                func.max(ProfileMetricProjection.review_revision).label(
+                    "review_revision"
+                ),
+            )
+            .filter(ProfileMetricProjection.metric_version == metric_version)
+            .group_by(ProfileMetricProjection.evidence_snapshot_id)
+            .subquery()
+        )
+        return (
+            db.query(ProfileMetricProjection)
+            .join(
+                ProfileEvidenceSnapshot,
+                ProfileEvidenceSnapshot.id
+                == ProfileMetricProjection.evidence_snapshot_id,
+            )
+            .join(
+                latest_evidence,
+                and_(
+                    latest_evidence.c.submission_id
+                    == ProfileEvidenceSnapshot.submission_id,
+                    latest_evidence.c.evidence_revision
+                    == ProfileEvidenceSnapshot.evidence_revision,
+                ),
+            )
+            .join(
+                latest_review,
+                and_(
+                    latest_review.c.evidence_snapshot_id
+                    == ProfileMetricProjection.evidence_snapshot_id,
+                    latest_review.c.review_revision
+                    == ProfileMetricProjection.review_revision,
+                ),
+            )
+            .filter(
+                ProfileMetricProjection.student_id == student_id,
+                ProfileMetricProjection.metric_version == metric_version,
+            )
+        )
+
+    def get_profile_metric_projections(
         self,
         student_id: str,
         metric_version: str,
@@ -2383,37 +3550,38 @@ class EducationTable:
         start_at: Optional[int] = None,
         end_at: Optional[int] = None,
         round_no: Optional[int] = None,
-        limit: int = 200,
+        limit: Optional[int] = 200,
         offset: int = 0,
         db: Optional[Session] = None,
-    ) -> list[StudentProfileSnapshotModel]:
+    ) -> list[ProfileMetricProjectionModel]:
         if assignment_ids is not None and not assignment_ids:
             return []
         with get_db_context(db) as db:
-            query = db.query(StudentProfileSnapshot).filter(
-                StudentProfileSnapshot.student_id == student_id,
-                StudentProfileSnapshot.metric_version == metric_version,
+            query = self._latest_profile_projection_query(
+                db, student_id, metric_version
             )
             if assignment_ids is not None:
                 query = query.filter(
-                    StudentProfileSnapshot.assignment_id.in_(assignment_ids)
+                    ProfileMetricProjection.assignment_id.in_(assignment_ids)
                 )
             if start_at is not None:
-                query = query.filter(StudentProfileSnapshot.submitted_at >= start_at)
+                query = query.filter(ProfileMetricProjection.submitted_at >= start_at)
             if end_at is not None:
-                query = query.filter(StudentProfileSnapshot.submitted_at <= end_at)
+                query = query.filter(ProfileMetricProjection.submitted_at <= end_at)
             if round_no is not None:
-                query = query.filter(StudentProfileSnapshot.round_no == round_no)
-            rows = query.order_by(
-                StudentProfileSnapshot.submitted_at.desc(),
-                StudentProfileSnapshot.round_no.desc(),
-            ).offset(offset).limit(limit).all()
-            rows.reverse()
+                query = query.filter(ProfileMetricProjection.round_no == round_no)
+            query = query.order_by(
+                ProfileMetricProjection.submitted_at.asc(),
+                ProfileMetricProjection.round_no.asc(),
+                ProfileMetricProjection.id.asc(),
+            ).offset(offset)
+            if limit is not None:
+                query = query.limit(limit)
             return [
-                StudentProfileSnapshotModel.model_validate(row) for row in rows
+                ProfileMetricProjectionModel.model_validate(row) for row in query.all()
             ]
 
-    def count_student_profile_snapshots(
+    def count_profile_metric_projections(
         self,
         student_id: str,
         metric_version: str,
@@ -2426,21 +3594,22 @@ class EducationTable:
         if assignment_ids is not None and not assignment_ids:
             return 0
         with get_db_context(db) as db:
-            query = db.query(StudentProfileSnapshot).filter(
-                StudentProfileSnapshot.student_id == student_id,
-                StudentProfileSnapshot.metric_version == metric_version,
+            query = self._latest_profile_projection_query(
+                db, student_id, metric_version
             )
             if assignment_ids is not None:
-                query = query.filter(StudentProfileSnapshot.assignment_id.in_(assignment_ids))
+                query = query.filter(
+                    ProfileMetricProjection.assignment_id.in_(assignment_ids)
+                )
             if start_at is not None:
-                query = query.filter(StudentProfileSnapshot.submitted_at >= start_at)
+                query = query.filter(ProfileMetricProjection.submitted_at >= start_at)
             if end_at is not None:
-                query = query.filter(StudentProfileSnapshot.submitted_at <= end_at)
+                query = query.filter(ProfileMetricProjection.submitted_at <= end_at)
             if round_no is not None:
-                query = query.filter(StudentProfileSnapshot.round_no == round_no)
+                query = query.filter(ProfileMetricProjection.round_no == round_no)
             return query.count()
 
-    def get_student_profile_metric_versions(
+    def get_profile_metric_versions(
         self,
         student_id: str,
         assignment_ids: Optional[list[str]] = None,
@@ -2449,11 +3618,13 @@ class EducationTable:
         if assignment_ids is not None and not assignment_ids:
             return []
         with get_db_context(db) as db:
-            query = db.query(StudentProfileSnapshot.metric_version).filter(
-                StudentProfileSnapshot.student_id == student_id
+            query = db.query(ProfileMetricProjection.metric_version).filter(
+                ProfileMetricProjection.student_id == student_id
             )
             if assignment_ids is not None:
-                query = query.filter(StudentProfileSnapshot.assignment_id.in_(assignment_ids))
+                query = query.filter(
+                    ProfileMetricProjection.assignment_id.in_(assignment_ids)
+                )
             return sorted({row[0] for row in query.distinct().all()}, reverse=True)
 
     def get_micro_reflections_by_ids(
@@ -2787,9 +3958,14 @@ class EducationTable:
                 )
             if not include_archived:
                 query = query.filter(StudentGrowthGoal.status != "archived")
-            goals = query.order_by(
-                StudentGrowthGoal.status.asc(), StudentGrowthGoal.updated_at.desc()
-            ).offset(offset).limit(limit).all()
+            goals = (
+                query.order_by(
+                    StudentGrowthGoal.status.asc(), StudentGrowthGoal.updated_at.desc()
+                )
+                .offset(offset)
+                .limit(limit)
+                .all()
+            )
             return [StudentGrowthGoalModel.model_validate(goal) for goal in goals]
 
     def insert_student_growth_goal(
@@ -2897,7 +4073,11 @@ class EducationTable:
     ) -> Optional[TeacherStudentNoteModel]:
         with get_db_context(db) as db:
             note = db.get(TeacherStudentNote, note_id)
-            if note is None or note.teacher_id != teacher_id or note.deleted_at is not None:
+            if (
+                note is None
+                or note.teacher_id != teacher_id
+                or note.deleted_at is not None
+            ):
                 return None
             db.add(
                 TeacherStudentNoteRevision(
