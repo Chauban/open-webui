@@ -35,6 +35,11 @@ from open_webui.models.users import (
     UserStatus,
     UserUpdateForm,
 )
+from open_webui.services.education.identity import (
+    get_education_role,
+    role_from_group_ids,
+    set_education_role,
+)
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.knowledge import Knowledges
 from open_webui.models.models import Models
@@ -137,6 +142,11 @@ async def get_users(
                 **{
                     **user.model_dump(),
                     'group_ids': [group.id for group in user_groups.get(user.id, [])],
+                    'education_role': (
+                        'admin'
+                        if user.role == 'admin'
+                        else role_from_group_ids({group.id for group in user_groups.get(user.id, [])})
+                    ),
                 }
             )
             for user in users
@@ -171,13 +181,31 @@ async def search_users(
     if query:
         filter['query'] = query
 
-    return await Users.get_users(
+    result = await Users.get_users(
         filter=filter,
         sort={'order_by': order_by, 'direction': direction},
         skip=skip,
         limit=limit,
         db=db,
     )
+
+    users = result['users']
+    user_groups = await Groups.get_groups_by_member_ids([u.id for u in users], db=db)
+
+    return {
+        'users': [
+            {
+                **u.model_dump(),
+                'education_role': (
+                    'admin'
+                    if u.role == 'admin'
+                    else role_from_group_ids({group.id for group in user_groups.get(u.id, [])})
+                ),
+            }
+            for u in users
+        ],
+        'total': result['total'],
+    }
 
 
 ############################
@@ -692,13 +720,11 @@ async def update_user_info_by_session_user(  # PATCH-style merge
     NOT eliminate lost-update races on concurrent same-user writes; real safety
     would need row locking or an optimistic-concurrency version column.
     """
-    if user.role != 'admin' and 'education_role' in form_data:
-        if form_data.get('education_role') != (user.info or {}).get('education_role'):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail='Education role can only be changed by an administrator',
-            )
-        form_data = {k: v for k, v in form_data.items() if k != 'education_role'}
+    if 'education_role' in form_data:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail='Education role is managed through permission groups by an administrator',
+        )
     merged_info = {**(user.info or {}), **form_data}
     updated = await Users.update_user_by_id(user.id, {'info': merged_info}, db=db)
     if not updated:
@@ -1038,22 +1064,20 @@ async def update_user_by_id(
             if await Auths.update_user_password_by_id(user_id, hashed, db=db):
                 await revoke_user_tokens(request, user_id)
 
-        user_info = {**(user.info or {})}
         effective_education_role = form_data.education_role
         if form_data.role != "admin" and effective_education_role not in {"student", "teacher"}:
             effective_education_role = "student"
+        if form_data.role == "admin":
+            effective_education_role = None
 
         existing_membership = Education.get_classroom_member_by_user_id(user_id, db=db)
         if form_data.classroom_id is not None:
             form_data.classroom_id = form_data.classroom_id.strip() or None
 
-        if effective_education_role in {"student", "teacher"}:
-            user_info["education_role"] = effective_education_role
-        else:
-            user_info.pop("education_role", None)
+        await set_education_role(user_id, effective_education_role, db=db)
 
         # Build update dict from only the provided fields
-        update_data = {"info": user_info}
+        update_data = {}
         if form_data.role is not None:
             update_data['role'] = form_data.role
         if form_data.name is not None:

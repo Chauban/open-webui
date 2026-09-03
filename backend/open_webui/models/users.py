@@ -185,6 +185,8 @@ class UpdateProfileForm(BaseModel):
 
 class UserGroupIdsModel(UserModel):
     group_ids: list[str] = []
+    # Teaching identity, derived from the education permission groups.
+    education_role: str | None = None
 
 
 class UserModelResponse(UserModel):
@@ -215,6 +217,8 @@ class UserInfoResponse(UserStatus):
     bio: str | None = None
     groups: list | None = []
     is_active: bool = False
+    # Teaching identity, derived from the education permission groups.
+    education_role: str | None = None
 
 
 class UserIdNameResponse(BaseModel):

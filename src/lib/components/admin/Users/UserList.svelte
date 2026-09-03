@@ -388,9 +388,9 @@
 							>
 								{$i18n.t(user.role)}
 							</button>
-							{#if user?.info?.education_role}
+							{#if user?.education_role && user.education_role !== 'admin'}
 								<div class="text-[11px] text-gray-500 dark:text-gray-400 capitalize">
-									{user.info.education_role === 'teacher'
+									{user.education_role === 'teacher'
 										? $i18n.t('Teacher')
 										: $i18n.t('Student')}
 								</div>

@@ -59,6 +59,7 @@ from open_webui.models.folders import Folder, FolderForm, FolderUpdateForm, Fold
 from open_webui.models.groups import Group, GroupMember
 from open_webui.models.notes import Note, PinnedNote
 from open_webui.models.users import User, UserModel
+from open_webui.services.education.identity import GROUP_ID_BY_ROLE
 import open_webui.routers.education as education_router_module
 import open_webui.services.education.analysis as education_analysis_module
 import open_webui.services.education.profile as education_profile_module
@@ -329,12 +330,37 @@ def _seed_user(session, user_id: str, name: str, email: str, education_role: str
         name=name,
         role="user",
         profile_image_url="/user.png",
-        info={"education_role": education_role},
+        info={},
         last_active_at=now,
         created_at=now,
         updated_at=now,
     )
     session.add(user_row)
+
+    # Teaching identity is group membership, so seed the group and the member
+    # row in the same session the router will read through.
+    group_id = GROUP_ID_BY_ROLE[education_role]
+    if session.get(Group, group_id) is None:
+        session.add(
+            Group(
+                id=group_id,
+                user_id="",
+                name=group_id,
+                description="",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+    session.add(
+        GroupMember(
+            id=str(uuid.uuid4()),
+            group_id=group_id,
+            user_id=user_id,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
     session.commit()
     session.refresh(user_row)
     return UserModel.model_validate(user_row)
@@ -589,6 +615,60 @@ def education_client():
             asyncio.run(async_engine.dispose())
             internal_db.AsyncSessionLocal = original_async_session_local
             UserContext.current_user = None
+
+
+def test_teaching_identity_is_permission_group_membership(education_client):
+    """身份即权限组:进班接口只认组成员关系,不再有第二份身份记录。"""
+    client, teacher, _, student, outsider, SessionLocal = education_client
+
+    UserContext.current_user = teacher
+    classroom_res = client.post(
+        "/api/v1/classrooms",
+        json={"name": "Group Identity Class", "description": ""},
+    )
+    assert classroom_res.status_code == 200, classroom_res.text
+    classroom = classroom_res.json()["classroom"]
+
+    def group_ids_of(user_id):
+        with SessionLocal() as session:
+            return {
+                row[0]
+                for row in session.query(GroupMember.group_id)
+                .filter(GroupMember.user_id == user_id)
+                .all()
+            }
+
+    assert group_ids_of(teacher.id) == {GROUP_ID_BY_ROLE["teacher"]}
+    assert group_ids_of(student.id) == {GROUP_ID_BY_ROLE["student"]}
+
+    UserContext.current_user = student
+    join_res = client.post(
+        "/api/v1/classrooms/join",
+        json={"invite_code": classroom["invite_code"]},
+    )
+    assert join_res.status_code == 200, join_res.text
+
+    # 教师不在学生组里,同一个邀请码对他就是 403 —— 判定只看组
+    UserContext.current_user = teacher
+    teacher_join_res = client.post(
+        "/api/v1/classrooms/join",
+        json={"invite_code": classroom["invite_code"]},
+    )
+    assert teacher_join_res.status_code == 403, teacher_join_res.text
+
+    # 身份从组里被摘掉后,进班资格随之消失,不存在第二处身份来源兜底
+    with SessionLocal() as session:
+        session.query(GroupMember).filter(
+            GroupMember.user_id == outsider.id
+        ).delete(synchronize_session=False)
+        session.commit()
+
+    UserContext.current_user = outsider
+    outsider_join_res = client.post(
+        "/api/v1/classrooms/join",
+        json={"invite_code": classroom["invite_code"]},
+    )
+    assert outsider_join_res.status_code == 403, outsider_join_res.text
 
 
 def test_education_classroom_main_flow(education_client):

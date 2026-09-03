@@ -19,7 +19,7 @@
 	let inviteCode = '';
 	let joining = false;
 
-	$: educationRole = $user?.info?.education_role ?? null;
+	$: educationRole = $user?.education_role ?? null;
 	$: isStudent = educationRole === 'student';
 
 	onMount(() => {

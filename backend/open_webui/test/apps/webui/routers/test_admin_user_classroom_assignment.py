@@ -18,7 +18,9 @@ if str(BACKEND_ROOT) not in sys.path:
 import open_webui.internal.db as internal_db
 from open_webui.models.auths import Auth
 from open_webui.models.education import Classroom, ClassroomMember, Education
+from open_webui.models.groups import Group, GroupMember
 from open_webui.models.users import User, UserModel
+from open_webui.services.education.identity import GROUP_ID_BY_ROLE
 from open_webui.routers.users import router as users_router
 from open_webui.utils.auth import get_admin_user
 
@@ -42,12 +44,37 @@ def _seed_user(session, name: str, email: str, role: str, education_role: str | 
         name=name,
         role=role,
         profile_image_url="/user.png",
-        info={"education_role": education_role} if education_role else {},
+        info={},
         last_active_at=now,
         created_at=now,
         updated_at=now,
     )
     session.add(user_row)
+
+    # 教学身份来自权限组,种子数据同样按组写入
+    group_id = GROUP_ID_BY_ROLE.get(education_role or "")
+    if group_id:
+        if session.get(Group, group_id) is None:
+            session.add(
+                Group(
+                    id=group_id,
+                    user_id="",
+                    name=group_id,
+                    description="",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+        session.add(
+            GroupMember(
+                id=uuid.uuid4().hex,
+                group_id=group_id,
+                user_id=user_row.id,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+
     session.commit()
     session.refresh(user_row)
     return UserModel.model_validate(user_row)
@@ -75,7 +102,14 @@ def test_admin_can_assign_student_to_classroom():
             expire_on_commit=False,
         )
 
-        for table in [User.__table__, Auth.__table__, Classroom.__table__, ClassroomMember.__table__]:
+        for table in [
+            User.__table__,
+            Auth.__table__,
+            Classroom.__table__,
+            ClassroomMember.__table__,
+            Group.__table__,
+            GroupMember.__table__,
+        ]:
             table.create(bind=engine, checkfirst=True)
 
         with engine.begin() as connection:
@@ -224,9 +258,15 @@ def test_admin_can_assign_student_to_classroom():
 
             with SessionLocal() as session:
                 membership = Education.get_classroom_member_by_user_id(student_id, db=session)
-                updated_user = session.get(User, student_id)
                 assert membership is None
-                assert updated_user.info["education_role"] == "teacher"
+                # 升为教师 = 换权限组:进教师组、离开学生组
+                group_ids = {
+                    row[0]
+                    for row in session.query(GroupMember.group_id)
+                    .filter(GroupMember.user_id == student_id)
+                    .all()
+                }
+                assert group_ids == {GROUP_ID_BY_ROLE["teacher"]}
         finally:
             client.close()
             engine.dispose()

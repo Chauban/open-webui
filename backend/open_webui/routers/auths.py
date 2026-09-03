@@ -60,6 +60,7 @@ from open_webui.models.users import (
     Users,
     UserStatus,
 )
+from open_webui.services.education.identity import get_education_role, set_education_role
 from open_webui.utils.access_control import get_permissions, has_permission
 from open_webui.utils.auth import (
     create_api_key,
@@ -217,9 +218,7 @@ async def create_session_response(
         data={'auth_method': source},
     )
 
-    education_role = None
-    if getattr(user, "info", None):
-        education_role = user.info.get("education_role")
+    education_role = await get_education_role(user, db=db)
 
     return {
         "token": token,
@@ -296,9 +295,7 @@ async def get_session_user(
 
     user_permissions = await get_permissions(user.id, await Config.get('user.permissions'), db=db)
 
-    education_role = None
-    if getattr(user, 'info', None):
-        education_role = user.info.get('education_role')
+    education_role = await get_education_role(user, db=db)
 
     response_data = {
         'token': token,
@@ -897,13 +894,8 @@ async def signup_handler(
         db=db,
     )
 
-    if education_role in {'student', 'teacher'}:
-        await Users.update_user_by_id(
-            user.id,
-            {'info': {'education_role': education_role}},
-            db=db,
-        )
-        user = await Users.get_user_by_id(user.id, db=db)
+    if education_role in {'student', 'teacher'} and user.role != 'admin':
+        await set_education_role(user.id, education_role, db=db)
 
     if classroom_invite_code and education_role == 'student':
         classroom = Education.get_classroom_by_invite_code(classroom_invite_code, db=db)
@@ -1178,11 +1170,7 @@ async def add_user(
 
         if user:
             if form_data.education_role in {"student", "teacher"}:
-                await Users.update_user_by_id(
-                    user.id,
-                    {"info": {"education_role": form_data.education_role}},
-                    db=db,
-                )
+                await set_education_role(user.id, form_data.education_role, db=db)
                 user = await Users.get_user_by_id(user.id, db=db)
 
             await apply_default_group_assignment(

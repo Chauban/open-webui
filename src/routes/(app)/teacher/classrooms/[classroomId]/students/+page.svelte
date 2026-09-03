@@ -104,7 +104,7 @@
 				(item) =>
 					item?.role !== 'pending' &&
 					item?.role !== 'admin' &&
-					item?.info?.education_role === 'student' &&
+					item?.education_role === 'student' &&
 					!existingMemberIds.has(item.id)
 			);
 		} catch (error) {

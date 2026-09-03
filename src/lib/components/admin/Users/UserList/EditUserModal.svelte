@@ -30,7 +30,7 @@
 			_user = {
 				...selectedUser,
 				education_role:
-					selectedUser?.role === 'admin' ? '' : selectedUser?.info?.education_role ?? 'student',
+					selectedUser?.role === 'admin' ? '' : (selectedUser?.education_role ?? 'student'),
 				classroom_id: '',
 				password: ''
 			};

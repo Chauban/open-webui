@@ -17,6 +17,7 @@ from open_webui.models.groups import (
     GroupUpdateForm,
     UserIdsForm,
 )
+from open_webui.services.education.identity import EDUCATION_GROUP_IDS
 from open_webui.models.knowledge import Knowledges
 from open_webui.models.models import Models
 from open_webui.models.tools import Tools
@@ -305,6 +306,12 @@ async def remove_users_from_group(
 async def delete_group_by_id(
     request: Request, id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)
 ):
+    if id in EDUCATION_GROUP_IDS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='This group carries a teaching identity and cannot be deleted',
+        )
+
     try:
         result = await Groups.delete_group_by_id(id, db=db)
         if result:

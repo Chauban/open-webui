@@ -20,12 +20,12 @@
 	let submitting = false;
 	let checking = true;
 
-	$: educationRole = $user?.info?.education_role ?? null;
+	$: educationRole = $user?.education_role ?? null;
 
 	onMount(async () => {
 		// 引导页守卫:身份在注册时选定、由管理员管理,这里只做首次初始化;已完成初始化的直接跳走
 		const current = get(user);
-		const role = current?.info?.education_role ?? null;
+		const role = current?.education_role ?? null;
 
 		if (current?.role === 'admin') {
 			goto('/teacher');

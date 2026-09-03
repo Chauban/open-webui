@@ -93,6 +93,7 @@ from open_webui.services.education.profile_snapshots import (
     build_student_profile,
 )
 from open_webui.services.education.profile import PROFILE_METRIC_VERSION
+from open_webui.services.education.identity import get_education_role
 from open_webui.services.education.profile_aggregates import (
     refresh_student_profile_aggregates,
 )
@@ -141,16 +142,13 @@ async def _send_education_notifications(
     )
 
 
-def _get_education_role(user):
-    if user.role == "admin":
-        return "admin"
-    if getattr(user, "info", None):
-        return user.info.get("education_role")
-    return None
+async def _get_education_role(user):
+    """教学身份来自权限组,走独立的异步会话(本模块的 db 是同步 Session)。"""
+    return await get_education_role(user)
 
 
-def _ensure_teacher_identity(user):
-    education_role = _get_education_role(user)
+async def _ensure_teacher_identity(user):
+    education_role = await _get_education_role(user)
     if education_role in {"admin", "teacher"}:
         return education_role
 
@@ -172,12 +170,11 @@ def _format_export_timestamp(timestamp: Optional[int]) -> str:
 
 async def _build_classroom_member_detail(member, db: Session):
     linked_user = await Users.get_user_by_id(member.user_id, db=db)
-    linked_user_info = linked_user.info if linked_user and linked_user.info else {}
     return ClassroomMemberDetail(
         member=member,
         user_name=linked_user.name if linked_user else member.user_id,
         user_email=linked_user.email if linked_user else None,
-        education_role=linked_user_info.get("education_role"),
+        education_role=(await get_education_role(linked_user)) if linked_user else None,
     )
 
 
@@ -667,37 +664,37 @@ class TeacherSubmissionScope(NamedTuple):
     assignment: AssignmentModel
 
 
-def require_teacher_classroom(
+async def require_teacher_classroom(
     classroom_id: str,
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ) -> ClassroomModel:
     """路径含 {classroom_id} 的教师端接口:校验教学身份 + 班级教师权限。"""
-    _ensure_teacher_identity(user)
+    await _ensure_teacher_identity(user)
     classroom = _get_classroom_or_404(classroom_id, db)
     _ensure_classroom_access(user, classroom, db, require_teacher=True)
     return classroom
 
 
-def require_teacher_assignment(
+async def require_teacher_assignment(
     assignment_id: str,
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ) -> AssignmentModel:
     """路径含 {assignment_id} 的教师端接口:校验教学身份 + 作业教师权限。"""
-    _ensure_teacher_identity(user)
+    await _ensure_teacher_identity(user)
     assignment = _get_assignment_or_404(assignment_id, db)
     _ensure_assignment_access(user, assignment, db, require_teacher=True)
     return assignment
 
 
-def require_teacher_submission(
+async def require_teacher_submission(
     submission_id: str,
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ) -> TeacherSubmissionScope:
     """路径含 {submission_id} 的教师端接口:提交所属作业需具备教师权限。"""
-    _ensure_teacher_identity(user)
+    await _ensure_teacher_identity(user)
     submission = _get_submission_or_404(submission_id, db)
     assignment = _get_assignment_or_404(submission.assignment_id, db)
     _ensure_assignment_access(user, assignment, db, require_teacher=True)
@@ -772,7 +769,7 @@ async def create_assignment(
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
-    _ensure_teacher_identity(user)
+    await _ensure_teacher_identity(user)
     classroom_ids = list(
         dict.fromkeys(
             classroom_id.strip()
@@ -1056,7 +1053,7 @@ async def get_my_classroom(
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
-    education_role = _get_education_role(user)
+    education_role = await _get_education_role(user)
     if education_role == "teacher" or user.role == "admin":
         classrooms = Education.get_classrooms_by_teacher(user.id, db=db)
         if not classrooms:
@@ -1085,7 +1082,7 @@ async def create_classroom(
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
-    _ensure_teacher_identity(user)
+    await _ensure_teacher_identity(user)
     if not form_data.name.strip():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1114,7 +1111,7 @@ async def join_classroom(
             detail="Classroom invite code is required",
         )
 
-    if _get_education_role(user) != "student":
+    if await _get_education_role(user) != "student":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only students can join classrooms",
@@ -1160,7 +1157,7 @@ async def get_teacher_classrooms(
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
-    _ensure_teacher_identity(user)
+    await _ensure_teacher_identity(user)
     classrooms = Education.get_classrooms_by_teacher(user.id, db=db)
 
     items = []
@@ -1201,7 +1198,7 @@ async def get_teacher_assignments(
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
-    _ensure_teacher_identity(user)
+    await _ensure_teacher_identity(user)
     assignments = Education.get_assignments_by_teacher(user.id, db=db)
     return [
         await _build_teacher_assignment_list_item(assignment, db)
@@ -1224,7 +1221,7 @@ async def get_teacher_overview(
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
-    _ensure_teacher_identity(user)
+    await _ensure_teacher_identity(user)
     classrooms = Education.get_classrooms_by_teacher(user.id, db=db)
     classroom_items = []
     assignment_items = []
@@ -1344,7 +1341,7 @@ async def get_teacher_review(
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
-    _ensure_teacher_identity(user)
+    await _ensure_teacher_identity(user)
     assignments = Education.get_assignments_by_teacher(user.id, db=db)
     if assignment_id:
         assignments = [
@@ -1453,9 +1450,7 @@ async def add_classroom_member(
             detail="User not found",
         )
 
-    education_role = (
-        (member_user.info or {}).get("education_role") if member_user.info else None
-    )
+    education_role = await get_education_role(member_user)
     if education_role != "student":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1524,9 +1519,7 @@ async def bulk_import_classroom_members(
             result.failed_users.append({"value": user_id, "reason": "User not found"})
             continue
 
-        education_role = (
-            (member_user.info or {}).get("education_role") if member_user.info else None
-        )
+        education_role = await get_education_role(member_user)
         if education_role != "student":
             result.failed_users.append(
                 {"value": user_id, "reason": "Only student users can be imported"}
@@ -1994,7 +1987,7 @@ async def get_writing_home(
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
-    education_role = _get_education_role(user)
+    education_role = await _get_education_role(user)
     memberships = (
         Education.get_classroom_members_by_user_id(user.id, db=db)
         if education_role == "student"
@@ -2134,7 +2127,7 @@ async def create_personal_writing(
     )
     return UnifiedWritingWorkspaceResponse(
         scope="personal",
-        owner_role=_get_education_role(user) or user.role,
+        owner_role=await _get_education_role(user) or user.role,
         assignment=None,
         writing_session=session,
         note=note.model_dump(),
@@ -2191,7 +2184,7 @@ async def get_writing_workspace(
 
     return UnifiedWritingWorkspaceResponse(
         scope=session.scope,
-        owner_role=_get_education_role(user) or user.role,
+        owner_role=await _get_education_role(user) or user.role,
         assignment=assignment,
         writing_session=session,
         note=note.model_dump(),
@@ -2225,7 +2218,7 @@ async def get_student_assignment_workspaces(
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
-    education_role = _get_education_role(user)
+    education_role = await _get_education_role(user)
     if education_role != "student":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
