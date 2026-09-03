@@ -33,8 +33,11 @@
 	};
 </script>
 
-<WritingWorkspaceShell
-	scope="assignment"
-	projectBaseUrl={`/assignments/${$page.params.assignmentId}/write`}
-	{loadWorkspace}
-/>
+<!-- SvelteKit 复用同一路由的页面组件,不加 key 时切换作业不会重新挂载工作区 -->
+{#key $page.params.assignmentId}
+	<WritingWorkspaceShell
+		scope="assignment"
+		projectBaseUrl={`/assignments/${$page.params.assignmentId}/write`}
+		{loadWorkspace}
+	/>
+{/key}
