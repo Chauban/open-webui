@@ -321,15 +321,15 @@
 
 											<div class="mb-2">
 												<label for="education-role" class="text-sm font-medium text-left mb-1 block"
-													>Identity</label
+													>{$i18n.t('Identity')}</label
 												>
 												<select
 													bind:value={educationRole}
 													id="education-role"
 													class="my-0.5 w-full text-sm outline-hidden bg-transparent"
 												>
-													<option value="student">Student</option>
-													<option value="teacher">Teacher</option>
+													<option value="student">{$i18n.t('Student')}</option>
+													<option value="teacher">{$i18n.t('Teacher')}</option>
 												</select>
 											</div>
 

@@ -198,18 +198,18 @@
 									</div>
 
 									<div class="flex flex-col w-full">
-										<div class=" mb-1 text-xs text-gray-500">Education Role</div>
+										<div class=" mb-1 text-xs text-gray-500">{$i18n.t('Education Role')}</div>
 
 										<div class="flex-1">
 											<select
 												class="w-full text-sm bg-transparent outline-hidden"
 												bind:value={_user.education_role}
-												aria-label="Education Role"
+												aria-label={$i18n.t('Education Role')}
 												disabled={_user.role === 'admin'}
 												required={_user.role !== 'admin'}
 											>
-												<option value="student">Student</option>
-												<option value="teacher">Teacher</option>
+												<option value="student">{$i18n.t('Student')}</option>
+												<option value="teacher">{$i18n.t('Teacher')}</option>
 											</select>
 										</div>
 									</div>
