@@ -152,6 +152,11 @@
 				class="absolute -left-1.5 -right-1.5 -top-0 -bottom-0 z-20 cursor-col-resize bg-transparent"
 				style="touch-action: none;"
 			></span>
+			<span
+				class="pointer-events-none absolute top-1/2 left-1/2 z-30 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full transition-all duration-150 {isResizing
+					? 'h-10 bg-gray-500 dark:bg-gray-400'
+					: 'h-7 bg-gray-300 dark:bg-gray-700 group-hover:h-10 group-hover:bg-gray-400 dark:group-hover:bg-gray-500'}"
+			></span>
 		</div>
 	{/if}
 
@@ -174,6 +179,11 @@
 			<span
 				class="absolute -left-1.5 -right-1.5 -top-0 -bottom-0 z-20 cursor-col-resize bg-transparent"
 				style="touch-action: none;"
+			></span>
+			<span
+				class="pointer-events-none absolute top-1/2 left-1/2 z-30 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full transition-all duration-150 {isResizing
+					? 'h-10 bg-gray-500 dark:bg-gray-400'
+					: 'h-7 bg-gray-300 dark:bg-gray-700 group-hover:h-10 group-hover:bg-gray-400 dark:group-hover:bg-gray-500'}"
 			></span>
 		</div>
 	{/if}
