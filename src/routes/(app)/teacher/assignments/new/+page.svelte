@@ -11,6 +11,7 @@
 	import EduButton from '$lib/components/education/EduButton.svelte';
 	import EduCard from '$lib/components/education/EduCard.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
+	import RubricCriteriaEditor from '$lib/components/education/RubricCriteriaEditor.svelte';
 	import { EDU_FIELD_CLASS, eduSegmentClass } from '$lib/components/education/styles';
 	import { getClassroomDisplayName } from '$lib/utils/education';
 
@@ -23,10 +24,11 @@
 	let description = '';
 	let dueAt = '';
 	let scoreMax = '100';
+	// 默认维度走词条，教师看到的是母语名称；key 只是后端字段名，教师不填。
 	let rubricCriteria = [
-		{ key: 'ideas', label: 'Ideas', maxScore: '34' },
-		{ key: 'structure', label: 'Structure', maxScore: '33' },
-		{ key: 'evidence', label: 'Evidence', maxScore: '33' }
+		{ key: 'criterion_1', label: t('Ideas'), maxScore: '34' },
+		{ key: 'criterion_2', label: t('Structure'), maxScore: '33' },
+		{ key: 'criterion_3', label: t('Evidence'), maxScore: '33' }
 	];
 	let loading = true;
 	let saving = false;
@@ -40,15 +42,6 @@
 			next.add(id);
 		}
 		selectedClassroomIds = next;
-	};
-
-	const addCriterion = () => {
-		rubricCriteria = [...rubricCriteria, { key: '', label: '', maxScore: '' }];
-	};
-
-	const removeCriterion = (index: number) => {
-		if (rubricCriteria.length <= 1) return;
-		rubricCriteria = rubricCriteria.filter((_, itemIndex) => itemIndex !== index);
 	};
 
 	onMount(async () => {
@@ -117,17 +110,10 @@
 		if (
 			parsedCriteria.some(
 				(criterion) =>
-					!/^[a-z][a-z0-9_]{0,39}$/.test(criterion.key) ||
-					!criterion.label ||
-					!Number.isInteger(criterion.max_score) ||
-					criterion.max_score <= 0
+					!criterion.label || !Number.isInteger(criterion.max_score) || criterion.max_score <= 0
 			)
 		) {
-			toast.error(t('Every rubric criterion needs a valid key, label, and positive whole-number maximum.'));
-			return;
-		}
-		if (new Set(parsedCriteria.map((criterion) => criterion.key)).size !== parsedCriteria.length) {
-			toast.error(t('Rubric criterion keys must be unique.'));
+			toast.error(t('Every rubric criterion needs a name and a positive whole-number maximum.'));
 			return;
 		}
 		if (parsedCriteria.reduce((sum, criterion) => sum + criterion.max_score, 0) !== parsedScoreMax) {
@@ -237,47 +223,7 @@
 						class="w-full {EDU_FIELD_CLASS}"
 					/>
 				</div>
-				<div>
-					<div class="mb-2 flex items-center justify-between gap-3">
-						<div class="text-sm font-semibold">{$i18n.t('Rubric Criteria')}</div>
-						<EduButton size="sm" on:click={addCriterion}>{$i18n.t('Add Criterion')}</EduButton>
-					</div>
-					<div class="space-y-2">
-						{#each rubricCriteria as criterion, index}
-							<div class="grid gap-2 md:grid-cols-[1fr_1.5fr_0.75fr_auto]">
-								<input
-									bind:value={criterion.key}
-									class="w-full {EDU_FIELD_CLASS}"
-									placeholder={$i18n.t('Key, e.g. evidence')}
-								/>
-								<input
-									bind:value={criterion.label}
-									class="w-full {EDU_FIELD_CLASS}"
-									placeholder={$i18n.t('Criterion label')}
-								/>
-								<input
-									bind:value={criterion.maxScore}
-									type="number"
-									min="1"
-									step="1"
-									class="w-full {EDU_FIELD_CLASS}"
-									placeholder={$i18n.t('Maximum')}
-								/>
-								<EduButton
-									variant="danger"
-									size="sm"
-									disabled={rubricCriteria.length <= 1}
-									on:click={() => removeCriterion(index)}
-								>
-									{$i18n.t('Remove')}
-								</EduButton>
-							</div>
-						{/each}
-					</div>
-					<div class="mt-2 text-xs text-gray-400">
-						{$i18n.t('Rubric maximum scores must add up to the assignment maximum.')}
-					</div>
-				</div>
+				<RubricCriteriaEditor bind:criteria={rubricCriteria} {scoreMax} />
 				<div class="flex justify-end">
 					<EduButton variant="primary" on:click={submit} disabled={saving}>
 						{saving ? $i18n.t('Creating...') : $i18n.t('Create Assignment')}

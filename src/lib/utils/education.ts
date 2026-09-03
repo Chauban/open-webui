@@ -78,3 +78,24 @@ export const formatDuration = (seconds: number | null | undefined, t: Translate)
 	}
 	return t('{{count}}m', { count: minutes });
 };
+
+/**
+ * 评分维度的 key 只是后端 rubric_scores 的字段名，教师不该关心，
+ * 所以新增维度时自动生成一个不与现有 key 冲突的标识。
+ */
+export const nextCriterionKey = (existingKeys: string[]) => {
+	const used = new Set(existingKeys);
+	let index = 1;
+	while (used.has(`criterion_${index}`)) {
+		index += 1;
+	}
+	return `criterion_${index}`;
+};
+
+/** 把作业满分平均摊到各维度上，余数从第一个维度依次加 1，保证总和刚好等于满分。 */
+export const distributeCriterionScores = (count: number, total: number) => {
+	if (count <= 0 || !Number.isInteger(total) || total < count) return [];
+	const base = Math.floor(total / count);
+	const remainder = total - base * count;
+	return Array.from({ length: count }, (_, index) => base + (index < remainder ? 1 : 0));
+};

@@ -19,6 +19,7 @@
 	import EduCard from '$lib/components/education/EduCard.svelte';
 	import EduStatCard from '$lib/components/education/EduStatCard.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
+	import RubricCriteriaEditor from '$lib/components/education/RubricCriteriaEditor.svelte';
 	import { EDU_FIELD_CLASS } from '$lib/components/education/styles';
 	import { getAssignmentStatusLabel, getClassroomDisplayName, toLocalDateTimeInput } from '$lib/utils/education';
 
@@ -41,13 +42,6 @@
 	let showDeleteConfirm = false;
 
 	const assignmentId = () => $page.params.assignmentId;
-	const addCriterion = () => {
-		rubricCriteria = [...rubricCriteria, { key: '', label: '', maxScore: '' }];
-	};
-	const removeCriterion = (index: number) => {
-		if (rubricCriteria.length <= 1) return;
-		rubricCriteria = rubricCriteria.filter((_, itemIndex) => itemIndex !== index);
-	};
 
 	$: isPastDue =
 		item?.assignment?.status === 'active' &&
@@ -117,17 +111,10 @@
 		if (
 			parsedCriteria.some(
 				(criterion) =>
-					!/^[a-z][a-z0-9_]{0,39}$/.test(criterion.key) ||
-					!criterion.label ||
-					!Number.isInteger(criterion.max_score) ||
-					criterion.max_score <= 0
+					!criterion.label || !Number.isInteger(criterion.max_score) || criterion.max_score <= 0
 			)
 		) {
-			toast.error(t('Every rubric criterion needs a valid key, label, and positive whole-number maximum.'));
-			return;
-		}
-		if (new Set(parsedCriteria.map((criterion) => criterion.key)).size !== parsedCriteria.length) {
-			toast.error(t('Rubric criterion keys must be unique.'));
+			toast.error(t('Every rubric criterion needs a name and a positive whole-number maximum.'));
 			return;
 		}
 		if (parsedCriteria.reduce((sum, criterion) => sum + criterion.max_score, 0) !== parsedScoreMax) {
@@ -285,34 +272,14 @@
 								{/if}
 							</div>
 						</div>
-						<div>
-							<div class="mb-2 flex items-center justify-between gap-3">
-								<div class="text-sm font-medium">{$i18n.t('Rubric Criteria')}</div>
-								<EduButton size="sm" disabled={item.submission_count > 0} on:click={addCriterion}>
-									{$i18n.t('Add Criterion')}
-								</EduButton>
-							</div>
-							<div class="space-y-2">
-								{#each rubricCriteria as criterion, index}
-									<div class="grid gap-2 md:grid-cols-[1fr_1.5fr_0.75fr_auto]">
-										<input bind:value={criterion.key} disabled={item.submission_count > 0} class="w-full {EDU_FIELD_CLASS} disabled:opacity-60" />
-										<input bind:value={criterion.label} disabled={item.submission_count > 0} class="w-full {EDU_FIELD_CLASS} disabled:opacity-60" />
-										<input bind:value={criterion.maxScore} type="number" min="1" step="1" disabled={item.submission_count > 0} class="w-full {EDU_FIELD_CLASS} disabled:opacity-60" />
-										<EduButton
-											variant="danger"
-											size="sm"
-											disabled={item.submission_count > 0 || rubricCriteria.length <= 1}
-											on:click={() => removeCriterion(index)}
-										>
-											{$i18n.t('Remove')}
-										</EduButton>
-									</div>
-								{/each}
-							</div>
-							<div class="mt-2 text-xs text-gray-400">
-								{$i18n.t('Rubric maximum scores must add up to the assignment maximum.')}
-							</div>
-						</div>
+						<RubricCriteriaEditor
+							bind:criteria={rubricCriteria}
+							{scoreMax}
+							disabled={item.submission_count > 0}
+							lockedHint={item.submission_count > 0
+								? $i18n.t('Rubric criteria are locked after the first submission.')
+								: ''}
+						/>
 						<div class="flex flex-wrap justify-between gap-2">
 							<div class="flex flex-wrap gap-2">
 								<EduButton variant="danger" on:click={() => (showArchiveConfirm = true)}>
