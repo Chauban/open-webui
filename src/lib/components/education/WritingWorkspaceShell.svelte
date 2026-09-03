@@ -11,6 +11,7 @@
 	import Chat from '$lib/components/chat/Chat.svelte';
 	import ReviewResultCard from '$lib/components/education/ReviewResultCard.svelte';
 	import SubmissionHistoryModal from '$lib/components/education/SubmissionHistoryModal.svelte';
+	import AssignmentBrief from '$lib/components/education/AssignmentBrief.svelte';
 	import EduButton from '$lib/components/education/EduButton.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 	import { EDU_FIELD_CLASS, eduSegmentClass } from '$lib/components/education/styles';
@@ -64,7 +65,6 @@
 	let isReadOnly = false;
 	let canSubmitAssignment = false;
 	let isSubmitting = false;
-	let showAssignmentDescription = false;
 	let showSubmissionHistory = false;
 
 	let nowTick = Date.now();
@@ -91,6 +91,7 @@
 		null;
 	let sourceRuns = [];
 	let unsavedOperations = [];
+	let clientOperationSequence = 0;
 	let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
 	let lastPersistedActiveChatId: string | null | undefined = undefined;
 
@@ -271,7 +272,14 @@
 		crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
 
 	const queueOperation = (operation) => {
-		unsavedOperations = [...unsavedOperations, operation];
+		unsavedOperations = [
+			...unsavedOperations,
+			{
+				...operation,
+				occurred_at_ms: Date.now(),
+				client_sequence: clientOperationSequence++
+			}
+		];
 	};
 
 	const updateTrackedOperation = (batchId: string, payload: Record<string, unknown>) => {
@@ -828,27 +836,8 @@
 						{/if}
 					</div>
 				</div>
-				{#if isAssignment && assignment?.description}
-					<div class="mt-3">
-						<button
-							type="button"
-							class="text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:underline"
-							on:click={() => (showAssignmentDescription = !showAssignmentDescription)}
-						>
-							{$i18n.t(
-								showAssignmentDescription
-									? 'Hide assignment requirements'
-									: 'View assignment requirements'
-							)}
-						</button>
-						{#if showAssignmentDescription}
-							<div
-								class="mt-2 whitespace-pre-wrap rounded-2xl bg-stone-50 dark:bg-gray-900 p-3 text-xs text-gray-600 dark:text-gray-400"
-							>
-								{assignment.description}
-							</div>
-						{/if}
-					</div>
+				{#if isAssignment}
+					<AssignmentBrief {assignment} />
 				{/if}
 			</div>
 			<div class="min-h-0 flex-1 overflow-y-auto px-5 py-5">
@@ -958,6 +947,9 @@
 							{$i18n.t('Close')}
 						</EduButton>
 					</div>
+					{#if isAssignment}
+						<AssignmentBrief {assignment} />
+					{/if}
 				</div>
 				<div class="min-h-0 flex-1 overflow-y-auto px-5 py-5">
 					{#if isAssignment && review}

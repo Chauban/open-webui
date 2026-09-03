@@ -270,6 +270,25 @@ def _make_assignment_project_meta(
     return meta
 
 
+def _build_assignment_system_prompt(assignment) -> str:
+    """把作业信息拼成项目文件夹的系统提示，让写作区里的对话自带作业上下文。"""
+    lines = [f"【作业】{assignment.title}"]
+
+    description = (assignment.description or "").strip()
+    if description:
+        lines.append(f"【要求】{description}")
+
+    criteria = assignment.rubric_schema.criteria
+    rubric_text = " / ".join(f"{c.label}({c.max_score})" for c in criteria)
+    lines.append(f"【评分维度】{rubric_text}，满分 {assignment.score_max}")
+
+    if assignment.due_at:
+        due_text = datetime.fromtimestamp(assignment.due_at).strftime("%Y-%m-%d %H:%M")
+        lines.append(f"【截止】{due_text}")
+
+    return "\n".join(lines)
+
+
 def _make_personal_project_meta(session_id: str) -> dict:
     return {
         "mode": PROJECT_MODE_PERSONAL_WRITING,
@@ -443,13 +462,15 @@ async def _ensure_assignment_project(assignment, session, db: Session):
         else None
     )
 
+    desired_data = {"system_prompt": _build_assignment_system_prompt(assignment)}
+
     if project is None:
         project = await Folders.insert_new_folder(
             session.owner_user_id,
             FolderForm(
                 name=assignment.title,
                 meta=_make_assignment_project_meta(assignment.id, session.id),
-                data={},
+                data=desired_data,
             ),
             db=db,
         )
@@ -463,12 +484,20 @@ async def _ensure_assignment_project(assignment, session, db: Session):
     else:
         desired_meta = _make_assignment_project_meta(assignment.id, session.id)
         desired_name = assignment.title
-        if desired_meta != (project.meta or {}) or desired_name != project.name:
+        # 系统提示每次都按最新作业信息覆盖：老师改了要求要能同步过来。
+        if (
+            desired_meta != (project.meta or {})
+            or desired_name != project.name
+            or (project.data or {}).get("system_prompt")
+            != desired_data["system_prompt"]
+        ):
             project = await Folders.update_folder_by_id_and_user_id(
                 project.id,
                 session.owner_user_id,
                 FolderForm(
-                    name=desired_name, meta=desired_meta, data=project.data or {}
+                    name=desired_name,
+                    meta=desired_meta,
+                    data={**(project.data or {}), **desired_data},
                 ),
                 db=db,
             )
