@@ -6,12 +6,14 @@
 	import { toast } from 'svelte-sonner';
 
 	import { createAssignment, getTeacherAssignment, getTeacherClassrooms } from '$lib/apis/education';
+	import type { CoachingStyle } from '$lib/apis/education';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
 	import EduButton from '$lib/components/education/EduButton.svelte';
 	import EduCard from '$lib/components/education/EduCard.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 	import RubricCriteriaEditor from '$lib/components/education/RubricCriteriaEditor.svelte';
+	import CoachingStyleSelector from '$lib/components/education/CoachingStyleSelector.svelte';
 	import { EDU_FIELD_CLASS, eduSegmentClass } from '$lib/components/education/styles';
 	import { formatDateTimeInput, getClassroomDisplayName, resolveErrorMessage } from '$lib/utils/education';
 
@@ -24,6 +26,7 @@
 	let description = '';
 	let dueAt = '';
 	let scoreMax = '100';
+	let coachingStyle: CoachingStyle = 'balanced';
 	// 默认维度走词条，教师看到的是母语名称；key 只是后端字段名，教师不填。
 	let rubricCriteria = [
 		{ key: 'criterion_1', label: t('Ideas'), maxScore: '34' },
@@ -59,6 +62,7 @@
 					title = source.assignment.title ?? '';
 					description = source.assignment.description ?? '';
 					scoreMax = String(source.assignment.score_max);
+					coachingStyle = source.assignment.coaching_style;
 					rubricCriteria = source.assignment.rubric_schema.criteria.map((criterion) => ({
 						key: criterion.key,
 						label: criterion.label,
@@ -131,6 +135,7 @@
 				classroom_ids: [...selectedClassroomIds],
 				due_at: Math.floor(new Date(dueAt).getTime() / 1000),
 				score_max: parsedScoreMax,
+				coaching_style: coachingStyle,
 				rubric_schema: { criteria: parsedCriteria }
 			});
 			toast.success(
@@ -228,6 +233,7 @@
 						class="w-full {EDU_FIELD_CLASS}"
 					/>
 				</div>
+				<CoachingStyleSelector bind:value={coachingStyle} />
 				<RubricCriteriaEditor bind:criteria={rubricCriteria} {scoreMax} />
 				<div class="flex justify-end">
 					<EduButton variant="primary" on:click={submit} disabled={saving}>

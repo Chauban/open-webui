@@ -43,6 +43,7 @@
 	import AdminConnections from '$lib/components/admin/Settings/Connections.svelte';
 	import AdminModels from '$lib/components/admin/Settings/Models.svelte';
 	import AdminSubagents from '$lib/components/admin/Settings/Subagents.svelte';
+	import AdminEducation from '$lib/components/admin/Settings/Education.svelte';
 	import AdminEvaluations from '$lib/components/admin/Settings/Evaluations.svelte';
 	import AdminAnalytics from '$lib/components/admin/Analytics.svelte';
 	import AdminIntegrations from '$lib/components/admin/Settings/Integrations.svelte';
@@ -155,6 +156,7 @@
 		'admin:connections': 'AI',
 		'admin:models': 'AI',
 		'admin:subagents': 'AI',
+		'admin:education': 'AI',
 		'admin:evaluations': 'Quality',
 		'admin:analytics': 'Quality',
 		'admin:integrations': 'Tools',
@@ -730,6 +732,11 @@
 			keywords: ['sub-agents', 'subagents', 'delegation', 'background', 'agents']
 		},
 		{
+			id: 'admin:education',
+			title: 'Writing Coaching',
+			keywords: ['education', 'writing', 'coaching', 'assignment', 'teaching', 'prompt']
+		},
+		{
 			id: 'admin:interface',
 			title: 'Interface',
 			keywords: ['interface', 'ui', 'appearance', 'banners', 'tasks', 'prompt suggestions', 'tags']
@@ -1276,6 +1283,8 @@
 				<AdminModels bind:tabState />
 			{:else if selectedTab === 'admin:subagents'}
 				<AdminSubagents />
+			{:else if selectedTab === 'admin:education'}
+				<AdminEducation />
 			{:else if selectedTab === 'admin:evaluations'}
 				<AdminEvaluations />
 			{:else if selectedTab === 'admin:analytics'}

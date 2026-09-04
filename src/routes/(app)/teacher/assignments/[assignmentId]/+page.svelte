@@ -12,6 +12,7 @@
 		getTeacherClassrooms,
 		updateAssignment
 	} from '$lib/apis/education';
+	import type { CoachingStyle } from '$lib/apis/education';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
@@ -20,6 +21,7 @@
 	import EduStatCard from '$lib/components/education/EduStatCard.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 	import RubricCriteriaEditor from '$lib/components/education/RubricCriteriaEditor.svelte';
+	import CoachingStyleSelector from '$lib/components/education/CoachingStyleSelector.svelte';
 	import { EDU_FIELD_CLASS } from '$lib/components/education/styles';
 	import {
 		formatDateTimeInput,
@@ -44,6 +46,7 @@
 	let status = 'active';
 	let dueAt = '';
 	let scoreMax = '';
+	let coachingStyle: CoachingStyle = 'balanced';
 	let rubricCriteria = [];
 	let showArchiveConfirm = false;
 	let showDeleteConfirm = false;
@@ -76,6 +79,7 @@
 		status = item.assignment.status || 'active';
 		dueAt = item.assignment.due_at ? toLocalDateTimeInput(item.assignment.due_at) : '';
 		scoreMax = String(item.assignment.score_max);
+		coachingStyle = item.assignment.coaching_style;
 		rubricCriteria = item.assignment.rubric_schema.criteria.map((criterion) => ({
 			key: criterion.key,
 			label: criterion.label,
@@ -139,6 +143,7 @@
 				status,
 				due_at: Math.floor(new Date(dueAt).getTime() / 1000),
 				score_max: parsedScoreMax,
+				coaching_style: coachingStyle,
 				rubric_schema: { criteria: parsedCriteria }
 			});
 			await loadData();
@@ -283,6 +288,7 @@
 								{/if}
 							</div>
 						</div>
+						<CoachingStyleSelector bind:value={coachingStyle} />
 						<RubricCriteriaEditor
 							bind:criteria={rubricCriteria}
 							{scoreMax}

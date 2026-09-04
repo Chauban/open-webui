@@ -170,6 +170,8 @@ export const getTeacherClassroomAssignments = async (token: string, classroomId:
 	}).then(handleJson);
 };
 
+export type CoachingStyle = 'socratic' | 'balanced' | 'hands_off';
+
 export const createAssignment = async (
 	token: string,
 	payload: {
@@ -178,6 +180,7 @@ export const createAssignment = async (
 		classroom_ids: string[];
 		due_at: number;
 		score_max: number;
+		coaching_style: CoachingStyle;
 		rubric_schema: {
 			criteria: Array<{ key: string; label: string; max_score: number }>;
 		};
@@ -233,6 +236,7 @@ export const updateAssignment = async (
 		status?: string;
 		due_at?: number;
 		score_max?: number;
+		coaching_style?: CoachingStyle;
 		rubric_schema?: {
 			criteria: Array<{ key: string; label: string; max_score: number }>;
 		};

@@ -67,6 +67,7 @@
 	let returnedComment = '';
 	let saving = false;
 	let showAllVersions = false;
+	let showCoachingPrompt = false;
 	let showUserTimeline = true;
 	let showAssistantTimeline = true;
 	let showAnalysisTimeline = true;
@@ -118,6 +119,12 @@
 	$: analysisSegments = detail?.analysis?.segments ?? [];
 	$: analysisTimeline = detail?.analysis?.timeline ?? [];
 	$: analysisHighlights = detail?.analysis?.highlights ?? detail?.provenance_segments ?? [];
+	// 本轮提交时实际生效的辅导档位和原文（档位措辞管理员随时可改，所以随轮次冻存）。
+	$: roundCoaching = detail?.submission?.stats_json?.coaching ?? null;
+	$: coachingStyleLabel =
+		{ socratic: 'Socratic', balanced: 'Balanced', hands_off: 'Hands-off' }[
+			roundCoaching?.style
+		] ?? null;
 	$: segmentCharStats = (() => {
 		if (!analysisHighlights.length) return null;
 		let typed = 0, aiInserted = 0, aiPasted = 0, externalPaste = 0, unknown = 0;
@@ -994,6 +1001,36 @@
 						<!-- ── 反思 & 版本 tab ── -->
 						{:else if activeTab === 'reflection'}
 							<div class="space-y-4 p-5">
+
+								<!-- Coaching style in force for this round -->
+								{#if roundCoaching}
+									<div class="rounded-2xl bg-gray-50 dark:bg-gray-800 px-4 py-4">
+										<div class="mb-2 text-[11px] uppercase tracking-[0.14em] text-gray-400">
+											{$i18n.t('AI Coaching Style')}
+										</div>
+										<div class="flex flex-wrap items-center gap-2">
+											<span class="rounded-full border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-3 py-1 text-xs text-gray-700 dark:text-gray-300">
+												{coachingStyleLabel ? $i18n.t(coachingStyleLabel) : roundCoaching.style}
+											</span>
+											{#if roundCoaching.prompt}
+												<button
+													class="text-xs text-gray-400 transition-colors hover:text-gray-600 dark:hover:text-gray-300"
+													on:click={() => (showCoachingPrompt = !showCoachingPrompt)}
+												>
+													{showCoachingPrompt
+														? $i18n.t('Hide the wording used')
+														: $i18n.t('Show the wording used')}
+												</button>
+											{/if}
+										</div>
+										{#if roundCoaching.prompt && showCoachingPrompt}
+											<pre class="mt-2 whitespace-pre-wrap break-words rounded-xl bg-white dark:bg-gray-850 px-3 py-2 font-sans text-xs leading-6 text-gray-600 dark:text-gray-400">{roundCoaching.prompt}</pre>
+										{/if}
+										<div class="mt-2 text-[11px] text-gray-400">
+											{$i18n.t('Frozen at submission time; later edits to this style do not change it.')}
+										</div>
+									</div>
+								{/if}
 
 								<!-- AI help types -->
 								<div class="rounded-2xl bg-gray-50 dark:bg-gray-800 px-4 py-4">

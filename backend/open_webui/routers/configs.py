@@ -7,7 +7,7 @@ from typing import Optional
 import aiohttp
 from fastapi import APIRouter, Depends, HTTPException, Request
 from mcp.shared.auth import OAuthMetadata
-from open_webui.config import BannerModel
+from open_webui.config import BannerModel, DEFAULT_EDUCATION_COACHING_PROMPTS
 from open_webui.env import AIOHTTP_CLIENT_SESSION_SSL, AIOHTTP_CLIENT_TIMEOUT
 from open_webui.events import EVENTS, publish_event
 from open_webui.models.config import Config
@@ -65,6 +65,9 @@ MODELS_CONFIG_KEYS = {
     'MODEL_ORDER_LIST': 'ui.model_order_list',
     'DEFAULT_MODEL_METADATA': 'models.default_metadata',
     'DEFAULT_MODEL_PARAMS': 'models.default_params',
+}
+EDUCATION_CONFIG_KEYS = {
+    'EDUCATION_COACHING_PROMPTS': 'education.coaching_prompts',
 }
 SUBAGENTS_CONFIG_KEYS = {
     'ENABLE_SUBAGENTS': 'subagents.enable',
@@ -797,6 +800,54 @@ async def set_subagents_config(
         subject_id='subagents',
         subject_type='config',
         data={'enabled': values.get('ENABLE_SUBAGENTS')},
+    )
+    return values
+
+
+class EducationCoachingPromptsForm(BaseModel):
+    """写作教学的三档辅导风格提示词；留空的档位不追加任何辅导约束。"""
+
+    socratic: str
+    balanced: str
+    hands_off: str
+
+
+class EducationConfigForm(BaseModel):
+    EDUCATION_COACHING_PROMPTS: EducationCoachingPromptsForm
+
+
+class EducationConfigResponse(EducationConfigForm):
+    """保存过的值会永久盖过代码默认值，所以把内置默认一起送出去，面板才能提供「恢复默认」。"""
+
+    EDUCATION_COACHING_PROMPT_DEFAULTS: EducationCoachingPromptsForm
+
+
+async def get_education_config_values() -> dict:
+    values = await get_config_values(EDUCATION_CONFIG_KEYS)
+    values['EDUCATION_COACHING_PROMPT_DEFAULTS'] = DEFAULT_EDUCATION_COACHING_PROMPTS
+    return values
+
+
+@router.get('/education', response_model=EducationConfigResponse)
+async def get_education_config(user=Depends(get_admin_user)):
+    return await get_education_config_values()
+
+
+@router.post('/education', response_model=EducationConfigResponse)
+async def set_education_config(
+    request: Request,
+    form_data: EducationConfigForm,
+    user=Depends(get_admin_user),
+):
+    await Config.upsert(config_updates(form_data.model_dump(), EDUCATION_CONFIG_KEYS))
+    values = await get_education_config_values()
+    await publish_event(
+        request,
+        EVENTS.CONFIG_UPDATED,
+        actor=user,
+        subject_id='education',
+        subject_type='config',
+        data={},
     )
     return values
 

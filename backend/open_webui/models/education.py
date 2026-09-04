@@ -41,6 +41,9 @@ def get_db_context(db: Optional[Session] = None):
 
 
 ASSIGNMENT_STATUSES = ("active", "archived")
+# 作业的 AI 辅导风格；每档对应一段管理员可改写的提示词（config 的 education.coaching_prompts）。
+CoachingStyle = Literal["socratic", "balanced", "hands_off"]
+COACHING_STYLES = ("socratic", "balanced", "hands_off")
 AIHelpType = Literal[
     "Understand Assignment",
     "Outline",
@@ -85,6 +88,10 @@ class Assignment(Base):
             "status IN ('active', 'archived')", name="assignment_status_check"
         ),
         CheckConstraint("score_max > 0", name="assignment_score_max_check"),
+        CheckConstraint(
+            "coaching_style IN ('socratic', 'balanced', 'hands_off')",
+            name="assignment_coaching_style_check",
+        ),
     )
 
     id = Column(Text, primary_key=True, unique=True)
@@ -95,6 +102,7 @@ class Assignment(Base):
     status = Column(Text, nullable=False, default="active")
     due_at = Column(BigInteger, nullable=True)
     score_max = Column(Integer, nullable=False)
+    coaching_style = Column(Text, nullable=False, default="balanced")
     rubric_schema = Column(JSONField, nullable=False)
     archived_at = Column(BigInteger, nullable=True)
     created_at = Column(BigInteger, nullable=False)
@@ -675,6 +683,7 @@ class AssignmentModel(BaseModel):
     status: str
     due_at: Optional[int] = None
     score_max: int
+    coaching_style: CoachingStyle
     rubric_schema: RubricSchema
     archived_at: Optional[int] = None
     created_at: int
@@ -870,6 +879,7 @@ class AssignmentCreateForm(BaseModel):
     classroom_ids: list[str] = Field(default_factory=list)
     due_at: Optional[int] = None
     score_max: int = Field(gt=0, le=10000)
+    coaching_style: CoachingStyle = "balanced"
     rubric_schema: RubricSchema
 
     @model_validator(mode="after")
@@ -888,6 +898,7 @@ class AssignmentUpdateForm(BaseModel):
     status: Optional[str] = None
     due_at: Optional[int] = None
     score_max: Optional[int] = Field(default=None, gt=0, le=10000)
+    coaching_style: Optional[CoachingStyle] = None
     rubric_schema: Optional[RubricSchema] = None
 
     @model_validator(mode="after")
@@ -2237,6 +2248,10 @@ class EducationTable:
                 if form_data.score_max is None or form_data.score_max <= 0:
                     raise ValueError("Assignment maximum score is required")
                 assignment.score_max = form_data.score_max
+            if "coaching_style" in form_data.model_fields_set:
+                if form_data.coaching_style not in COACHING_STYLES:
+                    raise ValueError("Invalid assignment coaching style")
+                assignment.coaching_style = form_data.coaching_style
             if "rubric_schema" in form_data.model_fields_set:
                 if form_data.rubric_schema is None:
                     raise ValueError("Assignment rubric is required")
@@ -2288,6 +2303,7 @@ class EducationTable:
                 status="active",
                 due_at=form_data.due_at,
                 score_max=form_data.score_max,
+                coaching_style=form_data.coaching_style,
                 rubric_schema=form_data.rubric_schema.model_dump(),
                 archived_at=None,
                 created_at=now,

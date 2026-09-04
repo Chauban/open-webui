@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from open_webui.internal.db import get_session
 from open_webui.models.chats import ChatForm, Chats
+from open_webui.models.config import Config
 from open_webui.models.chat_messages import ChatMessages
 from open_webui.models.folders import FolderForm, Folders
 from open_webui.models.education import (
@@ -274,8 +275,14 @@ def _make_assignment_project_meta(
     return meta
 
 
-def _build_assignment_system_prompt(assignment) -> str:
-    """把作业信息拼成项目文件夹的系统提示，让写作区里的对话自带作业上下文。"""
+async def _get_coaching_prompt(coaching_style: str) -> str:
+    """取该辅导档位当前的提示词；管理员把某档清空就返回空串。"""
+    coaching_prompts = await Config.get("education.coaching_prompts") or {}
+    return (coaching_prompts.get(coaching_style) or "").strip()
+
+
+async def _build_assignment_system_prompt(assignment) -> str:
+    """把作业信息和辅导风格拼成项目文件夹的系统提示，让写作区里的对话自带作业上下文。"""
     lines = [f"【作业】{assignment.title}"]
 
     description = (assignment.description or "").strip()
@@ -289,6 +296,10 @@ def _build_assignment_system_prompt(assignment) -> str:
     if assignment.due_at:
         due_text = datetime.fromtimestamp(assignment.due_at).strftime("%Y-%m-%d %H:%M")
         lines.append(f"【截止】{due_text}")
+
+    coaching_prompt = await _get_coaching_prompt(assignment.coaching_style)
+    if coaching_prompt:
+        lines.append(coaching_prompt)
 
     return "\n".join(lines)
 
@@ -492,7 +503,7 @@ async def _ensure_assignment_project(assignment, session, db: Session):
         else None
     )
 
-    desired_data = {"system_prompt": _build_assignment_system_prompt(assignment)}
+    desired_data = {"system_prompt": await _build_assignment_system_prompt(assignment)}
 
     if project is None:
         project = await Folders.insert_new_folder(
@@ -1921,7 +1932,7 @@ async def get_assignment_workspace(
             FolderForm(
                 name=assignment.title,
                 meta=_make_assignment_project_meta(assignment.id, writing_session_id),
-                data={},
+                data={"system_prompt": await _build_assignment_system_prompt(assignment)},
             ),
             db=db,
         )
@@ -2536,6 +2547,11 @@ async def submit_assignment(
             version_count=version_count,
         )
     stats["data_completeness"] = form_data.data_completeness.model_dump()
+    # 档位的措辞管理员随时可改，所以把这一轮实际生效的原文一起冻进本轮记录。
+    stats["coaching"] = {
+        "style": assignment.coaching_style,
+        "prompt": await _get_coaching_prompt(assignment.coaching_style),
+    }
     reflection = Education.insert_micro_reflection(
         assignment.id,
         session.owner_user_id,

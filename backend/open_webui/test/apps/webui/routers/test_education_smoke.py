@@ -3768,3 +3768,167 @@ def test_profile_insights_rank_confidence_and_combine_ai_evidence():
     assert all(0 <= insight.confidence <= 1 for insight in insights)
     assert all(insight.sample_count >= 0 for insight in insights)
     assert "ai_use_needs_review" in {insight.code for insight in insights}
+
+
+def _create_coaching_assignment(client, teacher, student, coaching_style=None):
+    """建班 + 发作业 + 学生入班，返回 (assignment, 打开写作区的函数)。"""
+    UserContext.current_user = teacher
+    create_classroom_res = client.post(
+        "/api/v1/classrooms", json={"name": "Grade 8 Coaching"}
+    )
+    assert create_classroom_res.status_code == 200, create_classroom_res.text
+    classroom = create_classroom_res.json()["classroom"]
+
+    payload = {
+        "title": "Argument Essay 1",
+        "description": "Write a short argument essay.",
+        "classroom_ids": [classroom["id"]],
+        "score_max": 100,
+        "rubric_schema": _rubric_schema(),
+        "due_at": 2000000000,
+    }
+    if coaching_style is not None:
+        payload["coaching_style"] = coaching_style
+
+    create_assignment_res = client.post("/api/v1/assignments", json=payload)
+    assert create_assignment_res.status_code == 200, create_assignment_res.text
+    assignment = create_assignment_res.json()[0]
+
+    UserContext.current_user = student
+    join_res = client.post(
+        "/api/v1/classrooms/join",
+        json={"invite_code": classroom["invite_code"]},
+    )
+    assert join_res.status_code == 200, join_res.text
+
+    def open_workspace():
+        UserContext.current_user = student
+        workspace_res = client.get(f"/api/v1/assignments/{assignment['id']}/workspace")
+        assert workspace_res.status_code == 200, workspace_res.text
+        return workspace_res.json()
+
+    return assignment, open_workspace
+
+
+def test_assignment_defaults_to_balanced_coaching_style(education_client):
+    client, teacher, _, student, _, _ = education_client
+
+    assignment, open_workspace = _create_coaching_assignment(client, teacher, student)
+
+    assert assignment["coaching_style"] == "balanced"
+
+    system_prompt = open_workspace()["project"]["data"]["system_prompt"]
+    assert "【作业】Argument Essay 1" in system_prompt
+    assert "【辅导方式】平衡" in system_prompt
+
+
+def test_assignment_coaching_style_changes_system_prompt(education_client):
+    client, teacher, _, student, _, _ = education_client
+
+    assignment, open_workspace = _create_coaching_assignment(
+        client, teacher, student, coaching_style="socratic"
+    )
+
+    assert assignment["coaching_style"] == "socratic"
+    assert "【辅导方式】严格提问式" in open_workspace()["project"]["data"]["system_prompt"]
+
+    UserContext.current_user = teacher
+    update_res = client.patch(
+        f"/api/v1/assignments/{assignment['id']}",
+        json={"coaching_style": "hands_off"},
+    )
+    assert update_res.status_code == 200, update_res.text
+    assert update_res.json()["coaching_style"] == "hands_off"
+
+    # 写作区每次打开都按最新作业重建系统提示，档位改动要能跟过来。
+    refreshed = open_workspace()["project"]["data"]["system_prompt"]
+    assert "【辅导方式】放手" in refreshed
+    assert "严格提问式" not in refreshed
+
+
+def test_blank_coaching_prompt_leaves_assignment_context_only(education_client):
+    client, teacher, _, student, _, _ = education_client
+
+    asyncio.run(
+        Config.upsert(
+            {
+                "education.coaching_prompts": {
+                    "socratic": "",
+                    "balanced": "",
+                    "hands_off": "",
+                }
+            }
+        )
+    )
+
+    _, open_workspace = _create_coaching_assignment(client, teacher, student)
+
+    system_prompt = open_workspace()["project"]["data"]["system_prompt"]
+    assert "【作业】Argument Essay 1" in system_prompt
+    assert "【辅导方式】" not in system_prompt
+
+
+def test_unknown_coaching_style_is_rejected(education_client):
+    client, teacher, _, _, _, _ = education_client
+
+    UserContext.current_user = teacher
+    create_classroom_res = client.post(
+        "/api/v1/classrooms", json={"name": "Grade 8 Coaching Reject"}
+    )
+    assert create_classroom_res.status_code == 200, create_classroom_res.text
+    classroom = create_classroom_res.json()["classroom"]
+
+    create_assignment_res = client.post(
+        "/api/v1/assignments",
+        json={
+            "title": "Argument Essay 1",
+            "classroom_ids": [classroom["id"]],
+            "score_max": 100,
+            "rubric_schema": _rubric_schema(),
+            "due_at": 2000000000,
+            "coaching_style": "strict",
+        },
+    )
+    assert create_assignment_res.status_code == 422, create_assignment_res.text
+
+
+
+def test_submission_freezes_the_coaching_wording_in_force(education_client):
+    client, teacher, _, student, _, _ = education_client
+
+    assignment, _ = _create_coaching_assignment(
+        client, teacher, student, coaching_style="socratic"
+    )
+
+    UserContext.current_user = student
+    workspace = client.get(f"/api/v1/assignments/{assignment['id']}/workspace").json()
+    submit_res = client.post(
+        f"/api/v1/assignments/{assignment['id']}/submit",
+        json=_submit_body(workspace["writing_session"]["id"], "draft text for coaching"),
+    )
+    assert submit_res.status_code == 200, submit_res.text
+    submission_id = submit_res.json()["submission_id"]
+
+    UserContext.current_user = teacher
+    detail = client.get(f"/api/v1/teacher/submissions/{submission_id}").json()
+    coaching = detail["submission"]["stats_json"]["coaching"]
+    assert coaching["style"] == "socratic"
+    assert "严格提问式" in coaching["prompt"]
+
+    # 管理员改了档位措辞，已交那一轮的记录不能跟着变。
+    asyncio.run(
+        Config.upsert(
+            {
+                "education.coaching_prompts": {
+                    "socratic": "【辅导方式】改过的新说法。",
+                    "balanced": "",
+                    "hands_off": "",
+                }
+            }
+        )
+    )
+
+    detail = client.get(f"/api/v1/teacher/submissions/{submission_id}").json()
+    frozen = detail["submission"]["stats_json"]["coaching"]
+    assert frozen["prompt"] == coaching["prompt"]
+    assert "改过的新说法" not in frozen["prompt"]
