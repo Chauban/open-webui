@@ -10,6 +10,7 @@
 	import Users from './Users.svelte';
 	import GroupPreviewPanel from './GroupPreviewPanel.svelte';
 	import { DEFAULT_PERMISSIONS } from '$lib/constants/permissions';
+	import { EDUCATION_IDENTITY_GROUP_IDS } from '$lib/constants';
 	import { getUserDefaultPermissions, getUserDefaultPermissionsDefaults } from '$lib/apis/users';
 	import UserPlusSolid from '$lib/components/icons/UserPlusSolid.svelte';
 	import WrenchSolid from '$lib/components/icons/WrenchSolid.svelte';
@@ -30,6 +31,11 @@
 	export let custom = true;
 
 	export let tabs = ['general', 'permissions', 'users'];
+
+	// Membership of the teaching-identity groups is written from the user
+	// editor, which moves classroom memberships along with it.
+	$: isEducationIdentityGroup = EDUCATION_IDENTITY_GROUP_IDS.includes(group?.id ?? '');
+	$: visibleTabs = isEducationIdentityGroup ? tabs.filter((tab) => tab !== 'users') : tabs;
 
 	let selectedTab = 'general';
 	let loading = false;
@@ -108,7 +114,7 @@
 	}
 
 	onMount(() => {
-		selectedTab = tabs[0];
+		selectedTab = visibleTabs[0];
 		init();
 	});
 </script>
@@ -170,7 +176,7 @@
 							id="admin-settings-tabs-container"
 							class="tabs flex flex-row overflow-x-auto gap-2.5 max-w-full lg:gap-1 lg:flex-col lg:flex-none lg:w-40 dark:text-gray-200 text-sm font-normal text-left scrollbar-none"
 						>
-							{#if tabs.includes('general')}
+							{#if visibleTabs.includes('general')}
 								<button
 									class="px-0.5 py-1 max-w-fit w-fit rounded-lg flex-1 lg:flex-none flex text-right transition {selectedTab ===
 									'general'
@@ -199,7 +205,7 @@
 								</button>
 							{/if}
 
-							{#if tabs.includes('permissions')}
+							{#if visibleTabs.includes('permissions')}
 								<button
 									class="px-0.5 py-1 max-w-fit w-fit rounded-lg flex-1 lg:flex-none flex text-right transition {selectedTab ===
 									'permissions'
@@ -217,7 +223,7 @@
 								</button>
 							{/if}
 
-							{#if tabs.includes('users')}
+							{#if visibleTabs.includes('users')}
 								<button
 									class="px-0.5 py-1 max-w-fit w-fit rounded-lg flex-1 lg:flex-none flex text-right transition {selectedTab ===
 									'users'
@@ -235,7 +241,7 @@
 								</button>
 							{/if}
 
-							{#if tabs.includes('preview')}
+							{#if visibleTabs.includes('preview')}
 								<button
 									class="px-0.5 py-1 max-w-fit w-fit rounded-lg flex-1 lg:flex-none flex text-right transition {selectedTab ===
 									'preview'
@@ -274,6 +280,7 @@
 										bind:description
 										bind:data
 										{edit}
+										deletable={!isEducationIdentityGroup}
 										onDelete={() => {
 											showDeleteConfirmDialog = true;
 										}}
@@ -334,7 +341,7 @@
 					<!-- <div
 						class=" tabs flex flex-row overflow-x-auto gap-2.5 text-sm font-normal border-b border-b-gray-800 scrollbar-hidden"
 					>
-						{#if tabs.includes('display')}
+						{#if visibleTabs.includes('display')}
 							<button
 								class="px-0.5 pb-1.5 min-w-fit flex text-right transition border-b-2 {selectedTab ===
 								'display'
@@ -349,7 +356,7 @@
 							</button>
 						{/if}
 
-						{#if tabs.includes('permissions')}
+						{#if visibleTabs.includes('permissions')}
 							<button
 								class="px-0.5 pb-1.5 min-w-fit flex text-right transition border-b-2 {selectedTab ===
 								'permissions'
@@ -364,7 +371,7 @@
 							</button>
 						{/if}
 
-						{#if tabs.includes('users')}
+						{#if visibleTabs.includes('users')}
 							<button
 								class="px-0.5 pb-1.5 min-w-fit flex text-right transition border-b-2 {selectedTab ===
 								'users'

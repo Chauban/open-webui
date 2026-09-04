@@ -36,6 +36,7 @@ from open_webui.models.users import (
     UserUpdateForm,
 )
 from open_webui.services.education.identity import (
+    EducationIdentityConflict,
     get_education_role,
     role_from_group_ids,
     set_education_role,
@@ -1068,13 +1069,16 @@ async def update_user_by_id(
         if form_data.role != "admin" and effective_education_role not in {"student", "teacher"}:
             effective_education_role = "student"
         if form_data.role == "admin":
-            effective_education_role = None
+            effective_education_role = "admin"
 
         existing_membership = Education.get_classroom_member_by_user_id(user_id, db=db)
         if form_data.classroom_id is not None:
             form_data.classroom_id = form_data.classroom_id.strip() or None
 
-        await set_education_role(user_id, effective_education_role, db=db)
+        try:
+            await set_education_role(user_id, effective_education_role, db=db)
+        except EducationIdentityConflict as e:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(e))
 
         # Build update dict from only the provided fields
         update_data = {}
@@ -1094,18 +1098,19 @@ async def update_user_by_id(
             db=db,
         )
 
-        if existing_membership and existing_membership.member_role == "student":
-            should_clear_existing_classroom = effective_education_role != "student"
-            should_switch_classroom = (
-                effective_education_role == "student"
-                and form_data.classroom_id != existing_membership.classroom_id
+        # Dropping the student identity already shed every classroom membership;
+        # what is left here is moving a student from one classroom to another.
+        if (
+            effective_education_role == "student"
+            and existing_membership
+            and existing_membership.member_role == "student"
+            and form_data.classroom_id != existing_membership.classroom_id
+        ):
+            Education.delete_classroom_member(
+                existing_membership.classroom_id,
+                user_id,
+                db=db,
             )
-            if should_clear_existing_classroom or should_switch_classroom:
-                Education.delete_classroom_member(
-                    existing_membership.classroom_id,
-                    user_id,
-                    db=db,
-                )
 
         if effective_education_role == "student" and form_data.classroom_id:
             classroom = Education.get_classroom_by_id(form_data.classroom_id, db=db)

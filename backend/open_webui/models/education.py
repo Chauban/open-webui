@@ -2164,6 +2164,28 @@ class EducationTable:
             db.commit()
             return deleted > 0
 
+    def delete_classroom_memberships_by_user_id(
+        self,
+        user_id: str,
+        member_role: Optional[str] = None,
+        db: Optional[Session] = None,
+    ) -> int:
+        """Drop every classroom membership a user holds, across all classrooms.
+
+        ``member_role`` narrows the deletion to one kind of membership, which is
+        how a teaching-identity change sheds the memberships that no longer
+        match the account.
+        """
+        with get_db_context(db) as db:
+            query = db.query(ClassroomMember).filter(
+                ClassroomMember.user_id == user_id
+            )
+            if member_role is not None:
+                query = query.filter(ClassroomMember.member_role == member_role)
+            deleted = query.delete()
+            db.commit()
+            return deleted
+
     def update_assignment_classroom(
         self, assignment_id: str, classroom_id: str, db: Optional[Session] = None
     ) -> Optional[AssignmentModel]:

@@ -124,6 +124,10 @@ export const DEFAULT_CAPABILITIES = {
 	builtin_tools: true
 };
 
+// 承载教学身份的两个权限组。身份本身在「编辑用户」的教学身份下拉里改,
+// 这里只用来把它们从常规用户组列表中区分出来。
+export const EDUCATION_IDENTITY_GROUP_IDS = ['education-teacher', 'education-student'];
+
 export const PASTED_TEXT_CHARACTER_LIMIT = 1000;
 
 // Source: https://kit.svelte.dev/docs/modules#$env-static-public

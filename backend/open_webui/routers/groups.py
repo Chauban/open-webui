@@ -228,6 +228,14 @@ async def add_user_to_group(
     user=Depends(get_admin_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    # Teaching identity is written through the user editor so that classroom
+    # memberships move with it; editing these groups by hand would split them.
+    if id in EDUCATION_GROUP_IDS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='This group carries a teaching identity; change it on the user instead',
+        )
+
     try:
         if form_data.user_ids:
             form_data.user_ids = await Users.get_valid_user_ids(form_data.user_ids, db=db)
@@ -268,6 +276,14 @@ async def remove_users_from_group(
     user=Depends(get_admin_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    # Teaching identity is written through the user editor so that classroom
+    # memberships move with it; editing these groups by hand would split them.
+    if id in EDUCATION_GROUP_IDS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='This group carries a teaching identity; change it on the user instead',
+        )
+
     try:
         group = await Groups.remove_users_from_group(id, form_data.user_ids, db=db)
         if group:

@@ -12,6 +12,7 @@
 
 	export let edit = false;
 	export let onDelete: Function = () => {};
+	export let deletable = true;
 </script>
 
 <div class="flex gap-2">
@@ -101,7 +102,7 @@
 	</div>
 </div>
 
-{#if edit}
+{#if edit && deletable}
 	<div class="flex flex-col w-full mt-2">
 		<div class=" mb-0.5 text-xs text-gray-500">{$i18n.t('Actions')}</div>
 

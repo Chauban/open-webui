@@ -7,6 +7,8 @@
 
 	import { updateUserById, getUserGroupsById, getUserClassroomAssignment } from '$lib/apis/users';
 
+	import { EDUCATION_IDENTITY_GROUP_IDS } from '$lib/constants';
+
 	import Modal from '$lib/components/common/Modal.svelte';
 	import localizedFormat from 'dayjs/plugin/localizedFormat';
 	import XMark from '$lib/components/icons/XMark.svelte';
@@ -73,10 +75,15 @@
 		if (!selectedUser?.id) return;
 		userGroups = null;
 
-		userGroups = await getUserGroupsById(localStorage.token, selectedUser.id).catch((error) => {
-			toast.error(`${error}`);
-			return null;
-		});
+		// 教学身份组不在这里重复列出 —— 下面的「教学身份」下拉就是它的编辑入口。
+		userGroups = await getUserGroupsById(localStorage.token, selectedUser.id)
+			.then((groups) =>
+				(groups ?? []).filter((group) => !EDUCATION_IDENTITY_GROUP_IDS.includes(group.id))
+			)
+			.catch((error) => {
+				toast.error(`${error}`);
+				return null;
+			});
 	};
 
 	const loadUserClassroomAssignment = async () => {
