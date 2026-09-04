@@ -69,6 +69,7 @@ from open_webui.routers.education import router as education_router
 from open_webui.routers.chats import router as chats_router
 from open_webui.routers.notes import router as notes_router
 from open_webui.services.education.analysis import (
+    collect_clarification_exchanges,
     build_submission_analysis,
     filter_segments_for_final_text,
 )
@@ -298,6 +299,10 @@ def test_submission_analysis_separates_source_map_counts_from_process_events():
         "replace_text_count": 0,
         "version_saved_count": 1,
         "assignment_submitted_count": 1,
+        "clarification_question_count": 0,
+        "clarification_answered_count": 0,
+        "clarification_free_text_count": 0,
+        "clarification_declined_count": 0,
     }
     assert [
         (segment["source_type"], segment["segment_text"])
@@ -3890,6 +3895,120 @@ def test_unknown_coaching_style_is_rejected(education_client):
         },
     )
     assert create_assignment_res.status_code == 422, create_assignment_res.text
+
+
+
+_ASK_USER_TIMELINE = [{'id': 'm1', 'role': 'user', 'content': '帮我写作文', 'created_at': 100, 'output': None},
+ {'id': 'm2',
+  'role': 'assistant',
+  'content': '',
+  'created_at': 200,
+  'output': [{'type': 'function_call',
+              'id': 'fc_c1',
+              'call_id': 'c1',
+              'name': 'ask_user',
+              'arguments': '{"questions": [{"id": "topic", "header": "Topic", '
+                           '"question": "这篇文章你想写什么主题？", "options": [{"label": "校园现象", '
+                           '"description": "身边看到的事"}, {"label": "思辨议题", "description": '
+                           '"有正反两面的问题"}], "allow_other": true}, {"id": "reader", '
+                           '"header": "Reader", "question": "你写给谁看？", "options": '
+                           '[{"label": "同学", "description": "同龄人"}, {"label": "老师", '
+                           '"description": "评卷人"}], "allow_other": true}]}',
+              'status': 'completed'},
+             {'type': 'function_call_output',
+              'id': 'fco_c1',
+              'call_id': 'c1',
+              'output': [{'type': 'input_text',
+                          'text': '{"status": "answered", "answers": {"topic": '
+                                  '{"type": "other", "text": "我想写食堂排队这件事背后的公共秩序"}, '
+                                  '"reader": {"type": "option", "option_index": 0, '
+                                  '"label": "同学", "description": "同龄人"}}}'}],
+              'status': 'completed'}]},
+ {'id': 'm3',
+  'role': 'assistant',
+  'content': '',
+  'created_at': 300,
+  'output': [{'type': 'function_call',
+              'id': 'fc_c2',
+              'call_id': 'c2',
+              'name': 'ask_user',
+              'arguments': '{"questions": [{"id": "topic", "header": "Topic", '
+                           '"question": "这篇文章你想写什么主题？", "options": [], "allow_other": '
+                           'true}]}',
+              'status': 'completed'},
+             {'type': 'function_call_output',
+              'id': 'fco_c2',
+              'call_id': 'c2',
+              'output': [{'type': 'input_text',
+                          'text': 'Error: Each question requires 2-3 options.'}],
+              'status': 'completed'}]},
+ {'id': 'm4',
+  'role': 'assistant',
+  'content': '',
+  'created_at': 400,
+  'output': [{'type': 'function_call',
+              'id': 'fc_c3',
+              'call_id': 'c3',
+              'name': 'ask_user',
+              'arguments': '{"questions": [{"id": "reader", "header": "Reader", '
+                           '"question": "你写给谁看？", "options": [{"label": "同学", '
+                           '"description": "同龄人"}, {"label": "老师", "description": '
+                           '"评卷人"}], "allow_other": true}]}',
+              'status': 'rejected'},
+             {'type': 'function_call_output',
+              'id': 'fco_c3',
+              'call_id': 'c3',
+              'output': [{'type': 'input_text',
+                          'text': 'Error: tool call rejected by user.'}],
+              'status': 'completed'}]}]
+
+
+def test_collect_clarification_exchanges_reads_chat_output():
+    exchanges = collect_clarification_exchanges(_ASK_USER_TIMELINE)
+
+    assert [item["status"] for item in exchanges] == ["answered", "invalid", "invalid"]
+
+    answered = exchanges[0]
+    assert [question["question"] for question in answered["questions"]] == [
+        "这篇文章你想写什么主题？",
+        "你写给谁看？",
+    ]
+    # 选项回答带得回标签文字，不只是 option_index。
+    assert answered["questions"][1]["answer"] == {
+        "type": "option",
+        "option_index": 0,
+        "label": "同学",
+    }
+    # 自由输入才是真正看得出学生在想什么的那部分。
+    assert answered["questions"][0]["answer"]["type"] == "other"
+    assert "食堂排队" in answered["questions"][0]["answer"]["text"]
+
+
+def test_clarification_counters_ignore_rejected_tool_calls():
+    summary = education_analysis_module._build_process_summary(
+        [], _ASK_USER_TIMELINE, [], [], collect_clarification_exchanges(_ASK_USER_TIMELINE)
+    )
+
+    assert summary["clarification_question_count"] == 2
+    assert summary["clarification_answered_count"] == 2
+    assert summary["clarification_free_text_count"] == 1
+    # 参数拼错被后端拒掉的调用是模型噪声，不能算成问过学生。
+    assert summary["clarification_declined_count"] == 0
+
+
+def test_clarification_collection_is_empty_when_tool_never_ran():
+    timeline = [
+        {"id": "m1", "role": "user", "content": "hi", "created_at": 1, "output": None},
+        {"id": "m2", "role": "assistant", "content": "hello", "created_at": 2, "output": None},
+    ]
+
+    assert collect_clarification_exchanges(timeline) == []
+
+    summary = education_analysis_module._build_process_summary([], timeline, [], [], [])
+    assert summary["clarification_question_count"] == 0
+    assert summary["clarification_answered_count"] == 0
+    assert summary["clarification_free_text_count"] == 0
+    assert summary["clarification_declined_count"] == 0
 
 
 

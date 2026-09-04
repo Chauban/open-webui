@@ -1,4 +1,5 @@
 import difflib
+import json
 import re
 from typing import Optional
 
@@ -10,7 +11,7 @@ from open_webui.models.education import Education
 
 # Bump whenever the provenance/highlight analysis logic changes so cached
 # results produced by older logic are recomputed instead of served stale.
-_ANALYSIS_LOGIC_VERSION = "2"
+_ANALYSIS_LOGIC_VERSION = "3"
 
 SOURCE_MAP_TYPES = {
     "ai_inserted",
@@ -35,10 +36,152 @@ def _empty_process_summary() -> dict:
         "replace_text_count": 0,
         "version_saved_count": 0,
         "assignment_submitted_count": 0,
+        "clarification_question_count": 0,
+        "clarification_answered_count": 0,
+        "clarification_free_text_count": 0,
+        "clarification_declined_count": 0,
     }
 
 
-def _build_process_summary(operations: list, prompt_timeline: list[dict], versions: list, bursts: list) -> dict:
+ASK_USER_TOOL_NAME = "ask_user"
+
+
+def _loads_or_none(value):
+    if isinstance(value, (dict, list)):
+        return value
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return json.loads(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _tool_output_text(item: dict) -> str:
+    """function_call_output 的 output 是 [{type: input_text, text: ...}]。"""
+    parts = item.get("output")
+    if isinstance(parts, str):
+        return parts
+    if not isinstance(parts, list):
+        return ""
+    return "".join(part.get("text") or "" for part in parts if isinstance(part, dict))
+
+
+def _normalize_clarification_answer(answer) -> Optional[dict]:
+    """学生的回答：点选项带 label，自由输入带 text，两者教学价值不同要分开记。"""
+    if not isinstance(answer, dict):
+        return None
+    if answer.get("type") == "other":
+        text = str(answer.get("text") or "").strip()
+        return {"type": "other", "text": text} if text else None
+    if answer.get("type") == "option":
+        return {
+            "type": "option",
+            "option_index": answer.get("option_index"),
+            "label": str(answer.get("label") or "").strip(),
+        }
+    return None
+
+
+def _clarification_status(function_call: dict, payload, result_text: str) -> str:
+    if isinstance(payload, dict) and payload.get("status") in {
+        "answered",
+        "cancelled",
+        "error",
+    }:
+        return payload["status"]
+    if result_text.strip().lower().startswith("error:"):
+        return "invalid"
+    if function_call.get("status") == "rejected":
+        return "cancelled"
+    return "pending"
+
+
+def collect_clarification_exchanges(prompt_timeline: list[dict]) -> list[dict]:
+    """从 assistant 消息的 output 里还原 AI 的澄清追问和学生的回答。
+
+    这是纯派生：问答本来就存在消息 output 里（工具调用由后端写库），不需要前端上报。
+    内置工具关掉时 output 里没有 ask_user 项，结果自然是空列表。
+    模型把参数拼错、被后端校验拒掉的调用只记为 invalid，不算问过学生。
+    """
+    exchanges = []
+    for message in prompt_timeline:
+        if message.get("role") != "assistant":
+            continue
+        output = _loads_or_none(message.get("output"))
+        if not isinstance(output, list):
+            continue
+
+        results = {
+            item.get("call_id"): item
+            for item in output
+            if isinstance(item, dict)
+            and item.get("type") == "function_call_output"
+            and item.get("call_id")
+        }
+
+        for item in output:
+            if not isinstance(item, dict) or item.get("type") != "function_call":
+                continue
+            if item.get("name") != ASK_USER_TOOL_NAME:
+                continue
+
+            arguments = _loads_or_none(item.get("arguments")) or {}
+            questions = arguments.get("questions")
+            result = results.get(item.get("call_id"))
+            result_text = _tool_output_text(result) if result else ""
+            payload = _loads_or_none(result_text)
+
+            if not isinstance(questions, list) or not questions:
+                exchanges.append(
+                    {
+                        "message_id": message.get("id"),
+                        "created_at": message.get("created_at"),
+                        "status": "invalid",
+                        "questions": [],
+                    }
+                )
+                continue
+
+            answers = payload.get("answers") if isinstance(payload, dict) else None
+            answers = answers if isinstance(answers, dict) else {}
+
+            exchanges.append(
+                {
+                    "message_id": message.get("id"),
+                    "created_at": message.get("created_at"),
+                    "status": _clarification_status(item, payload, result_text),
+                    "questions": [
+                        {
+                            "id": question.get("id"),
+                            "header": question.get("header"),
+                            "question": question.get("question"),
+                            "options": [
+                                str(option.get("label") or "")
+                                for option in question.get("options") or []
+                                if isinstance(option, dict)
+                            ],
+                            "answer": _normalize_clarification_answer(
+                                answers.get(question.get("id"))
+                            ),
+                        }
+                        for question in questions
+                        if isinstance(question, dict)
+                    ],
+                }
+            )
+
+    exchanges.sort(key=lambda item: item.get("created_at") or 0)
+    return exchanges
+
+
+def _build_process_summary(
+    operations: list,
+    prompt_timeline: list[dict],
+    versions: list,
+    bursts: list,
+    clarifications: list[dict],
+) -> dict:
     summary = _empty_process_summary()
     summary["prompt_sent_count"] = len([item for item in prompt_timeline if item.get("role") == "user"])
     summary["assistant_message_received_count"] = len(
@@ -64,6 +207,20 @@ def _build_process_summary(operations: list, prompt_timeline: list[dict], versio
         key = op_type_counts.get(operation.op_type)
         if key:
             summary[key] += 1
+
+    for exchange in clarifications:
+        if exchange["status"] == "invalid":
+            continue
+        if exchange["status"] == "cancelled":
+            summary["clarification_declined_count"] += 1
+        for question in exchange["questions"]:
+            summary["clarification_question_count"] += 1
+            answer = question["answer"]
+            if answer is None:
+                continue
+            summary["clarification_answered_count"] += 1
+            if answer["type"] == "other":
+                summary["clarification_free_text_count"] += 1
 
     return summary
 
@@ -653,7 +810,10 @@ def build_submission_analysis(submission, session, versions, provenance_segments
         if imported_segments
         else 0
     )
-    process_summary = _build_process_summary(operations, prompt_timeline, versions, bursts)
+    clarifications = collect_clarification_exchanges(prompt_timeline)
+    process_summary = _build_process_summary(
+        operations, prompt_timeline, versions, bursts, clarifications
+    )
 
     timeline = [
         {
@@ -733,6 +893,7 @@ def build_submission_analysis(submission, session, versions, provenance_segments
         "segments": analyzed_segments + suspected_segments,
         "timeline": timeline,
         "version_diffs": version_diffs,
+        "clarifications": clarifications,
     }
 
 

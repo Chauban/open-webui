@@ -119,6 +119,12 @@
 	$: analysisSegments = detail?.analysis?.segments ?? [];
 	$: analysisTimeline = detail?.analysis?.timeline ?? [];
 	$: analysisHighlights = detail?.analysis?.highlights ?? detail?.provenance_segments ?? [];
+	// AI 的澄清追问：纯派生自聊天消息的 output，内置工具关掉时天然为空。
+	// 模型拼错参数被后端拒掉的调用（status invalid）是噪声，不展示给教师。
+	$: clarifications = (detail?.analysis?.clarifications ?? []).filter(
+		(item) => item.status !== 'invalid'
+	);
+	$: clarificationSummary = analysisSummary?.process_summary ?? {};
 	// 本轮提交时实际生效的辅导档位和原文（档位措辞管理员随时可改，所以随轮次冻存）。
 	$: roundCoaching = detail?.submission?.stats_json?.coaching ?? null;
 	$: coachingStyleLabel =
@@ -893,6 +899,86 @@
 														</div>
 													{/if}
 												</button>
+											{/each}
+										</div>
+									{/if}
+								</div>
+
+								<!-- AI clarification questions -->
+								<div>
+									<div class="mb-3">
+										<div class="text-sm font-semibold text-gray-950 dark:text-gray-100">
+											{$i18n.t('AI Clarification Questions')}
+										</div>
+										<div class="mt-0.5 text-xs text-gray-400">
+											{$i18n.t(
+												'Questions the AI paused to ask, and what the student answered. Recorded server-side from the chat itself.'
+											)}
+										</div>
+									</div>
+									{#if clarifications.length === 0}
+										<div class="rounded-2xl bg-gray-50 dark:bg-gray-800 px-4 py-4 text-sm text-gray-400">
+											{$i18n.t('The AI never paused to ask this student a question.')}
+										</div>
+									{:else}
+										<div class="mb-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+											<span>
+												{$i18n.t('Asked: {{count}}', {
+													count: clarificationSummary.clarification_question_count ?? 0
+												})}
+											</span>
+											<span>
+												{$i18n.t('Answered: {{count}}', {
+													count: clarificationSummary.clarification_answered_count ?? 0
+												})}
+											</span>
+											<span class="text-emerald-600 dark:text-emerald-400">
+												{$i18n.t('In own words: {{count}}', {
+													count: clarificationSummary.clarification_free_text_count ?? 0
+												})}
+											</span>
+											{#if clarificationSummary.clarification_declined_count}
+												<span>
+													{$i18n.t('Dismissed: {{count}}', {
+														count: clarificationSummary.clarification_declined_count
+													})}
+												</span>
+											{/if}
+										</div>
+										<div class="space-y-2">
+											{#each clarifications as exchange}
+												<div class="rounded-2xl bg-gray-50 dark:bg-gray-800 px-4 py-3 text-sm">
+													{#if exchange.created_at}
+														<div class="mb-1.5 text-[10px] uppercase tracking-[0.14em] text-gray-400 tabular-nums">
+															{formatEpochTime(exchange.created_at)}
+														</div>
+													{/if}
+													<div class="space-y-2.5">
+														{#each exchange.questions as question}
+															<div>
+																<div class="text-gray-800 dark:text-gray-200">{question.question}</div>
+																{#if question.options.length}
+																	<div class="mt-1 text-xs text-gray-400">
+																		{question.options.join(' / ')}
+																	</div>
+																{/if}
+																{#if question.answer === null}
+																	<div class="mt-1.5 text-xs text-gray-400">
+																		{$i18n.t('No answer')}
+																	</div>
+																{:else if question.answer.type === 'other'}
+																	<div class="mt-1.5 rounded-xl bg-emerald-50 px-3 py-2 text-sm whitespace-pre-wrap break-words text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
+																		{question.answer.text}
+																	</div>
+																{:else}
+																	<div class="mt-1.5 text-sm text-gray-700 dark:text-gray-300">
+																		{question.answer.label}
+																	</div>
+																{/if}
+															</div>
+														{/each}
+													</div>
+												</div>
 											{/each}
 										</div>
 									{/if}
