@@ -1,7 +1,9 @@
 import asyncio
+import json
 import tempfile
 import time
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -28,6 +30,8 @@ from open_webui.models.education import (
     AnalysisResult,
     Assignment,
     AssignmentExtension,
+    ChallengeSession,
+    ChallengeTurn,
     Classroom,
     ClassroomMember,
     EditorOperation,
@@ -63,6 +67,7 @@ from open_webui.models.users import User, UserModel
 from open_webui.services.education.identity import GROUP_ID_BY_ROLE
 import open_webui.routers.education as education_router_module
 import open_webui.services.education.analysis as education_analysis_module
+import open_webui.services.education.challenge as education_challenge_module
 import open_webui.services.education.profile as education_profile_module
 import open_webui.services.education.profile_snapshots as profile_snapshots_module
 import open_webui.services.education.profile_recompute as profile_recompute_module
@@ -526,6 +531,8 @@ def education_client():
             Assignment.__table__,
             AssignmentExtension.__table__,
             WritingSession.__table__,
+            ChallengeSession.__table__,
+            ChallengeTurn.__table__,
             WritingVersion.__table__,
             ProvenanceSegment.__table__,
             EditorOperation.__table__,
@@ -4240,3 +4247,525 @@ def test_submission_freezes_the_coaching_wording_in_force(education_client):
     frozen = detail["submission"]["stats_json"]["coaching"]
     assert frozen["prompt"] == coaching["prompt"]
     assert "改过的新说法" not in frozen["prompt"]
+
+
+# ---------------------------------------------------------------------------
+# 提交前质疑环节
+# ---------------------------------------------------------------------------
+
+
+def _long_draft(unit="短视频降低了年轻人的注意力，因为它把时间切成了碎片。"):
+    """越过最短正文门槛的草稿。正文太短时质疑没有可打的东西，服务端会拒绝。"""
+
+    return unit * 6
+
+
+@contextmanager
+def _fake_challenge_model(turn_text="你这一点说服不了我", closing=None):
+    """替换质疑环节唯一的模型调用出口，测试不碰真实模型。
+
+    收尾调用靠 system 提示词里的 JSON 约定识别（closing 那段带 "stood" 字样）。
+    """
+
+    calls = []
+
+    async def fake_generate(request, user, model_id, messages):
+        calls.append({"model": model_id, "messages": messages})
+        if '"stood"' in messages[0]["content"]:
+            return json.dumps(
+                closing or {"stood": [], "unresolved": []}, ensure_ascii=False
+            )
+        return f"{turn_text} #{len(calls)}"
+
+    original = education_challenge_module.generate_completion
+    education_challenge_module.generate_completion = fake_generate
+    try:
+        yield calls
+    finally:
+        education_challenge_module.generate_completion = original
+
+
+def _setup_challenge_assignment(
+    client,
+    teacher,
+    student,
+    rounds=3,
+    focus_keys=("ideas",),
+    title="Challenge Essay",
+):
+    UserContext.current_user = teacher
+    classroom = client.post("/api/v1/classrooms", json={"name": f"CR {title}"}).json()[
+        "classroom"
+    ]
+
+    UserContext.current_user = student
+    client.post(
+        "/api/v1/classrooms/join", json={"invite_code": classroom["invite_code"]}
+    )
+
+    UserContext.current_user = teacher
+    create_res = client.post(
+        "/api/v1/assignments",
+        json={
+            "title": title,
+            "classroom_ids": [classroom["id"]],
+            "due_at": 2000000000,
+            "score_max": 100,
+            "rubric_schema": _rubric_schema(100),
+            "challenge_enabled": True,
+            "challenge_rounds": rounds,
+            "challenge_focus_keys": list(focus_keys),
+        },
+    )
+    assert create_res.status_code == 200, create_res.text
+    assignment = create_res.json()[0]
+
+    UserContext.current_user = student
+    workspace = client.get(f"/api/v1/assignments/{assignment['id']}/workspace").json()
+    session_id = workspace["writing_session"]["id"]
+    version_res = client.post(
+        f"/api/v1/writing-sessions/{session_id}/versions",
+        json={"trigger_type": "autosave", "content_text": _long_draft()},
+    )
+    assert version_res.status_code == 200, version_res.text
+    return assignment, session_id
+
+
+def _start_challenge(client, assignment_id, session_id):
+    return client.post(
+        f"/api/v1/assignments/{assignment_id}/challenge/start",
+        json={"writing_session_id": session_id, "model": "test-model"},
+    )
+
+
+def _respond(client, challenge_id, turn_no, text="我补充一条调查数据来支撑这个判断。"):
+    return client.post(
+        f"/api/v1/challenge/{challenge_id}/respond",
+        json={"turn_no": turn_no, "response_text": text, "model": "test-model"},
+    )
+
+
+def test_challenge_stops_at_planned_rounds_and_closes(education_client):
+    """回合上限由服务端兜死，不靠提示词。答满就收尾，再答一轮直接拒。"""
+
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id = _setup_challenge_assignment(
+        client, teacher, student, rounds=3
+    )
+
+    UserContext.current_user = student
+    with _fake_challenge_model(
+        closing={"stood": ["立意站住了"], "unresolved": ["证据仍然不足"]}
+    ) as calls:
+        start_res = _start_challenge(client, assignment["id"], session_id)
+        assert start_res.status_code == 200, start_res.text
+        detail = start_res.json()
+        assert detail["session"]["status"] == "in_progress"
+        assert detail["session"]["planned_rounds"] == 3
+        assert len(detail["turns"]) == 1
+        challenge_id = detail["session"]["id"]
+
+        for turn_no in (1, 2, 3):
+            res = _respond(client, challenge_id, turn_no)
+            assert res.status_code == 200, res.text
+            detail = res.json()
+
+        assert detail["session"]["status"] == "completed"
+        assert len(detail["turns"]) == 3
+        assert all(turn["response_text"] for turn in detail["turns"])
+        assert detail["session"]["closing_summary_json"]["unresolved"] == [
+            "证据仍然不足"
+        ]
+        assert detail["session"]["ended_at"] is not None
+
+        # 三轮质疑 + 一次收尾 = 四次模型调用，不多不少。
+        assert len(calls) == 4
+
+        extra = _respond(client, challenge_id, 4)
+        assert extra.status_code == 400, extra.text
+
+
+def test_challenge_rejects_out_of_order_and_repeat_answers(education_client):
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id = _setup_challenge_assignment(
+        client, teacher, student, rounds=2, title="Order Essay"
+    )
+
+    UserContext.current_user = student
+    with _fake_challenge_model():
+        challenge_id = _start_challenge(client, assignment["id"], session_id).json()[
+            "session"
+        ]["id"]
+
+        # 第 1 轮还没答就想答第 2 轮
+        assert _respond(client, challenge_id, 2).status_code == 400
+
+        assert _respond(client, challenge_id, 1).status_code == 200
+        # 同一轮答两次
+        assert _respond(client, challenge_id, 1).status_code == 400
+
+
+def test_challenge_single_focus_repeats_across_rounds(education_client):
+    """教师只勾一个维度就三轮都打这一个，这是教师的选择，引擎不做纠正。"""
+
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id = _setup_challenge_assignment(
+        client, teacher, student, rounds=3, focus_keys=("evidence",), title="Focus One"
+    )
+
+    UserContext.current_user = student
+    with _fake_challenge_model():
+        challenge_id = _start_challenge(client, assignment["id"], session_id).json()[
+            "session"
+        ]["id"]
+        for turn_no in (1, 2, 3):
+            detail = _respond(client, challenge_id, turn_no).json()
+
+    assert [turn["focus_key"] for turn in detail["turns"]] == [
+        "evidence",
+        "evidence",
+        "evidence",
+    ]
+
+
+def test_challenge_two_focus_keys_alternate(education_client):
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id = _setup_challenge_assignment(
+        client,
+        teacher,
+        student,
+        rounds=3,
+        focus_keys=("ideas", "evidence"),
+        title="Focus Two",
+    )
+
+    UserContext.current_user = student
+    with _fake_challenge_model():
+        challenge_id = _start_challenge(client, assignment["id"], session_id).json()[
+            "session"
+        ]["id"]
+        for turn_no in (1, 2, 3):
+            detail = _respond(client, challenge_id, turn_no).json()
+
+    assert [turn["focus_key"] for turn in detail["turns"]] == [
+        "ideas",
+        "evidence",
+        "ideas",
+    ]
+
+
+def test_challenge_requires_a_long_enough_draft(education_client):
+    """空白页上来就被问三个问题只会让学生关掉页面，正文太短直接拒。"""
+
+    client, teacher, _, student, _, _ = education_client
+
+    UserContext.current_user = teacher
+    classroom = client.post("/api/v1/classrooms", json={"name": "CR Short"}).json()[
+        "classroom"
+    ]
+    UserContext.current_user = student
+    client.post(
+        "/api/v1/classrooms/join", json={"invite_code": classroom["invite_code"]}
+    )
+
+    UserContext.current_user = teacher
+    assignment = client.post(
+        "/api/v1/assignments",
+        json={
+            "title": "Short Draft",
+            "classroom_ids": [classroom["id"]],
+            "due_at": 2000000000,
+            "score_max": 100,
+            "rubric_schema": _rubric_schema(100),
+            "challenge_enabled": True,
+            "challenge_rounds": 2,
+            "challenge_focus_keys": ["ideas"],
+        },
+    ).json()[0]
+
+    UserContext.current_user = student
+    workspace = client.get(f"/api/v1/assignments/{assignment['id']}/workspace").json()
+    session_id = workspace["writing_session"]["id"]
+    client.post(
+        f"/api/v1/writing-sessions/{session_id}/versions",
+        json={"trigger_type": "autosave", "content_text": "太短了"},
+    )
+
+    with _fake_challenge_model():
+        res = _start_challenge(client, assignment["id"], session_id)
+    assert res.status_code == 400, res.text
+
+
+def test_challenge_start_rejected_when_assignment_has_it_off(education_client):
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id, _ = _setup_submitted_assignment(
+        client, teacher, student, "No Challenge"
+    )
+
+    UserContext.current_user = student
+    with _fake_challenge_model():
+        res = _start_challenge(client, assignment["id"], session_id)
+    assert res.status_code == 400, res.text
+
+
+def test_challenge_can_be_skipped_and_teacher_sees_it(education_client):
+    """允许跳过，但跳过留痕。强制不可跳过只会逼出敷衍答案。"""
+
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id = _setup_challenge_assignment(
+        client, teacher, student, rounds=2, title="Skip Essay"
+    )
+
+    UserContext.current_user = student
+    with _fake_challenge_model():
+        challenge_id = _start_challenge(client, assignment["id"], session_id).json()[
+            "session"
+        ]["id"]
+
+    skip_res = client.post(f"/api/v1/challenge/{challenge_id}/skip")
+    assert skip_res.status_code == 200, skip_res.text
+    assert skip_res.json()["session"]["status"] == "skipped"
+    # 已结束的质疑不能再跳一次
+    assert client.post(f"/api/v1/challenge/{challenge_id}/skip").status_code == 400
+
+    submit_res = client.post(
+        f"/api/v1/assignments/{assignment['id']}/submit",
+        json=_submit_body(session_id, _long_draft()),
+    )
+    assert submit_res.status_code == 200, submit_res.text
+    submission_id = submit_res.json()["submission_id"]
+
+    UserContext.current_user = teacher
+    detail = client.get(f"/api/v1/teacher/submissions/{submission_id}").json()
+    frozen = detail["submission"]["stats_json"]["challenge"]
+    assert frozen["status"] == "skipped"
+    assert frozen["answered_rounds"] == 0
+
+    rounds_res = client.get(f"/api/v1/submissions/{submission_id}/challenge")
+    assert rounds_res.status_code == 200, rounds_res.text
+    assert rounds_res.json()["session"]["status"] == "skipped"
+
+
+def test_challenge_rounds_are_visible_to_the_teacher_after_submit(education_client):
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id = _setup_challenge_assignment(
+        client, teacher, student, rounds=2, title="Teacher View"
+    )
+
+    UserContext.current_user = student
+    with _fake_challenge_model(
+        closing={"stood": ["你说清了论点"], "unresolved": ["还缺一个反例"]}
+    ):
+        challenge_id = _start_challenge(client, assignment["id"], session_id).json()[
+            "session"
+        ]["id"]
+        _respond(client, challenge_id, 1, "我补了一份调查数据。")
+        _respond(client, challenge_id, 2, "我承认这里还缺一个反例。")
+
+    submit_res = client.post(
+        f"/api/v1/assignments/{assignment['id']}/submit",
+        json=_submit_body(session_id, _long_draft()),
+    )
+    assert submit_res.status_code == 200, submit_res.text
+    submission_id = submit_res.json()["submission_id"]
+
+    UserContext.current_user = teacher
+    rounds = client.get(f"/api/v1/submissions/{submission_id}/challenge").json()
+    assert rounds["session"]["status"] == "completed"
+    assert len(rounds["turns"]) == 2
+    assert rounds["turns"][0]["response_text"] == "我补了一份调查数据。"
+    assert rounds["session"]["closing_summary_json"]["unresolved"] == ["还缺一个反例"]
+
+
+def test_submission_without_challenge_records_absence(education_client):
+    """没开质疑的作业，提交流程一切照旧。"""
+
+    client, teacher, _, student, _, _ = education_client
+    _assignment, _session_id, submission_id = _setup_submitted_assignment(
+        client, teacher, student, "Plain Essay"
+    )
+
+    UserContext.current_user = teacher
+    detail = client.get(f"/api/v1/teacher/submissions/{submission_id}").json()
+    challenge = detail["submission"]["stats_json"]["challenge"]
+    assert challenge["enabled"] is False
+    assert challenge["status"] is None
+    assert client.get(f"/api/v1/submissions/{submission_id}/challenge").json() is None
+
+
+def test_submission_freezes_the_challenge_wording_in_force(education_client):
+    """管理员随时可改质疑措辞，已交那一轮的记录不能跟着变。"""
+
+    client, teacher, _, student, _, _ = education_client
+    asyncio.run(
+        Config.upsert(
+            {
+                "education.challenge_prompts": {
+                    "turn": "你是一个不同意作者观点的读者。原始措辞。",
+                    "closing": '收尾，输出 {"stood": [], "unresolved": []}。',
+                }
+            }
+        )
+    )
+    assignment, session_id = _setup_challenge_assignment(
+        client, teacher, student, rounds=2, title="Frozen Wording"
+    )
+
+    UserContext.current_user = student
+    with _fake_challenge_model():
+        challenge_id = _start_challenge(client, assignment["id"], session_id).json()[
+            "session"
+        ]["id"]
+        _respond(client, challenge_id, 1)
+        _respond(client, challenge_id, 2)
+
+    submission_id = client.post(
+        f"/api/v1/assignments/{assignment['id']}/submit",
+        json=_submit_body(session_id, _long_draft()),
+    ).json()["submission_id"]
+
+    UserContext.current_user = teacher
+    detail = client.get(f"/api/v1/teacher/submissions/{submission_id}").json()
+    frozen = detail["submission"]["stats_json"]["challenge"]
+    assert "原始措辞" in frozen["turn_prompt"]
+    assert frozen["answered_rounds"] == 2
+
+    asyncio.run(
+        Config.upsert(
+            {
+                "education.challenge_prompts": {
+                    "turn": "改过的新说法。",
+                    "closing": "改过的收尾说法。",
+                }
+            }
+        )
+    )
+
+    detail = client.get(f"/api/v1/teacher/submissions/{submission_id}").json()
+    assert (
+        detail["submission"]["stats_json"]["challenge"]["turn_prompt"]
+        == frozen["turn_prompt"]
+    )
+
+
+def test_challenge_config_must_reference_rubric_criteria(education_client):
+    """未配置评分维度的作业不允许启用质疑，焦点必须是本作业已有的维度。"""
+
+    client, teacher, _, _student, _, _ = education_client
+
+    UserContext.current_user = teacher
+    classroom = client.post("/api/v1/classrooms", json={"name": "CR Config"}).json()[
+        "classroom"
+    ]
+
+    unknown_focus = client.post(
+        "/api/v1/assignments",
+        json={
+            "title": "Bad Focus",
+            "classroom_ids": [classroom["id"]],
+            "due_at": 2000000000,
+            "score_max": 100,
+            "rubric_schema": _rubric_schema(100),
+            "challenge_enabled": True,
+            "challenge_rounds": 3,
+            "challenge_focus_keys": ["not_a_criterion"],
+        },
+    )
+    assert unknown_focus.status_code == 422, unknown_focus.text
+
+    empty_focus = client.post(
+        "/api/v1/assignments",
+        json={
+            "title": "No Focus",
+            "classroom_ids": [classroom["id"]],
+            "due_at": 2000000000,
+            "score_max": 100,
+            "rubric_schema": _rubric_schema(100),
+            "challenge_enabled": True,
+            "challenge_rounds": 3,
+            "challenge_focus_keys": [],
+        },
+    )
+    assert empty_focus.status_code == 422, empty_focus.text
+
+    bad_rounds = client.post(
+        "/api/v1/assignments",
+        json={
+            "title": "Bad Rounds",
+            "classroom_ids": [classroom["id"]],
+            "due_at": 2000000000,
+            "score_max": 100,
+            "rubric_schema": _rubric_schema(100),
+            "challenge_enabled": True,
+            "challenge_rounds": 5,
+            "challenge_focus_keys": ["ideas"],
+        },
+    )
+    assert bad_rounds.status_code == 422, bad_rounds.text
+
+
+def test_challenge_current_restores_unfinished_session(education_client):
+    """刷新页面不该把已经答过的回合弄丢。"""
+
+    client, teacher, _, student, outsider, _ = education_client
+    assignment, session_id = _setup_challenge_assignment(
+        client, teacher, student, rounds=3, title="Resume Essay"
+    )
+
+    UserContext.current_user = student
+    with _fake_challenge_model():
+        challenge_id = _start_challenge(client, assignment["id"], session_id).json()[
+            "session"
+        ]["id"]
+        _respond(client, challenge_id, 1)
+
+    current = client.get(
+        f"/api/v1/assignments/{assignment['id']}/challenge/current",
+        params={"writing_session_id": session_id},
+    )
+    assert current.status_code == 200, current.text
+    payload = current.json()
+    assert payload["session"]["id"] == challenge_id
+    assert len(payload["turns"]) == 2
+    assert payload["turns"][0]["response_text"] is not None
+    assert payload["turns"][1]["response_text"] is None
+
+    # 一轮只质疑一次，重复 start 要被拒
+    with _fake_challenge_model():
+        assert _start_challenge(client, assignment["id"], session_id).status_code == 400
+
+    # 别人的质疑读不到也答不了
+    UserContext.current_user = outsider
+    assert client.post(f"/api/v1/challenge/{challenge_id}/skip").status_code == 403
+    with _fake_challenge_model():
+        assert _respond(client, challenge_id, 2).status_code == 403
+
+
+def test_challenge_checklist_state_persists(education_client):
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id = _setup_challenge_assignment(
+        client, teacher, student, rounds=2, title="Checklist Essay"
+    )
+
+    UserContext.current_user = student
+    with _fake_challenge_model(
+        closing={"stood": [], "unresolved": ["补一个反例", "说明数据来源"]}
+    ):
+        challenge_id = _start_challenge(client, assignment["id"], session_id).json()[
+            "session"
+        ]["id"]
+        _respond(client, challenge_id, 1)
+        _respond(client, challenge_id, 2)
+
+    res = client.patch(
+        f"/api/v1/challenge/{challenge_id}/checklist",
+        json={"checked_indexes": [1, 1, 0]},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["session"]["checklist_state_json"] == {"checked_indexes": [0, 1]}
+
+    current = client.get(
+        f"/api/v1/assignments/{assignment['id']}/challenge/current",
+        params={"writing_session_id": session_id},
+    ).json()
+    assert current["session"]["checklist_state_json"]["checked_indexes"] == [0, 1]

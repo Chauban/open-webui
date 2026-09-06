@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import NamedTuple, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
@@ -28,6 +28,10 @@ from open_webui.models.education import (
     AssignmentWorkspaceListItem,
     AssignmentWorkspaceResponse,
     AutosaveForm,
+    ChallengeChecklistForm,
+    ChallengeRespondForm,
+    ChallengeSessionDetail,
+    ChallengeStartForm,
     ClassroomCreateForm,
     ClassroomBulkImportForm,
     ClassroomBulkImportResult,
@@ -94,6 +98,12 @@ from open_webui.services.education.analysis import (
     get_materialized_submission_analysis,
     get_materialized_submission_analyses,
     get_prompt_timeline,
+)
+from open_webui.services.education.challenge import (
+    ChallengeError,
+    get_challenge_prompt as _get_challenge_prompt,
+    start_challenge,
+    submit_challenge_response,
 )
 from open_webui.services.education.profile_snapshots import (
     build_student_profile,
@@ -2528,6 +2538,198 @@ async def upsert_writing_chat_message(
     return {"ok": True}
 
 
+def _challenge_detail(challenge_session, db: Session) -> ChallengeSessionDetail:
+    return ChallengeSessionDetail(
+        session=challenge_session,
+        turns=Education.get_challenge_turns(challenge_session.id, db=db),
+    )
+
+
+def _get_challenge_session_or_404(session_id: str, db: Session):
+    challenge_session = Education.get_challenge_session_by_id(session_id, db=db)
+    if challenge_session is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Challenge not found"
+        )
+    return challenge_session
+
+
+def _ensure_challenge_owner(user, challenge_session):
+    if user.role != "admin" and challenge_session.student_id != user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+
+def _ensure_student_challenge_access(user, assignment, db: Session):
+    role = _ensure_assignment_access(user, assignment, db)
+    if role not in ("student", "admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only students take the pre-submission challenge",
+        )
+
+
+@router.post(
+    "/assignments/{assignment_id}/challenge/start",
+    response_model=ChallengeSessionDetail,
+)
+async def start_assignment_challenge(
+    request: Request,
+    assignment_id: str,
+    form_data: ChallengeStartForm,
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+):
+    assignment = _get_assignment_or_404(assignment_id, db)
+    _ensure_student_challenge_access(user, assignment, db)
+
+    session = _get_workspace_session_or_404(form_data.writing_session_id, db)
+    if session.scope != "assignment" or session.assignment_id != assignment.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Mismatched session"
+        )
+    _ensure_workspace_session_owner(user, session)
+
+    try:
+        challenge_session, _ = await start_challenge(
+            request, user, assignment, session, form_data.model, db
+        )
+    except ChallengeError as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)
+        ) from error
+
+    return _challenge_detail(challenge_session, db)
+
+
+@router.get("/assignments/{assignment_id}/challenge/current")
+async def get_current_assignment_challenge(
+    assignment_id: str,
+    writing_session_id: str = Query(...),
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+):
+    """恢复本轮未完成的质疑。刷新页面不该把学生已经答过的回合弄丢。"""
+
+    assignment = _get_assignment_or_404(assignment_id, db)
+    _ensure_student_challenge_access(user, assignment, db)
+
+    session = _get_workspace_session_or_404(writing_session_id, db)
+    if session.scope != "assignment" or session.assignment_id != assignment.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Mismatched session"
+        )
+    _ensure_workspace_session_owner(user, session)
+
+    round_no = Education.resolve_next_submission_round_no(
+        assignment.id, session.owner_user_id, db=db
+    )
+    challenge_session = Education.get_challenge_session_for_round(
+        session.id, round_no, db=db
+    )
+    if challenge_session is None:
+        return None
+    return _challenge_detail(challenge_session, db)
+
+
+@router.post("/challenge/{session_id}/respond", response_model=ChallengeSessionDetail)
+async def respond_to_challenge(
+    request: Request,
+    session_id: str,
+    form_data: ChallengeRespondForm,
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+):
+    challenge_session = _get_challenge_session_or_404(session_id, db)
+    _ensure_challenge_owner(user, challenge_session)
+    assignment = _get_assignment_or_404(challenge_session.assignment_id, db)
+
+    try:
+        result = await submit_challenge_response(
+            request,
+            user,
+            assignment,
+            challenge_session,
+            form_data.turn_no,
+            form_data.response_text,
+            form_data.model,
+            db,
+        )
+    except ChallengeError as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)
+        ) from error
+
+    return _challenge_detail(result["session"], db)
+
+
+@router.post("/challenge/{session_id}/skip", response_model=ChallengeSessionDetail)
+async def skip_assignment_challenge(
+    session_id: str,
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+):
+    """允许跳过,但跳过留痕。
+
+    强制不可跳过只会逼出敷衍答案,还会制造对立情绪;教师看得到谁跳了,
+    社会压力比系统锁管用。
+    """
+
+    challenge_session = _get_challenge_session_or_404(session_id, db)
+    _ensure_challenge_owner(user, challenge_session)
+    if challenge_session.status != "in_progress":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Challenge is already finished",
+        )
+
+    updated = Education.skip_challenge_session(challenge_session.id, db=db)
+    return _challenge_detail(updated, db)
+
+
+@router.patch(
+    "/challenge/{session_id}/checklist", response_model=ChallengeSessionDetail
+)
+async def update_challenge_checklist(
+    session_id: str,
+    form_data: ChallengeChecklistForm,
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+):
+    challenge_session = _get_challenge_session_or_404(session_id, db)
+    _ensure_challenge_owner(user, challenge_session)
+    if challenge_session.status != "completed":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Checklist is available after the challenge closes",
+        )
+
+    updated = Education.update_challenge_checklist(
+        challenge_session.id, form_data.checked_indexes, db=db
+    )
+    return _challenge_detail(updated, db)
+
+
+@router.get("/submissions/{submission_id}/challenge")
+async def get_submission_challenge(
+    submission_id: str,
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+):
+    """教师读这一轮的质疑往来。本轮没做过质疑就返回 null。"""
+
+    submission = _get_submission_or_404(submission_id, db)
+    assignment = _get_assignment_or_404(submission.assignment_id, db)
+    _ensure_assignment_access(user, assignment, db, require_teacher=True)
+
+    challenge_id = (submission.stats_json or {}).get("challenge", {}).get("session_id")
+    if not challenge_id:
+        return None
+    challenge_session = Education.get_challenge_session_by_id(challenge_id, db=db)
+    if challenge_session is None:
+        return None
+    return _challenge_detail(challenge_session, db)
+
+
 @router.post("/assignments/{assignment_id}/submit")
 async def submit_assignment(
     assignment_id: str,
@@ -2675,6 +2877,31 @@ async def submit_assignment(
         "style": assignment.coaching_style,
         "prompt": await _get_coaching_prompt(assignment.coaching_style),
     }
+    # 质疑措辞同理，管理员随时可改，已交的这一轮不能跟着变。
+    challenge_round_no = Education.resolve_next_submission_round_no(
+        assignment.id, session.owner_user_id, db=db
+    )
+    challenge_session = Education.get_challenge_session_for_round(
+        session.id, challenge_round_no, db=db
+    )
+    if challenge_session is None:
+        stats["challenge"] = {"enabled": assignment.challenge_enabled, "status": None}
+    else:
+        answered = [
+            turn
+            for turn in Education.get_challenge_turns(challenge_session.id, db=db)
+            if turn.response_text is not None
+        ]
+        stats["challenge"] = {
+            "enabled": assignment.challenge_enabled,
+            "session_id": challenge_session.id,
+            "status": challenge_session.status,
+            "planned_rounds": challenge_session.planned_rounds,
+            "answered_rounds": len(answered),
+            "focus_keys": list(challenge_session.focus_keys or []),
+            "turn_prompt": await _get_challenge_prompt("turn"),
+            "closing_prompt": await _get_challenge_prompt("closing"),
+        }
     reflection = Education.insert_micro_reflection(
         assignment.id,
         session.owner_user_id,

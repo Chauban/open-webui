@@ -68,6 +68,7 @@ MODELS_CONFIG_KEYS = {
 }
 EDUCATION_CONFIG_KEYS = {
     'EDUCATION_COACHING_PROMPTS': 'education.coaching_prompts',
+    'EDUCATION_CHALLENGE_PROMPTS': 'education.challenge_prompts',
 }
 SUBAGENTS_CONFIG_KEYS = {
     'ENABLE_SUBAGENTS': 'subagents.enable',

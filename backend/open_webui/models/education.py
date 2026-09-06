@@ -44,6 +44,13 @@ ASSIGNMENT_STATUSES = ("active", "archived")
 # 作业的 AI 辅导风格；每档对应一段管理员可改写的提示词（config 的 education.coaching_prompts）。
 CoachingStyle = Literal["socratic", "balanced", "hands_off"]
 COACHING_STYLES = ("socratic", "balanced", "hands_off")
+# 提交前质疑环节。辅导档位管的是「AI 帮多少」,质疑管的是「交之前挑多狠、挑哪几个维度」,
+# 两者是两个互不兼任的角色:辅导助手不带质疑口吻,质疑读者不提供辅导。
+ChallengeStatus = Literal["in_progress", "completed", "skipped"]
+CHALLENGE_STATUSES = ("in_progress", "completed", "skipped")
+# 只给 2 或 3。无限回合会把质疑变成打击,而且学生看不到终点就会中途退出。
+CHALLENGE_ROUND_CHOICES = (2, 3)
+CHALLENGE_MAX_FOCUS_KEYS = 2
 AIHelpType = Literal[
     "Understand Assignment",
     "Outline",
@@ -92,6 +99,9 @@ class Assignment(Base):
             "coaching_style IN ('socratic', 'balanced', 'hands_off')",
             name="assignment_coaching_style_check",
         ),
+        CheckConstraint(
+            "challenge_rounds IN (2, 3)", name="assignment_challenge_rounds_check"
+        ),
     )
 
     id = Column(Text, primary_key=True, unique=True)
@@ -103,6 +113,9 @@ class Assignment(Base):
     due_at = Column(BigInteger, nullable=True)
     score_max = Column(Integer, nullable=False)
     coaching_style = Column(Text, nullable=False, default="balanced")
+    challenge_enabled = Column(Boolean, nullable=False, default=False)
+    challenge_rounds = Column(Integer, nullable=False, default=3)
+    challenge_focus_keys = Column(JSONField, nullable=False, default=list)
     rubric_schema = Column(JSONField, nullable=False)
     archived_at = Column(BigInteger, nullable=True)
     created_at = Column(BigInteger, nullable=False)
@@ -305,6 +318,72 @@ class MicroReflection(Base):
     ai_used = Column(Boolean, nullable=False)
     ai_help_types = Column(JSONField, nullable=False, default=[])
     reflection_json = Column(JSONField, nullable=False)
+    created_at = Column(BigInteger, nullable=False)
+
+
+class ChallengeSession(Base):
+    """学生提交前的一次质疑流程,一轮提交至多一条。
+
+    source_version_id 冻结「质疑针对的是哪一稿」——收尾之后学生会回去改,
+    不冻住的话教师就分不清质疑指的是改前还是改后的正文。
+    """
+
+    __tablename__ = "challenge_session"
+    __table_args__ = (
+        UniqueConstraint(
+            "writing_session_id",
+            "submission_round_no",
+            name="challenge_session_round_idx",
+        ),
+        Index("challenge_session_student_idx", "assignment_id", "student_id"),
+        CheckConstraint(
+            "status IN ('in_progress', 'completed', 'skipped')",
+            name="challenge_session_status_check",
+        ),
+    )
+
+    id = Column(Text, primary_key=True, unique=True)
+    writing_session_id = Column(
+        Text, ForeignKey("writing_session.id", ondelete="CASCADE"), nullable=False
+    )
+    assignment_id = Column(
+        Text, ForeignKey("assignment.id", ondelete="CASCADE"), nullable=False
+    )
+    student_id = Column(Text, nullable=False)
+    submission_round_no = Column(Integer, nullable=False)
+    source_version_id = Column(Text, nullable=False)
+    focus_keys = Column(JSONField, nullable=False, default=list)
+    planned_rounds = Column(Integer, nullable=False)
+    status = Column(Text, nullable=False, default="in_progress")
+    closing_summary_json = Column(JSONField, nullable=True)
+    checklist_state_json = Column(JSONField, nullable=True)
+    started_at = Column(BigInteger, nullable=False)
+    ended_at = Column(BigInteger, nullable=True)
+
+
+class ChallengeTurn(Base):
+    """一个质疑回合。
+
+    challenge_text 是服务端生成的权威数据,response_text 是学生自己敲的字
+    (可信度等同 typed 正文)。回合数由服务端按 planned_rounds 控制,不靠提示词。
+    """
+
+    __tablename__ = "challenge_turn"
+    __table_args__ = (
+        UniqueConstraint(
+            "challenge_session_id", "turn_no", name="challenge_turn_order_idx"
+        ),
+    )
+
+    id = Column(Text, primary_key=True, unique=True)
+    challenge_session_id = Column(
+        Text, ForeignKey("challenge_session.id", ondelete="CASCADE"), nullable=False
+    )
+    turn_no = Column(Integer, nullable=False)
+    focus_key = Column(Text, nullable=False)
+    challenge_text = Column(Text, nullable=False)
+    response_text = Column(Text, nullable=True)
+    responded_at = Column(BigInteger, nullable=True)
     created_at = Column(BigInteger, nullable=False)
 
 
@@ -711,10 +790,104 @@ class AssignmentModel(BaseModel):
     due_at: Optional[int] = None
     score_max: int
     coaching_style: CoachingStyle
+    challenge_enabled: bool
+    challenge_rounds: int
+    challenge_focus_keys: list[str] = Field(default_factory=list)
     rubric_schema: RubricSchema
     archived_at: Optional[int] = None
     created_at: int
     updated_at: int
+
+
+def validate_challenge_focus_keys(
+    focus_keys: list[str], rubric: RubricSchema, enabled: bool
+) -> list[str]:
+    """质疑焦点必须是本作业已有的评分维度。
+
+    焦点直接复用 rubric,教师不用学新概念,学生被追问的点就是最后被扣分的点。
+    未配置评分维度的作业不允许启用质疑——没有维度就没有对齐的方向。
+    """
+
+    keys = [key.strip() for key in focus_keys if key.strip()]
+    if not enabled:
+        return []
+    if not keys:
+        raise ValueError("Challenge focus requires at least one rubric criterion")
+    if len(keys) > CHALLENGE_MAX_FOCUS_KEYS:
+        raise ValueError(
+            f"Challenge focus accepts at most {CHALLENGE_MAX_FOCUS_KEYS} criteria"
+        )
+    if len(keys) != len(set(keys)):
+        raise ValueError("Challenge focus keys must be unique")
+    known = {criterion.key for criterion in rubric.criteria}
+    unknown = [key for key in keys if key not in known]
+    if unknown:
+        raise ValueError("Challenge focus keys must reference rubric criteria")
+    return keys
+
+
+class ChallengeClosing(BaseModel):
+    """收尾清单。没有它,学生只是被怼一顿,下次必然跳过。"""
+
+    stood: list[str] = Field(default_factory=list)
+    unresolved: list[str] = Field(default_factory=list)
+
+
+class ChallengeTurnModel(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    challenge_session_id: str
+    turn_no: int
+    focus_key: str
+    challenge_text: str
+    response_text: Optional[str] = None
+    responded_at: Optional[int] = None
+    created_at: int
+
+
+class ChallengeSessionModel(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    writing_session_id: str
+    assignment_id: str
+    student_id: str
+    submission_round_no: int
+    source_version_id: str
+    focus_keys: list[str] = Field(default_factory=list)
+    planned_rounds: int
+    status: ChallengeStatus
+    closing_summary_json: Optional[ChallengeClosing] = None
+    checklist_state_json: Optional[dict] = None
+    started_at: int
+    ended_at: Optional[int] = None
+
+
+class ChallengeSessionDetail(BaseModel):
+    session: ChallengeSessionModel
+    turns: list[ChallengeTurnModel] = Field(default_factory=list)
+
+
+class ChallengeStartForm(BaseModel):
+    writing_session_id: str
+    # 质疑是核心教学交互,不走 task model 降级,直接用学生写作区当前选的模型。
+    model: str
+
+
+class ChallengeRespondForm(BaseModel):
+    turn_no: int = Field(gt=0)
+    response_text: str = Field(min_length=1, max_length=8000)
+    model: str
+
+    @field_validator("response_text", mode="before")
+    @classmethod
+    def strip_response(cls, value: str) -> str:
+        return (value or "").strip()
+
+
+class ChallengeChecklistForm(BaseModel):
+    checked_indexes: list[int] = Field(default_factory=list)
 
 
 class ClassroomModel(BaseModel):
@@ -907,6 +1080,9 @@ class AssignmentCreateForm(BaseModel):
     due_at: Optional[int] = None
     score_max: int = Field(gt=0, le=10000)
     coaching_style: CoachingStyle = "balanced"
+    challenge_enabled: bool = False
+    challenge_rounds: int = 3
+    challenge_focus_keys: list[str] = Field(default_factory=list)
     rubric_schema: RubricSchema
 
     @model_validator(mode="after")
@@ -915,6 +1091,15 @@ class AssignmentCreateForm(BaseModel):
             raise ValueError(
                 "Rubric maximum scores must add up to assignment maximum score"
             )
+        return self
+
+    @model_validator(mode="after")
+    def validate_challenge_config(self):
+        if self.challenge_rounds not in CHALLENGE_ROUND_CHOICES:
+            raise ValueError("Challenge rounds must be 2 or 3")
+        self.challenge_focus_keys = validate_challenge_focus_keys(
+            self.challenge_focus_keys, self.rubric_schema, self.challenge_enabled
+        )
         return self
 
 
@@ -926,7 +1111,21 @@ class AssignmentUpdateForm(BaseModel):
     due_at: Optional[int] = None
     score_max: Optional[int] = Field(default=None, gt=0, le=10000)
     coaching_style: Optional[CoachingStyle] = None
+    challenge_enabled: Optional[bool] = None
+    challenge_rounds: Optional[int] = None
+    # 焦点 key 要对着「更新后」的 rubric 校验,而 rubric 可能不在本次请求里,
+    # 所以交叉校验放在 update_assignment 里做,那里能拿到库里的现值。
+    challenge_focus_keys: Optional[list[str]] = None
     rubric_schema: Optional[RubricSchema] = None
+
+    @model_validator(mode="after")
+    def validate_updated_challenge_rounds(self):
+        if (
+            self.challenge_rounds is not None
+            and self.challenge_rounds not in CHALLENGE_ROUND_CHOICES
+        ):
+            raise ValueError("Challenge rounds must be 2 or 3")
+        return self
 
     @model_validator(mode="after")
     def validate_updated_rubric_total(self):
@@ -2315,6 +2514,25 @@ class EducationTable:
                 if form_data.rubric_schema is None:
                     raise ValueError("Assignment rubric is required")
                 assignment.rubric_schema = form_data.rubric_schema.model_dump()
+            if "challenge_enabled" in form_data.model_fields_set:
+                if form_data.challenge_enabled is None:
+                    raise ValueError("Challenge switch is required")
+                assignment.challenge_enabled = form_data.challenge_enabled
+            if "challenge_rounds" in form_data.model_fields_set:
+                if form_data.challenge_rounds is None:
+                    raise ValueError("Challenge rounds are required")
+                assignment.challenge_rounds = form_data.challenge_rounds
+            if "challenge_focus_keys" in form_data.model_fields_set:
+                assignment.challenge_focus_keys = list(
+                    form_data.challenge_focus_keys or []
+                )
+            # 焦点必须对着「本次更新后」的 rubric 与开关重新校验:任何一边动了都可能
+            # 让原来的焦点失效(维度被删、质疑被打开但没选焦点)。
+            assignment.challenge_focus_keys = validate_challenge_focus_keys(
+                list(assignment.challenge_focus_keys or []),
+                RubricSchema.model_validate(assignment.rubric_schema),
+                bool(assignment.challenge_enabled),
+            )
 
             assignment.updated_at = int(time.time())
             db.commit()
@@ -2363,6 +2581,9 @@ class EducationTable:
                 due_at=form_data.due_at,
                 score_max=form_data.score_max,
                 coaching_style=form_data.coaching_style,
+                challenge_enabled=form_data.challenge_enabled,
+                challenge_rounds=form_data.challenge_rounds,
+                challenge_focus_keys=list(form_data.challenge_focus_keys),
                 rubric_schema=form_data.rubric_schema.model_dump(),
                 archived_at=None,
                 created_at=now,
@@ -2944,6 +3165,18 @@ class EducationTable:
             version = db.get(WritingVersion, version_id)
             return WritingVersionModel.model_validate(version) if version else None
 
+    def get_latest_version(
+        self, session_id: str, db: Optional[Session] = None
+    ) -> Optional[WritingVersionModel]:
+        with get_db_context(db) as db:
+            version = (
+                db.query(WritingVersion)
+                .filter(WritingVersion.writing_session_id == session_id)
+                .order_by(WritingVersion.version_no.desc())
+                .first()
+            )
+            return WritingVersionModel.model_validate(version) if version else None
+
     def insert_provenance_segments(
         self,
         session_id: str,
@@ -3180,6 +3413,226 @@ class EducationTable:
             return (
                 MicroReflectionModel.model_validate(reflection) if reflection else None
             )
+
+    def resolve_next_submission_round_no(
+        self, assignment_id: str, student_id: str, db: Optional[Session] = None
+    ) -> int:
+        """下一次提交会落在第几轮。
+
+        与 insert_submission 的开轮逻辑保持一致:首轮为 1,退回后重交开新轮,
+        当前轮还没批改就仍是这一轮(覆盖式重交)。质疑按轮绑定,一轮只质疑一次。
+        """
+
+        with get_db_context(db) as db:
+            current = (
+                db.query(Submission)
+                .filter(
+                    Submission.assignment_id == assignment_id,
+                    Submission.student_id == student_id,
+                    Submission.is_current == 1,
+                )
+                .order_by(Submission.round_no.desc())
+                .first()
+            )
+            if current is None:
+                return 1
+            review = (
+                db.query(SubmissionReview)
+                .filter(SubmissionReview.submission_id == current.id)
+                .first()
+            )
+            if review is not None and review.review_status == "returned":
+                return current.round_no + 1
+            return current.round_no
+
+    def insert_challenge_session(
+        self,
+        writing_session_id: str,
+        assignment_id: str,
+        student_id: str,
+        submission_round_no: int,
+        source_version_id: str,
+        focus_keys: list[str],
+        planned_rounds: int,
+        commit: bool = True,
+        db: Optional[Session] = None,
+    ) -> ChallengeSessionModel:
+        with get_db_context(db) as db:
+            session = ChallengeSession(
+                id=str(uuid.uuid4()),
+                writing_session_id=writing_session_id,
+                assignment_id=assignment_id,
+                student_id=student_id,
+                submission_round_no=submission_round_no,
+                source_version_id=source_version_id,
+                focus_keys=list(focus_keys),
+                planned_rounds=planned_rounds,
+                status="in_progress",
+                closing_summary_json=None,
+                checklist_state_json=None,
+                started_at=int(time.time()),
+                ended_at=None,
+            )
+            db.add(session)
+            if commit:
+                db.commit()
+            else:
+                db.flush()
+            db.refresh(session)
+            return ChallengeSessionModel.model_validate(session)
+
+    def get_challenge_session_by_id(
+        self, session_id: str, db: Optional[Session] = None
+    ) -> Optional[ChallengeSessionModel]:
+        with get_db_context(db) as db:
+            session = db.get(ChallengeSession, session_id)
+            return ChallengeSessionModel.model_validate(session) if session else None
+
+    def get_challenge_session_for_round(
+        self,
+        writing_session_id: str,
+        submission_round_no: int,
+        db: Optional[Session] = None,
+    ) -> Optional[ChallengeSessionModel]:
+        with get_db_context(db) as db:
+            session = (
+                db.query(ChallengeSession)
+                .filter(
+                    ChallengeSession.writing_session_id == writing_session_id,
+                    ChallengeSession.submission_round_no == submission_round_no,
+                )
+                .first()
+            )
+            return ChallengeSessionModel.model_validate(session) if session else None
+
+    def get_challenge_turns(
+        self, challenge_session_id: str, db: Optional[Session] = None
+    ) -> list[ChallengeTurnModel]:
+        with get_db_context(db) as db:
+            turns = (
+                db.query(ChallengeTurn)
+                .filter(ChallengeTurn.challenge_session_id == challenge_session_id)
+                .order_by(ChallengeTurn.turn_no.asc())
+                .all()
+            )
+            return [ChallengeTurnModel.model_validate(turn) for turn in turns]
+
+    def insert_challenge_turn(
+        self,
+        challenge_session_id: str,
+        turn_no: int,
+        focus_key: str,
+        challenge_text: str,
+        commit: bool = True,
+        db: Optional[Session] = None,
+    ) -> ChallengeTurnModel:
+        with get_db_context(db) as db:
+            turn = ChallengeTurn(
+                id=str(uuid.uuid4()),
+                challenge_session_id=challenge_session_id,
+                turn_no=turn_no,
+                focus_key=focus_key,
+                challenge_text=challenge_text,
+                response_text=None,
+                responded_at=None,
+                created_at=int(time.time()),
+            )
+            db.add(turn)
+            if commit:
+                db.commit()
+            else:
+                db.flush()
+            db.refresh(turn)
+            return ChallengeTurnModel.model_validate(turn)
+
+    def record_challenge_response(
+        self,
+        challenge_session_id: str,
+        turn_no: int,
+        response_text: str,
+        commit: bool = True,
+        db: Optional[Session] = None,
+    ) -> Optional[ChallengeTurnModel]:
+        with get_db_context(db) as db:
+            turn = (
+                db.query(ChallengeTurn)
+                .filter(
+                    ChallengeTurn.challenge_session_id == challenge_session_id,
+                    ChallengeTurn.turn_no == turn_no,
+                )
+                .first()
+            )
+            if turn is None:
+                return None
+            turn.response_text = response_text
+            turn.responded_at = int(time.time())
+            if commit:
+                db.commit()
+            else:
+                db.flush()
+            db.refresh(turn)
+            return ChallengeTurnModel.model_validate(turn)
+
+    def complete_challenge_session(
+        self,
+        challenge_session_id: str,
+        closing: ChallengeClosing,
+        commit: bool = True,
+        db: Optional[Session] = None,
+    ) -> Optional[ChallengeSessionModel]:
+        with get_db_context(db) as db:
+            session = db.get(ChallengeSession, challenge_session_id)
+            if session is None:
+                return None
+            session.status = "completed"
+            session.closing_summary_json = closing.model_dump()
+            session.ended_at = int(time.time())
+            if commit:
+                db.commit()
+            else:
+                db.flush()
+            db.refresh(session)
+            return ChallengeSessionModel.model_validate(session)
+
+    def skip_challenge_session(
+        self,
+        challenge_session_id: str,
+        commit: bool = True,
+        db: Optional[Session] = None,
+    ) -> Optional[ChallengeSessionModel]:
+        with get_db_context(db) as db:
+            session = db.get(ChallengeSession, challenge_session_id)
+            if session is None:
+                return None
+            session.status = "skipped"
+            session.ended_at = int(time.time())
+            if commit:
+                db.commit()
+            else:
+                db.flush()
+            db.refresh(session)
+            return ChallengeSessionModel.model_validate(session)
+
+    def update_challenge_checklist(
+        self,
+        challenge_session_id: str,
+        checked_indexes: list[int],
+        commit: bool = True,
+        db: Optional[Session] = None,
+    ) -> Optional[ChallengeSessionModel]:
+        with get_db_context(db) as db:
+            session = db.get(ChallengeSession, challenge_session_id)
+            if session is None:
+                return None
+            session.checklist_state_json = {
+                "checked_indexes": sorted(set(checked_indexes))
+            }
+            if commit:
+                db.commit()
+            else:
+                db.flush()
+            db.refresh(session)
+            return ChallengeSessionModel.model_validate(session)
 
     def get_analysis_results_by_submission_ids(
         self,
