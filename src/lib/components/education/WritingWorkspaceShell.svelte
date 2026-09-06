@@ -410,7 +410,10 @@
 					});
 				}
 
-				saveStatusKey = isSubmitted ? 'Submitted' : 'Saved';
+				// 这个胶囊只报自动保存状态。之前提交后它显示「已提交」，和旁边的绿色
+				// 提交徽标撞成两个「已提交」；更糟的是学生提交后继续改稿，每存一次它
+				// 又变回「已提交」，而这版草稿其实还没重新提交。
+				saveStatusKey = 'Saved';
 				hasUnsavedFailure = false;
 				saveRetryAttempt = 0;
 				saving = false;
@@ -672,7 +675,7 @@
 			workspaceProject = workspace.project;
 			workspaceNote = workspace.note;
 			isSubmitted = workspace.writing_session?.status === 'submitted';
-			saveStatusKey = isSubmitted ? 'Submitted' : 'Saved';
+			saveStatusKey = 'Saved';
 			noteJson = workspace.note?.data?.content?.json ?? null;
 			noteHtml = workspace.note?.data?.content?.html ?? '';
 			noteText = workspace.note?.data?.content?.md ?? '';
@@ -756,6 +759,12 @@
 />
 
 {#if loaded}
+	<!--
+		写作面板可拖宽，但两端都要卡死：
+		下限 560 —— 再窄标题行右侧那串（提交徽标 / 提交记录 / 保存状态 / 提交作业）就把标题挤没了；
+		上限 800 —— 编辑器根节点带 min-w-full，会盖掉 prose 自带的 65ch 上限，
+		不封顶的话正文行长跟着面板一起拉长，宽屏上一行五六十个汉字，读改都费劲。
+	-->
 	<Chat
 		chatIdProp={currentChatId}
 		{projectBaseUrl}
@@ -767,8 +776,9 @@
 		disableContextActions={false}
 		allowAssignmentWorkspaceChat={isAssignment}
 		showRightPanel={!$mobile}
-		rightPanelWidth={520}
-		rightPanelMinWidth={400}
+		rightPanelWidth={600}
+		rightPanelMinWidth={560}
+		rightPanelMaxWidth={800}
 		rightPanelClassName="hidden lg:flex"
 	>
 		<div
@@ -824,7 +834,7 @@
 							</div>
 						{/if}
 					</div>
-					<div class="flex items-center gap-2">
+					<div class="flex flex-wrap items-center justify-end gap-2">
 						{#if isSubmitted}
 							<div
 								class="rounded-full bg-emerald-100 px-3 py-1 text-xs text-emerald-700 dark:text-emerald-300"
