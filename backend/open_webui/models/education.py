@@ -394,6 +394,30 @@ class ChallengeTurn(Base):
     created_at = Column(BigInteger, nullable=False)
 
 
+class ChallengeInsight(Base):
+    """一次作业的班级质疑归纳,缓存用。
+
+    第一层的维度命中率是纯内存聚合,不落表;只有这一层要调模型,所以必须缓存——
+    不缓存的话教师每刷新一次看板就烧一次调用。
+    """
+
+    __tablename__ = "challenge_insight"
+    __table_args__ = (
+        # 一个作业只留一条:输入变了整条覆盖,不攒历史版本。
+        UniqueConstraint("assignment_id", name="challenge_insight_assignment_idx"),
+    )
+
+    id = Column(Text, primary_key=True, unique=True)
+    assignment_id = Column(
+        Text, ForeignKey("assignment.id", ondelete="CASCADE"), nullable=False
+    )
+    # 参与归纳的条目集合的规范化哈希。内容没变就直接复用,不重算。
+    input_hash = Column(Text, nullable=False)
+    categories_json = Column(JSONField, nullable=False)
+    sample_size = Column(Integer, nullable=False)
+    created_at = Column(BigInteger, nullable=False)
+
+
 class Submission(Base):
     __tablename__ = "submission"
     __table_args__ = (
@@ -895,6 +919,47 @@ class ChallengeSessionDetail(BaseModel):
     turns: list[ChallengeTurnModel] = Field(default_factory=list)
     # 只有教师读提交时才带：被质疑那一稿与最终正文的差异结论，提交时已冻在 stats_json。
     revision: Optional[dict] = None
+
+
+class ChallengeInsightCategory(BaseModel):
+    """一类「本班普遍站不住的论证」。
+
+    只报频次,不作评价:允许「以个例代替普遍规律,出现 14 人次」,禁止「本班论证基础
+    薄弱」这类给班级贴标签的结论。样例必须脱敏到教师敢拿上讲台——展示时全班不能
+    认出是谁。
+    """
+
+    name: str
+    hits: int = Field(default=0, ge=0)
+    samples: list[str] = Field(default_factory=list)
+    advice: str = ""
+
+
+class ChallengeInsightModel(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    assignment_id: str
+    input_hash: str
+    categories_json: dict
+    sample_size: int
+    created_at: int
+
+
+class ChallengeInsightResponse(BaseModel):
+    """样本不足时 categories 为空、below_threshold 为真,前端不显示半成品结论。"""
+
+    categories: list[ChallengeInsightCategory] = Field(default_factory=list)
+    sample_size: int = 0
+    below_threshold: bool = False
+    threshold: int = 0
+    generated_at: Optional[int] = None
+
+
+class ChallengeInsightForm(BaseModel):
+    """生成教研分析。质疑用哪个模型由学生写作区决定,这里由教师决定。"""
+
+    model: str
 
 
 class ChallengeStartForm(BaseModel):
@@ -3510,6 +3575,54 @@ class EducationTable:
             if review is not None and review.review_status == "returned":
                 return current.round_no + 1
             return current.round_no
+
+    def get_challenge_insight(
+        self, assignment_id: str, db: Optional[Session] = None
+    ) -> Optional[ChallengeInsightModel]:
+        with get_db_context(db) as db:
+            insight = (
+                db.query(ChallengeInsight)
+                .filter(ChallengeInsight.assignment_id == assignment_id)
+                .first()
+            )
+            return ChallengeInsightModel.model_validate(insight) if insight else None
+
+    def upsert_challenge_insight(
+        self,
+        assignment_id: str,
+        input_hash: str,
+        categories_json: dict,
+        sample_size: int,
+        commit: bool = True,
+        db: Optional[Session] = None,
+    ) -> ChallengeInsightModel:
+        with get_db_context(db) as db:
+            insight = (
+                db.query(ChallengeInsight)
+                .filter(ChallengeInsight.assignment_id == assignment_id)
+                .first()
+            )
+            if insight is None:
+                insight = ChallengeInsight(
+                    id=str(uuid.uuid4()),
+                    assignment_id=assignment_id,
+                    input_hash=input_hash,
+                    categories_json=categories_json,
+                    sample_size=sample_size,
+                    created_at=int(time.time()),
+                )
+                db.add(insight)
+            else:
+                insight.input_hash = input_hash
+                insight.categories_json = categories_json
+                insight.sample_size = sample_size
+                insight.created_at = int(time.time())
+            if commit:
+                db.commit()
+            else:
+                db.flush()
+            db.refresh(insight)
+            return ChallengeInsightModel.model_validate(insight)
 
     def insert_challenge_session(
         self,

@@ -29,6 +29,8 @@ from open_webui.models.education import (
     AssignmentWorkspaceResponse,
     AutosaveForm,
     ChallengeChecklistForm,
+    ChallengeInsightForm,
+    ChallengeInsightResponse,
     ChallengeRespondForm,
     ChallengeSkipBeforeStartForm,
     ChallengeSessionDetail,
@@ -102,6 +104,7 @@ from open_webui.services.education.analysis import (
 )
 from open_webui.services.education.challenge_insight import (
     build_challenge_distribution,
+    build_challenge_insight,
 )
 from open_webui.services.education.challenge import (
     skip_challenge_before_start,
@@ -2956,13 +2959,10 @@ async def submit_assignment(
             # 它们的维度归属都在这里算好。归属不上的条目照样给学生看，只是不进
             # 班级那张按维度统计的表——不硬塞给某个维度。
             "unresolved_count": len(_challenge_unresolved(challenge_session)),
-            "unresolved_focus_keys": sorted(
-                {
-                    item.focus_key
-                    for item in _challenge_unresolved(challenge_session)
-                    if item.focus_key
-                }
-            ),
+            "unresolved_items": [
+                {"text": item.text, "focus_key": item.focus_key}
+                for item in _challenge_unresolved(challenge_session)
+            ],
             "revision": summarize_post_challenge_revision(
                 challenge_turns,
                 form_data.final_content_text,
@@ -3525,6 +3525,35 @@ async def save_submission_review(
             db,
         )
     return review
+
+
+@router.post(
+    "/teacher/assignments/{assignment_id}/challenge-insight",
+    response_model=ChallengeInsightResponse,
+)
+async def generate_teacher_challenge_insight(
+    request: Request,
+    form_data: ChallengeInsightForm,
+    user=Depends(get_verified_user),
+    assignment: AssignmentModel = Depends(require_teacher_assignment),
+    db: Session = Depends(get_session),
+):
+    """把全班没答住的点归纳成几类「普遍站不住的论证」。
+
+    由教师主动触发，不随看板自动生成——这是唯一一处会调模型的班级分析，挂在看板
+    加载上就等于每次打开都烧一次调用。缓存、样本门槛、脱敏、只报频次四条约束都在
+    服务层，见 challenge_insight。
+    """
+
+    submissions = Education.get_submissions_by_assignment(assignment.id, db=db)
+    try:
+        return await build_challenge_insight(
+            request, user, assignment, submissions, form_data.model, db
+        )
+    except ChallengeError as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)
+        ) from error
 
 
 @router.get(

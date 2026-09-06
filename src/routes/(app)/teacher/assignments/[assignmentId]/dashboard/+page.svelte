@@ -5,9 +5,10 @@
 	import { get } from 'svelte/store';
 	import { toast } from 'svelte-sonner';
 
-	import { getTeacherDashboard } from '$lib/apis/education';
+	import { generateChallengeInsight, getTeacherDashboard } from '$lib/apis/education';
+	import type { ChallengeInsight } from '$lib/apis/education';
 	import { resolveErrorMessage } from '$lib/utils/education';
-	import { educationNotificationSummary } from '$lib/stores';
+	import { educationNotificationSummary, models } from '$lib/stores';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
 	import LoadingState from '$lib/components/education/LoadingState.svelte';
@@ -26,6 +27,31 @@
 	let refreshing = false;
 	let unsubscribeNotifications;
 	let notificationsInitialized = false;
+	let insight: ChallengeInsight | null = null;
+	let insightLoading = false;
+
+	// 只有这一处班级分析会调模型，所以由教师点了才生成，不挂在看板加载上——
+	// 挂上去就等于每打开一次看板烧一次调用。
+	const loadInsight = async () => {
+		const modelId = $models[0]?.id;
+		if (!modelId) {
+			toast.error(t('Pick a model before generating the analysis.'));
+			return;
+		}
+		insightLoading = true;
+		try {
+			insight = await generateChallengeInsight(
+				localStorage.token,
+				$page.params.assignmentId,
+				modelId
+			);
+		} catch (error) {
+			toast.error(resolveErrorMessage(error, t));
+		} finally {
+			insightLoading = false;
+		}
+	};
+
 	// 分析结果要能直接变成下一轮的教学配置，否则它只是一张看完就走的图表。
 	// 复用既有的「以此为模板新建」流程：连同 rubric 一起带过去，焦点才有意义。
 	const useAsNextFocus = (focusKey: string) => {
@@ -162,6 +188,57 @@
 							</EduButton>
 						</div>
 					{/each}
+				</div>
+
+				<div class="mt-4 border-t border-gray-200 pt-3 dark:border-gray-700">
+					{#if insight === null}
+						<EduButton disabled={insightLoading} on:click={loadInsight}>
+							{insightLoading
+								? $i18n.t('Generating...')
+								: $i18n.t('Group these into argument patterns')}
+						</EduButton>
+					{:else if insight.below_threshold}
+						<!-- 样本不足就明说，不显示半成品结论：几条文本归纳出的「类型」是噪声。 -->
+						<div class="text-xs text-gray-500 dark:text-gray-400">
+							{$i18n.t(
+								'Only {{count}} students finished — {{threshold}} are needed before grouping means anything.',
+								{ count: insight.sample_size, threshold: insight.threshold }
+							)}
+						</div>
+					{:else if insight.categories.length === 0}
+						<div class="text-xs text-gray-500 dark:text-gray-400">
+							{$i18n.t('No shared pattern came out of this round.')}
+						</div>
+					{:else}
+						<div class="space-y-3">
+							{#each insight.categories as category (category.name)}
+								<div>
+									<div class="text-sm font-medium text-gray-800 dark:text-gray-100">
+										{category.name}
+										<span class="ml-1.5 text-xs font-normal text-gray-400">
+											{$i18n.t('{{hits}} occurrences', { hits: category.hits })}
+										</span>
+									</div>
+									{#if category.advice}
+										<div class="mt-0.5 text-xs text-gray-600 dark:text-gray-300">
+											{category.advice}
+										</div>
+									{/if}
+									{#each category.samples as sample}
+										<div
+											class="mt-1 border-l-2 border-gray-200 pl-3 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400"
+										>
+											{sample}
+										</div>
+									{/each}
+								</div>
+							{/each}
+						</div>
+						<!-- 样例已脱敏，教师可以直接念给全班听。 -->
+						<div class="mt-3 text-xs text-gray-400">
+							{$i18n.t('Samples carry no student identity — safe to read out in class.')}
+						</div>
+					{/if}
 				</div>
 			</EduCard>
 		{/if}

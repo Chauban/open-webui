@@ -9,12 +9,34 @@
 submissions 全取回来,所以这里是纯内存聚合,不额外查库,也不进缓存。
 """
 
+import hashlib
+import json
+import logging
 from typing import Iterable, Optional
 
-from open_webui.models.education import RubricSchema
+from open_webui.models.education import (
+    ChallengeInsightCategory,
+    ChallengeInsightResponse,
+    Education,
+    RubricSchema,
+)
+# 走模块引用而不是 from ... import generate_completion：模型调用出口只有
+# challenge.generate_completion 一个，测试靠替换它来隔离模型。直接把名字绑过来
+# 会绕开那个出口，这里就成了第二个出口。
+from open_webui.services.education import challenge as challenge_module
+from open_webui.services.education.challenge import (
+    ChallengeError,
+    get_challenge_prompt,
+)
+
+log = logging.getLogger(__name__)
 
 # 少于这个人数不出班级结论。几个人的比例没有意义,而教师会当真。
 CHALLENGE_DISTRIBUTION_MIN_STUDENTS = 3
+# 归纳的门槛更高:少数几条文本归纳出来的「类型」是噪声,而教师会拿它上讲台。
+CHALLENGE_INSIGHT_MIN_STUDENTS = 5
+# 一次最多送这么多条,防止大班把上下文顶爆。
+CHALLENGE_INSIGHT_MAX_ITEMS = 200
 
 
 def _challenge_stats(submission) -> dict:
@@ -68,8 +90,10 @@ def build_challenge_distribution(assignment, submissions: Iterable) -> Optional[
                 turn.get("changed")
             )
 
-        for focus_key in stats.get("unresolved_focus_keys") or []:
-            if focus_key not in challenged:
+        for item in stats.get("unresolved_items") or []:
+            focus_key = item.get("focus_key")
+            # 归属不上的条目照样给学生看，只是不进这张按维度统计的表。
+            if not focus_key or focus_key not in challenged:
                 continue
             unresolved.setdefault(focus_key, set()).add(student_id)
             if not focus_changed.get(focus_key, False):
@@ -105,3 +129,168 @@ def build_challenge_distribution(assignment, submissions: Iterable) -> Optional[
         "below_sample_threshold": completed < CHALLENGE_DISTRIBUTION_MIN_STUDENTS,
         "sample_threshold": CHALLENGE_DISTRIBUTION_MIN_STUDENTS,
     }
+
+
+def collect_unresolved_items(assignment, submissions: Iterable) -> list[tuple[str, str]]:
+    """把全班的未解决条目收成 (维度名, 文本)。
+
+    **只收这两样。** 不带姓名、学号、提交 id,也不带任何能回指到人的东西——这份东西
+    是要送进模型、再摆到课堂上讲的,学生不能在讲评时被全班认出来。脱敏做在收集这一步
+    而不是展示那一步,是为了让「送出去的载荷里根本没有标识」这件事只有一个出处。
+    """
+
+    labels = _criterion_labels(assignment)
+    items: list[tuple[str, str]] = []
+    for submission in submissions:
+        stats = _challenge_stats(submission)
+        if stats.get("status") != "completed":
+            continue
+        for item in stats.get("unresolved_items") or []:
+            text = str(item.get("text") or "").strip()
+            if not text:
+                continue
+            focus_key = item.get("focus_key")
+            items.append((labels.get(focus_key, "") if focus_key else "", text))
+    # 排序让同一批内容无论提交顺序如何都算出同一个哈希。
+    items.sort()
+    return items[:CHALLENGE_INSIGHT_MAX_ITEMS]
+
+
+def insight_input_hash(items: list[tuple[str, str]]) -> str:
+    payload = json.dumps(items, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def count_completed_students(submissions: Iterable) -> int:
+    return sum(
+        1
+        for submission in submissions
+        if _challenge_stats(submission).get("status") == "completed"
+    )
+
+
+def build_insight_messages(
+    system_prompt: str, assignment, items: list[tuple[str, str]]
+) -> list[dict]:
+    lines = [f"【作业】{assignment.title}", "【全班仍未答住的点】"]
+    for label, text in items:
+        lines.append(f"- （{label}）{text}" if label else f"- {text}")
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": "\n".join(lines)},
+    ]
+
+
+def parse_insight(raw: str) -> list[ChallengeInsightCategory]:
+    """解析归纳结果。解析不出来就返回空,不编造类型。"""
+
+    text = (raw or "").strip()
+    start = text.find("{")
+    end = text.rfind("}") + 1
+    if start == -1 or end <= start:
+        log.warning("challenge insight output was not a JSON object")
+        return []
+    try:
+        payload = json.loads(text[start:end])
+    except json.JSONDecodeError:
+        log.warning("challenge insight output was not valid JSON")
+        return []
+
+    categories = []
+    for entry in payload.get("categories") or []:
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("name") or "").strip()
+        if not name:
+            continue
+        samples = [
+            str(sample).strip()
+            for sample in (entry.get("samples") or [])
+            if str(sample).strip()
+        ]
+        try:
+            hits = max(0, int(entry.get("hits") or 0))
+        except (TypeError, ValueError):
+            hits = 0
+        categories.append(
+            ChallengeInsightCategory(
+                name=name,
+                hits=hits,
+                samples=samples[:2],
+                advice=str(entry.get("advice") or "").strip(),
+            )
+        )
+    return categories[:5]
+
+
+async def build_challenge_insight(
+    request,
+    user,
+    assignment,
+    submissions: Iterable,
+    model_id: str,
+    db,
+) -> ChallengeInsightResponse:
+    """把全班的未解决条目归纳成几类「普遍站不住的论证」。
+
+    四条约束,缺一条这个功能就不能用:
+
+    - **缓存**:输入哈希不变就直接返回上次的结果,不重算。
+    - **样本门槛**:完成质疑的人少于门槛就明说样本不足,不勉强归纳。
+    - **脱敏**:送进模型的载荷里只有维度名和条目文本,见 collect_unresolved_items。
+    - **只报频次**:措辞里写死了不许给班级下评价性结论。
+    """
+
+    submissions = list(submissions)
+    completed = count_completed_students(submissions)
+    if completed < CHALLENGE_INSIGHT_MIN_STUDENTS:
+        return ChallengeInsightResponse(
+            sample_size=completed,
+            below_threshold=True,
+            threshold=CHALLENGE_INSIGHT_MIN_STUDENTS,
+        )
+
+    items = collect_unresolved_items(assignment, submissions)
+    if not items:
+        return ChallengeInsightResponse(
+            sample_size=completed, threshold=CHALLENGE_INSIGHT_MIN_STUDENTS
+        )
+
+    input_hash = insight_input_hash(items)
+    cached = Education.get_challenge_insight(assignment.id, db=db)
+    if cached is not None and cached.input_hash == input_hash:
+        return ChallengeInsightResponse(
+            categories=[
+                ChallengeInsightCategory.model_validate(category)
+                for category in cached.categories_json.get("categories") or []
+            ],
+            sample_size=cached.sample_size,
+            threshold=CHALLENGE_INSIGHT_MIN_STUDENTS,
+            generated_at=cached.created_at,
+        )
+
+    system_prompt = await get_challenge_prompt("insight")
+    if not system_prompt:
+        raise ChallengeError("Challenge insight prompt is not configured")
+
+    raw = await challenge_module.generate_completion(
+        request,
+        user,
+        model_id,
+        build_insight_messages(system_prompt, assignment, items),
+    )
+    categories = parse_insight(raw)
+
+    stored = Education.upsert_challenge_insight(
+        assignment.id,
+        input_hash,
+        {"categories": [category.model_dump() for category in categories]},
+        completed,
+        db=db,
+    )
+    return ChallengeInsightResponse(
+        categories=categories,
+        sample_size=completed,
+        threshold=CHALLENGE_INSIGHT_MIN_STUDENTS,
+        generated_at=stored.created_at,
+    )

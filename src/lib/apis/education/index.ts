@@ -920,6 +920,43 @@ export const updateChallengeChecklist = async (
 	}).then(handleJson);
 };
 
+/** 一类「本班普遍站不住的论证」。只报频次，不对班级下评价性结论。 */
+export type ChallengeInsightCategory = {
+	name: string;
+	hits: number;
+	samples: string[];
+	advice: string;
+};
+
+export type ChallengeInsight = {
+	categories: ChallengeInsightCategory[];
+	sample_size: number;
+	below_threshold: boolean;
+	threshold: number;
+	generated_at: number | null;
+};
+
+/**
+ * 生成班级教研分析。
+ *
+ * 由教师主动触发，不随看板自动加载——这是唯一一处会调模型的班级分析。服务端按输入
+ * 哈希缓存，内容没变不会重算。
+ */
+export const generateChallengeInsight = async (
+	token: string,
+	assignmentId: string,
+	model: string
+): Promise<ChallengeInsight> => {
+	return fetch(
+		`${WEBUI_API_BASE_URL}/teacher/assignments/${assignmentId}/challenge-insight`,
+		{
+			method: 'POST',
+			headers: withAuth(token),
+			body: JSON.stringify({ model })
+		}
+	).then(handleJson);
+};
+
 export const getSubmissionChallenge = async (
 	token: string,
 	submissionId: string

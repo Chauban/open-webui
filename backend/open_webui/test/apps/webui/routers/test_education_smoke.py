@@ -30,6 +30,7 @@ from open_webui.models.education import (
     AnalysisResult,
     Assignment,
     AssignmentExtension,
+    ChallengeInsight,
     ChallengeSession,
     ChallengeTurn,
     Classroom,
@@ -537,6 +538,7 @@ def education_client():
             WritingSession.__table__,
             ChallengeSession.__table__,
             ChallengeTurn.__table__,
+            ChallengeInsight.__table__,
             WritingVersion.__table__,
             ProvenanceSegment.__table__,
             EditorOperation.__table__,
@@ -5267,6 +5269,151 @@ def test_challenge_followup_rejected_when_assignment_has_challenge_off(education
         },
     )
     assert res.status_code == 400, res.text
+
+
+def _complete_challenge_and_submit(client, assignment, session_id, unresolved_text):
+    """跑完一轮质疑并提交，留下一条指定文本的未解决点。"""
+
+    with _fake_challenge_model(
+        closing={
+            "stood": [],
+            "unresolved": [{"text": unresolved_text, "turn_no": 1}],
+        }
+    ):
+        challenge_id = _start_challenge(client, assignment["id"], session_id).json()[
+            "session"
+        ]["id"]
+        _respond(client, challenge_id, 1)
+        _respond(client, challenge_id, 2)
+
+    return client.post(
+        f"/api/v1/assignments/{assignment['id']}/submit",
+        json=_submit_body(session_id, _long_draft()),
+    )
+
+
+def test_challenge_insight_refuses_below_the_sample_threshold(education_client):
+    """样本不足时明说还差几人，不勉强归纳 —— 少数几条文本归纳出的类型是噪声。"""
+
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id = _setup_challenge_assignment(
+        client, teacher, student, rounds=2, title="Thin Sample"
+    )
+
+    UserContext.current_user = student
+    _complete_challenge_and_submit(client, assignment, session_id, "论据还不够")
+
+    UserContext.current_user = teacher
+    with _fake_challenge_model() as calls:
+        res = client.post(
+            f"/api/v1/teacher/assignments/{assignment['id']}/challenge-insight",
+            json={"model": "test-model"},
+        )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["below_threshold"] is True
+    assert body["sample_size"] == 1
+    assert body["categories"] == []
+    # 样本不足时一次模型都不能调。
+    assert calls == []
+
+
+def test_challenge_insight_payload_carries_no_student_identity(education_client):
+    """送进模型的载荷里不能有姓名、学号、提交 id —— 这份东西要摆到课堂上讲。"""
+
+    client, teacher, _, students, _, _ = education_client
+    assignment, first_session = _setup_challenge_assignment(
+        client, teacher, students, rounds=2, title="Redaction Check"
+    )
+
+    UserContext.current_user = students
+    submit_res = _complete_challenge_and_submit(
+        client, assignment, first_session, "以个例代替普遍规律"
+    )
+    submission_id = submit_res.json()["submission_id"]
+
+    UserContext.current_user = teacher
+    insight_payload = {
+        "categories": [
+            {
+                "name": "以个例代替普遍规律",
+                "hits": 1,
+                "samples": ["以个例代替普遍规律"],
+                "advice": "讲清样本量和结论强度的关系。",
+            }
+        ]
+    }
+    with _fake_challenge_model(
+        raw_turns=[json.dumps(insight_payload, ensure_ascii=False)]
+    ) as calls:
+        # 门槛在服务层，这里直接调服务把它绕开，专测脱敏。
+        from open_webui.services.education import challenge_insight as insight_module
+
+        original = insight_module.CHALLENGE_INSIGHT_MIN_STUDENTS
+        insight_module.CHALLENGE_INSIGHT_MIN_STUDENTS = 1
+        try:
+            res = client.post(
+                f"/api/v1/teacher/assignments/{assignment['id']}/challenge-insight",
+                json={"model": "test-model"},
+            )
+        finally:
+            insight_module.CHALLENGE_INSIGHT_MIN_STUDENTS = original
+
+    assert res.status_code == 200, res.text
+    assert len(calls) == 1
+    sent = calls[0]["messages"][1]["content"]
+    assert "以个例代替普遍规律" in sent
+    # 载荷里只有维度名和条目文本。
+    assert students.name not in sent
+    assert students.id not in sent
+    assert students.email not in sent
+    assert submission_id not in sent
+    assert first_session not in sent
+
+    body = res.json()
+    assert body["categories"][0]["name"] == "以个例代替普遍规律"
+    assert body["categories"][0]["hits"] == 1
+
+
+def test_challenge_insight_is_cached_until_the_input_changes(education_client):
+    """输入哈希不变就不重算 —— 不缓存的话教师每刷一次看板烧一次调用。"""
+
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id = _setup_challenge_assignment(
+        client, teacher, student, rounds=2, title="Cached Insight"
+    )
+
+    UserContext.current_user = student
+    _complete_challenge_and_submit(client, assignment, session_id, "论据还不够")
+
+    UserContext.current_user = teacher
+    from open_webui.services.education import challenge_insight as insight_module
+
+    original = insight_module.CHALLENGE_INSIGHT_MIN_STUDENTS
+    insight_module.CHALLENGE_INSIGHT_MIN_STUDENTS = 1
+    payload = json.dumps(
+        {"categories": [{"name": "论据不足", "hits": 1, "samples": [], "advice": "讲证据。"}]},
+        ensure_ascii=False,
+    )
+    try:
+        with _fake_challenge_model(raw_turns=[payload]) as first_calls:
+            first = client.post(
+                f"/api/v1/teacher/assignments/{assignment['id']}/challenge-insight",
+                json={"model": "test-model"},
+            ).json()
+        with _fake_challenge_model(raw_turns=[payload]) as second_calls:
+            second = client.post(
+                f"/api/v1/teacher/assignments/{assignment['id']}/challenge-insight",
+                json={"model": "test-model"},
+            ).json()
+    finally:
+        insight_module.CHALLENGE_INSIGHT_MIN_STUDENTS = original
+
+    assert len(first_calls) == 1
+    # 第二次全靠缓存，一次模型都不调。
+    assert second_calls == []
+    assert second["categories"] == first["categories"]
+    assert second["generated_at"] == first["generated_at"]
 
 
 def test_challenge_config_survives_assignment_update(education_client):
