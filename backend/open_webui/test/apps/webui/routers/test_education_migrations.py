@@ -33,9 +33,11 @@ EDUCATION_TABLES = {
 
 def _set_database_url(monkeypatch, database_url: str) -> None:
     monkeypatch.setenv("DATABASE_URL", database_url)
+    monkeypatch.setenv("ENABLE_DB_MIGRATIONS", "False")
     loaded_env = sys.modules.get("open_webui.env")
     if loaded_env is not None:
         monkeypatch.setattr(loaded_env, "DATABASE_URL", database_url)
+        monkeypatch.setattr(loaded_env, "ENABLE_DB_MIGRATIONS", False)
 
 
 def _alembic_config(backend_dir: Path) -> Config:
@@ -109,6 +111,15 @@ def test_fresh_database_upgrades_to_head(tmp_path, monkeypatch):
         )
         assert {"submission_id", "evidence_revision"} in [
             set(item["column_names"]) for item in evidence_unique_constraints
+        ]
+        review_event_columns = {
+            column["name"]: column
+            for column in schema.get_columns("submission_review_event")
+        }
+        assert review_event_columns["evidence_snapshot_id"]["nullable"] is False
+        assert {"evidence_snapshot_id"} in [
+            set(item["constrained_columns"])
+            for item in schema.get_foreign_keys("submission_review_event")
         ]
         assert "student_profile_snapshot" not in schema.get_table_names()
         assert {
