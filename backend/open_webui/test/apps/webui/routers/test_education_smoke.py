@@ -4261,20 +4261,40 @@ def test_submission_freezes_the_coaching_wording_in_force(education_client):
 # ---------------------------------------------------------------------------
 
 
-def _long_draft(unit="短视频降低了年轻人的注意力，因为它把时间切成了碎片。"):
+# 每一句都不一样。质疑要从中引用一句作为修订判定的锚点，同一句重复六遍的话，
+# 学生改掉其中一处、剩下五处还在，就永远判不出「那一句变了」。
+_DRAFT_SENTENCES = (
+    "短视频降低了年轻人的注意力，因为它把时间切成了碎片。",
+    "所有人都认为长视频已经没人看了，这是显而易见的事实。",
+    "我身边的同学几乎都在刷短视频，可见这已经是普遍现象。",
+    "平台的推荐算法让人停不下来，因此它必须为此负责。",
+    "阅读能力的下降和短视频的普及是同时发生的，两者显然互为因果。",
+    "综上所述，短视频对年轻人的影响是全面而深远的。",
+)
+
+
+def _long_draft():
     """越过最短正文门槛的草稿。正文太短时质疑没有可打的东西，服务端会拒绝。"""
 
-    return unit * 6
+    return "".join(_DRAFT_SENTENCES)
 
 
 @contextmanager
-def _fake_challenge_model(turn_text="你这一点说服不了我", closing=None):
+def _fake_challenge_model(turn_text="你这一点说服不了我", closing=None, raw_turns=None):
     """替换质疑环节唯一的模型调用出口，测试不碰真实模型。
 
     收尾调用靠 system 提示词里的 JSON 约定识别（closing 那段带 "stood" 字样）。
+    质疑轮按真实契约输出 JSON，quote 从正文里原样摘一句——摘不回原文的引用会被
+    服务端判为生成失败，测试里也不该绕过这条。
+
+    raw_turns 用来喂坏输出（不是 JSON、引用不在正文里），验证解析失败与重试。
     """
 
     calls = []
+
+    def _draft_from(messages):
+        body = messages[1]["content"].split("【作者的文章】\n", 1)[1]
+        return body.split("\n\n", 1)[0]
 
     async def fake_generate(request, user, model_id, messages):
         calls.append({"model": model_id, "messages": messages})
@@ -4282,7 +4302,23 @@ def _fake_challenge_model(turn_text="你这一点说服不了我", closing=None)
             return json.dumps(
                 closing or {"stood": [], "unresolved": []}, ensure_ascii=False
             )
-        return f"{turn_text} #{len(calls)}"
+
+        turn_calls = [
+            call for call in calls if '"stood"' not in call["messages"][0]["content"]
+        ]
+        index = len(turn_calls) - 1
+        if raw_turns is not None:
+            return raw_turns[min(index, len(raw_turns) - 1)]
+
+        draft = _draft_from(messages)
+        sentences = [part + "。" for part in draft.split("。") if part.strip()]
+        return json.dumps(
+            {
+                "quote": sentences[index % len(sentences)],
+                "challenge": f"{turn_text} #{len(calls)}",
+            },
+            ensure_ascii=False,
+        )
 
     original = education_challenge_module.generate_completion
     education_challenge_module.generate_completion = fake_generate
@@ -4779,7 +4815,11 @@ def test_challenge_checklist_state_persists(education_client):
 
 
 def test_teacher_sees_whether_the_student_revised_after_the_read_through(education_client):
-    """被问住之后到底改没改。判定用的是两份服务端快照，不碰客户端上报。"""
+    """被问住之后到底改没改。判的是被质疑的那一句，不是全文改了多少字。
+
+    这里只把第一句里的两个词换掉——字数上微不足道，却正是被质疑之后最理想的修改。
+    老口径（全文改动量过 20 字）会把它判成没改。
+    """
 
     client, teacher, _, student, _, _ = education_client
     assignment, session_id = _setup_challenge_assignment(
@@ -4794,7 +4834,10 @@ def test_teacher_sees_whether_the_student_revised_after_the_read_through(educati
         _respond(client, challenge_id, 1)
         _respond(client, challenge_id, 2)
 
-    revised_text = _long_draft() + "补充一个反例：某项调查显示并非所有人都如此，这里需要区分人群。"
+    # 第一轮质疑引用的就是第一句。只改这句里的两个词。
+    revised_text = _long_draft().replace(
+        "短视频降低了年轻人的注意力", "短视频可能削弱了部分人的注意力"
+    )
     submission_id = client.post(
         f"/api/v1/assignments/{assignment['id']}/submit",
         json=_submit_body(session_id, revised_text),
@@ -4802,15 +4845,27 @@ def test_teacher_sees_whether_the_student_revised_after_the_read_through(educati
 
     UserContext.current_user = teacher
     rounds = client.get(f"/api/v1/submissions/{submission_id}/challenge").json()
-    assert rounds["revision"]["revised"] is True
-    assert rounds["revision"]["changed_chars"] >= 20
+    revision = rounds["revision"]
+    assert revision["revised"] is True
+    assert revision["changed_spans"] == 1
+    assert revision["total_spans"] == 2
+
+    first, second = revision["turns"]
+    assert first["changed"] is True
+    # 三栏里的第三栏：这句在最终稿里成了什么样。
+    assert "短视频可能削弱了部分人的注意力" in first["final_span"]
+    assert second["changed"] is False
 
     frozen = client.get(f"/api/v1/teacher/submissions/{submission_id}").json()
     assert frozen["submission"]["stats_json"]["challenge"]["revision"]["revised"] is True
 
 
 def test_teacher_sees_when_the_student_changed_nothing(education_client):
-    """答完一个字没改，教师要明确看到「未修改」——这是最该被讲的那种情况。"""
+    """在结尾堆一段与质疑无关的话，被质疑的那几句一字未动 —— 判定必须是「未修改」。
+
+    这是老口径最容易被糊弄的地方：全文改动量轻松过 20 字，于是判成「改了」。
+    新口径只看被质疑的那几句在不在。
+    """
 
     client, teacher, _, student, _, _ = education_client
     assignment, session_id = _setup_challenge_assignment(
@@ -4825,15 +4880,121 @@ def test_teacher_sees_when_the_student_changed_nothing(education_client):
         _respond(client, challenge_id, 1)
         _respond(client, challenge_id, 2)
 
+    padding = (
+        "总而言之，这个话题值得我们每一个人认真地思考和反复地体会，"
+        "并且在今后的日常生活当中持续地加以关注，不能掉以轻心。"
+    )
+    assert len(padding) >= 50
+    padded = _long_draft() + padding
+
+    submission_id = client.post(
+        f"/api/v1/assignments/{assignment['id']}/submit",
+        json=_submit_body(session_id, padded),
+    ).json()["submission_id"]
+
+    UserContext.current_user = teacher
+    rounds = client.get(f"/api/v1/submissions/{submission_id}/challenge").json()
+    revision = rounds["revision"]
+    assert revision["revised"] is False
+    assert revision["changed_spans"] == 0
+    assert revision["total_spans"] == 2
+    assert all(turn["changed"] is False for turn in revision["turns"])
+
+
+def test_challenge_skipped_on_the_contract_page_is_recorded(education_client):
+    """连「开始」都没点就跳过，同样要留痕。
+
+    这是这个环节最有教学意义的信号之一——系统性回避质疑的学生正是最该被教师看到的
+    那批。不落库的话，他们反而是唯一在质疑维度上完全空白的。
+    """
+
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id = _setup_challenge_assignment(
+        client, teacher, student, rounds=2, title="Never Started Essay"
+    )
+
+    UserContext.current_user = student
+    # 没有 _start_challenge：模拟学生在契约页直接点跳过。
+    skip_res = client.post(
+        f"/api/v1/assignments/{assignment['id']}/challenge/skip",
+        json={"writing_session_id": session_id},
+    )
+    assert skip_res.status_code == 200, skip_res.text
+    assert skip_res.json()["session"]["status"] == "skipped"
+    assert skip_res.json()["turns"] == []
+
+    # 已经落过一条就不许再落，避免重复点击写出两条。
+    assert (
+        client.post(
+            f"/api/v1/assignments/{assignment['id']}/challenge/skip",
+            json={"writing_session_id": session_id},
+        ).status_code
+        == 400
+    )
+
     submission_id = client.post(
         f"/api/v1/assignments/{assignment['id']}/submit",
         json=_submit_body(session_id, _long_draft()),
     ).json()["submission_id"]
 
     UserContext.current_user = teacher
+    frozen = client.get(f"/api/v1/teacher/submissions/{submission_id}").json()
+    assert frozen["submission"]["stats_json"]["challenge"]["status"] == "skipped"
     rounds = client.get(f"/api/v1/submissions/{submission_id}/challenge").json()
-    assert rounds["revision"]["revised"] is False
-    assert rounds["revision"]["changed_chars"] == 0
+    assert rounds["session"]["status"] == "skipped"
+
+
+def test_challenge_turn_records_the_quoted_sentence(education_client):
+    """每一轮都要引用原文里的一句，并且存下来的是原文那一版。"""
+
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id = _setup_challenge_assignment(
+        client, teacher, student, rounds=2, title="Quoted Essay"
+    )
+
+    UserContext.current_user = student
+    with _fake_challenge_model():
+        detail = _start_challenge(client, assignment["id"], session_id).json()
+        challenge_id = detail["session"]["id"]
+        detail = _respond(client, challenge_id, 1).json()
+
+    draft = _long_draft()
+    for turn in detail["turns"]:
+        assert turn["quoted_span"]
+        assert turn["quoted_span"] in draft
+
+
+def test_challenge_retries_once_when_the_quote_cannot_be_located(education_client):
+    """引用锚不回原文就是生成失败，重试一次，再失败直接拒。
+
+    刻意不做「拿整段输出当质疑、片段留空」的降级：留空的片段会让这一轮永远判不出
+    改没改，等于把坏数据写进证据链。
+    """
+
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id = _setup_challenge_assignment(
+        client, teacher, student, rounds=2, title="Bad Quote Essay"
+    )
+
+    UserContext.current_user = student
+
+    # 第一次不是 JSON，第二次引用的是正文里没有的句子 —— 两次都失败。
+    bad = ['我觉得你这里说不通。', '{"quote": "这句话原文里根本没有出现过", "challenge": "说不通"}']
+    with _fake_challenge_model(raw_turns=bad) as calls:
+        res = _start_challenge(client, assignment["id"], session_id)
+    assert res.status_code == 400, res.text
+    assert len(calls) == 2
+
+    # 第一次坏、第二次好 —— 重试救回来。
+    good = ['不是 JSON', json.dumps(
+        {"quote": _DRAFT_SENTENCES[0], "challenge": "这一句说服不了我"},
+        ensure_ascii=False,
+    )]
+    with _fake_challenge_model(raw_turns=good) as calls:
+        res = _start_challenge(client, assignment["id"], session_id)
+    assert res.status_code == 200, res.text
+    assert len(calls) == 2
+    assert res.json()["turns"][0]["quoted_span"] == _DRAFT_SENTENCES[0]
 
 
 def test_challenge_config_survives_assignment_update(education_client):
@@ -4900,7 +5061,10 @@ def test_challenge_facts_reach_the_growth_profile(education_client):
         _respond(client, challenge_id, 1)
         _respond(client, challenge_id, 2)
 
-    revised_text = _long_draft() + "补一个反例并说明数据来源，避免以偏概全的结论。"
+    # 第二轮质疑引用的是第二句，把那句里的绝对化表述限缩掉。
+    revised_text = _long_draft().replace(
+        "所有人都认为长视频已经没人看了", "我采访的 12 个同学里有 9 个说很少看长视频"
+    )
     submission_id = client.post(
         f"/api/v1/assignments/{assignment['id']}/submit",
         json=_submit_body(session_id, revised_text),
@@ -4919,7 +5083,8 @@ def test_challenge_facts_reach_the_growth_profile(education_client):
         assert challenge["answered_rounds"] == 2
         assert challenge["unresolved_count"] == 2
         assert challenge["revised_after"] is True
-        assert challenge["revised_chars"] >= 20
+        assert challenge["changed_spans"] >= 1
+        assert challenge["total_spans"] == 2
 
         projection = (
             session.query(ProfileMetricProjection)

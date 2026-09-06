@@ -30,6 +30,7 @@ from open_webui.models.education import (
     AutosaveForm,
     ChallengeChecklistForm,
     ChallengeRespondForm,
+    ChallengeSkipBeforeStartForm,
     ChallengeSessionDetail,
     ChallengeStartForm,
     ClassroomCreateForm,
@@ -100,6 +101,7 @@ from open_webui.services.education.analysis import (
     get_prompt_timeline,
 )
 from open_webui.services.education.challenge import (
+    skip_challenge_before_start,
     ChallengeError,
     get_challenge_prompt as _get_challenge_prompt,
     start_challenge,
@@ -2632,6 +2634,42 @@ async def get_current_assignment_challenge(
     return _challenge_detail(challenge_session, db)
 
 
+@router.post(
+    "/assignments/{assignment_id}/challenge/skip",
+    response_model=ChallengeSessionDetail,
+)
+async def skip_assignment_challenge_before_start(
+    assignment_id: str,
+    form_data: ChallengeSkipBeforeStartForm,
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+):
+    """学生在契约页没点「开始」就跳过。
+
+    没有 session 可标记，所以这里直接落一条 skipped。不落的话，连开都不开的那批
+    学生在质疑维度上完全空白，而那恰恰是最该被教师看到的信号。
+    """
+
+    assignment = _get_assignment_or_404(assignment_id, db)
+    _ensure_student_challenge_access(user, assignment, db)
+
+    session = _get_workspace_session_or_404(form_data.writing_session_id, db)
+    if session.scope != "assignment" or session.assignment_id != assignment.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Mismatched session"
+        )
+    _ensure_workspace_session_owner(user, session)
+
+    try:
+        challenge_session = skip_challenge_before_start(assignment, session, db)
+    except ChallengeError as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)
+        ) from error
+
+    return _challenge_detail(challenge_session, db)
+
+
 @router.post("/challenge/{session_id}/respond", response_model=ChallengeSessionDetail)
 async def respond_to_challenge(
     request: Request,
@@ -2896,10 +2934,9 @@ async def submit_assignment(
             for turn in Education.get_challenge_turns(challenge_session.id, db=db)
             if turn.response_text is not None
         ]
-        # 被质疑的那一稿 vs 这次交上来的正文：教师最想知道的是「被问住之后改了没」。
-        challenged_version = Education.get_version_by_id(
-            challenge_session.source_version_id, db=db
-        )
+
+        # 被质疑的那几处 vs 这次交上来的正文：教师最想知道的是「被问住之后动没动那句话」。
+        challenge_turns = Education.get_challenge_turns(challenge_session.id, db=db)
         stats["challenge"] = {
             "enabled": assignment.challenge_enabled,
             "session_id": challenge_session.id,
@@ -2914,7 +2951,7 @@ async def submit_assignment(
                 else []
             ),
             "revision": summarize_post_challenge_revision(
-                challenged_version.note_snapshot_text if challenged_version else "",
+                challenge_turns,
                 form_data.final_content_text,
             ),
             "turn_prompt": await _get_challenge_prompt("turn"),

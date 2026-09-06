@@ -351,7 +351,8 @@ class ChallengeSession(Base):
     )
     student_id = Column(Text, nullable=False)
     submission_round_no = Column(Integer, nullable=False)
-    source_version_id = Column(Text, nullable=False)
+    # 契约页尚未开始就跳过时没有「被质疑的那一稿」,空是语义正确的状态。
+    source_version_id = Column(Text, nullable=True)
     focus_keys = Column(JSONField, nullable=False, default=list)
     planned_rounds = Column(Integer, nullable=False)
     status = Column(Text, nullable=False, default="in_progress")
@@ -366,6 +367,9 @@ class ChallengeTurn(Base):
 
     challenge_text 是服务端生成的权威数据,response_text 是学生自己敲的字
     (可信度等同 typed 正文)。回合数由服务端按 planned_rounds 控制,不靠提示词。
+
+    quoted_span 是这一轮质疑所引用的原文片段,必须是被质疑那一稿的连续子串。
+    修订判定靠它定位——判的是「被质疑的那处变没变」,不是「全文改了多少字」。
     """
 
     __tablename__ = "challenge_turn"
@@ -382,6 +386,7 @@ class ChallengeTurn(Base):
     turn_no = Column(Integer, nullable=False)
     focus_key = Column(Text, nullable=False)
     challenge_text = Column(Text, nullable=False)
+    quoted_span = Column(Text, nullable=False)
     response_text = Column(Text, nullable=True)
     responded_at = Column(BigInteger, nullable=True)
     created_at = Column(BigInteger, nullable=False)
@@ -841,6 +846,7 @@ class ChallengeTurnModel(BaseModel):
     turn_no: int
     focus_key: str
     challenge_text: str
+    quoted_span: str
     response_text: Optional[str] = None
     responded_at: Optional[int] = None
     created_at: int
@@ -854,7 +860,7 @@ class ChallengeSessionModel(BaseModel):
     assignment_id: str
     student_id: str
     submission_round_no: int
-    source_version_id: str
+    source_version_id: Optional[str] = None
     focus_keys: list[str] = Field(default_factory=list)
     planned_rounds: int
     status: ChallengeStatus
@@ -875,6 +881,12 @@ class ChallengeStartForm(BaseModel):
     writing_session_id: str
     # 质疑是核心教学交互,不走 task model 降级,直接用学生写作区当前选的模型。
     model: str
+
+
+class ChallengeSkipBeforeStartForm(BaseModel):
+    """契约页尚未开始就跳过。没有 session 可标记,所以按作业 + 写作会话定位。"""
+
+    writing_session_id: str
 
 
 class ChallengeRespondForm(BaseModel):
@@ -1746,11 +1758,13 @@ class ProfileEvidenceChallenge(StrictProfileModel):
     unresolved_count: int = Field(default=0, ge=0)
     focus_keys: list[str] = Field(default_factory=list)
     revised_after: Optional[bool] = None
-    revised_chars: int = Field(default=0, ge=0)
+    # 判的是位置不是字数:被质疑的几处里有几处动了。
+    changed_spans: int = Field(default=0, ge=0)
+    total_spans: int = Field(default=0, ge=0)
 
 
 class ProfileEvidencePayload(StrictProfileModel):
-    evidence_schema_version: Literal["2026-09-06.1"] = "2026-09-06.1"
+    evidence_schema_version: Literal["2026-09-06.2"] = "2026-09-06.2"
     submission_id: str = Field(min_length=1)
     student_id: str = Field(min_length=1)
     assignment_id: str = Field(min_length=1)
@@ -3480,12 +3494,19 @@ class EducationTable:
         assignment_id: str,
         student_id: str,
         submission_round_no: int,
-        source_version_id: str,
+        source_version_id: Optional[str],
         focus_keys: list[str],
         planned_rounds: int,
+        status: str = "in_progress",
         commit: bool = True,
         db: Optional[Session] = None,
     ) -> ChallengeSessionModel:
+        """落一条质疑会话。
+
+        status 传 `skipped` 用于「学生在契约页没点开始就跳过」——这种回避同样要留痕,
+        否则最该被教师看到的那批学生反而是唯一没有记录的。
+        """
+
         with get_db_context(db) as db:
             session = ChallengeSession(
                 id=str(uuid.uuid4()),
@@ -3496,11 +3517,11 @@ class EducationTable:
                 source_version_id=source_version_id,
                 focus_keys=list(focus_keys),
                 planned_rounds=planned_rounds,
-                status="in_progress",
+                status=status,
                 closing_summary_json=None,
                 checklist_state_json=None,
                 started_at=int(time.time()),
-                ended_at=None,
+                ended_at=None if status == "in_progress" else int(time.time()),
             )
             db.add(session)
             if commit:
@@ -3552,6 +3573,7 @@ class EducationTable:
         turn_no: int,
         focus_key: str,
         challenge_text: str,
+        quoted_span: str,
         commit: bool = True,
         db: Optional[Session] = None,
     ) -> ChallengeTurnModel:
@@ -3562,6 +3584,7 @@ class EducationTable:
                 turn_no=turn_no,
                 focus_key=focus_key,
                 challenge_text=challenge_text,
+                quoted_span=quoted_span,
                 response_text=None,
                 responded_at=None,
                 created_at=int(time.time()),

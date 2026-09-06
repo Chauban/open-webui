@@ -777,6 +777,8 @@ export type ChallengeTurn = {
 	turn_no: number;
 	focus_key: string;
 	challenge_text: string;
+	/** 这一轮质疑引用的原文片段，是修订判定与正文定位的锚点。 */
+	quoted_span: string;
 	response_text: string | null;
 	responded_at: number | null;
 	created_at: number;
@@ -793,7 +795,8 @@ export type ChallengeSession = {
 	assignment_id: string;
 	student_id: string;
 	submission_round_no: number;
-	source_version_id: string;
+	/** 契约页未开始就跳过时为空：那种情况下不存在「被质疑的那一稿」。 */
+	source_version_id: string | null;
 	focus_keys: string[];
 	planned_rounds: number;
 	status: ChallengeStatus;
@@ -803,9 +806,28 @@ export type ChallengeSession = {
 	ended_at: number | null;
 };
 
+/** 一轮质疑对应的那处正文，在最终交上来的稿子里变了没有。 */
+export type ChallengeRevisionTurn = {
+	turn_no: number;
+	focus_key: string;
+	quoted_span: string;
+	changed: boolean;
+	/** 这句在最终稿里的样子；被整段删掉时为 null。 */
+	final_span: string | null;
+};
+
+export type ChallengeRevision = {
+	revised: boolean;
+	changed_spans: number;
+	total_spans: number;
+	turns: ChallengeRevisionTurn[];
+};
+
 export type ChallengeDetail = {
 	session: ChallengeSession;
 	turns: ChallengeTurn[];
+	/** 只有教师读提交时才带，提交那一刻就冻好了。 */
+	revision?: ChallengeRevision | null;
 };
 
 export const startAssignmentChallenge = async (
@@ -851,6 +873,24 @@ export const skipAssignmentChallenge = async (
 	return fetch(`${WEBUI_API_BASE_URL}/challenge/${challengeSessionId}/skip`, {
 		method: 'POST',
 		headers: withAuth(token)
+	}).then(handleJson);
+};
+
+/**
+ * 契约页尚未开始就跳过。
+ *
+ * 没有 session 可标记，所以按作业 + 写作会话落一条 skipped。不落的话，连开都不开
+ * 的那批学生在质疑维度上完全空白，而那恰恰是最该被教师看到的信号。
+ */
+export const skipAssignmentChallengeBeforeStart = async (
+	token: string,
+	assignmentId: string,
+	writingSessionId: string
+): Promise<ChallengeDetail> => {
+	return fetch(`${WEBUI_API_BASE_URL}/assignments/${assignmentId}/challenge/skip`, {
+		method: 'POST',
+		headers: withAuth(token),
+		body: JSON.stringify({ writing_session_id: writingSessionId })
 	}).then(handleJson);
 };
 

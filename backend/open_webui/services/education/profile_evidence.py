@@ -50,7 +50,7 @@ from open_webui.services.education.profile import (
     _summarize_help_types,
 )
 
-PROFILE_EVIDENCE_SCHEMA_VERSION = "2026-09-06.1"
+PROFILE_EVIDENCE_SCHEMA_VERSION = "2026-09-06.2"
 PROFILE_EVIDENCE_COLLECTOR_VERSION = "2026-09-03.1"
 
 
@@ -193,7 +193,8 @@ def capture_profile_evidence(
         unresolved_count=int(frozen_challenge.get("unresolved_count") or 0),
         focus_keys=list(frozen_challenge.get("focus_keys") or []),
         revised_after=revision.get("revised"),
-        revised_chars=int(revision.get("changed_chars") or 0),
+        changed_spans=int(revision.get("changed_spans") or 0),
+        total_spans=int(revision.get("total_spans") or 0),
     )
 
     payload = ProfileEvidencePayload(

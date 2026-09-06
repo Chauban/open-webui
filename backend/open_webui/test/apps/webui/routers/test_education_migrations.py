@@ -246,5 +246,45 @@ def test_challenge_profile_upgrade_passes_on_empty_evidence(tmp_path, monkeypatc
     try:
         schema = inspect(engine)
         assert "challenge_session" in set(schema.get_table_names())
+
+        # 修订判定的锚点：每一轮都要存它质疑的原文片段。
+        turn_columns = {
+            column["name"]: column for column in schema.get_columns("challenge_turn")
+        }
+        assert turn_columns["quoted_span"]["nullable"] is False
+
+        # 契约页未开始就跳过时没有「被质疑的那一稿」，空是语义正确的状态。
+        session_columns = {
+            column["name"]: column
+            for column in schema.get_columns("challenge_session")
+        }
+        assert session_columns["source_version_id"]["nullable"] is True
+    finally:
+        engine.dispose()
+
+
+def test_quoted_span_upgrade_requires_empty_evidence(tmp_path, monkeypatch):
+    """修订判定口径换了，证据载荷跟着换形状，旧快照同样必须先清掉。"""
+
+    backend_dir = Path(__file__).resolve().parents[5]
+    database_path = tmp_path / "quoted-span-nonempty.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    _set_database_url(monkeypatch, database_url)
+    config = _alembic_config(backend_dir)
+
+    command.upgrade(config, "b1e6d4a8c3f7")
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                "INSERT INTO profile_evidence_snapshot "
+                "(id, submission_id, evidence_revision, evidence_schema_version, "
+                "student_id, assignment_id, round_no, submitted_at, evidence_json, "
+                "evidence_hash, created_at) "
+                "VALUES ('snapshot', 'submission', 1, '2026-09-06.1', 'student', "
+                "'assignment', 1, 1, '{}', '" + "a" * 64 + "', 1)"
+            )
+        with pytest.raises(RuntimeError, match="2026-09-06.2"):
+            command.upgrade(config, "head")
     finally:
         engine.dispose()

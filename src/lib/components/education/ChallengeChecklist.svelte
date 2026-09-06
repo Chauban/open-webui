@@ -3,9 +3,14 @@
 	//
 	// 没有这一步，试读就只是「被问一顿」，学生带不走任何东西，下次必然跳过。
 	// 清单里的每条都是一句照着就能改的提示，勾选状态存服务端，刷新不丢。
+	//
+	// 清单下面还挂着本轮完整往来。关掉试读弹窗之后就再也看不到自己被问了什么、
+	// 当时怎么答的，这个方向是反的——真正要拿这份记录去改文章的是学生，而教师端
+	// 反倒一直有完整记录。数据用写作面板已经持有的那份，不额外请求。
 	import { getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
 
+	import ChallengeTranscript from '$lib/components/education/ChallengeTranscript.svelte';
 	import { updateChallengeChecklist } from '$lib/apis/education';
 	import { resolveErrorMessage } from '$lib/utils/education';
 	import type { ChallengeDetail } from '$lib/apis/education';
@@ -16,6 +21,8 @@
 	export let onDetailChange: (next: ChallengeDetail) => void = () => {};
 
 	let expanded = true;
+	// 往来记录默认折叠：清单才是拿来改文章的，回看是需要时才展开的东西。
+	let transcriptExpanded = false;
 	let saving = false;
 
 	$: unresolved =
@@ -23,6 +30,8 @@
 			? (detail.session.closing_summary_json?.unresolved ?? [])
 			: [];
 	$: checked = new Set(detail?.session?.checklist_state_json?.checked_indexes ?? []);
+	$: turns = detail?.turns ?? [];
+	$: plannedRounds = detail?.session?.planned_rounds ?? 0;
 
 	const toggle = async (index: number) => {
 		if (!detail || saving) return;
@@ -88,6 +97,26 @@
 					</li>
 				{/each}
 			</ul>
+
+			{#if turns.length > 0}
+				<div class="mt-2.5 border-t border-amber-200/70 pt-2 dark:border-amber-900/50">
+					<button
+						type="button"
+						class="text-[11px] font-medium text-amber-700 underline-offset-2 hover:underline dark:text-amber-400"
+						on:click={() => (transcriptExpanded = !transcriptExpanded)}
+					>
+						{transcriptExpanded
+							? $i18n.t('Hide what the reader asked')
+							: $i18n.t('See what the reader asked')}
+					</button>
+
+					{#if transcriptExpanded}
+						<div class="mt-2 rounded-xl bg-white/70 px-3 py-2.5 dark:bg-gray-900/50">
+							<ChallengeTranscript {turns} {plannedRounds} />
+						</div>
+					{/if}
+				</div>
+			{/if}
 		{/if}
 	</div>
 {/if}

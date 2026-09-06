@@ -7,13 +7,15 @@ import ChallengeDialog from './ChallengeDialog.svelte';
 import {
 	respondToChallenge,
 	skipAssignmentChallenge,
+	skipAssignmentChallengeBeforeStart,
 	startAssignmentChallenge
 } from '$lib/apis/education';
 
 vi.mock('$lib/apis/education', () => ({
 	startAssignmentChallenge: vi.fn(),
 	respondToChallenge: vi.fn(),
-	skipAssignmentChallenge: vi.fn()
+	skipAssignmentChallenge: vi.fn(),
+	skipAssignmentChallengeBeforeStart: vi.fn()
 }));
 
 afterEach(cleanup);
@@ -49,6 +51,7 @@ const makeTurn = (turnNo: number, response: string | null = null) => ({
 	turn_no: turnNo,
 	focus_key: 'ideas',
 	challenge_text: `这一点说服不了我 ${turnNo}`,
+	quoted_span: `被质疑的第 ${turnNo} 句原文。`,
 	response_text: response,
 	responded_at: response ? 2 : null,
 	created_at: 1
@@ -169,12 +172,24 @@ test('跳过会留痕并直接进提交', async () => {
 	expect(skipAssignmentChallenge).toHaveBeenCalledWith('test-token', 'cs-1');
 });
 
-test('还没开始就跳过不需要落库', async () => {
+test('契约页还没开始就跳过，同样要留痕', async () => {
+	// 连开都不开的那批学生才是最该被教师看到的，不落库的话他们反而完全空白。
+	vi.mocked(skipAssignmentChallengeBeforeStart).mockResolvedValue({
+		session: makeSession({ status: 'skipped', ended_at: 3 }),
+		turns: []
+	} as never);
+
 	const onContinue = vi.fn();
 	render(ChallengeDialog, { props: { ...baseProps, onContinue, detail: null }, context });
 
 	await fireEvent.click(screen.getByText('Skip this time'));
 
 	await waitFor(() => expect(onContinue).toHaveBeenCalled());
+	expect(skipAssignmentChallengeBeforeStart).toHaveBeenCalledWith(
+		'test-token',
+		'a-1',
+		'ws-1'
+	);
+	// 没有 session 时不能走要 session id 的那个端点。
 	expect(skipAssignmentChallenge).not.toHaveBeenCalled();
 });

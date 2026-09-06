@@ -2,11 +2,19 @@
 	// 教师端：这一轮提交前的读者试读往来。
 	//
 	// 提交详情里其它块给的都是量化占比（typed / AI inserted / AI pasted %），教师看完
-	// 也不知道该说什么。这一块给的是学生思考过程的直接证据：他被问到什么、怎么答的、
-	// 答完之后有没有真的回去改。这才是能拿到课堂上讲的东西。
+	// 也不知道该说什么。这一块给的是学生思考过程的直接证据：他被问到哪一句、怎么答的、
+	// 那一句最后有没有动。这才是能拿到课堂上讲的东西。
+	//
+	// 判的是位置不是字数。老口径用全文改动量加最小字符阈值，方向是反的：被质疑之后
+	// 最理想的修改往往最小（删掉一个站不住的例子、把「所有人都认为」限缩为「我采访的
+	// 12 个同学里有 9 个」），那些都过不了阈值；而在结尾补一句无关的套话稳过。
+	//
+	// 这里只呈现「那处变没变」，不判「改得对不对、是不是真回应了质疑」——后者要不要
+	// 交给 AI 判是个待定问题（PRD 16.4），本期由教师看这三栏自己下结论。
 	import { getContext } from 'svelte';
 
-	import type { ChallengeDetail } from '$lib/apis/education';
+	import ChallengeTranscript from '$lib/components/education/ChallengeTranscript.svelte';
+	import type { ChallengeDetail, ChallengeRevisionTurn } from '$lib/apis/education';
 
 	const i18n = getContext('i18n');
 
@@ -19,6 +27,13 @@
 	$: answered = turns.filter((turn) => turn.response_text !== null);
 	$: closing = session?.closing_summary_json ?? null;
 	$: revision = detail?.revision ?? null;
+	$: revisionByTurn = (revision?.turns ?? []).reduce<Record<number, ChallengeRevisionTurn>>(
+		(acc, item) => {
+			acc[item.turn_no] = item;
+			return acc;
+		},
+		{}
+	);
 </script>
 
 {#if session}
@@ -47,7 +62,7 @@
 							planned: session.planned_rounds
 						})}
 					</span>
-					{#if revision}
+					{#if revision && revision.total_spans > 0}
 						<!-- 服务端两份快照直接比对得出，不依赖客户端上报，也不受客户端时钟影响。 -->
 						<span
 							class={revision.revised
@@ -55,46 +70,24 @@
 								: 'font-medium text-rose-600 dark:text-rose-400'}
 						>
 							{revision.revised
-								? $i18n.t('Revised the draft afterwards ({{chars}} chars changed)', {
-										chars: revision.changed_chars
+								? $i18n.t('Changed {{changed}} of {{total}} challenged sentences', {
+										changed: revision.changed_spans,
+										total: revision.total_spans
 									})
-								: $i18n.t('Did not revise the draft afterwards')}
+								: $i18n.t('None of the challenged sentences changed')}
 						</span>
 					{/if}
 				{/if}
 			</div>
 
 			{#if session.status !== 'skipped'}
-				<div class="mt-4 space-y-4">
-					{#each turns as turn (turn.id)}
-						<div>
-							<div class="text-xs text-gray-400">
-								{$i18n.t('Round {{current}} of {{total}}', {
-									current: turn.turn_no,
-									total: session.planned_rounds
-								})}
-								{#if criteriaLabels[turn.focus_key]}
-									· {criteriaLabels[turn.focus_key]}
-								{/if}
-							</div>
-							<p
-								class="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-gray-700 dark:text-gray-200"
-							>
-								{turn.challenge_text}
-							</p>
-							{#if turn.response_text}
-								<p
-									class="mt-2 whitespace-pre-wrap border-l-2 border-gray-300 pl-3 text-sm leading-relaxed text-gray-900 dark:border-gray-600 dark:text-gray-100"
-								>
-									{turn.response_text}
-								</p>
-							{:else}
-								<p class="mt-2 border-l-2 border-gray-200 pl-3 text-sm text-gray-400 dark:border-gray-700">
-									{$i18n.t('No answer to this round')}
-								</p>
-							{/if}
-						</div>
-					{/each}
+				<div class="mt-4">
+					<ChallengeTranscript
+						{turns}
+						plannedRounds={session.planned_rounds}
+						{criteriaLabels}
+						{revisionByTurn}
+					/>
 				</div>
 
 				{#if closing && (closing.stood.length > 0 || closing.unresolved.length > 0)}
@@ -133,9 +126,9 @@
 			{/if}
 
 			<!--
-				信任层级（PRD 12.9.7）：质疑文本与回合数是服务端生成的权威数据；
-				学生回应是他自己敲的字，可信度等同 typed 正文；「有没有回去改」由两份
-				服务端快照比对得出，同样不依赖客户端上报。所以这一块不挂
+				信任层级（PRD 12.9.7）：质疑文本、引用的原文片段与回合数是服务端生成的
+				权威数据；学生回应是他自己敲的字，可信度等同 typed 正文；「那一句有没有
+				变」由两份服务端快照比对得出，同样不依赖客户端上报。所以这一块不挂
 				EduEvidenceDisclaimer——那句话说的是客户端上报的口径，挂在这里反而误导。
 			-->
 			<div class="mt-3 text-xs text-gray-400">

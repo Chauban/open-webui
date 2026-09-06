@@ -17,6 +17,7 @@
 	import {
 		respondToChallenge,
 		skipAssignmentChallenge,
+		skipAssignmentChallengeBeforeStart,
 		startAssignmentChallenge
 	} from '$lib/apis/education';
 	import type { ChallengeDetail } from '$lib/apis/education';
@@ -93,9 +94,19 @@
 		if (busy) return;
 		busy = true;
 		try {
-			// 还没开始就跳过：没有 session 可标记，直接进反思。
+			// 两种跳过都要留痕。契约页上还没有 session 可标记，就按作业 + 写作会话
+			// 直接落一条 skipped——不落的话，连开都不开的那批学生在质疑维度上完全
+			// 空白，而那恰恰是这个环节最有教学意义的信号。
 			if (detail) {
 				applyDetail(await skipAssignmentChallenge(localStorage.token, detail.session.id));
+			} else {
+				applyDetail(
+					await skipAssignmentChallengeBeforeStart(
+						localStorage.token,
+						assignment.id,
+						writingSessionId
+					)
+				);
 			}
 			onContinue();
 		} catch (error) {
