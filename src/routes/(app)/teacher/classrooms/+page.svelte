@@ -72,7 +72,7 @@
 	});
 </script>
 
-<TeacherPageShell title="Classrooms">
+<TeacherPageShell crumbs={[{ label: $i18n.t('Teaching') }]} title={$i18n.t('Classrooms')}>
 	<div class="mx-auto max-w-6xl px-4 py-8">
 		<div class="mb-8 text-sm text-gray-500 dark:text-gray-400">
 			{$i18n.t('Create classrooms, share invite codes, and manage student rosters.')}

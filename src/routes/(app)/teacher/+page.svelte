@@ -80,7 +80,7 @@
 	});
 </script>
 
-<TeacherPageShell title="Overview">
+<TeacherPageShell crumbs={[{ label: $i18n.t('Teaching') }]} title={$i18n.t('Overview')}>
 	<div class="mx-auto max-w-6xl px-4 py-8">
 		<div class="mb-8 text-sm text-gray-500 dark:text-gray-400">
 			{$i18n.t('Track classroom activity, assignments, and recent submissions from one place.')}

@@ -157,15 +157,14 @@
 	};
 </script>
 
-<TeacherPageShell title="Assignments">
+<TeacherPageShell
+	crumbs={[{ label: $i18n.t('Teaching') }, { label: $i18n.t('Assignments'), href: '/teacher/assignments' }]}
+	title={$i18n.t('Create Assignment')}
+>
 	<div class="mx-auto max-w-4xl px-4 py-8">
 		<TeacherSectionNav />
 
-	<div class="mb-6 flex flex-wrap items-end justify-between gap-3">
-		<div>
-			<div class="mb-2 text-sm text-gray-500 dark:text-gray-400">{$i18n.t('Teaching')} / {$i18n.t('Assignments')}</div>
-			<h1 class="text-3xl font-semibold">{$i18n.t('Create Assignment')}</h1>
-		</div>
+	<div class="mb-6 flex flex-wrap items-end justify-end gap-3">
 		<EduButton on:click={() => goto('/teacher/assignments')}>
 			{$i18n.t('Back to Assignments')}
 		</EduButton>

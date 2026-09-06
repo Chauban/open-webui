@@ -63,16 +63,22 @@
 	});
 </script>
 
-<TeacherPageShell title="Assignments">
+<TeacherPageShell
+	crumbs={[
+		{ label: $i18n.t('Teaching') },
+		{ label: $i18n.t('Assignments'), href: '/teacher/assignments' },
+		{
+			label: $i18n.t('Assignment'),
+			href: `/teacher/assignments/${$page.params.assignmentId}`
+		}
+	]}
+	title={$i18n.t('Class Overview')}
+>
 	{#if dashboard}
 		<div class="mx-auto max-w-6xl px-4 py-8">
 			<TeacherSectionNav />
 
-		<div class="mb-6 flex items-center justify-between">
-			<div>
-				<div class="text-xs uppercase tracking-[0.2em] text-gray-500 dark:text-gray-400">{$i18n.t('Teacher Dashboard')}</div>
-				<h1 class="text-2xl font-semibold">{$i18n.t('Class Overview')}</h1>
-			</div>
+		<div class="mb-6 flex items-center justify-end">
 			<div class="flex gap-2">
 				<EduButton disabled={refreshing} on:click={loadDashboard}>
 					{refreshing ? $i18n.t('Refreshing...') : $i18n.t('Refresh')}

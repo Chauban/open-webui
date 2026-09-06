@@ -426,7 +426,13 @@
 	});
 </script>
 
-<TeacherPageShell title={$i18n.t('Review')}>
+<TeacherPageShell
+	crumbs={[
+		{ label: $i18n.t('Teaching') },
+		{ label: $i18n.t('Review'), href: '/teacher/review' }
+	]}
+	title={detail?.student_name ?? $i18n.t('Submission Review')}
+>
 	{#if loaded && detail}
 		<!-- h-full + overflow-hidden prevents the shell's overflow-y-auto from activating -->
 		<div class="flex h-full flex-col overflow-hidden">
@@ -466,7 +472,7 @@
 						<div class="text-xs uppercase tracking-[0.2em] text-gray-400">
 							{$i18n.t('Submission Review')}
 						</div>
-						<h1 class="mt-0.5 text-xl font-semibold text-gray-950 dark:text-gray-100">{detail.assignment.title}</h1>
+						<div class="mt-0.5 text-xl font-semibold text-gray-950 dark:text-gray-100">{detail.assignment.title}</div>
 						<div class="mt-1.5 flex flex-wrap gap-1.5 text-xs text-gray-600 dark:text-gray-400">
 							<span class="rounded-full bg-gray-100 dark:bg-gray-800 px-3 py-1">{detail.student_name}</span>
 							<span class="rounded-full bg-gray-100 dark:bg-gray-800 px-3 py-1">

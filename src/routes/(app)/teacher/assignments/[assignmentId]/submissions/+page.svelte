@@ -52,6 +52,8 @@
 	$: filteredItems = items.filter((item) =>
 		selectedStatus === 'all' ? true : item.review_status === selectedStatus
 	);
+	// 提交列表接口不单独回作业信息;有提交时用提交带回来的标题,一份都没有时退回通名。
+	$: assignmentTitle = items[0]?.assignment?.title ?? t('Assignment');
 
 	const loadData = async () => {
 		try {
@@ -189,15 +191,21 @@
 	});
 </script>
 
-<TeacherPageShell title="Assignments">
+<TeacherPageShell
+	crumbs={[
+		{ label: $i18n.t('Teaching') },
+		{ label: $i18n.t('Assignments'), href: '/teacher/assignments' },
+		{
+			label: assignmentTitle,
+			href: `/teacher/assignments/${$page.params.assignmentId}`
+		}
+	]}
+	title={$i18n.t('Submissions')}
+>
 	<div class="mx-auto max-w-6xl px-4 py-8">
 		<TeacherSectionNav />
 
-	<div class="mb-6 flex flex-wrap items-center justify-between gap-3">
-		<div>
-			<div class="text-xs uppercase tracking-[0.2em] text-gray-500 dark:text-gray-400">{$i18n.t('Teacher Review')}</div>
-			<h1 class="text-2xl font-semibold">{$i18n.t('Submissions')}</h1>
-		</div>
+	<div class="mb-6 flex flex-wrap items-center justify-end gap-3">
 		<div class="flex gap-2">
 			<EduButton on:click={() => goto(`/teacher/assignments/${$page.params.assignmentId}`)}>
 				{$i18n.t('Assignment')}

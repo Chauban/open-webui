@@ -49,7 +49,21 @@
 	onMount(loadProfile);
 </script>
 
-<TeacherPageShell title="Classrooms">
+<TeacherPageShell
+	crumbs={[
+		{ label: $i18n.t('Teaching') },
+		{ label: $i18n.t('Classrooms'), href: '/teacher/classrooms' },
+		{
+			label: getClassroomDisplayName(profile?.classrooms?.[0]?.name, t),
+			href: `/teacher/classrooms/${$page.params.classroomId}`
+		},
+		{
+			label: $i18n.t('Students'),
+			href: `/teacher/classrooms/${$page.params.classroomId}/students`
+		}
+	]}
+	title={profile?.student_name ?? $i18n.t('Students')}
+>
 	{#if loading}
 		<div class="mx-auto max-w-6xl px-4 py-8 text-sm text-gray-500 dark:text-gray-400">
 			{$i18n.t('Loading student profile...')}
@@ -63,17 +77,8 @@
 			<TeacherSectionNav />
 
 			<div class="mb-6 flex flex-wrap items-end justify-between gap-3">
-				<div>
-					<div class="mb-2 text-sm text-gray-500 dark:text-gray-400">
-						{$i18n.t('Teaching')} / {$i18n.t('Classrooms')} /
-						{getClassroomDisplayName(profile.classrooms[0]?.name, t)} / {$i18n.t('Students')}
-					</div>
-					<h1 class="text-3xl font-semibold">{profile.student_name}</h1>
-					{#if profile.student_email}
-						<div class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-							{profile.student_email}
-						</div>
-					{/if}
+				<div class="text-sm text-gray-500 dark:text-gray-400">
+					{profile.student_email ?? ''}
 				</div>
 				<EduButton
 					on:click={() => goto(`/teacher/classrooms/${$page.params.classroomId}/students`)}

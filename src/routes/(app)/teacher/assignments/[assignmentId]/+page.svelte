@@ -188,7 +188,10 @@
 	});
 </script>
 
-<TeacherPageShell title="Assignments">
+<TeacherPageShell
+	crumbs={[{ label: $i18n.t('Teaching') }, { label: $i18n.t('Assignments'), href: '/teacher/assignments' }]}
+	title={item?.assignment?.title ?? $i18n.t('Assignments')}
+>
 	{#if loading}
 		<div class="mx-auto max-w-6xl px-4 py-8 text-sm text-gray-500 dark:text-gray-400">{$i18n.t('Loading assignment...')}</div>
 	{:else if loadError}
@@ -200,12 +203,8 @@
 			<TeacherSectionNav />
 
 			<div class="mb-6 flex flex-wrap items-end justify-between gap-3">
-				<div>
-					<div class="mb-2 text-sm text-gray-500 dark:text-gray-400">{$i18n.t('Teaching')} / {$i18n.t('Assignments')}</div>
-					<h1 class="text-3xl font-semibold">{item.assignment.title}</h1>
-					<div class="mt-2 text-sm text-gray-500 dark:text-gray-400">
-						{item.classroom ? getClassroomDisplayName(item.classroom.name, t) : t('Unknown classroom')}
-					</div>
+				<div class="text-sm text-gray-500 dark:text-gray-400">
+					{item.classroom ? getClassroomDisplayName(item.classroom.name, t) : t('Unknown classroom')}
 				</div>
 				<div class="flex flex-wrap gap-2">
 					<EduButton on:click={() => goto('/teacher/assignments')}>

@@ -106,7 +106,7 @@
 	});
 </script>
 
-<TeacherPageShell title="Assignments">
+<TeacherPageShell crumbs={[{ label: $i18n.t('Teaching') }]} title={$i18n.t('Assignments')}>
 	<div class="mx-auto max-w-6xl px-4 py-8">
 		<div class="mb-8 flex flex-wrap items-center justify-between gap-3">
 			<div class="text-sm text-gray-500 dark:text-gray-400">
