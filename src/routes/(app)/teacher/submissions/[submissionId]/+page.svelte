@@ -192,10 +192,24 @@
 		? formatEpochTime(Math.floor(lastSavedAt.getTime() / 1000))
 		: null;
 
+	// 维度分从高到低列出：批改时命中的多是接近满分的档位。
+	const scoreOptions = (max: number) => Array.from({ length: max + 1 }, (_, index) => max - index);
+
+	$: rubricCriteria = detail?.assignment?.rubric_schema?.criteria ?? [];
+	$: rubricFilledCount = rubricCriteria.filter(
+		(criterion) => (rubricScores[criterion.key] ?? '') !== ''
+	).length;
+	// 总分不再手填：评完全部维度才算出总分，否则留空（后端要求总分等于各维度之和）。
+	$: score =
+		rubricCriteria.length > 0 && rubricFilledCount === rubricCriteria.length
+			? String(
+					rubricCriteria.reduce((sum, criterion) => sum + Number(rubricScores[criterion.key]), 0)
+				)
+			: '';
+
 	const syncReview = () => {
 		const review = detail?.review;
 		reviewStatus = review?.review_status || 'pending';
-		score = review?.score != null ? String(review.score) : '';
 		overallComment = review?.overall_comment || '';
 		rubricScores = Object.fromEntries(
 			(detail?.assignment?.rubric_schema?.criteria ?? []).map((criterion) => [
@@ -209,55 +223,26 @@
 		resubmitDueLocal = review?.resubmit_due_at ? toLocalDateTimeInput(review.resubmit_due_at) : '';
 	};
 
-	const saveReview = async (statusOverride?: string) => {
+	const saveReview = async (effectiveStatus: string) => {
 		if (isHistoricalRound) return false;
-		const effectiveStatus = statusOverride || reviewStatus;
+		// 总分由各维度分求和得到，范围与「等于各维度之和」都无需再校验。
 		const parsedScore = score === '' ? null : Number(score);
-		if (
-			parsedScore != null &&
-			(!Number.isInteger(parsedScore) ||
-				parsedScore < 0 ||
-				parsedScore > detail.assignment.score_max)
-		) {
-			toast.error(
-				t('Score must be between 0 and {{max}}.', { max: detail.assignment.score_max })
-			);
+		// 下拉只能选出合法档位，这里只需分辨「全空 / 全填 / 填了一半」。
+		const parsedRubricScores =
+			rubricCriteria.length > 0 && rubricFilledCount === rubricCriteria.length
+				? Object.fromEntries(
+						rubricCriteria.map((criterion) => [
+							criterion.key,
+							Number(rubricScores[criterion.key])
+						])
+					)
+				: null;
+		if (rubricFilledCount > 0 && parsedRubricScores == null) {
+			toast.error(t('Score every rubric criterion before saving.'));
 			return false;
-		}
-		const criteria = detail.assignment.rubric_schema.criteria;
-		const hasAnyRubricScore = criteria.some((criterion) => rubricScores[criterion.key] !== '');
-		let parsedRubricScores: Record<string, number> | null = null;
-		if (hasAnyRubricScore) {
-			parsedRubricScores = {};
-			for (const criterion of criteria) {
-				const value = Number(rubricScores[criterion.key]);
-				if (
-					rubricScores[criterion.key] === '' ||
-					!Number.isInteger(value) ||
-					value < 0 ||
-					value > criterion.max_score
-				) {
-					toast.error(
-						t('Rubric score for {{label}} must be between 0 and {{max}}.', {
-							label: criterion.label,
-							max: criterion.max_score
-						})
-					);
-					return false;
-				}
-				parsedRubricScores[criterion.key] = value;
-			}
 		}
 		if (effectiveStatus === 'reviewed' && (parsedScore == null || parsedRubricScores == null)) {
 			toast.error(t('Reviewed submissions require a total score and complete rubric scores.'));
-			return false;
-		}
-		if (
-			parsedScore != null &&
-			parsedRubricScores != null &&
-			Object.values(parsedRubricScores).reduce((sum, value) => sum + value, 0) !== parsedScore
-		) {
-			toast.error(t('Total score must equal the sum of rubric scores.'));
 			return false;
 		}
 		let resubmitDueAt: number | null = null;
@@ -295,7 +280,7 @@
 	const saveReviewAndNext = async () => {
 		const currentId = submissionId;
 		const target = nextPendingId === currentId ? (queueIds[queueIndex + 1] ?? null) : nextPendingId;
-		const saved = await saveReview();
+		const saved = await saveReview('reviewed');
 		if (!saved) return;
 		queueIds = queueIds.filter((id) => id !== currentId);
 		if (target) {
@@ -672,41 +657,53 @@
 									</div>
 								{/if}
 
-								<!-- Status: button group -->
+								<!-- Rubric: pick a score per criterion; the total below is derived -->
 								<div>
 									<div class="mb-1.5 text-xs font-medium uppercase tracking-[0.12em] text-gray-400">
-										{$i18n.t('Status')}
+										{$i18n.t('Rubric')}
 									</div>
-									<div class="flex gap-1 rounded-2xl border border-gray-200 dark:border-gray-800 p-1">
-										{#each reviewStatusOptions as option}
-											<button
-												class="flex-1 rounded-xl py-2 text-xs font-medium transition-colors disabled:opacity-50 {reviewStatus === option.value
-													? 'bg-black dark:bg-gray-100 text-white dark:text-gray-900'
-													: 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'}"
-												disabled={isHistoricalRound}
-												on:click={() => (reviewStatus = option.value)}
-											>
-												{$i18n.t(option.label)}
-											</button>
+									<div class="divide-y divide-gray-100 dark:divide-gray-800 rounded-2xl border border-gray-200 dark:border-gray-800 overflow-hidden">
+										{#each rubricCriteria as criterion}
+											<div class="flex items-center gap-3 px-4 py-3 bg-white dark:bg-gray-850 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+												<span class="flex-1 text-sm text-gray-700 dark:text-gray-300">
+													{criterion.label} / {criterion.max_score}
+												</span>
+												<select
+													value={rubricScores[criterion.key] ?? ''}
+													on:change={(event) =>
+														(rubricScores = {
+															...rubricScores,
+															[criterion.key]: event.currentTarget.value
+														})}
+													disabled={isHistoricalRound}
+													class="w-24 rounded-xl border border-gray-200 dark:border-gray-800 dark:bg-gray-850 py-1.5 pl-3 pr-8 text-right text-sm outline-none focus:border-gray-400 transition-colors disabled:opacity-50"
+												>
+													<option value="">—</option>
+													{#each scoreOptions(criterion.max_score) as option}
+														<option value={String(option)}>{option}</option>
+													{/each}
+												</select>
+											</div>
 										{/each}
 									</div>
 								</div>
 
-								<!-- Score -->
+								<!-- Total score: sum of the rubric scores above, read-only -->
 								<div>
-									<label class="mb-1.5 block text-xs font-medium uppercase tracking-[0.12em] text-gray-400">
-										{$i18n.t('Score')} / {detail.assignment.score_max}
-									</label>
-									<input
-										bind:value={score}
-										type="number"
-										min="0"
-										max={detail.assignment.score_max}
-										step="1"
-										disabled={isHistoricalRound}
-										class="w-full rounded-2xl border border-gray-200 dark:border-gray-800 px-4 py-3 text-sm outline-none focus:border-gray-400 transition-colors disabled:opacity-50"
-										placeholder="0"
-									/>
+									<div class="mb-1.5 text-xs font-medium uppercase tracking-[0.12em] text-gray-400">
+										{$i18n.t('Total Score')}
+									</div>
+									<div class="flex items-center justify-between gap-3 rounded-2xl border border-gray-200 dark:border-gray-800 px-4 py-3">
+										<span class="text-xs text-gray-400 dark:text-gray-500">
+											{#if rubricFilledCount < rubricCriteria.length}
+												{$i18n.t('Score every rubric criterion to get a total.')}
+											{/if}
+										</span>
+										<span class="shrink-0 text-gray-700 dark:text-gray-300">
+											<span class="text-lg font-semibold tabular-nums">{score === '' ? '—' : score}</span>
+											<span class="text-sm text-gray-400"> / {detail.assignment.score_max}</span>
+										</span>
+									</div>
 								</div>
 
 								<!-- Overall comment -->
@@ -720,37 +717,6 @@
 										class="min-h-24 w-full resize-none rounded-2xl border border-gray-200 dark:border-gray-800 px-4 py-3 text-sm outline-none focus:border-gray-400 transition-colors disabled:opacity-50"
 										placeholder={$i18n.t('Overall Comment')}
 									></textarea>
-								</div>
-
-								<!-- Rubric table -->
-								<div>
-									<div class="mb-1.5 text-xs font-medium uppercase tracking-[0.12em] text-gray-400">
-										{$i18n.t('Rubric')}
-									</div>
-									<div class="divide-y divide-gray-100 dark:divide-gray-800 rounded-2xl border border-gray-200 dark:border-gray-800 overflow-hidden">
-										{#each detail.assignment.rubric_schema.criteria as criterion}
-											<div class="flex items-center gap-3 px-4 py-3 bg-white dark:bg-gray-850 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
-												<span class="flex-1 text-sm text-gray-700 dark:text-gray-300">
-													{criterion.label} / {criterion.max_score}
-												</span>
-												<input
-													value={rubricScores[criterion.key] ?? ''}
-													on:input={(event) =>
-														(rubricScores = {
-															...rubricScores,
-															[criterion.key]: event.currentTarget.value
-														})}
-													type="number"
-													min="0"
-													max={criterion.max_score}
-													step="1"
-													disabled={isHistoricalRound}
-													class="w-20 rounded-xl border border-gray-200 dark:border-gray-800 px-3 py-1.5 text-right text-sm outline-none focus:border-gray-400 transition-colors disabled:opacity-50"
-													placeholder="—"
-												/>
-											</div>
-										{/each}
-									</div>
 								</div>
 
 								<!-- Returned comment -->
@@ -786,16 +752,22 @@
 									<div class="flex flex-wrap gap-2">
 										<EduButton
 											disabled={saving || isHistoricalRound}
-											on:click={() => saveReview('returned')}
+											on:click={() => saveReview('pending')}
 										>
-											{$i18n.t('Return for Revision')}
+											{$i18n.t('Save Draft')}
 										</EduButton>
 										<EduButton
 											variant="primary"
 											disabled={saving || isHistoricalRound}
-											on:click={() => saveReview()}
+											on:click={() => saveReview('reviewed')}
 										>
 											{saving ? $i18n.t('Saving...') : $i18n.t('Save Review')}
+										</EduButton>
+										<EduButton
+											disabled={saving || isHistoricalRound}
+											on:click={() => saveReview('returned')}
+										>
+											{$i18n.t('Return for Revision')}
 										</EduButton>
 										<button
 											class="rounded-full bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-700 disabled:opacity-60 transition-colors"
