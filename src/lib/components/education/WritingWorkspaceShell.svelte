@@ -472,16 +472,15 @@
 	};
 
 	const handleContentChange = (content) => {
-		if (isReadOnly) return;
+		// 两类事件都不是学生在改稿，必须一起挡掉：
+		// docChanged=false 是选区/格式变化，正文一个字没动；
+		// programmatic 是本组件自己把正文灌进编辑器（挂载和每次 value 同步）。
+		// 灌入前编辑器是空文档，ProseMirror 照样报 docChanged=true，
+		// 只看 docChanged 会把它当成学生清空全文：整篇记一次删除、source map
+		// 被清掉，回填后又整体标成 user_typed，还会喂出假的「疑似未标注导入」。
+		// 挡掉这两类之后，剩下的空文档就真是学生全选删光，如实留痕。
+		if (isReadOnly || !content.docChanged || content.programmatic) return;
 		const nextText = content.text ?? content.md ?? '';
-
-		// 编辑器重新挂载时会先抛一个空文档（正文还没灌回去），这不是用户删除。
-		// 不拦掉的话：整篇被记成一次删除，source map 被清空，随后内容回填又被
-		// 整体标成 user_typed —— 来源追踪和过程指标会一起失真。
-		// 代价是真的「全选删光」不再留痕，但那远比凭空造出一次万字删除好。
-		if (lastText.length > 0 && nextText.length === 0) {
-			return;
-		}
 
 		noteJson = content.json;
 		noteHtml = content.html;

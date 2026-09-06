@@ -335,6 +335,21 @@
 
 	let pendingUpdate = null;
 
+	// True only while this component is pushing content into the editor itself
+	// (the initial value sync, and every later `value` -> editor sync). ProseMirror
+	// reports those as ordinary document changes, so a consumer cannot otherwise
+	// tell them apart from the person actually typing or deleting.
+	let programmaticContent = false;
+
+	const pushContent = (mutate: () => void) => {
+		programmaticContent = true;
+		try {
+			mutate();
+		} finally {
+			programmaticContent = false;
+		}
+	};
+
 	const options = {
 		throwOnError: false
 	};
@@ -346,7 +361,7 @@
 	}
 
 	$: if (value === null && html !== null && editor) {
-		editor.commands.setContent(html);
+		pushContent(() => editor.commands.setContent(html));
 	}
 
 	export const getWordAtDocPos = () => {
@@ -676,6 +691,8 @@
 		if (value !== '') {
 			// After updating the state, try to find and select the next template
 			setTimeout(() => {
+				// 这个 0ms 回调可能在组件卸载之后才跑（灌入正文后立刻切页就会）。
+				if (!editor || editor.isDestroyed) return;
 				const templateFound = selectNextTemplate(editor.view.state, editor.view.dispatch);
 				if (!templateFound) {
 					editor.commands.focus('end');
@@ -919,7 +936,7 @@
 			],
 			content: provider ? undefined : content,
 			autofocus: messageInput ? true : false,
-			onTransaction: () => {
+			onTransaction: ({ transaction }) => {
 				if (!editor) return;
 
 				// Defer Svelte reactivity trigger to rAF so we don't interleave
@@ -960,6 +977,8 @@
 				}
 
 				onChange({
+					docChanged: transaction.docChanged,
+					programmatic: programmaticContent,
 					html: htmlValue,
 					json: jsonValue,
 					text: editor.getText({ blockSeparator: '\n' }),
@@ -1333,7 +1352,7 @@
 			.replace(/\u00a0/g, ' ');
 
 		if (value === '') {
-			editor.commands.clearContent(); // Clear content if value is empty
+			pushContent(() => editor.commands.clearContent()); // Clear content if value is empty
 			selectTemplate();
 
 			return;
@@ -1341,23 +1360,25 @@
 
 		if (json) {
 			if (!equal(value, jsonValue)) {
-				editor.commands.setContent(value);
+				pushContent(() => editor.commands.setContent(value));
 				selectTemplate();
 			}
 		} else {
 			if (raw) {
 				if (value !== htmlValue) {
-					editor.commands.setContent(value);
+					pushContent(() => editor.commands.setContent(value));
 					selectTemplate();
 				}
 			} else {
 				if (value !== mdValue) {
-					editor.commands.setContent(
-						preserveBreaks
-							? value
-							: marked.parse(value.replaceAll(`\n<br/>`, `<br/>`), {
-									breaks: false
-								})
+					pushContent(() =>
+						editor.commands.setContent(
+							preserveBreaks
+								? value
+								: marked.parse(value.replaceAll(`\n<br/>`, `<br/>`), {
+										breaks: false
+									})
+						)
 					);
 
 					selectTemplate();
