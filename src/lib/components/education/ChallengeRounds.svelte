@@ -114,7 +114,7 @@
 									<ul class="mt-1 space-y-0.5">
 										{#each closing.unresolved as item}
 											<li class="flex gap-1.5">
-												<span aria-hidden="true">·</span><span>{item}</span>
+												<span aria-hidden="true">·</span><span>{item.text}</span>
 											</li>
 										{/each}
 									</ul>

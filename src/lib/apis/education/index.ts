@@ -784,9 +784,21 @@ export type ChallengeTurn = {
 	created_at: number;
 };
 
+/**
+ * 一条仍不成立的点。
+ *
+ * focus_key 由服务端按轮次映射得出，是班级层面按维度聚合的依据。归属不上时为 null，
+ * 那种条目照样展示给学生，只是不进统计表。
+ */
+export type ChallengeClosingItem = {
+	text: string;
+	turn_no: number | null;
+	focus_key: string | null;
+};
+
 export type ChallengeClosing = {
 	stood: string[];
-	unresolved: string[];
+	unresolved: ChallengeClosingItem[];
 };
 
 export type ChallengeSession = {

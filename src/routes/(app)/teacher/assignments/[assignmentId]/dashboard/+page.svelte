@@ -26,6 +26,15 @@
 	let refreshing = false;
 	let unsubscribeNotifications;
 	let notificationsInitialized = false;
+	// 分析结果要能直接变成下一轮的教学配置，否则它只是一张看完就走的图表。
+	// 复用既有的「以此为模板新建」流程：连同 rubric 一起带过去，焦点才有意义。
+	const useAsNextFocus = (focusKey: string) => {
+		goto(
+			`/teacher/assignments/new?from=${$page.params.assignmentId}` +
+				`&challengeFocus=${encodeURIComponent(focusKey)}`
+		);
+	};
+
 	const rewriteLevelLabels = {
 		unchanged: 'unchanged',
 		lightly_edited: 'lightly_edited',
@@ -105,6 +114,57 @@
 				value={`${dashboard.summary?.average_rewrite_ratio ?? 0}%`}
 			/>
 		</div>
+
+		{#if dashboard.distributions?.challenge}
+			{@const challenge = dashboard.distributions.challenge}
+			<EduCard class="mb-6">
+				<div class="text-sm font-semibold">{$i18n.t('Where the class did not hold up')}</div>
+				<!--
+					来源占比回答「他用了多少 AI」，这一块回答「这个班普遍在哪个维度上站不住」。
+					数据是服务端两份快照比对得出的，不是客户端上报，所以这里不挂
+					EduEvidenceDisclaimer。
+				-->
+				<div class="mt-1 text-xs text-gray-400">
+					{$i18n.t('{{completed}} finished the read-through · {{skipped}} skipped it', {
+						completed: challenge.completed_students,
+						skipped: challenge.skipped_students
+					})}
+				</div>
+
+				{#if challenge.below_sample_threshold}
+					<div class="mt-2 text-xs text-amber-600 dark:text-amber-400">
+						{$i18n.t(
+							'Fewer than {{threshold}} students finished — read these as individual cases, not a class pattern.',
+							{ threshold: challenge.sample_threshold }
+						)}
+					</div>
+				{/if}
+
+				<div class="mt-4 space-y-3">
+					{#each challenge.criteria as row (row.focus_key)}
+						<div
+							class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-2xl bg-gray-50 px-4 py-3 dark:bg-gray-800"
+						>
+							<!-- 给一句能直接拿去讲评的话，不是三个裸数字。 -->
+							<div class="text-sm text-gray-700 dark:text-gray-200">
+								{$i18n.t(
+									'{{label}}: {{challenged}} challenged, {{unresolved}} did not hold up, {{unchanged}} of them left the sentence untouched',
+									{
+										label: row.label,
+										challenged: row.challenged,
+										unresolved: row.unresolved,
+										unchanged: row.unresolved_unchanged
+									}
+								)}
+							</div>
+							<EduButton variant="link" on:click={() => useAsNextFocus(row.focus_key)}>
+								{$i18n.t('Use as next challenge focus')}
+							</EduButton>
+						</div>
+					{/each}
+				</div>
+			</EduCard>
+		{/if}
 
 		<div class="mb-6 grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
 			<EduCard>

@@ -42,7 +42,13 @@ const detail = {
 		focus_keys: ['ideas'],
 		planned_rounds: 2,
 		status: 'completed',
-		closing_summary_json: { stood: [], unresolved: ['还缺一个反例', '数据来源没说'] },
+		closing_summary_json: {
+			stood: [],
+			unresolved: [
+				{ text: '还缺一个反例', turn_no: 1, focus_key: 'ideas' },
+				{ text: '数据来源没说', turn_no: 2, focus_key: 'evidence' }
+			]
+		},
 		checklist_state_json: null,
 		started_at: 1,
 		ended_at: 3

@@ -117,7 +117,10 @@ test('答满最后一轮后出现收尾清单和两个出口', async () => {
 		session: makeSession({
 			status: 'completed',
 			ended_at: 9,
-			closing_summary_json: { stood: ['论点说清了'], unresolved: ['还缺一个反例'] }
+			closing_summary_json: {
+				stood: ['论点说清了'],
+				unresolved: [{ text: '还缺一个反例', turn_no: 1, focus_key: 'ideas' }]
+			}
 		}),
 		turns: [makeTurn(1, '答1'), makeTurn(2, '答2')]
 	} as never);

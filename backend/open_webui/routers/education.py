@@ -100,6 +100,9 @@ from open_webui.services.education.analysis import (
     get_materialized_submission_analyses,
     get_prompt_timeline,
 )
+from open_webui.services.education.challenge_insight import (
+    build_challenge_distribution,
+)
 from open_webui.services.education.challenge import (
     skip_challenge_before_start,
     ChallengeError,
@@ -2541,6 +2544,11 @@ async def upsert_writing_chat_message(
     return {"ok": True}
 
 
+def _challenge_unresolved(challenge_session) -> list:
+    closing = challenge_session.closing_summary_json
+    return list(closing.unresolved or []) if closing else []
+
+
 def _challenge_detail(challenge_session, db: Session) -> ChallengeSessionDetail:
     return ChallengeSessionDetail(
         session=challenge_session,
@@ -2944,11 +2952,16 @@ async def submit_assignment(
             "planned_rounds": challenge_session.planned_rounds,
             "answered_rounds": len(answered),
             "focus_keys": list(challenge_session.focus_keys or []),
-            # 画像层只读 stats_json，不回读原始表，所以未解决条数在这里就算好。
-            "unresolved_count": len(
-                (challenge_session.closing_summary_json.unresolved or [])
-                if challenge_session.closing_summary_json
-                else []
+            # 画像层与班级聚合都只读 stats_json，不回读原始表，所以未解决条数和
+            # 它们的维度归属都在这里算好。归属不上的条目照样给学生看，只是不进
+            # 班级那张按维度统计的表——不硬塞给某个维度。
+            "unresolved_count": len(_challenge_unresolved(challenge_session)),
+            "unresolved_focus_keys": sorted(
+                {
+                    item.focus_key
+                    for item in _challenge_unresolved(challenge_session)
+                    if item.focus_key
+                }
             ),
             "revision": summarize_post_challenge_revision(
                 challenge_turns,
@@ -3550,13 +3563,20 @@ async def get_teacher_dashboard(
                 risk_summary=analysis.get("summary", {}),
             )
         )
+    distributions = {
+        "rewrite_levels": rewrite_distribution,
+        "submission_count": len(items),
+    }
+    # 来源占比回答「他用了多少 AI」，这一项回答「这个班普遍在哪个维度上站不住」。
+    # 纯内存聚合，不调模型、不落表、不进缓存。
+    challenge_distribution = build_challenge_distribution(assignment, submissions)
+    if challenge_distribution is not None:
+        distributions["challenge"] = challenge_distribution
+
     return DashboardResponse(
         items=items,
         summary=finalize_risk_summary(summary),
-        distributions={
-            "rewrite_levels": rewrite_distribution,
-            "submission_count": len(items),
-        },
+        distributions=distributions,
     )
 
 

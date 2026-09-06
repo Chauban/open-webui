@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from open_webui.models.config import Config
 from open_webui.models.education import (
     ChallengeClosing,
+    ChallengeClosingItem,
     ChallengeSessionModel,
     ChallengeTurnModel,
     Education,
@@ -157,6 +158,8 @@ def build_closing_messages(
         [
             f"【作业】{assignment.title}",
             "【往来记录】\n" + "\n".join(history),
+            "unresolved 里的每一条都要写清它来自第几轮（turn_no），"
+            f"轮次范围是 1 到 {len(turns)}。",
         ]
     )
     return [
@@ -302,11 +305,15 @@ async def generate_turn(
     raise last_error or ChallengeError("Challenge generation failed")
 
 
-def parse_closing(raw: str) -> ChallengeClosing:
+def parse_closing(raw: str, turns: list[ChallengeTurnModel]) -> ChallengeClosing:
     """把收尾输出解析成清单。
 
     解析不出来时返回空清单而不是抛错:收尾失败不该把学生卡在质疑里出不来,
     但也不能编造「你都答住了」这种结论。
+
+    unresolved 的每一条按模型报的 turn_no 映射到那一轮的维度。模型报错轮次或不报,
+    focus_key 就留空——这条照样给学生看,只是不进班级那张按维度统计的表。宁可少统计
+    一条,也不把它硬塞给某个维度。
     """
 
     payload = _extract_json_object(raw)
@@ -314,14 +321,44 @@ def parse_closing(raw: str) -> ChallengeClosing:
         log.warning("challenge closing output was not a JSON object")
         return ChallengeClosing()
 
-    def _clean(items) -> list[str]:
+    focus_by_turn = {turn.turn_no: turn.focus_key for turn in turns}
+
+    def _clean_stood(items) -> list[str]:
         if not isinstance(items, list):
             return []
         return [str(item).strip() for item in items if str(item).strip()]
 
+    def _clean_unresolved(items) -> list[ChallengeClosingItem]:
+        if not isinstance(items, list):
+            return []
+        cleaned = []
+        for item in items:
+            if isinstance(item, dict):
+                text = str(item.get("text") or "").strip()
+                raw_turn = item.get("turn_no")
+            else:
+                text = str(item).strip()
+                raw_turn = None
+            if not text:
+                continue
+            try:
+                turn_no = int(raw_turn) if raw_turn is not None else None
+            except (TypeError, ValueError):
+                turn_no = None
+            if turn_no not in focus_by_turn:
+                turn_no = None
+            cleaned.append(
+                ChallengeClosingItem(
+                    text=text,
+                    turn_no=turn_no,
+                    focus_key=focus_by_turn.get(turn_no) if turn_no else None,
+                )
+            )
+        return cleaned
+
     return ChallengeClosing(
-        stood=_clean(payload.get("stood")),
-        unresolved=_clean(payload.get("unresolved")),
+        stood=_clean_stood(payload.get("stood")),
+        unresolved=_clean_unresolved(payload.get("unresolved")),
     )
 
 
@@ -572,7 +609,7 @@ async def submit_challenge_response(
             model_id,
             build_closing_messages(closing_prompt, assignment, turns),
         )
-        closing = parse_closing(raw)
+        closing = parse_closing(raw, turns)
 
     session = Education.complete_challenge_session(
         challenge_session.id, closing, commit=False, db=db

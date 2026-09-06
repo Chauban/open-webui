@@ -60,6 +60,9 @@
 			const params = get(page).url.searchParams;
 			const presetClassroomId = params.get('classroomId');
 			const duplicateFromId = params.get('from');
+			// 看板上「以此为下次的质疑焦点」带过来的。放在复制之后覆盖，
+			// 因为焦点只有配着同一套评分维度才说得通。
+			const presetChallengeFocus = params.get('challengeFocus');
 
 			if (duplicateFromId) {
 				try {
@@ -82,6 +85,11 @@
 				} catch (error) {
 					toast.error(resolveErrorMessage(error, t));
 				}
+			}
+
+			if (presetChallengeFocus) {
+				challengeEnabled = true;
+				challengeFocusKeys = [presetChallengeFocus];
 			}
 
 			if (selectedClassroomIds.size === 0) {

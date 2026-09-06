@@ -91,7 +91,7 @@
 									? 'text-amber-700/60 line-through dark:text-amber-400/50'
 									: 'text-amber-900 dark:text-amber-200'}"
 							>
-								{item}
+								{item.text}
 							</span>
 						</label>
 					</li>

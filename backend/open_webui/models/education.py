@@ -831,11 +831,26 @@ def validate_challenge_focus_keys(
     return keys
 
 
+class ChallengeClosingItem(BaseModel):
+    """一条仍不成立的点。
+
+    turn_no 是模型自己报的「这条来自第几轮」,focus_key 由服务端按轮次映射得出——
+    让模型直接报维度 key 它会瞎编,报轮次它错不了,错了也能当场验出来。
+
+    带上维度是为了班级层面能按维度聚合(「本次论据支撑 21 人没答住」),没有归属的
+    条目照样展示给学生,只是不进那张统计表——不硬塞给某个维度。
+    """
+
+    text: str
+    turn_no: Optional[int] = None
+    focus_key: Optional[str] = None
+
+
 class ChallengeClosing(BaseModel):
     """收尾清单。没有它,学生只是被怼一顿,下次必然跳过。"""
 
     stood: list[str] = Field(default_factory=list)
-    unresolved: list[str] = Field(default_factory=list)
+    unresolved: list[ChallengeClosingItem] = Field(default_factory=list)
 
 
 class ChallengeTurnModel(BaseModel):

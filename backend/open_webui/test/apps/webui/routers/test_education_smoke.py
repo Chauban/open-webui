@@ -4397,6 +4397,8 @@ def test_challenge_stops_at_planned_rounds_and_closes(education_client):
     )
 
     UserContext.current_user = student
+    # 这里刻意用裸字符串：模型不按格式输出时，条目照样要能给学生看到，
+    # 只是没有维度归属，不进班级那张统计表。
     with _fake_challenge_model(
         closing={"stood": ["立意站住了"], "unresolved": ["证据仍然不足"]}
     ) as calls:
@@ -4416,9 +4418,10 @@ def test_challenge_stops_at_planned_rounds_and_closes(education_client):
         assert detail["session"]["status"] == "completed"
         assert len(detail["turns"]) == 3
         assert all(turn["response_text"] for turn in detail["turns"])
-        assert detail["session"]["closing_summary_json"]["unresolved"] == [
-            "证据仍然不足"
-        ]
+        # 这条是裸字符串喂进去的，文本照样留住，只是没有维度归属。
+        unresolved = detail["session"]["closing_summary_json"]["unresolved"]
+        assert [item["text"] for item in unresolved] == ["证据仍然不足"]
+        assert unresolved[0]["focus_key"] is None
         assert detail["session"]["ended_at"] is not None
 
         # 三轮质疑 + 一次收尾 = 四次模型调用，不多不少。
@@ -4597,7 +4600,10 @@ def test_challenge_rounds_are_visible_to_the_teacher_after_submit(education_clie
 
     UserContext.current_user = student
     with _fake_challenge_model(
-        closing={"stood": ["你说清了论点"], "unresolved": ["还缺一个反例"]}
+        closing={
+            "stood": ["你说清了论点"],
+            "unresolved": [{"text": "还缺一个反例", "turn_no": 2}],
+        }
     ):
         challenge_id = _start_challenge(client, assignment["id"], session_id).json()[
             "session"
@@ -4617,7 +4623,9 @@ def test_challenge_rounds_are_visible_to_the_teacher_after_submit(education_clie
     assert rounds["session"]["status"] == "completed"
     assert len(rounds["turns"]) == 2
     assert rounds["turns"][0]["response_text"] == "我补了一份调查数据。"
-    assert rounds["session"]["closing_summary_json"]["unresolved"] == ["还缺一个反例"]
+    assert [
+        item["text"] for item in rounds["session"]["closing_summary_json"]["unresolved"]
+    ] == ["还缺一个反例"]
 
 
 def test_submission_without_challenge_records_absence(education_client):
@@ -4792,7 +4800,13 @@ def test_challenge_checklist_state_persists(education_client):
 
     UserContext.current_user = student
     with _fake_challenge_model(
-        closing={"stood": [], "unresolved": ["补一个反例", "说明数据来源"]}
+        closing={
+            "stood": [],
+            "unresolved": [
+                {"text": "补一个反例", "turn_no": 1},
+                {"text": "说明数据来源", "turn_no": 2},
+            ],
+        }
     ):
         challenge_id = _start_challenge(client, assignment["id"], session_id).json()[
             "session"
@@ -4827,7 +4841,9 @@ def test_teacher_sees_whether_the_student_revised_after_the_read_through(educati
     )
 
     UserContext.current_user = student
-    with _fake_challenge_model(closing={"stood": [], "unresolved": ["还缺一个反例"]}):
+    with _fake_challenge_model(
+        closing={"stood": [], "unresolved": [{"text": "还缺一个反例", "turn_no": 1}]}
+    ):
         challenge_id = _start_challenge(client, assignment["id"], session_id).json()[
             "session"
         ]["id"]
@@ -4997,6 +5013,139 @@ def test_challenge_retries_once_when_the_quote_cannot_be_located(education_clien
     assert res.json()["turns"][0]["quoted_span"] == _DRAFT_SENTENCES[0]
 
 
+def test_closing_items_carry_their_focus_dimension(education_client):
+    """收尾条目按轮次映射到维度。轮次报错或不报就留空，不硬塞给某个维度。"""
+
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id = _setup_challenge_assignment(
+        client,
+        teacher,
+        student,
+        rounds=2,
+        focus_keys=("ideas", "evidence"),
+        title="Focus Attribution",
+    )
+
+    UserContext.current_user = student
+    with _fake_challenge_model(
+        closing={
+            "stood": [],
+            "unresolved": [
+                {"text": "第一轮那条还不成立", "turn_no": 1},
+                {"text": "第二轮那条也不成立", "turn_no": 2},
+                # 轮次超出范围：模型瞎报，服务端不接受。
+                {"text": "来路不明的一条", "turn_no": 9},
+                # 干脆不是对象：模型没按格式输出。
+                "连格式都没按",
+            ],
+        }
+    ):
+        challenge_id = _start_challenge(client, assignment["id"], session_id).json()[
+            "session"
+        ]["id"]
+        _respond(client, challenge_id, 1)
+        detail = _respond(client, challenge_id, 2).json()
+
+    unresolved = detail["session"]["closing_summary_json"]["unresolved"]
+    # 四条都要留给学生看，一条都不能因为归属不上就被丢掉。
+    assert [item["text"] for item in unresolved] == [
+        "第一轮那条还不成立",
+        "第二轮那条也不成立",
+        "来路不明的一条",
+        "连格式都没按",
+    ]
+    assert unresolved[0]["focus_key"] == "ideas"
+    assert unresolved[1]["focus_key"] == "evidence"
+    assert unresolved[2]["focus_key"] is None
+    assert unresolved[3]["focus_key"] is None
+
+
+def test_dashboard_reports_challenge_hit_rate_per_criterion(education_client):
+    """看板按维度给出命中率：被质疑几人、几人没答住、其中几人一字未动。
+
+    来源占比回答「他用了多少 AI」，这一项回答「这个班普遍在哪个维度上站不住」，
+    是第一个班级层面的学习指标而不是监控指标。
+    """
+
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id = _setup_challenge_assignment(
+        client,
+        teacher,
+        student,
+        rounds=2,
+        focus_keys=("ideas", "evidence"),
+        title="Distribution Essay",
+    )
+
+    UserContext.current_user = student
+    with _fake_challenge_model(
+        closing={
+            "stood": [],
+            "unresolved": [
+                {"text": "立意这条还不成立", "turn_no": 1},
+                {"text": "证据这条也不成立", "turn_no": 2},
+            ],
+        }
+    ):
+        challenge_id = _start_challenge(client, assignment["id"], session_id).json()[
+            "session"
+        ]["id"]
+        _respond(client, challenge_id, 1)
+        _respond(client, challenge_id, 2)
+
+    # 只改第一轮质疑的那一句（第一句），第二轮那句原样不动。
+    revised = _long_draft().replace(
+        "短视频降低了年轻人的注意力", "短视频可能削弱了部分人的注意力"
+    )
+    client.post(
+        f"/api/v1/assignments/{assignment['id']}/submit",
+        json=_submit_body(session_id, revised),
+    )
+
+    UserContext.current_user = teacher
+    dashboard = client.get(
+        f"/api/v1/teacher/assignments/{assignment['id']}/dashboard"
+    ).json()
+    distribution = dashboard["distributions"]["challenge"]
+
+    assert distribution["completed_students"] == 1
+    assert distribution["skipped_students"] == 0
+    # 一个人的样本不该被当成班级结论。
+    assert distribution["below_sample_threshold"] is True
+
+    by_key = {row["focus_key"]: row for row in distribution["criteria"]}
+    assert by_key["ideas"]["challenged"] == 1
+    assert by_key["ideas"]["unresolved"] == 1
+    # 立意这句改了 —— 没答住但动了笔。
+    assert by_key["ideas"]["unresolved_unchanged"] == 0
+    assert by_key["evidence"]["challenged"] == 1
+    assert by_key["evidence"]["unresolved"] == 1
+    # 证据这句一字未动 —— 这才是教师最该讲的那种。
+    assert by_key["evidence"]["unresolved_unchanged"] == 1
+
+
+def test_dashboard_omits_challenge_block_when_nobody_was_challenged(education_client):
+    """没人做过质疑就不出这一块，不摆空状态占位。"""
+
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id = _setup_challenge_assignment(
+        client, teacher, student, rounds=2, title="Nobody Challenged"
+    )
+
+    # 既没发起也没跳过就直接交。
+    UserContext.current_user = student
+    client.post(
+        f"/api/v1/assignments/{assignment['id']}/submit",
+        json=_submit_body(session_id, _long_draft()),
+    )
+
+    UserContext.current_user = teacher
+    dashboard = client.get(
+        f"/api/v1/teacher/assignments/{assignment['id']}/dashboard"
+    ).json()
+    assert "challenge" not in dashboard["distributions"]
+
+
 def test_challenge_config_survives_assignment_update(education_client):
     """教师改作业时三个字段要跟着走，关掉质疑要把焦点一并清空。"""
 
@@ -5053,7 +5202,13 @@ def test_challenge_facts_reach_the_growth_profile(education_client):
 
     UserContext.current_user = student
     with _fake_challenge_model(
-        closing={"stood": ["论点清楚"], "unresolved": ["还缺一个反例", "数据来源没说"]}
+        closing={
+            "stood": ["论点清楚"],
+            "unresolved": [
+                {"text": "还缺一个反例", "turn_no": 1},
+                {"text": "数据来源没说", "turn_no": 2},
+            ],
+        }
     ):
         challenge_id = _start_challenge(client, assignment["id"], session_id).json()[
             "session"
