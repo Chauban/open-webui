@@ -3437,6 +3437,21 @@ async def save_submission_review(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="A future resubmit due time is required when returning",
             )
+    if form_data.challenge_followup:
+        # 不在这里替教师悄悄打开质疑：他勾这一下的意思是「就这条追问」，
+        # 不是「给这个作业启用质疑环节」。
+        if not assignment.challenge_enabled:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Challenge follow-up needs the pre-submission challenge enabled",
+            )
+        if form_data.review_status != "returned" or not (
+            form_data.returned_comment or ""
+        ).strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Challenge follow-up needs a returned submission with a comment",
+            )
 
     try:
         review = Education.upsert_submission_review(

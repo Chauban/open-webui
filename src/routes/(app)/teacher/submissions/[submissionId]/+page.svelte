@@ -85,6 +85,7 @@
 	let lastSavedAt: Date | null = null;
 	let expandedTimelineIds: Set<number> = new Set();
 	let resubmitDueLocal = '';
+	let challengeFollowup = false;
 	let diffData: any = null;
 	let diffLoading = false;
 	let loadSeq = 0;
@@ -228,6 +229,7 @@
 		);
 		returnedComment = review?.returned_comment || '';
 		resubmitDueLocal = review?.resubmit_due_at ? toLocalDateTimeInput(review.resubmit_due_at) : '';
+		challengeFollowup = review?.challenge_followup ?? false;
 	};
 
 	const saveReview = async (effectiveStatus: string) => {
@@ -269,7 +271,9 @@
 				overall_comment: overallComment.trim(),
 				rubric_scores: parsedRubricScores,
 				returned_comment: returnedComment.trim(),
-				resubmit_due_at: resubmitDueAt
+				resubmit_due_at: resubmitDueAt,
+				// 只在真的退回时带上：换个状态保存不该把这个意图留在记录里。
+				challenge_followup: effectiveStatus === 'returned' && challengeFollowup
 			});
 			detail.review = response;
 			syncReview();
@@ -756,6 +760,27 @@
 										placeholder={$i18n.t('Returned Comment')}
 									></textarea>
 								</div>
+
+								<!--
+									让质疑读者就这条意见追问。退回意见此前写完就没下文了，学生看不看、
+									改不改全凭自觉；勾上之后，下一轮提交前的质疑会围绕这条展开。
+									作业没启用质疑时不显示 —— 不在这里替教师悄悄打开那个环节。
+								-->
+								{#if detail?.assignment?.challenge_enabled}
+									<label
+										class="flex cursor-pointer items-start gap-2 rounded-2xl bg-gray-50 px-4 py-3 dark:bg-gray-800"
+									>
+										<input
+											type="checkbox"
+											class="mt-0.5 size-3.5 shrink-0 accent-black dark:accent-gray-100"
+											bind:checked={challengeFollowup}
+											disabled={isHistoricalRound}
+										/>
+										<span class="text-xs leading-relaxed text-gray-700 dark:text-gray-200">
+											{$i18n.t('Have the reader follow up on this comment next round')}
+										</span>
+									</label>
+								{/if}
 
 								<!-- Resubmit due at (required when returning for revision) -->
 								<div>

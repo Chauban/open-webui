@@ -106,6 +106,7 @@ def build_turn_messages(
     previous_turns: list[ChallengeTurnModel],
     turn_no: int,
     planned_rounds: int,
+    followup_comment: Optional[str] = None,
 ) -> list[dict]:
     lines = [
         f"【作业】{assignment.title}",
@@ -115,6 +116,16 @@ def build_turn_messages(
         lines.append(f"【要求】{description}")
     lines.append(f"【本轮质疑聚焦的评分维度】{_describe_focus(assignment, focus_key)}")
     lines.append(f"【进度】这是第 {turn_no} 轮，共 {planned_rounds} 轮。")
+
+    # 教师退回时点名要追问的那条。焦点维度照旧轮转（班级聚合要靠它），教师的话
+    # 叠在上面当作本轮的首要指向——退回意见此前写完就没下文，这是它第一次有抓手。
+    if followup_comment:
+        lines.append(
+            "【教师退回这篇时点名的问题】"
+            + followup_comment
+            + "\n本轮优先追问这一条。作者如果已经把它解决了，就说明它已经解决，"
+            "再问上面那个维度里其它仍然说服不了你的地方。"
+        )
 
     if previous_turns:
         history = []
@@ -453,6 +464,7 @@ async def start_challenge(
 
     focus_keys = list(assignment.challenge_focus_keys or [])
     focus_key = resolve_focus_key(focus_keys, 1)
+    followup_comment = resolve_followup_comment(assignment, writing_session, db)
     challenge_text, quoted_span = await generate_turn(
         request,
         user,
@@ -465,6 +477,7 @@ async def start_challenge(
             [],
             1,
             assignment.challenge_rounds,
+            followup_comment,
         ),
         draft_text,
     )
@@ -477,6 +490,7 @@ async def start_challenge(
         version.id,
         focus_keys,
         assignment.challenge_rounds,
+        followup_comment=followup_comment,
         commit=False,
         db=db,
     )
@@ -491,6 +505,26 @@ async def start_challenge(
     )
     db.commit()
     return session, turn
+
+
+def resolve_followup_comment(assignment, writing_session, db: Session) -> Optional[str]:
+    """上一轮教师退回时勾了「让质疑读者追问」的话，取出那条意见。
+
+    只认当前这一轮之前那次退回：教师没勾就没有，勾了但没写意见也没有——没有内容
+    可追问的时候不该硬造一轮。
+    """
+
+    submission = Education.get_current_submission(
+        assignment.id, writing_session.owner_user_id, db=db
+    )
+    if submission is None:
+        return None
+    review = Education.get_submission_review_by_submission_id(submission.id, db=db)
+    if review is None or review.review_status != "returned":
+        return None
+    if not review.challenge_followup:
+        return None
+    return (review.returned_comment or "").strip() or None
 
 
 def skip_challenge_before_start(
@@ -585,6 +619,7 @@ async def submit_challenge_response(
                 turns,
                 next_turn_no,
                 challenge_session.planned_rounds,
+                challenge_session.followup_comment,
             ),
             draft_text,
         )

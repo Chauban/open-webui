@@ -516,6 +516,8 @@ export const saveSubmissionReview = async (
 		rubric_scores?: Record<string, number> | null;
 		returned_comment?: string;
 		resubmit_due_at?: number | null;
+		/** 让质疑读者下一轮就着这条退回意见追问。只在退回时有意义。 */
+		challenge_followup?: boolean;
 	}
 ) => {
 	return fetch(`${WEBUI_API_BASE_URL}/teacher/submissions/${submissionId}/review`, {

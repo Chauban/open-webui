@@ -3838,6 +3838,7 @@
 	"Fewer than {{threshold}} students finished — read these as individual cases, not a class pattern.": "完成试读的不足 {{threshold}} 人，这些数字只能当个案看，不足以说明全班。",
 	"{{label}}: {{challenged}} challenged, {{unresolved}} did not hold up, {{unchanged}} of them left the sentence untouched": "{{label}}：{{challenged}} 人被质疑，{{unresolved}} 人没答住，其中 {{unchanged}} 人被质疑的那句一字未动",
 	"Use as next challenge focus": "以此为下次的质疑焦点",
+	"Have the reader follow up on this comment next round": "让读者下一轮就着这条意见追问",
 	"No answer to this round": "这一轮没有作答",
 	"What the reader concluded": "读者的结论",
 	"Questions and rounds are generated server-side; the answers are the student’s own words.": "质疑与回合由服务端生成；回应是学生自己写的字。",

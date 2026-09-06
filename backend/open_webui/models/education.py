@@ -358,6 +358,8 @@ class ChallengeSession(Base):
     status = Column(Text, nullable=False, default="in_progress")
     closing_summary_json = Column(JSONField, nullable=True)
     checklist_state_json = Column(JSONField, nullable=True)
+    # 教师退回意见的原文，发起这一轮时冻下来。评语可以事后被改，已开始的这轮不跟着变。
+    followup_comment = Column(Text, nullable=True)
     started_at = Column(BigInteger, nullable=False)
     ended_at = Column(BigInteger, nullable=True)
 
@@ -440,6 +442,8 @@ class SubmissionReview(Base):
     rubric_scores = Column(JSONField, nullable=True)
     returned_comment = Column(Text, nullable=True)
     resubmit_due_at = Column(BigInteger, nullable=True)
+    # 教师退回时是否要求质疑读者就这条意见追问。退回意见此前写完就没下文了。
+    challenge_followup = Column(Boolean, nullable=False, default=False)
     reviewed_at = Column(BigInteger, nullable=True)
     created_at = Column(BigInteger, nullable=False)
     updated_at = Column(BigInteger, nullable=False)
@@ -879,6 +883,7 @@ class ChallengeSessionModel(BaseModel):
     focus_keys: list[str] = Field(default_factory=list)
     planned_rounds: int
     status: ChallengeStatus
+    followup_comment: Optional[str] = None
     closing_summary_json: Optional[ChallengeClosing] = None
     checklist_state_json: Optional[dict] = None
     started_at: int
@@ -1086,6 +1091,7 @@ class SubmissionReviewModel(BaseModel):
     rubric_scores: Optional[dict[str, int]] = None
     returned_comment: Optional[str] = None
     resubmit_due_at: Optional[int] = None
+    challenge_followup: bool = False
     reviewed_at: Optional[int] = None
     created_at: int
     updated_at: int
@@ -1423,6 +1429,8 @@ class SubmissionReviewForm(BaseModel):
     rubric_scores: Optional[dict[str, int]] = None
     returned_comment: Optional[str] = None
     resubmit_due_at: Optional[int] = None
+    # 只在退回时有意义：让质疑读者下一轮就着这条意见追问。
+    challenge_followup: bool = False
 
 
 class ClassroomBulkImportForm(BaseModel):
@@ -3513,6 +3521,7 @@ class EducationTable:
         focus_keys: list[str],
         planned_rounds: int,
         status: str = "in_progress",
+        followup_comment: Optional[str] = None,
         commit: bool = True,
         db: Optional[Session] = None,
     ) -> ChallengeSessionModel:
@@ -3533,6 +3542,7 @@ class EducationTable:
                 focus_keys=list(focus_keys),
                 planned_rounds=planned_rounds,
                 status=status,
+                followup_comment=followup_comment,
                 closing_summary_json=None,
                 checklist_state_json=None,
                 started_at=int(time.time()),
@@ -4604,6 +4614,7 @@ class EducationTable:
                     overall_comment=form_data.overall_comment,
                     rubric_scores=form_data.rubric_scores,
                     returned_comment=form_data.returned_comment,
+                    challenge_followup=form_data.challenge_followup,
                     resubmit_due_at=form_data.resubmit_due_at,
                     reviewed_at=now if form_data.review_status != "pending" else None,
                     created_at=now,
@@ -4617,6 +4628,7 @@ class EducationTable:
                 review.overall_comment = form_data.overall_comment
                 review.rubric_scores = form_data.rubric_scores
                 review.returned_comment = form_data.returned_comment
+                review.challenge_followup = form_data.challenge_followup
                 review.resubmit_due_at = form_data.resubmit_due_at
                 review.reviewed_at = (
                     now if form_data.review_status != "pending" else None

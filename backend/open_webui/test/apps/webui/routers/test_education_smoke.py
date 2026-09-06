@@ -5146,6 +5146,129 @@ def test_dashboard_omits_challenge_block_when_nobody_was_challenged(education_cl
     assert "challenge" not in dashboard["distributions"]
 
 
+def test_return_comment_drives_the_next_challenge(education_client):
+    """教师退回时勾了追问，下一轮质疑就围绕那条意见展开。
+
+    这是产品里第一处 AI 直接执行教师教学意图、而不是执行配置预设的交互。此前退回
+    意见写完就没下文：学生看不看、改不改全凭自觉，教师没有任何抓手。
+    """
+
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id = _setup_challenge_assignment(
+        client, teacher, student, rounds=2, title="Followup Essay"
+    )
+
+    # 第一轮：学生跳过质疑直接交。
+    UserContext.current_user = student
+    client.post(
+        f"/api/v1/assignments/{assignment['id']}/challenge/skip",
+        json={"writing_session_id": session_id},
+    )
+    submission_id = client.post(
+        f"/api/v1/assignments/{assignment['id']}/submit",
+        json=_submit_body(session_id, _long_draft()),
+    ).json()["submission_id"]
+
+    # 教师退回，并要求就这条意见追问。
+    UserContext.current_user = teacher
+    comment = "你说所有人都认为长视频没人看了，凭什么这么说？"
+    review_res = client.post(
+        f"/api/v1/teacher/submissions/{submission_id}/review",
+        json={
+            "review_status": "returned",
+            "returned_comment": comment,
+            "resubmit_due_at": 2000000000,
+            "challenge_followup": True,
+        },
+    )
+    assert review_res.status_code == 200, review_res.text
+    assert review_res.json()["challenge_followup"] is True
+
+    # 学生重交前发起质疑：教师那句话要进模型的输入，并冻进本轮记录。
+    UserContext.current_user = student
+    with _fake_challenge_model() as calls:
+        detail = _start_challenge(client, assignment["id"], session_id).json()
+
+    assert detail["session"]["followup_comment"] == comment
+    assert comment in calls[0]["messages"][1]["content"]
+
+
+def test_challenge_followup_needs_a_returned_comment(education_client):
+    """勾了追问但没退回、或没写意见，直接拒——没有内容可追问时不该硬造一轮。"""
+
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id = _setup_challenge_assignment(
+        client, teacher, student, rounds=2, title="Followup Guard"
+    )
+
+    UserContext.current_user = student
+    submission_id = client.post(
+        f"/api/v1/assignments/{assignment['id']}/submit",
+        json=_submit_body(session_id, _long_draft()),
+    ).json()["submission_id"]
+
+    UserContext.current_user = teacher
+    # 退回了但没写意见。
+    assert (
+        client.post(
+            f"/api/v1/teacher/submissions/{submission_id}/review",
+            json={
+                "review_status": "returned",
+                "returned_comment": "   ",
+                "resubmit_due_at": 2000000000,
+                "challenge_followup": True,
+            },
+        ).status_code
+        == 400
+    )
+    # 根本不是退回。
+    assert (
+        client.post(
+            f"/api/v1/teacher/submissions/{submission_id}/review",
+            json={
+                "review_status": "pending",
+                "returned_comment": "改一下这里",
+                "challenge_followup": True,
+            },
+        ).status_code
+        == 400
+    )
+
+
+def test_challenge_followup_rejected_when_assignment_has_challenge_off(education_client):
+    """未启用质疑的作业不接受这个勾选——不在这里替教师悄悄打开那个环节。"""
+
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id = _setup_challenge_assignment(
+        client, teacher, student, rounds=2, title="Followup Off"
+    )
+
+    UserContext.current_user = teacher
+    disabled = client.patch(
+        f"/api/v1/assignments/{assignment['id']}",
+        json={"challenge_enabled": False},
+    )
+    assert disabled.status_code == 200, disabled.text
+
+    UserContext.current_user = student
+    submission_id = client.post(
+        f"/api/v1/assignments/{assignment['id']}/submit",
+        json=_submit_body(session_id, _long_draft()),
+    ).json()["submission_id"]
+
+    UserContext.current_user = teacher
+    res = client.post(
+        f"/api/v1/teacher/submissions/{submission_id}/review",
+        json={
+            "review_status": "returned",
+            "returned_comment": "再补一个反例",
+            "resubmit_due_at": 2000000000,
+            "challenge_followup": True,
+        },
+    )
+    assert res.status_code == 400, res.text
+
+
 def test_challenge_config_survives_assignment_update(education_client):
     """教师改作业时三个字段要跟着走，关掉质疑要把焦点一并清空。"""
 
