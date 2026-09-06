@@ -23,6 +23,7 @@
 	import EduDateTimeField from '$lib/components/education/EduDateTimeField.svelte';
 	import RubricCriteriaEditor from '$lib/components/education/RubricCriteriaEditor.svelte';
 	import CoachingStyleSelector from '$lib/components/education/CoachingStyleSelector.svelte';
+	import ChallengeSettings from '$lib/components/education/ChallengeSettings.svelte';
 	import { EDU_FIELD_CLASS } from '$lib/components/education/styles';
 	import {
 		formatDateTimeInput,
@@ -48,6 +49,9 @@
 	let dueAt = '';
 	let scoreMax = '';
 	let coachingStyle: CoachingStyle = 'balanced';
+	let challengeEnabled = false;
+	let challengeRounds = 3;
+	let challengeFocusKeys: string[] = [];
 	let rubricCriteria = [];
 	let showArchiveConfirm = false;
 	let showDeleteConfirm = false;
@@ -81,6 +85,9 @@
 		dueAt = item.assignment.due_at ? toLocalDateTimeInput(item.assignment.due_at) : '';
 		scoreMax = String(item.assignment.score_max);
 		coachingStyle = item.assignment.coaching_style;
+		challengeEnabled = item.assignment.challenge_enabled ?? false;
+		challengeRounds = item.assignment.challenge_rounds ?? 3;
+		challengeFocusKeys = [...(item.assignment.challenge_focus_keys ?? [])];
 		rubricCriteria = item.assignment.rubric_schema.criteria.map((criterion) => ({
 			key: criterion.key,
 			label: criterion.label,
@@ -145,6 +152,9 @@
 				due_at: Math.floor(new Date(dueAt).getTime() / 1000),
 				score_max: parsedScoreMax,
 				coaching_style: coachingStyle,
+				challenge_enabled: challengeEnabled,
+				challenge_rounds: challengeRounds,
+				challenge_focus_keys: challengeEnabled ? challengeFocusKeys : [],
 				rubric_schema: { criteria: parsedCriteria }
 			});
 			await loadData();
@@ -296,6 +306,12 @@
 							lockedHint={item.submission_count > 0
 								? $i18n.t('Rubric criteria are locked after the first submission.')
 								: ''}
+						/>
+						<ChallengeSettings
+							criteria={rubricCriteria}
+							bind:enabled={challengeEnabled}
+							bind:rounds={challengeRounds}
+							bind:focusKeys={challengeFocusKeys}
 						/>
 						<div class="flex flex-wrap justify-between gap-2">
 							<div class="flex flex-wrap gap-2">

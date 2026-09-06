@@ -4769,3 +4769,107 @@ def test_challenge_checklist_state_persists(education_client):
         params={"writing_session_id": session_id},
     ).json()
     assert current["session"]["checklist_state_json"]["checked_indexes"] == [0, 1]
+
+
+def test_teacher_sees_whether_the_student_revised_after_the_read_through(education_client):
+    """被问住之后到底改没改。判定用的是两份服务端快照，不碰客户端上报。"""
+
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id = _setup_challenge_assignment(
+        client, teacher, student, rounds=2, title="Revised Essay"
+    )
+
+    UserContext.current_user = student
+    with _fake_challenge_model(closing={"stood": [], "unresolved": ["还缺一个反例"]}):
+        challenge_id = _start_challenge(client, assignment["id"], session_id).json()[
+            "session"
+        ]["id"]
+        _respond(client, challenge_id, 1)
+        _respond(client, challenge_id, 2)
+
+    revised_text = _long_draft() + "补充一个反例：某项调查显示并非所有人都如此，这里需要区分人群。"
+    submission_id = client.post(
+        f"/api/v1/assignments/{assignment['id']}/submit",
+        json=_submit_body(session_id, revised_text),
+    ).json()["submission_id"]
+
+    UserContext.current_user = teacher
+    rounds = client.get(f"/api/v1/submissions/{submission_id}/challenge").json()
+    assert rounds["revision"]["revised"] is True
+    assert rounds["revision"]["changed_chars"] >= 20
+
+    frozen = client.get(f"/api/v1/teacher/submissions/{submission_id}").json()
+    assert frozen["submission"]["stats_json"]["challenge"]["revision"]["revised"] is True
+
+
+def test_teacher_sees_when_the_student_changed_nothing(education_client):
+    """答完一个字没改，教师要明确看到「未修改」——这是最该被讲的那种情况。"""
+
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id = _setup_challenge_assignment(
+        client, teacher, student, rounds=2, title="Untouched Essay"
+    )
+
+    UserContext.current_user = student
+    with _fake_challenge_model():
+        challenge_id = _start_challenge(client, assignment["id"], session_id).json()[
+            "session"
+        ]["id"]
+        _respond(client, challenge_id, 1)
+        _respond(client, challenge_id, 2)
+
+    submission_id = client.post(
+        f"/api/v1/assignments/{assignment['id']}/submit",
+        json=_submit_body(session_id, _long_draft()),
+    ).json()["submission_id"]
+
+    UserContext.current_user = teacher
+    rounds = client.get(f"/api/v1/submissions/{submission_id}/challenge").json()
+    assert rounds["revision"]["revised"] is False
+    assert rounds["revision"]["changed_chars"] == 0
+
+
+def test_challenge_config_survives_assignment_update(education_client):
+    """教师改作业时三个字段要跟着走，关掉质疑要把焦点一并清空。"""
+
+    client, teacher, _, student, _, _ = education_client
+    assignment, _ = _setup_challenge_assignment(
+        client,
+        teacher,
+        student,
+        rounds=3,
+        focus_keys=("ideas", "evidence"),
+        title="Config Update",
+    )
+
+    UserContext.current_user = teacher
+    detail = client.get(f"/api/v1/teacher/assignments/{assignment['id']}").json()
+    assert detail["assignment"]["challenge_enabled"] is True
+    assert detail["assignment"]["challenge_rounds"] == 3
+    assert detail["assignment"]["challenge_focus_keys"] == ["ideas", "evidence"]
+
+    updated = client.patch(
+        f"/api/v1/assignments/{assignment['id']}",
+        json={"challenge_rounds": 2, "challenge_focus_keys": ["structure"]},
+    )
+    assert updated.status_code == 200, updated.text
+    detail = client.get(f"/api/v1/teacher/assignments/{assignment['id']}").json()
+    assert detail["assignment"]["challenge_rounds"] == 2
+    assert detail["assignment"]["challenge_focus_keys"] == ["structure"]
+
+    # 关掉质疑，焦点必须一起清掉，免得下次开启时带着过期的维度
+    disabled = client.patch(
+        f"/api/v1/assignments/{assignment['id']}",
+        json={"challenge_enabled": False},
+    )
+    assert disabled.status_code == 200, disabled.text
+    detail = client.get(f"/api/v1/teacher/assignments/{assignment['id']}").json()
+    assert detail["assignment"]["challenge_enabled"] is False
+    assert detail["assignment"]["challenge_focus_keys"] == []
+
+    # 评分维度里没有的 key 一律拒绝
+    rejected = client.patch(
+        f"/api/v1/assignments/{assignment['id']}",
+        json={"challenge_enabled": True, "challenge_focus_keys": ["not_a_criterion"]},
+    )
+    assert rejected.status_code in (400, 422), rejected.text

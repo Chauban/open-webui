@@ -867,6 +867,8 @@ class ChallengeSessionModel(BaseModel):
 class ChallengeSessionDetail(BaseModel):
     session: ChallengeSessionModel
     turns: list[ChallengeTurnModel] = Field(default_factory=list)
+    # 只有教师读提交时才带：被质疑那一稿与最终正文的差异结论，提交时已冻在 stats_json。
+    revision: Optional[dict] = None
 
 
 class ChallengeStartForm(BaseModel):

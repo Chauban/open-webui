@@ -7,6 +7,7 @@
 就真的停下,所以每一轮都是服务端显式发起的一次独立调用,到 planned_rounds 就转收尾。
 """
 
+import difflib
 import json
 import logging
 from typing import Optional
@@ -31,6 +32,8 @@ log = logging.getLogger(__name__)
 CHALLENGE_MIN_DRAFT_CHARS = 100
 # 传给模型的正文上限,超出部分截断,免得长文把上下文顶爆。
 CHALLENGE_DRAFT_CHAR_LIMIT = 12000
+# 收尾之后改动多少字才算「真的回去改了」。低于这个数基本是错别字和标点。
+CHALLENGE_REVISION_MIN_CHARS = 20
 
 
 class ChallengeError(Exception):
@@ -184,6 +187,29 @@ def parse_closing(raw: str) -> ChallengeClosing:
         stood=_clean(payload.get("stood")),
         unresolved=_clean(payload.get("unresolved")),
     )
+
+
+def summarize_post_challenge_revision(source_text: str, final_text: str) -> dict:
+    """被质疑的那一稿和最终交上来的稿子差多少。
+
+    这是教师最想知道的那件事:他被问住之后到底改了没有。刻意不用 editor_operation
+    的时间戳来判断——那既依赖客户端时钟(和服务端时间没有可比性),又只统计上报成功
+    的编辑。改成直接比两份服务端快照:source_version 是发起质疑时冻住的那一稿,
+    final_text 是这次提交的正文,两头都是服务端权威数据,不需要信任客户端。
+    """
+
+    source = (source_text or "").strip()
+    final = (final_text or "").strip()
+    matcher = difflib.SequenceMatcher(None, source, final)
+    changed_chars = sum(
+        max(i2 - i1, j2 - j1)
+        for tag, i1, i2, j1, j2 in matcher.get_opcodes()
+        if tag != "equal"
+    )
+    return {
+        "revised": changed_chars >= CHALLENGE_REVISION_MIN_CHARS,
+        "changed_chars": changed_chars,
+    }
 
 
 async def start_challenge(

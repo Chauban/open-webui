@@ -3814,5 +3814,21 @@
 	"Pick a model before the read-through.": "试读前请先选一个模型。",
 	"From the read-through": "试读留下的待改项",
 	"{{done}} of {{total}} done": "已改 {{done}} / {{total}}",
-	"Could not save the checklist.": "没能保存清单状态。"
+	"Could not save the checklist.": "没能保存清单状态。",
+	"Pre-submission Read-through": "提交前读者试读",
+	"Enable": "启用",
+	"Before submitting, an AI reader challenges the draft and the student has to answer. It never writes for them.": "提交前由一位 AI 读者质疑草稿，学生必须作答。它不会替学生写。",
+	"Coaching style shapes help while writing; this applies right before submitting.": "辅导风格管的是写的过程中帮多少；这一项管的是交之前。",
+	"Add rubric criteria first, then you can turn on the read-through.": "请先配置评分维度，然后才能开启试读。",
+	"Rounds": "回合数",
+	"Focus on these rubric criteria (up to {{max}})": "质疑聚焦的评分维度（最多 {{max}} 个）",
+	"Pick at least one criterion for the reader to press on.": "请至少选一个维度让读者追问。",
+	"An AI reader challenged the draft and the student answered. The reader never writes for the student.": "一位 AI 读者质疑了这份草稿，学生逐轮作答。读者不会替学生写。",
+	"Student skipped the read-through": "学生跳过了试读",
+	"Answered {{answered}} of {{planned}} rounds": "答了 {{answered}} / {{planned}} 轮",
+	"Revised the draft afterwards ({{chars}} chars changed)": "之后回去改了正文（改动 {{chars}} 字）",
+	"Did not revise the draft afterwards": "之后没有改正文",
+	"No answer to this round": "这一轮没有作答",
+	"What the reader concluded": "读者的结论",
+	"Questions and rounds are generated server-side; the answers are the student’s own words.": "质疑与回合由服务端生成；回应是学生自己写的字。"
 }

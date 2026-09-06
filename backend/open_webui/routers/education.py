@@ -104,6 +104,7 @@ from open_webui.services.education.challenge import (
     get_challenge_prompt as _get_challenge_prompt,
     start_challenge,
     submit_challenge_response,
+    summarize_post_challenge_revision,
 )
 from open_webui.services.education.profile_snapshots import (
     build_student_profile,
@@ -2721,13 +2722,16 @@ async def get_submission_challenge(
     assignment = _get_assignment_or_404(submission.assignment_id, db)
     _ensure_assignment_access(user, assignment, db, require_teacher=True)
 
-    challenge_id = (submission.stats_json or {}).get("challenge", {}).get("session_id")
+    frozen = (submission.stats_json or {}).get("challenge") or {}
+    challenge_id = frozen.get("session_id")
     if not challenge_id:
         return None
     challenge_session = Education.get_challenge_session_by_id(challenge_id, db=db)
     if challenge_session is None:
         return None
-    return _challenge_detail(challenge_session, db)
+    detail = _challenge_detail(challenge_session, db)
+    detail.revision = frozen.get("revision")
+    return detail
 
 
 @router.post("/assignments/{assignment_id}/submit")
@@ -2892,6 +2896,10 @@ async def submit_assignment(
             for turn in Education.get_challenge_turns(challenge_session.id, db=db)
             if turn.response_text is not None
         ]
+        # 被质疑的那一稿 vs 这次交上来的正文：教师最想知道的是「被问住之后改了没」。
+        challenged_version = Education.get_version_by_id(
+            challenge_session.source_version_id, db=db
+        )
         stats["challenge"] = {
             "enabled": assignment.challenge_enabled,
             "session_id": challenge_session.id,
@@ -2899,6 +2907,10 @@ async def submit_assignment(
             "planned_rounds": challenge_session.planned_rounds,
             "answered_rounds": len(answered),
             "focus_keys": list(challenge_session.focus_keys or []),
+            "revision": summarize_post_challenge_revision(
+                challenged_version.note_snapshot_text if challenged_version else "",
+                form_data.final_content_text,
+            ),
             "turn_prompt": await _get_challenge_prompt("turn"),
             "closing_prompt": await _get_challenge_prompt("closing"),
         }

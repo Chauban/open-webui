@@ -15,6 +15,7 @@
 	import EduDateTimeField from '$lib/components/education/EduDateTimeField.svelte';
 	import RubricCriteriaEditor from '$lib/components/education/RubricCriteriaEditor.svelte';
 	import CoachingStyleSelector from '$lib/components/education/CoachingStyleSelector.svelte';
+	import ChallengeSettings from '$lib/components/education/ChallengeSettings.svelte';
 	import { EDU_FIELD_CLASS, eduSegmentClass } from '$lib/components/education/styles';
 	import { formatDateTimeInput, getClassroomDisplayName, resolveErrorMessage } from '$lib/utils/education';
 
@@ -28,6 +29,9 @@
 	let dueAt = '';
 	let scoreMax = '100';
 	let coachingStyle: CoachingStyle = 'balanced';
+	let challengeEnabled = false;
+	let challengeRounds = 3;
+	let challengeFocusKeys: string[] = [];
 	// 默认维度走词条，教师看到的是母语名称；key 只是后端字段名，教师不填。
 	let rubricCriteria = [
 		{ key: 'criterion_1', label: t('Ideas'), maxScore: '34' },
@@ -64,6 +68,9 @@
 					description = source.assignment.description ?? '';
 					scoreMax = String(source.assignment.score_max);
 					coachingStyle = source.assignment.coaching_style;
+					challengeEnabled = source.assignment.challenge_enabled ?? false;
+					challengeRounds = source.assignment.challenge_rounds ?? 3;
+					challengeFocusKeys = [...(source.assignment.challenge_focus_keys ?? [])];
 					rubricCriteria = source.assignment.rubric_schema.criteria.map((criterion) => ({
 						key: criterion.key,
 						label: criterion.label,
@@ -137,6 +144,9 @@
 				due_at: Math.floor(new Date(dueAt).getTime() / 1000),
 				score_max: parsedScoreMax,
 				coaching_style: coachingStyle,
+				challenge_enabled: challengeEnabled,
+				challenge_rounds: challengeRounds,
+				challenge_focus_keys: challengeEnabled ? challengeFocusKeys : [],
 				rubric_schema: { criteria: parsedCriteria }
 			});
 			toast.success(
@@ -235,6 +245,12 @@
 				</div>
 				<CoachingStyleSelector bind:value={coachingStyle} />
 				<RubricCriteriaEditor bind:criteria={rubricCriteria} {scoreMax} />
+				<ChallengeSettings
+					criteria={rubricCriteria}
+					bind:enabled={challengeEnabled}
+					bind:rounds={challengeRounds}
+					bind:focusKeys={challengeFocusKeys}
+				/>
 				<div class="flex justify-end">
 					<EduButton variant="primary" on:click={submit} disabled={saving}>
 						{saving ? $i18n.t('Creating...') : $i18n.t('Create Assignment')}

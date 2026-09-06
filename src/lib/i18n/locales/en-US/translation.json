@@ -3782,5 +3782,21 @@
 	"Pick a model before the read-through.": "Pick a model before the read-through.",
 	"From the read-through": "From the read-through",
 	"{{done}} of {{total}} done": "{{done}} of {{total}} done",
-	"Could not save the checklist.": "Could not save the checklist."
+	"Could not save the checklist.": "Could not save the checklist.",
+	"Pre-submission Read-through": "Pre-submission Read-through",
+	"Enable": "Enable",
+	"Before submitting, an AI reader challenges the draft and the student has to answer. It never writes for them.": "Before submitting, an AI reader challenges the draft and the student has to answer. It never writes for them.",
+	"Coaching style shapes help while writing; this applies right before submitting.": "Coaching style shapes help while writing; this applies right before submitting.",
+	"Add rubric criteria first, then you can turn on the read-through.": "Add rubric criteria first, then you can turn on the read-through.",
+	"Rounds": "Rounds",
+	"Focus on these rubric criteria (up to {{max}})": "Focus on these rubric criteria (up to {{max}})",
+	"Pick at least one criterion for the reader to press on.": "Pick at least one criterion for the reader to press on.",
+	"An AI reader challenged the draft and the student answered. The reader never writes for the student.": "An AI reader challenged the draft and the student answered. The reader never writes for the student.",
+	"Student skipped the read-through": "Student skipped the read-through",
+	"Answered {{answered}} of {{planned}} rounds": "Answered {{answered}} of {{planned}} rounds",
+	"Revised the draft afterwards ({{chars}} chars changed)": "Revised the draft afterwards ({{chars}} chars changed)",
+	"Did not revise the draft afterwards": "Did not revise the draft afterwards",
+	"No answer to this round": "No answer to this round",
+	"What the reader concluded": "What the reader concluded",
+	"Questions and rounds are generated server-side; the answers are the student’s own words.": "Questions and rounds are generated server-side; the answers are the student’s own words."
 }

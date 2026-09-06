@@ -10,6 +10,7 @@
 		getSubmissionRoundDiff,
 		getSubmissionVersions,
 		getTeacherReview,
+		getSubmissionChallenge,
 		getTeacherSubmissionDetail,
 		recomputeSubmissionAnalysis,
 		saveSubmissionReview
@@ -17,6 +18,7 @@
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import SourceHighlightedText from '$lib/components/education/SourceHighlightedText.svelte';
 	import EduEvidenceDisclaimer from '$lib/components/education/EduEvidenceDisclaimer.svelte';
+	import ChallengeRounds from '$lib/components/education/ChallengeRounds.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
 	import { buildSubmissionReviewOverview } from '$lib/utils/submission-review';
 	import {
@@ -196,7 +198,11 @@
 	// 维度分从高到低列出：批改时命中的多是接近满分的档位。
 	const scoreOptions = (max: number) => Array.from({ length: max + 1 }, (_, index) => max - index);
 
+	let challengeDetail = null;
 	$: rubricCriteria = detail?.assignment?.rubric_schema?.criteria ?? [];
+	$: criteriaLabels = Object.fromEntries(
+		rubricCriteria.map((criterion) => [criterion.key, criterion.label])
+	);
 	$: rubricFilledCount = rubricCriteria.filter(
 		(criterion) => (rubricScores[criterion.key] ?? '') !== ''
 	).length;
@@ -406,6 +412,17 @@
 			detail = response;
 			showAllVersions = false;
 			syncReview();
+			try {
+				const challenge = await getSubmissionChallenge(localStorage.token, id);
+				if (seq === loadSeq) {
+					challengeDetail = challenge;
+				}
+			} catch (error) {
+				// 试读读不出来不该挡住整个批改页，这一块不渲染即可。
+				if (seq === loadSeq) {
+					challengeDetail = null;
+				}
+			}
 		} catch (error) {
 			if (seq !== loadSeq) return;
 			loadError = resolveErrorMessage(error, t);
@@ -963,6 +980,9 @@
 										</div>
 									{/if}
 								</div>
+
+								<!-- 提交前读者试读 -->
+								<ChallengeRounds detail={challengeDetail} {criteriaLabels} />
 
 								<!-- Timeline -->
 								<div>
