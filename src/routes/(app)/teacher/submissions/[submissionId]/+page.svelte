@@ -30,6 +30,7 @@
 	import EduBadge from '$lib/components/education/EduBadge.svelte';
 	import EduButton from '$lib/components/education/EduButton.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
+	import EduDateTimeField from '$lib/components/education/EduDateTimeField.svelte';
 
 	const i18n = getContext('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
@@ -770,11 +771,10 @@
 									<label class="mb-1.5 block text-xs font-medium uppercase tracking-[0.12em] text-gray-400">
 										{$i18n.t('Resubmit before')}
 									</label>
-									<input
-										type="datetime-local"
+									<EduDateTimeField
 										bind:value={resubmitDueLocal}
 										disabled={isHistoricalRound}
-										class="w-full rounded-2xl border border-gray-200 dark:border-gray-800 px-4 py-3 text-sm outline-none focus:border-gray-400 transition-colors disabled:opacity-50"
+										className="w-full rounded-2xl border border-gray-200 dark:border-gray-800 px-4 py-3 text-sm outline-none focus:border-gray-400 transition-colors disabled:opacity-50"
 									/>
 									{#if resubmitDuePreview}
 										<div class="mt-1.5 text-xs text-gray-400 dark:text-gray-500">{resubmitDuePreview}</div>

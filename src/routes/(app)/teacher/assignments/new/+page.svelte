@@ -12,6 +12,7 @@
 	import EduButton from '$lib/components/education/EduButton.svelte';
 	import EduCard from '$lib/components/education/EduCard.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
+	import EduDateTimeField from '$lib/components/education/EduDateTimeField.svelte';
 	import RubricCriteriaEditor from '$lib/components/education/RubricCriteriaEditor.svelte';
 	import CoachingStyleSelector from '$lib/components/education/CoachingStyleSelector.svelte';
 	import { EDU_FIELD_CLASS, eduSegmentClass } from '$lib/components/education/styles';
@@ -217,7 +218,7 @@
 				</div>
 				<div>
 					<div class="mb-2 text-sm font-semibold">{$i18n.t('Due At')}</div>
-					<input bind:value={dueAt} type="datetime-local" required class="w-full {EDU_FIELD_CLASS}" />
+					<EduDateTimeField bind:value={dueAt} required className="w-full {EDU_FIELD_CLASS}" />
 					{#if dueAtPreview}
 						<div class="mt-1.5 text-xs text-gray-400 dark:text-gray-500">{dueAtPreview}</div>
 					{/if}

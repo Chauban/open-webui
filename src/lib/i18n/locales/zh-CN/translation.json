@@ -2704,6 +2704,7 @@
 	"Select a theme": "选择主题",
 	"Select a tool": "选择工具",
 	"Select a voice": "选择声音",
+	"Select date and time": "选择日期和时间",
 	"Select an Ollama instance": "选择 Ollama 实例",
 	"Select an auth method": "选择身份验证方式",
 	"Select an embedding model engine": "选择嵌入模型引擎",
