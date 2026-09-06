@@ -1,4 +1,10 @@
 {
+	"This writing composition": "This writing composition",
+	"Typed by you": "Typed by you",
+	"Source not recorded": "Source not recorded",
+	"Composition will appear as you write.": "Composition will appear as you write.",
+	"Based on the text currently in your draft. AI sources track in-app insertions and copies.": "Based on the text currently in your draft. AI sources track in-app insertions and copies.",
+	"Clarification questions answered": "Clarification questions answered:",
 	"'s', 'm', 'h', 'd', 'w' or '-1' for no expiration.": "",
 	"(latest)": "",
 	"(leave blank for to use commercial endpoint)": "",

@@ -7,11 +7,12 @@
 	import SourceHighlightedText from '$lib/components/education/SourceHighlightedText.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
 	import { getMyAssignmentSubmissions } from '$lib/apis/education';
+	import type { ProfileAssignment } from '$lib/apis/education';
 
 	const i18n = getContext('i18n');
 
 	export let show = false;
-	export let assignmentId: string;
+	export let assignment: Pick<ProfileAssignment, 'id' | 'score_max' | 'rubric_schema'>;
 
 	type SubmissionRound = {
 		submission_id: string;
@@ -47,7 +48,7 @@
 		activeRoundNo = null;
 
 		try {
-			const res = await getMyAssignmentSubmissions(localStorage.token, assignmentId);
+			const res = await getMyAssignmentSubmissions(localStorage.token, assignment.id);
 			rounds = ((res?.rounds ?? []) as SubmissionRound[])
 				.slice()
 				.sort((a, b) => a.round_no - b.round_no);
@@ -60,7 +61,7 @@
 		}
 	};
 
-	$: if (show && assignmentId) {
+	$: if (show && assignment.id) {
 		load();
 	}
 </script>
@@ -113,6 +114,7 @@
 
 				{#if activeRound}
 					<ReviewResultCard
+						{assignment}
 						review={{
 							round_no: activeRound.round_no,
 							submitted_at: activeRound.submitted_at,

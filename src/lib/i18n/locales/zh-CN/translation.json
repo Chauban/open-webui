@@ -1,4 +1,10 @@
 {
+	"This writing composition": "本次写作构成",
+	"Typed by you": "自己敲的",
+	"Source not recorded": "来源未记录",
+	"Composition will appear as you write.": "开始写作后，这里会显示正文构成。",
+	"Based on the text currently in your draft. AI sources track in-app insertions and copies.": "按当前正文字符统计；AI 来源记录来自站内插入和复制。",
+	"Clarification questions answered": "已回答澄清追问：",
 	"'s', 'm', 'h', 'd', 'w' or '-1' for no expiration.": "'s'(秒), 'm'(分), 'h'(时), 'd'(天), 'w'(周) 或 '-1' 表示无过期时间",
 	"(latest)": "（最新版）",
 	"(leave blank for to use commercial endpoint)": "（留空以使用商用端点）",

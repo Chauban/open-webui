@@ -10,6 +10,7 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Chat from '$lib/components/chat/Chat.svelte';
 	import ReviewResultCard from '$lib/components/education/ReviewResultCard.svelte';
+	import WritingComposition from '$lib/components/education/WritingComposition.svelte';
 	import SubmissionHistoryModal from '$lib/components/education/SubmissionHistoryModal.svelte';
 	import AssignmentBrief from '$lib/components/education/AssignmentBrief.svelte';
 	import EduButton from '$lib/components/education/EduButton.svelte';
@@ -25,11 +26,13 @@
 		provenanceSegmentsToSourceRuns,
 		sourceRunsToProvenanceSegments
 	} from '$lib/utils/writing-source-map';
+	import type { SourceRun } from '$lib/utils/writing-source-map';
 	import {
 		autosaveWritingSession,
 		createEditorOperations,
 		createProvenanceSegments,
 		createWritingVersion,
+		getWritingProcessSummary,
 		setWritingSessionActiveChat,
 		submitAssignment
 	} from '$lib/apis/education';
@@ -91,7 +94,23 @@
 	let lastVersionedText = '';
 	let pendingSource: null | { sourceType: string; sourceMessageId?: string | null; text?: string } =
 		null;
-	let sourceRuns = [];
+	let sourceRuns: SourceRun[] = [];
+	let clarificationAnsweredCount: number | null = null;
+	let processSummaryRequest = 0;
+
+	const refreshProcessSummary = async () => {
+		if (!writingSession) return;
+		const request = ++processSummaryRequest;
+		try {
+			const summary = await getWritingProcessSummary(localStorage.token, writingSession.id);
+			if (request === processSummaryRequest) {
+				clarificationAnsweredCount = summary.clarification_answered_count;
+			}
+		} catch (error) {
+			if (request === processSummaryRequest) clarificationAnsweredCount = null;
+			console.error(error);
+		}
+	};
 	let unsavedOperations = [];
 	let clientOperationSequence = 0;
 	let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -650,6 +669,7 @@
 			review = workspace.review ?? null;
 			effectiveDueAt = workspace.effective_due_at ?? null;
 			writingSession = workspace.writing_session;
+			void refreshProcessSummary();
 			workspaceProject = workspace.project;
 			workspaceNote = workspace.note;
 			isSubmitted = workspace.writing_session?.status === 'submitted';
@@ -742,6 +762,7 @@
 		{projectBaseUrl}
 		responseInsertHandler={isReadOnly ? null : insertAssistantContent}
 		responseCopyHandler={copyAssistantContentWithSource}
+		onToolCallCompleted={() => void refreshProcessSummary()}
 		responseInsertLabel={'Insert to Writing'}
 		readOnly={isReadOnly}
 		disableContextActions={false}
@@ -844,8 +865,9 @@
 			</div>
 			<div class="min-h-0 flex-1 overflow-y-auto px-5 py-5">
 				{#if isAssignment && review}
-					<ReviewResultCard {review} onRevise={null} />
+					<ReviewResultCard {review} {assignment} onRevise={null} />
 				{/if}
+				<WritingComposition {sourceRuns} {clarificationAnsweredCount} />
 				<RichTextInput
 					bind:editor
 					bind:value={noteJson}
@@ -955,8 +977,9 @@
 				</div>
 				<div class="min-h-0 flex-1 overflow-y-auto px-5 py-5">
 					{#if isAssignment && review}
-						<ReviewResultCard {review} onRevise={null} />
+						<ReviewResultCard {review} {assignment} onRevise={null} />
 					{/if}
+					<WritingComposition {sourceRuns} {clarificationAnsweredCount} />
 					<RichTextInput
 						bind:editor
 						bind:value={noteJson}
@@ -998,7 +1021,7 @@
 	{/if}
 
 	{#if isAssignment && assignment}
-		<SubmissionHistoryModal bind:show={showSubmissionHistory} assignmentId={assignment.id} />
+		<SubmissionHistoryModal bind:show={showSubmissionHistory} {assignment} />
 	{/if}
 
 	{#if isAssignment && showSubmitModal}

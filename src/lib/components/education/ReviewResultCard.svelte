@@ -2,8 +2,10 @@
 	import { getContext } from 'svelte';
 
 	import { formatEpoch } from '$lib/utils/education';
+	import type { ProfileAssignment } from '$lib/apis/education';
 
 	const i18n = getContext('i18n');
+	export let assignment: Pick<ProfileAssignment, 'score_max' | 'rubric_schema'>;
 
 	export let review: {
 		round_no: number;
@@ -52,13 +54,15 @@
 				{$i18n.t('Reviewed')} · {$i18n.t('Round {{round}}', { round: review.round_no })}
 			</div>
 			{#if review.score !== null && review.score !== undefined}
-				<div class="text-2xl font-bold">{review.score}</div>
+				<div class="text-2xl font-bold">{review.score}/{assignment.score_max}</div>
 			{/if}
 		</div>
 		{#if review.rubric}
-			<div class="mt-2 flex gap-4 text-sm">
-				{#each Object.entries(review.rubric) as [key, value]}
-					<span class="text-gray-600 dark:text-gray-300">{key}: {value}</span>
+			<div class="mt-2 flex flex-wrap gap-x-4 gap-y-2 text-sm">
+				{#each assignment.rubric_schema.criteria as criterion (criterion.key)}
+					<span class="text-gray-600 dark:text-gray-300">
+						{criterion.label} {review.rubric[criterion.key] ?? '—'}/{criterion.max_score}
+					</span>
 				{/each}
 			</div>
 		{/if}

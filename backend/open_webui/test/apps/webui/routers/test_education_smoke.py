@@ -71,6 +71,7 @@ from open_webui.routers.notes import router as notes_router
 from open_webui.services.education.analysis import (
     collect_clarification_exchanges,
     build_submission_analysis,
+    count_clarifications,
     filter_segments_for_final_text,
 )
 from open_webui.services.education.profile_recompute import (
@@ -3994,6 +3995,40 @@ def test_clarification_counters_ignore_rejected_tool_calls():
     assert summary["clarification_free_text_count"] == 1
     # 参数拼错被后端拒掉的调用是模型噪声，不能算成问过学生。
     assert summary["clarification_declined_count"] == 0
+
+
+def test_student_and_teacher_read_the_same_answered_count():
+    # 学生写作区和教师端过程摘要展示的是同一个数字，必须出自同一处实现。
+    exchanges = collect_clarification_exchanges(_ASK_USER_TIMELINE)
+    summary = education_analysis_module._build_process_summary(
+        [], _ASK_USER_TIMELINE, [], [], exchanges
+    )
+
+    assert count_clarifications(exchanges) == {
+        "clarification_question_count": summary["clarification_question_count"],
+        "clarification_answered_count": summary["clarification_answered_count"],
+        "clarification_free_text_count": summary["clarification_free_text_count"],
+        "clarification_declined_count": summary["clarification_declined_count"],
+    }
+    assert count_clarifications(exchanges)["clarification_answered_count"] == 2
+
+
+def test_writing_process_summary_is_owner_only(education_client):
+    client, teacher, _, student, _, _ = education_client
+
+    UserContext.current_user = teacher
+    created = client.post("/api/v1/me/writing/personal", json={"title": "Draft"})
+    assert created.status_code == 200, created.text
+    session_id = created.json()["writing_session"]["id"]
+
+    owner_res = client.get(f"/api/v1/writing/{session_id}/process-summary")
+    assert owner_res.status_code == 200, owner_res.text
+    # 工具没跑过时结果是空列表，计数自然是 0，不需要任何分支判断。
+    assert owner_res.json() == {"clarification_answered_count": 0}
+
+    UserContext.current_user = student
+    foreign_res = client.get(f"/api/v1/writing/{session_id}/process-summary")
+    assert foreign_res.status_code == 403, foreign_res.text
 
 
 def test_clarification_collection_is_empty_when_tool_never_ran():

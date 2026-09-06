@@ -939,6 +939,10 @@ class AssignmentWorkspaceResponse(BaseModel):
     effective_due_at: Optional[int] = None
 
 
+class WritingProcessSummaryResponse(BaseModel):
+    clarification_answered_count: int = Field(ge=0)
+
+
 class PersonalWritingCreateForm(BaseModel):
     title: Optional[str] = None
 

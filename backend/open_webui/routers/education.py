@@ -75,12 +75,15 @@ from open_webui.models.education import (
     WritingHomeResponse,
     WritingRecentItem,
     WritingSessionModel,
+    WritingProcessSummaryResponse,
     WritingVersionSummaryModel,
 )
 from open_webui.services.education.analysis import (
     NormalizedSegment,
     accumulate_risk_summary,
     build_source_map_highlights,
+    collect_clarification_exchanges,
+    count_clarifications,
     compute_stats,
     compute_stats_from_highlights,
     empty_risk_summary,
@@ -2202,6 +2205,20 @@ async def get_writing_workspace(
         project=project.model_dump(),
         active_chat_id=active_chat_id,
         source_map=Education.get_provenance_segments(session.id, db=db),
+    )
+
+
+@router.get(
+    "/writing/{session_id}/process-summary", response_model=WritingProcessSummaryResponse
+)
+async def get_writing_process_summary(
+    session: WritingSessionModel = Depends(require_owned_writing_session),
+    db: Session = Depends(get_session),
+):
+    exchanges = collect_clarification_exchanges(await get_prompt_timeline(session, db))
+    counts = count_clarifications(exchanges)
+    return WritingProcessSummaryResponse(
+        clarification_answered_count=counts["clarification_answered_count"]
     )
 
 

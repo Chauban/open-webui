@@ -146,6 +146,7 @@
 	// RightWrite: the writing workspace hosts the editor in Chat's right-panel slot.
 	export let responseInsertHandler: Function | null = null;
 	export let responseCopyHandler: Function | null = null;
+	export let onToolCallCompleted: (() => void) | null = null;
 	export let responseInsertLabel = 'Insert to Draft';
 	export let readOnly = false;
 	export let disableContextActions = false;
@@ -740,6 +741,7 @@
 	};
 
 	const onToolCallResolved = (res) => {
+		if (res) onToolCallCompleted?.();
 		const newTaskIds = res?.task_ids ?? (res?.task_id ? [res.task_id] : []);
 		if (newTaskIds.length > 0) {
 			taskIds = [...(taskIds ?? []), ...newTaskIds];

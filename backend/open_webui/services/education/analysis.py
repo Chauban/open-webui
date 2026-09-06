@@ -46,6 +46,34 @@ def _empty_process_summary() -> dict:
 ASK_USER_TOOL_NAME = "ask_user"
 
 
+def count_clarifications(clarifications) -> dict:
+    """澄清追问的四个计数。
+
+    教师端过程摘要和学生端写作构成读的是同一口径，所以只允许有这一处实现：
+    两边各算各的，迟早会给同一份稿子报出两个不一样的数字。
+    """
+    counts = {
+        "clarification_question_count": 0,
+        "clarification_answered_count": 0,
+        "clarification_free_text_count": 0,
+        "clarification_declined_count": 0,
+    }
+    for exchange in clarifications:
+        if exchange["status"] == "invalid":
+            continue
+        if exchange["status"] == "cancelled":
+            counts["clarification_declined_count"] += 1
+        for question in exchange["questions"]:
+            counts["clarification_question_count"] += 1
+            answer = question["answer"]
+            if answer is None:
+                continue
+            counts["clarification_answered_count"] += 1
+            if answer["type"] == "other":
+                counts["clarification_free_text_count"] += 1
+    return counts
+
+
 def _loads_or_none(value):
     if isinstance(value, (dict, list)):
         return value
@@ -208,19 +236,7 @@ def _build_process_summary(
         if key:
             summary[key] += 1
 
-    for exchange in clarifications:
-        if exchange["status"] == "invalid":
-            continue
-        if exchange["status"] == "cancelled":
-            summary["clarification_declined_count"] += 1
-        for question in exchange["questions"]:
-            summary["clarification_question_count"] += 1
-            answer = question["answer"]
-            if answer is None:
-                continue
-            summary["clarification_answered_count"] += 1
-            if answer["type"] == "other":
-                summary["clarification_free_text_count"] += 1
+    summary.update(count_clarifications(clarifications))
 
     return summary
 

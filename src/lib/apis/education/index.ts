@@ -13,6 +13,16 @@ import { buildProfileQuery } from '$lib/utils/growth-profile';
 
 export type * from './types';
 
+export const getWritingProcessSummary = async (
+	token: string,
+	sessionId: string
+): Promise<{ clarification_answered_count: number }> => {
+	return fetch(`${WEBUI_API_BASE_URL}/writing/${sessionId}/process-summary`, {
+		method: 'GET',
+		headers: withAuth(token)
+	}).then(handleJson);
+};
+
 const parseErrorResponse = async (res: Response) => {
 	const contentType = res.headers.get('content-type') || '';
 	if (contentType.includes('application/json')) {
