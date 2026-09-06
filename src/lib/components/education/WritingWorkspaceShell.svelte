@@ -13,6 +13,8 @@
 	import WritingComposition from '$lib/components/education/WritingComposition.svelte';
 	import SubmissionHistoryModal from '$lib/components/education/SubmissionHistoryModal.svelte';
 	import AssignmentBrief from '$lib/components/education/AssignmentBrief.svelte';
+	import ChallengeDialog from '$lib/components/education/ChallengeDialog.svelte';
+	import ChallengeChecklist from '$lib/components/education/ChallengeChecklist.svelte';
 	import EduButton from '$lib/components/education/EduButton.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 	import { EDU_FIELD_CLASS, eduSegmentClass } from '$lib/components/education/styles';
@@ -34,7 +36,8 @@
 		createWritingVersion,
 		getWritingProcessSummary,
 		setWritingSessionActiveChat,
-		submitAssignment
+		submitAssignment,
+		getCurrentAssignmentChallenge
 	} from '$lib/apis/education';
 	import { updateFolderById } from '$lib/apis/folders';
 	import { updateNoteById } from '$lib/apis/notes';
@@ -64,6 +67,10 @@
 	let saving = false;
 	let showSubmitModal = false;
 	let showMobileDraft = false;
+	// 提交前的读者试读。质疑读者不进聊天框，所以它的状态挂在写作面板这一侧。
+	let showChallenge = false;
+	let challengeDetail = null;
+	let selectedModelId = '';
 	let isSubmitted = false;
 	let titleSaving = false;
 	let isPastDue = false;
@@ -599,6 +606,63 @@
 		toast.success($i18n.t('Copied with source'));
 	};
 
+	// --- 提交前的读者试读 ---------------------------------------------------
+	// 试读挂在提交动作上，不做常驻入口：正文还是空白时进去被连问三轮毫无意义。
+	// 顺序是 试读 -> 收尾清单 -> 反思 -> 提交。
+
+	$: challengeEnabled = isAssignment && assignment?.challenge_enabled === true;
+	$: challengeSettledThisRound =
+		challengeDetail?.session?.status === 'completed' ||
+		challengeDetail?.session?.status === 'skipped';
+	const refreshChallenge = async () => {
+		if (!isAssignment || !assignment?.challenge_enabled || !writingSession?.id) {
+			challengeDetail = null;
+			return;
+		}
+		try {
+			challengeDetail = await getCurrentAssignmentChallenge(
+				localStorage.token,
+				assignment.id,
+				writingSession.id
+			);
+		} catch (error) {
+			// 试读读不出来不该挡住写作，静默退回「本轮还没试读」。
+			challengeDetail = null;
+		}
+	};
+
+	const openSubmitFlow = async () => {
+		if (!canSubmitAssignment) return;
+		if (!challengeEnabled || challengeSettledThisRound) {
+			showSubmitModal = true;
+			return;
+		}
+		if (!selectedModelId) {
+			toast.error($i18n.t('Pick a model before the read-through.'));
+			return;
+		}
+		// 试读针对的是服务端最新的那一稿，所以先把当前草稿落盘再开。
+		await persistDraft('manual', { force: true });
+		if (hasUnsavedFailure) {
+			toast.error($i18n.t('Save failed. Fix the connection before submitting.'));
+			return;
+		}
+		showChallenge = true;
+	};
+
+	const onChallengeDetailChange = (next) => {
+		challengeDetail = next;
+	};
+
+	const closeChallengeAndRevise = () => {
+		showChallenge = false;
+	};
+
+	const closeChallengeAndSubmit = () => {
+		showChallenge = false;
+		showSubmitModal = true;
+	};
+
 	const submit = async () => {
 		if (!canSubmitAssignment || isSubmitting) return;
 		if (aiUsage == null) {
@@ -687,6 +751,7 @@
 				: normalizeSourceRuns([], noteText.length);
 			currentChatId = $page.url.searchParams.get('chat') ?? '';
 			await selectedFolder.set(workspaceProject);
+			await refreshChallenge();
 			loaded = true;
 		} catch (error) {
 			loadError = resolveErrorMessage(error, t);
@@ -771,6 +836,7 @@
 		responseInsertHandler={isReadOnly ? null : insertAssistantContent}
 		responseCopyHandler={copyAssistantContentWithSource}
 		onToolCallCompleted={() => void refreshProcessSummary()}
+		onSelectedModelsChange={(ids) => (selectedModelId = ids?.[0] ?? '')}
 		responseInsertLabel={'Insert to Writing'}
 		readOnly={isReadOnly}
 		disableContextActions={false}
@@ -860,7 +926,7 @@
 								variant="primary"
 								on:click={() => {
 									loadReflectionDraft();
-									showSubmitModal = true;
+									void openSubmitFlow();
 								}}
 							>
 								{$i18n.t('Submit Assignment')}
@@ -870,6 +936,10 @@
 				</div>
 				{#if isAssignment}
 					<AssignmentBrief {assignment} />
+					<ChallengeChecklist
+						detail={challengeDetail}
+						onDetailChange={onChallengeDetailChange}
+					/>
 				{/if}
 			</div>
 			<div class="min-h-0 flex-1 overflow-y-auto px-5 py-5">
@@ -940,7 +1010,7 @@
 						size="sm"
 						on:click={() => {
 							loadReflectionDraft();
-							showSubmitModal = true;
+							void openSubmitFlow();
 						}}
 					>
 						{$i18n.t('Submit Assignment')}
@@ -982,6 +1052,10 @@
 					</div>
 					{#if isAssignment}
 						<AssignmentBrief {assignment} />
+						<ChallengeChecklist
+							detail={challengeDetail}
+							onDetailChange={onChallengeDetailChange}
+						/>
 					{/if}
 				</div>
 				<div class="min-h-0 flex-1 overflow-y-auto px-5 py-5">
@@ -1031,6 +1105,18 @@
 
 	{#if isAssignment && assignment}
 		<SubmissionHistoryModal bind:show={showSubmissionHistory} {assignment} />
+	{/if}
+
+	{#if isAssignment && showChallenge && assignment}
+		<ChallengeDialog
+			{assignment}
+			writingSessionId={writingSession?.id ?? ''}
+			modelId={selectedModelId}
+			detail={challengeDetail}
+			onDetailChange={onChallengeDetailChange}
+			onBackToRevise={closeChallengeAndRevise}
+			onContinue={closeChallengeAndSubmit}
+		/>
 	{/if}
 
 	{#if isAssignment && showSubmitModal}

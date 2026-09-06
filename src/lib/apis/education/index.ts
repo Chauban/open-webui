@@ -191,6 +191,9 @@ export const createAssignment = async (
 		due_at: number;
 		score_max: number;
 		coaching_style: CoachingStyle;
+		challenge_enabled?: boolean;
+		challenge_rounds?: number;
+		challenge_focus_keys?: string[];
 		rubric_schema: {
 			criteria: Array<{ key: string; label: string; max_score: number }>;
 		};
@@ -277,6 +280,9 @@ export const updateAssignment = async (
 		due_at?: number;
 		score_max?: number;
 		coaching_style?: CoachingStyle;
+		challenge_enabled?: boolean;
+		challenge_rounds?: number;
+		challenge_focus_keys?: string[];
 		rubric_schema?: {
 			criteria: Array<{ key: string; label: string; max_score: number }>;
 		};
@@ -756,5 +762,116 @@ export const markEducationNotificationsRead = async (
 		method: 'POST',
 		headers: withAuth(token),
 		body: JSON.stringify(payload)
+	}).then(handleJson);
+};
+
+// --- 提交前质疑环节 -------------------------------------------------------
+// 质疑读者与左侧辅导助手是两个相反的角色：辅导助手负责帮，质疑读者只负责问，
+// 且它的输出进不了正文。所以这套接口独立于聊天，不复用 chat 的任何通道。
+
+export type ChallengeStatus = 'in_progress' | 'completed' | 'skipped';
+
+export type ChallengeTurn = {
+	id: string;
+	challenge_session_id: string;
+	turn_no: number;
+	focus_key: string;
+	challenge_text: string;
+	response_text: string | null;
+	responded_at: number | null;
+	created_at: number;
+};
+
+export type ChallengeClosing = {
+	stood: string[];
+	unresolved: string[];
+};
+
+export type ChallengeSession = {
+	id: string;
+	writing_session_id: string;
+	assignment_id: string;
+	student_id: string;
+	submission_round_no: number;
+	source_version_id: string;
+	focus_keys: string[];
+	planned_rounds: number;
+	status: ChallengeStatus;
+	closing_summary_json: ChallengeClosing | null;
+	checklist_state_json: { checked_indexes: number[] } | null;
+	started_at: number;
+	ended_at: number | null;
+};
+
+export type ChallengeDetail = {
+	session: ChallengeSession;
+	turns: ChallengeTurn[];
+};
+
+export const startAssignmentChallenge = async (
+	token: string,
+	assignmentId: string,
+	payload: { writing_session_id: string; model: string }
+): Promise<ChallengeDetail> => {
+	return fetch(`${WEBUI_API_BASE_URL}/assignments/${assignmentId}/challenge/start`, {
+		method: 'POST',
+		headers: withAuth(token),
+		body: JSON.stringify(payload)
+	}).then(handleJson);
+};
+
+export const getCurrentAssignmentChallenge = async (
+	token: string,
+	assignmentId: string,
+	writingSessionId: string
+): Promise<ChallengeDetail | null> => {
+	const query = new URLSearchParams({ writing_session_id: writingSessionId });
+	return fetch(`${WEBUI_API_BASE_URL}/assignments/${assignmentId}/challenge/current?${query}`, {
+		method: 'GET',
+		headers: withAuth(token)
+	}).then(handleJson);
+};
+
+export const respondToChallenge = async (
+	token: string,
+	challengeSessionId: string,
+	payload: { turn_no: number; response_text: string; model: string }
+): Promise<ChallengeDetail> => {
+	return fetch(`${WEBUI_API_BASE_URL}/challenge/${challengeSessionId}/respond`, {
+		method: 'POST',
+		headers: withAuth(token),
+		body: JSON.stringify(payload)
+	}).then(handleJson);
+};
+
+export const skipAssignmentChallenge = async (
+	token: string,
+	challengeSessionId: string
+): Promise<ChallengeDetail> => {
+	return fetch(`${WEBUI_API_BASE_URL}/challenge/${challengeSessionId}/skip`, {
+		method: 'POST',
+		headers: withAuth(token)
+	}).then(handleJson);
+};
+
+export const updateChallengeChecklist = async (
+	token: string,
+	challengeSessionId: string,
+	checkedIndexes: number[]
+): Promise<ChallengeDetail> => {
+	return fetch(`${WEBUI_API_BASE_URL}/challenge/${challengeSessionId}/checklist`, {
+		method: 'PATCH',
+		headers: withAuth(token),
+		body: JSON.stringify({ checked_indexes: checkedIndexes })
+	}).then(handleJson);
+};
+
+export const getSubmissionChallenge = async (
+	token: string,
+	submissionId: string
+): Promise<ChallengeDetail | null> => {
+	return fetch(`${WEBUI_API_BASE_URL}/submissions/${submissionId}/challenge`, {
+		method: 'GET',
+		headers: withAuth(token)
 	}).then(handleJson);
 };

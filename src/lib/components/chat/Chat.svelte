@@ -157,6 +157,8 @@
 	export let rightPanelMinWidth = 360;
 	export let rightPanelMaxWidth: number | null = null;
 	export let rightPanelClassName = '';
+	// 写作区的质疑环节要用学生当前选的模型发起服务端生成，Chat 把选择结果报上去。
+	export let onSelectedModelsChange: ((modelIds: string[]) => void) | null = null;
 
 	// The workspace clears chatIdProp to start a fresh conversation in place;
 	// upstream only reacts to a non-empty chatIdProp.
@@ -757,6 +759,7 @@
 	const onSelectedModelIdsChange = () => {
 		resetInput();
 		oldSelectedModelIds = structuredClone(selectedModelIds);
+		onSelectedModelsChange?.(selectedModelIds.filter((id) => id));
 	};
 
 	const mergeFiles = (current, incoming) => {
