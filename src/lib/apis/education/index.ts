@@ -224,6 +224,36 @@ export const getAssignmentUnsubmittedStudents = async (token: string, assignment
 	}).then(handleJson);
 };
 
+export const grantAssignmentExtension = async (
+	token: string,
+	assignmentId: string,
+	studentUserId: string,
+	payload: { due_at: number; reason?: string | null }
+) => {
+	return fetch(
+		`${WEBUI_API_BASE_URL}/teacher/assignments/${assignmentId}/extensions/${studentUserId}`,
+		{
+			method: 'PUT',
+			headers: withAuth(token),
+			body: JSON.stringify(payload)
+		}
+	).then(handleJson);
+};
+
+export const revokeAssignmentExtension = async (
+	token: string,
+	assignmentId: string,
+	studentUserId: string
+) => {
+	return fetch(
+		`${WEBUI_API_BASE_URL}/teacher/assignments/${assignmentId}/extensions/${studentUserId}`,
+		{
+			method: 'DELETE',
+			headers: withAuth(token)
+		}
+	).then(handleJson);
+};
+
 export const remindUnsubmittedStudents = async (
 	token: string,
 	assignmentId: string,
