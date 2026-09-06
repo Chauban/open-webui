@@ -16,6 +16,7 @@
 	} from '$lib/apis/education';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import SourceHighlightedText from '$lib/components/education/SourceHighlightedText.svelte';
+	import EduEvidenceDisclaimer from '$lib/components/education/EduEvidenceDisclaimer.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
 	import { buildSubmissionReviewOverview } from '$lib/utils/submission-review';
 	import {
@@ -502,7 +503,7 @@
 						{/if}
 					</div>
 					<div class="shrink-0 rounded-2xl border border-cyan-100 bg-cyan-50 px-4 py-3 lg:min-w-60">
-						<div class="text-[10px] uppercase tracking-[0.14em] text-cyan-600">{$i18n.t('Process Focus')}</div>
+						<div class="text-[10px] uppercase tracking-[0.14em] text-cyan-600" title={$i18n.t('A heuristic pointer for where to look first, not a conclusion.')}>{$i18n.t('Process Focus')}</div>
 						<div class="mt-0.5 text-base font-semibold text-cyan-950">{$i18n.t(reviewOverview.focusLabel)}</div>
 						<div class="mt-1.5 flex flex-wrap gap-1.5">
 							{#each reviewOverview.focusReasons as reason}
@@ -558,6 +559,7 @@
 						<div class="mt-0.5 text-base font-semibold text-indigo-950">{reviewOverview.promptCount} / {reviewOverview.versionCount}</div>
 					</div>
 				</div>
+				<EduEvidenceDisclaimer class="mt-2" />
 			</div>
 
 			<!-- ── Main two-column body ── -->

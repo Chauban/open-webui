@@ -12,6 +12,7 @@
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
 	import LoadingState from '$lib/components/education/LoadingState.svelte';
 	import EduBadge from '$lib/components/education/EduBadge.svelte';
+	import EduEvidenceDisclaimer from '$lib/components/education/EduEvidenceDisclaimer.svelte';
 	import EduButton from '$lib/components/education/EduButton.svelte';
 	import EduCard from '$lib/components/education/EduCard.svelte';
 	import EduStatCard from '$lib/components/education/EduStatCard.svelte';
@@ -130,7 +131,8 @@
 			</EduCard>
 
 			<EduCard>
-				<div class="mb-4 text-sm font-semibold">{$i18n.t('Top Risk Submissions')}</div>
+				<div class="text-sm font-semibold">{$i18n.t('Top Risk Submissions')}</div>
+				<EduEvidenceDisclaimer class="mt-1.5 mb-4" />
 				<div class="space-y-3">
 					{#each [...dashboard.items].sort((a, b) => (b.risk_summary?.suspected_unmarked_import_count ?? 0) - (a.risk_summary?.suspected_unmarked_import_count ?? 0) || (b.risk_summary?.burst_count ?? 0) - (a.risk_summary?.burst_count ?? 0)).slice(0, 5) as item}
 						<button
