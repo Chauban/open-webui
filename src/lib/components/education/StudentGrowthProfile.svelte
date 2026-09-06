@@ -184,6 +184,19 @@
 	$: axisLabels = crossTimeline.map((point) => formatShortDate(point.submitted_at));
 	$: trends = Object.fromEntries((profile?.trends ?? []).map((trend) => [trend.key, trend]));
 	$: latest = crossTimeline.at(-1) ?? timeline.at(-1) ?? null;
+	// 只统计真的做过试读的轮次，没开试读的轮次不进分母。
+	$: challengeRounds = (crossTimeline.length ? crossTimeline : timeline).filter(
+		(point) => point.challenge_status != null
+	);
+	$: challengeCompletedCount = challengeRounds.filter(
+		(point) => point.challenge_status === 'completed'
+	).length;
+	$: challengeSkippedCount = challengeRounds.filter(
+		(point) => point.challenge_status === 'skipped'
+	).length;
+	$: challengeRevisedCount = challengeRounds.filter(
+		(point) => point.challenge_revised === true
+	).length;
 	$: completenessItems = latest
 		? ([
 				{ label: 'Version data', status: latest.data_completeness.version_data },
@@ -967,6 +980,51 @@
 					series={[seriesOf('process_index', 'Process Index', 'violet')]}
 					formatValue={(value) => `${Math.round(value)}`}
 				/>
+
+				<!--
+					面对质疑放在过程维，不放在 AI 协作维：质疑读者不是帮手，
+					把它并进「AI 协作」会把两个刻意分开的角色又混回去。
+					作业没开试读时整块不渲染——那是「不适用」，不是「表现差」。
+				-->
+				{#if challengeRounds.length > 0}
+					<div class="mt-8 border-t border-gray-200 pt-6 dark:border-gray-800">
+						<div class="mb-1 text-sm font-semibold">{$i18n.t('Facing challenges')}</div>
+						<div class="mb-4 text-xs text-gray-500 dark:text-gray-400">
+							{$i18n.t(
+								'Only rounds where a reader challenged the draft before submitting are counted here.'
+							)}
+						</div>
+						<div class="grid gap-6 sm:grid-cols-3">
+							<EduTrendStat
+								label="Rounds with a read-through"
+								hint="How many submitted rounds went through the pre-submission read-through."
+								value={challengeCompletedCount}
+								format={(value) => `${Math.round(value)}`}
+							/>
+							<EduTrendStat
+								label="Answered rounds"
+								hint="Share of reader questions answered in the latest read-through."
+								value={latest?.challenge_answer_ratio ?? null}
+								higherIsBetter="yes"
+								format={(value) => `${Math.round(value)}%`}
+							/>
+							<EduTrendStat
+								label="Revised after the read-through"
+								hint="Rounds where the draft actually changed after the reader's closing notes."
+								value={challengeRevisedCount}
+								higherIsBetter="yes"
+								format={(value) => `${Math.round(value)}`}
+							/>
+						</div>
+						{#if challengeSkippedCount > 0}
+							<div class="mt-3 text-xs text-gray-500 dark:text-gray-400">
+								{$i18n.t('Skipped the read-through in {{count}} rounds.', {
+									count: challengeSkippedCount
+								})}
+							</div>
+						{/if}
+					</div>
+				{/if}
 			</EduCard>
 		{/if}
 

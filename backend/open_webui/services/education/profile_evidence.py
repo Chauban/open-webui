@@ -15,6 +15,7 @@ from open_webui.models.education import (
     ProfileEvidenceConversationEvent,
     ProfileEvidenceDocument,
     ProfileEvidenceEditorEvent,
+    ProfileEvidenceChallenge,
     ProfileEvidencePayload,
     ProfileEvidencePreviousRound,
     ProfileEvidenceProvenanceEvent,
@@ -49,7 +50,7 @@ from open_webui.services.education.profile import (
     _summarize_help_types,
 )
 
-PROFILE_EVIDENCE_SCHEMA_VERSION = "2026-09-03.1"
+PROFILE_EVIDENCE_SCHEMA_VERSION = "2026-09-06.1"
 PROFILE_EVIDENCE_COLLECTOR_VERSION = "2026-09-03.1"
 
 
@@ -182,6 +183,18 @@ def capture_profile_evidence(
     capture = SubmissionEvidenceCompleteness.model_validate(
         submission.stats_json["data_completeness"]
     )
+    frozen_challenge = submission.stats_json.get("challenge") or {}
+    revision = frozen_challenge.get("revision") or {}
+    challenge = ProfileEvidenceChallenge(
+        enabled=bool(frozen_challenge.get("enabled", False)),
+        status=frozen_challenge.get("status"),
+        planned_rounds=int(frozen_challenge.get("planned_rounds") or 0),
+        answered_rounds=int(frozen_challenge.get("answered_rounds") or 0),
+        unresolved_count=int(frozen_challenge.get("unresolved_count") or 0),
+        focus_keys=list(frozen_challenge.get("focus_keys") or []),
+        revised_after=revision.get("revised"),
+        revised_chars=int(revision.get("changed_chars") or 0),
+    )
 
     payload = ProfileEvidencePayload(
         evidence_schema_version=PROFILE_EVIDENCE_SCHEMA_VERSION,
@@ -309,6 +322,7 @@ def capture_profile_evidence(
             reflection=reflection.reflection_json,
             created_at=reflection.created_at,
         ),
+        challenge=challenge,
         capture_manifest=ProfileEvidenceCaptureManifest(
             collector_version=PROFILE_EVIDENCE_COLLECTOR_VERSION,
             application_build=profile_code_commit_sha(),
@@ -558,6 +572,31 @@ def build_metric_projection(
         suspected_unmarked_import_count=(
             int(summary.get("suspected_unmarked_import_count", 0))
             if source_complete
+            else None
+        ),
+        # 作业没开试读时这四项全是 None：那是「不适用」，不是「表现差」。
+        challenge_status=(facts.challenge.status if facts.challenge.enabled else None),
+        challenge_answer_ratio=(
+            int(
+                round(
+                    facts.challenge.answered_rounds
+                    / facts.challenge.planned_rounds
+                    * 100
+                )
+            )
+            if facts.challenge.enabled
+            and facts.challenge.status == "completed"
+            and facts.challenge.planned_rounds > 0
+            else None
+        ),
+        challenge_unresolved_count=(
+            facts.challenge.unresolved_count
+            if facts.challenge.enabled and facts.challenge.status == "completed"
+            else None
+        ),
+        challenge_revised=(
+            facts.challenge.revised_after
+            if facts.challenge.enabled and facts.challenge.status == "completed"
             else None
         ),
     )

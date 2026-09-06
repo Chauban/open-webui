@@ -142,6 +142,11 @@ export type StudentProfileTimelinePoint = {
 	collaboration_index: number | null;
 	burst_count: number | null;
 	suspected_unmarked_import_count: number | null;
+	// 作业没开提交前试读时全为 null，表示「不适用」而不是「表现差」。
+	challenge_status: 'completed' | 'skipped' | null;
+	challenge_answer_ratio: number | null;
+	challenge_unresolved_count: number | null;
+	challenge_revised: boolean | null;
 };
 
 export type StudentProfileMetricTrend = {

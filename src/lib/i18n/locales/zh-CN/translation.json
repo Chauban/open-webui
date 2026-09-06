@@ -3830,5 +3830,14 @@
 	"Did not revise the draft afterwards": "之后没有改正文",
 	"No answer to this round": "这一轮没有作答",
 	"What the reader concluded": "读者的结论",
-	"Questions and rounds are generated server-side; the answers are the student’s own words.": "质疑与回合由服务端生成；回应是学生自己写的字。"
+	"Questions and rounds are generated server-side; the answers are the student’s own words.": "质疑与回合由服务端生成；回应是学生自己写的字。",
+	"Facing challenges": "面对质疑",
+	"Only rounds where a reader challenged the draft before submitting are counted here.": "这里只统计提交前做过读者试读的轮次。",
+	"Rounds with a read-through": "做过试读的轮次",
+	"How many submitted rounds went through the pre-submission read-through.": "有多少已提交轮次走过提交前试读。",
+	"Answered rounds": "回应完成度",
+	"Share of reader questions answered in the latest read-through.": "最近一次试读里回应了多少比例的提问。",
+	"Revised after the read-through": "试读后回去改了",
+	"Rounds where the draft actually changed after the reader's closing notes.": "读者给出结论之后正文确实发生变化的轮次数。",
+	"Skipped the read-through in {{count}} rounds.": "有 {{count}} 轮跳过了试读。"
 }

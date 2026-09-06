@@ -2907,6 +2907,12 @@ async def submit_assignment(
             "planned_rounds": challenge_session.planned_rounds,
             "answered_rounds": len(answered),
             "focus_keys": list(challenge_session.focus_keys or []),
+            # 画像层只读 stats_json，不回读原始表，所以未解决条数在这里就算好。
+            "unresolved_count": len(
+                (challenge_session.closing_summary_json.unresolved or [])
+                if challenge_session.closing_summary_json
+                else []
+            ),
             "revision": summarize_post_challenge_revision(
                 challenged_version.note_snapshot_text if challenged_version else "",
                 form_data.final_content_text,

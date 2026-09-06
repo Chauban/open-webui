@@ -1732,8 +1732,25 @@ class ProfileEvidencePreviousRound(StrictProfileModel):
     resubmit_due_at: Optional[int] = Field(default=None, ge=0)
 
 
+class ProfileEvidenceChallenge(StrictProfileModel):
+    """这一轮提交前读者试读的事实,提交时已冻在 stats_json 里。
+
+    画像只读派生数据,不回读 challenge_session / challenge_turn 原表,所以这里
+    的每一项都必须在提交那一刻就算好。
+    """
+
+    enabled: bool = False
+    status: Optional[Literal["completed", "skipped"]] = None
+    planned_rounds: int = Field(default=0, ge=0)
+    answered_rounds: int = Field(default=0, ge=0)
+    unresolved_count: int = Field(default=0, ge=0)
+    focus_keys: list[str] = Field(default_factory=list)
+    revised_after: Optional[bool] = None
+    revised_chars: int = Field(default=0, ge=0)
+
+
 class ProfileEvidencePayload(StrictProfileModel):
-    evidence_schema_version: Literal["2026-09-03.1"] = "2026-09-03.1"
+    evidence_schema_version: Literal["2026-09-06.1"] = "2026-09-06.1"
     submission_id: str = Field(min_length=1)
     student_id: str = Field(min_length=1)
     assignment_id: str = Field(min_length=1)
@@ -1750,6 +1767,9 @@ class ProfileEvidencePayload(StrictProfileModel):
     provenance: list[ProfileEvidenceProvenanceEvent]
     conversation: list[ProfileEvidenceConversationEvent]
     reflection: ProfileEvidenceReflection
+    challenge: ProfileEvidenceChallenge = Field(
+        default_factory=ProfileEvidenceChallenge
+    )
     capture_manifest: ProfileEvidenceCaptureManifest
 
 
@@ -1843,6 +1863,13 @@ class StudentProfileTimelinePoint(StrictProfileModel):
     reflection_quality: int = Field(default=0, ge=0, le=100)
     ai_help_types: list[AIHelpType] = Field(default_factory=list)
     collaboration_index: Optional[int] = Field(default=None, ge=0, le=100)
+
+    # 面对质疑维。作业没开试读时全为 None——这是「不适用」,不是「表现差」,
+    # 前端必须按缺数据呈现,不能拿它拉低任何汇总。
+    challenge_status: Optional[Literal["completed", "skipped"]] = None
+    challenge_answer_ratio: Optional[int] = Field(default=None, ge=0, le=100)
+    challenge_unresolved_count: Optional[int] = Field(default=None, ge=0)
+    challenge_revised: Optional[bool] = None
 
     # 风险信号:只做展示,不参与任何成长指数。
     burst_count: Optional[int] = Field(default=None, ge=0)

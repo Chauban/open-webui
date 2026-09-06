@@ -3798,5 +3798,14 @@
 	"Did not revise the draft afterwards": "Did not revise the draft afterwards",
 	"No answer to this round": "No answer to this round",
 	"What the reader concluded": "What the reader concluded",
-	"Questions and rounds are generated server-side; the answers are the student’s own words.": "Questions and rounds are generated server-side; the answers are the student’s own words."
+	"Questions and rounds are generated server-side; the answers are the student’s own words.": "Questions and rounds are generated server-side; the answers are the student’s own words.",
+	"Facing challenges": "Facing challenges",
+	"Only rounds where a reader challenged the draft before submitting are counted here.": "Only rounds where a reader challenged the draft before submitting are counted here.",
+	"Rounds with a read-through": "Rounds with a read-through",
+	"How many submitted rounds went through the pre-submission read-through.": "How many submitted rounds went through the pre-submission read-through.",
+	"Answered rounds": "Answered rounds",
+	"Share of reader questions answered in the latest read-through.": "Share of reader questions answered in the latest read-through.",
+	"Revised after the read-through": "Revised after the read-through",
+	"Rounds where the draft actually changed after the reader's closing notes.": "Rounds where the draft actually changed after the reader's closing notes.",
+	"Skipped the read-through in {{count}} rounds.": "Skipped the read-through in {{count}} rounds."
 }

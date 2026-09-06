@@ -205,3 +205,46 @@ def test_nonempty_legacy_profile_schema_requires_explicit_cleanup(
             command.upgrade(config, "head")
     finally:
         engine.dispose()
+
+
+def test_challenge_profile_upgrade_requires_empty_evidence(tmp_path, monkeypatch):
+    """证据载荷换了形状，旧快照必须先清掉——升级时拦住，而不是读的时候炸。"""
+
+    backend_dir = Path(__file__).resolve().parents[5]
+    database_path = tmp_path / "challenge-profile-nonempty.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    _set_database_url(monkeypatch, database_url)
+    config = _alembic_config(backend_dir)
+
+    command.upgrade(config, "a9f4c2e7b3d1")
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                "INSERT INTO profile_evidence_snapshot "
+                "(id, submission_id, evidence_revision, evidence_schema_version, "
+                "student_id, assignment_id, round_no, submitted_at, evidence_json, "
+                "evidence_hash, created_at) "
+                "VALUES ('snapshot', 'submission', 1, '2026-09-03.1', 'student', "
+                "'assignment', 1, 1, '{}', '" + "a" * 64 + "', 1)"
+            )
+        with pytest.raises(RuntimeError, match="intentionally incompatible"):
+            command.upgrade(config, "head")
+    finally:
+        engine.dispose()
+
+
+def test_challenge_profile_upgrade_passes_on_empty_evidence(tmp_path, monkeypatch):
+    backend_dir = Path(__file__).resolve().parents[5]
+    database_path = tmp_path / "challenge-profile-empty.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    _set_database_url(monkeypatch, database_url)
+    config = _alembic_config(backend_dir)
+
+    command.upgrade(config, "head")
+    engine = create_engine(database_url)
+    try:
+        schema = inspect(engine)
+        assert "challenge_session" in set(schema.get_table_names())
+    finally:
+        engine.dispose()

@@ -83,7 +83,11 @@ from open_webui.services.education.analysis import (
 from open_webui.services.education.profile_recompute import (
     recompute_profile_projections,
 )
+from open_webui.services.education.profile import (
+    PROFILE_METRIC_VERSION,
+)
 from open_webui.services.education.profile_evidence import (
+    PROFILE_EVIDENCE_SCHEMA_VERSION,
     build_analysis_from_evidence,
     canonical_json_hash,
 )
@@ -3070,7 +3074,7 @@ def test_student_profile_tracks_round_progress_and_trends(
     assert profile_res.status_code == 200, profile_res.text
     profile = profile_res.json()
 
-    assert profile["metric_version"] == "2026-09-03.1"
+    assert profile["metric_version"] == PROFILE_METRIC_VERSION
 
     # 两轮都进时间线:成长看的是轮次之间的变化,历史轮不能丢。
     assert [point["round_no"] for point in profile["timeline"]] == [1, 2]
@@ -3340,9 +3344,9 @@ def test_profile_snapshots_keep_multiple_metric_versions(education_client):
                 id=str(uuid.uuid4()),
                 metric_version="future-metric",
                 insight_version="future-insight",
-                evidence_schema_versions=["2026-09-03.1"],
+                evidence_schema_versions=[PROFILE_EVIDENCE_SCHEMA_VERSION],
                 formula_config_json=session.query(ProfileAlgorithmRelease)
-                .filter(ProfileAlgorithmRelease.metric_version == "2026-09-03.1")
+                .filter(ProfileAlgorithmRelease.metric_version == PROFILE_METRIC_VERSION)
                 .one()
                 .formula_config_json,
                 code_commit_sha="test",
@@ -3400,7 +3404,7 @@ def test_profile_snapshots_keep_multiple_metric_versions(education_client):
     assert profile.json()["metric_version"] == "future-metric"
     assert profile.json()["excluded_snapshot_count"] == 1
     assert set(profile.json()["available_metric_versions"]) == {
-        "2026-09-03.1",
+        PROFILE_METRIC_VERSION,
         "future-metric",
     }
     unknown = client.get(
@@ -3487,7 +3491,10 @@ def test_profile_evidence_and_projections_reject_mutation(education_client):
             .filter(ProfileEvidenceSnapshot.submission_id == submission_id)
             .one()
         )
-        assert evidence.evidence_json["evidence_schema_version"] == "2026-09-03.1"
+        assert (
+            evidence.evidence_json["evidence_schema_version"]
+            == PROFILE_EVIDENCE_SCHEMA_VERSION
+        )
         assert (
             evidence.evidence_json["assignment"]["title"] == "Immutable Profile Facts"
         )
@@ -4873,3 +4880,121 @@ def test_challenge_config_survives_assignment_update(education_client):
         json={"challenge_enabled": True, "challenge_focus_keys": ["not_a_criterion"]},
     )
     assert rejected.status_code in (400, 422), rejected.text
+
+
+def test_challenge_facts_reach_the_growth_profile(education_client):
+    """质疑事实进画像，且只走 stats_json（画像不回读 challenge 原表）。"""
+
+    client, teacher, _, student, _, SessionLocal = education_client
+    assignment, session_id = _setup_challenge_assignment(
+        client, teacher, student, rounds=2, title="Profile Challenge"
+    )
+
+    UserContext.current_user = student
+    with _fake_challenge_model(
+        closing={"stood": ["论点清楚"], "unresolved": ["还缺一个反例", "数据来源没说"]}
+    ):
+        challenge_id = _start_challenge(client, assignment["id"], session_id).json()[
+            "session"
+        ]["id"]
+        _respond(client, challenge_id, 1)
+        _respond(client, challenge_id, 2)
+
+    revised_text = _long_draft() + "补一个反例并说明数据来源，避免以偏概全的结论。"
+    submission_id = client.post(
+        f"/api/v1/assignments/{assignment['id']}/submit",
+        json=_submit_body(session_id, revised_text),
+    ).json()["submission_id"]
+
+    with SessionLocal() as session:
+        evidence = (
+            session.query(ProfileEvidenceSnapshot)
+            .filter(ProfileEvidenceSnapshot.submission_id == submission_id)
+            .one()
+        )
+        challenge = evidence.evidence_json["challenge"]
+        assert challenge["enabled"] is True
+        assert challenge["status"] == "completed"
+        assert challenge["planned_rounds"] == 2
+        assert challenge["answered_rounds"] == 2
+        assert challenge["unresolved_count"] == 2
+        assert challenge["revised_after"] is True
+        assert challenge["revised_chars"] >= 20
+
+        projection = (
+            session.query(ProfileMetricProjection)
+            .filter(ProfileMetricProjection.evidence_snapshot_id == evidence.id)
+            .one()
+        )
+        point = projection.projection_json["point"]
+        assert point["challenge_status"] == "completed"
+        assert point["challenge_answer_ratio"] == 100
+        assert point["challenge_unresolved_count"] == 2
+        assert point["challenge_revised"] is True
+
+
+def test_profile_marks_challenge_as_not_applicable_when_disabled(education_client):
+    """没开试读的作业，画像里这几项是 None——「不适用」不能被读成「表现差」。"""
+
+    client, teacher, _, student, _, SessionLocal = education_client
+    _assignment, _session_id, submission_id = _setup_submitted_assignment(
+        client, teacher, student, "No Challenge Profile"
+    )
+
+    with SessionLocal() as session:
+        evidence = (
+            session.query(ProfileEvidenceSnapshot)
+            .filter(ProfileEvidenceSnapshot.submission_id == submission_id)
+            .one()
+        )
+        assert evidence.evidence_json["challenge"]["enabled"] is False
+
+        projection = (
+            session.query(ProfileMetricProjection)
+            .filter(ProfileMetricProjection.evidence_snapshot_id == evidence.id)
+            .one()
+        )
+        point = projection.projection_json["point"]
+        assert point["challenge_status"] is None
+        assert point["challenge_answer_ratio"] is None
+        assert point["challenge_unresolved_count"] is None
+        assert point["challenge_revised"] is None
+
+
+def test_skipped_challenge_reaches_profile_without_answer_ratio(education_client):
+    """跳过要如实进画像，但不给回应率——没答过就没有这个数，不是 0%。"""
+
+    client, teacher, _, student, _, SessionLocal = education_client
+    assignment, session_id = _setup_challenge_assignment(
+        client, teacher, student, rounds=2, title="Skipped Profile"
+    )
+
+    UserContext.current_user = student
+    with _fake_challenge_model():
+        challenge_id = _start_challenge(client, assignment["id"], session_id).json()[
+            "session"
+        ]["id"]
+    client.post(f"/api/v1/challenge/{challenge_id}/skip")
+
+    submission_id = client.post(
+        f"/api/v1/assignments/{assignment['id']}/submit",
+        json=_submit_body(session_id, _long_draft()),
+    ).json()["submission_id"]
+
+    with SessionLocal() as session:
+        evidence = (
+            session.query(ProfileEvidenceSnapshot)
+            .filter(ProfileEvidenceSnapshot.submission_id == submission_id)
+            .one()
+        )
+        assert evidence.evidence_json["challenge"]["status"] == "skipped"
+
+        projection = (
+            session.query(ProfileMetricProjection)
+            .filter(ProfileMetricProjection.evidence_snapshot_id == evidence.id)
+            .one()
+        )
+        point = projection.projection_json["point"]
+        assert point["challenge_status"] == "skipped"
+        assert point["challenge_answer_ratio"] is None
+        assert point["challenge_revised"] is None
