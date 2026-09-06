@@ -155,6 +155,7 @@
 	export let showRightPanel = false;
 	export let rightPanelWidth = 480;
 	export let rightPanelMinWidth = 360;
+	export let rightPanelMaxWidth: number | null = null;
 	export let rightPanelClassName = '';
 
 	// The workspace clears chatIdProp to start a fresh conversation in place;
@@ -4701,6 +4702,7 @@
 					open={showRightPanel}
 					bind:width={rightPanelWidth}
 					minWidth={rightPanelMinWidth}
+					maxWidth={rightPanelMaxWidth}
 					minSiblingWidth={360}
 					storageKey="writingRightPanelSize"
 					resizerId="right-panel-resizer"

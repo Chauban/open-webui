@@ -102,8 +102,11 @@
 	onMount(() => {
 		if (!storageKey) return;
 
-		const storedWidth = Number(localStorage.getItem(storageKey));
-		if (!Number.isNaN(storedWidth)) {
+		// 没存过时 getItem 返回 null,而 Number(null) 是 0 不是 NaN,
+		// 旧写法会把它当成合法宽度 clamp 成 minWidth,调用方传的默认宽度永远不生效。
+		const storedRaw = localStorage.getItem(storageKey);
+		const storedWidth = Number(storedRaw);
+		if (storedRaw !== null && Number.isFinite(storedWidth) && storedWidth > 0) {
 			width = clamp(storedWidth);
 		}
 	});
