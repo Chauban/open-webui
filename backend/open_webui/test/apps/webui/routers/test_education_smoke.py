@@ -27,6 +27,7 @@ from open_webui.models.shared_chats import SharedChat
 from open_webui.models.education import (
     AnalysisResult,
     Assignment,
+    AssignmentExtension,
     Classroom,
     ClassroomMember,
     EditorOperation,
@@ -523,6 +524,7 @@ def education_client():
             Classroom.__table__,
             ClassroomMember.__table__,
             Assignment.__table__,
+            AssignmentExtension.__table__,
             WritingSession.__table__,
             WritingVersion.__table__,
             ProvenanceSegment.__table__,
@@ -937,6 +939,158 @@ def test_student_cannot_submit_after_assignment_due_time(education_client):
     )
     assert submit_res.status_code == 400, submit_res.text
     assert submit_res.json()["detail"] == "Assignment due time has passed"
+
+
+def _open_past_due_assignment(client, teacher, students):
+    """一个已经截止的作业 + 若干已加入班级的学生,返回 (assignment, classroom)。"""
+    UserContext.current_user = teacher
+    create_classroom_res = client.post(
+        "/api/v1/classrooms", json={"name": "Grade 8 Extension Writing"}
+    )
+    assert create_classroom_res.status_code == 200, create_classroom_res.text
+    classroom = create_classroom_res.json()["classroom"]
+
+    create_assignment_res = client.post(
+        "/api/v1/assignments",
+        json={
+            "title": "Extension Essay",
+            "description": "Closed for everyone but the extended student.",
+            "classroom_ids": [classroom["id"]],
+            "score_max": 100,
+            "rubric_schema": _rubric_schema(),
+            "due_at": 1,
+        },
+    )
+    assert create_assignment_res.status_code == 200, create_assignment_res.text
+    assignment = create_assignment_res.json()[0]
+
+    for student in students:
+        UserContext.current_user = student
+        join_res = client.post(
+            "/api/v1/classrooms/join",
+            json={"invite_code": classroom["invite_code"]},
+        )
+        assert join_res.status_code == 200, join_res.text
+
+    return assignment, classroom
+
+
+def _submit_assignment(client, assignment_id, html="<p>Essay body.</p>"):
+    workspace_res = client.get(f"/api/v1/assignments/{assignment_id}/workspace")
+    assert workspace_res.status_code == 200, workspace_res.text
+    session_id = workspace_res.json()["writing_session"]["id"]
+    return client.post(
+        f"/api/v1/assignments/{assignment_id}/submit",
+        json={
+            "writing_session_id": session_id,
+            "final_content_json": None,
+            "final_content_html": html,
+            "final_content_text": "Essay body.",
+            "ai_used": True,
+            "ai_help_types": ["Outline"],
+            "data_completeness": _evidence_completeness(),
+            "reflection": _reflection_payload(),
+        },
+    )
+
+
+def test_assignment_extension_reopens_submission_for_one_student(education_client):
+    client, teacher, _, student, outsider, _ = education_client
+    assignment, _classroom = _open_past_due_assignment(
+        client, teacher, [student, outsider]
+    )
+    extended_due_at = int(time.time()) + 3600
+
+    UserContext.current_user = teacher
+    grant_res = client.put(
+        f"/api/v1/teacher/assignments/{assignment['id']}/extensions/{student.id}",
+        json={"due_at": extended_due_at, "reason": "Sick leave"},
+    )
+    assert grant_res.status_code == 200, grant_res.text
+    assert grant_res.json()["due_at"] == extended_due_at
+    assert grant_res.json()["reason"] == "Sick leave"
+
+    # 名单页要能看出谁被放开了,以及放开到什么时候。
+    unsubmitted_res = client.get(
+        f"/api/v1/teacher/assignments/{assignment['id']}/unsubmitted"
+    )
+    assert unsubmitted_res.status_code == 200, unsubmitted_res.text
+    by_user = {item["user_id"]: item for item in unsubmitted_res.json()}
+    assert by_user[student.id]["effective_due_at"] == extended_due_at
+    assert by_user[student.id]["extension"]["reason"] == "Sick leave"
+    assert by_user[outsider.id]["extension"] is None
+    assert by_user[outsider.id]["effective_due_at"] == 1
+
+    UserContext.current_user = student
+    assert _submit_assignment(client, assignment["id"]).status_code == 200
+
+    # 延期只对被授予的学生生效,同班其他人仍然按原截止时间关闭。
+    UserContext.current_user = outsider
+    blocked_res = _submit_assignment(client, assignment["id"])
+    assert blocked_res.status_code == 400, blocked_res.text
+    assert blocked_res.json()["detail"] == "Assignment due time has passed"
+
+    # 学生收到个人截止时间变更的通知。
+    UserContext.current_user = student
+    summary_res = client.get("/api/v1/me/notifications/summary")
+    assert summary_res.status_code == 200, summary_res.text
+    assert summary_res.json()["by_type"].get("assignment_extension_granted") == 1
+
+
+def test_assignment_extension_revoke_restores_class_due_time(education_client):
+    client, teacher, _, student, _, _ = education_client
+    assignment, _classroom = _open_past_due_assignment(client, teacher, [student])
+
+    UserContext.current_user = teacher
+    grant_res = client.put(
+        f"/api/v1/teacher/assignments/{assignment['id']}/extensions/{student.id}",
+        json={"due_at": int(time.time()) + 3600},
+    )
+    assert grant_res.status_code == 200, grant_res.text
+
+    revoke_res = client.delete(
+        f"/api/v1/teacher/assignments/{assignment['id']}/extensions/{student.id}"
+    )
+    assert revoke_res.status_code == 200, revoke_res.text
+
+    UserContext.current_user = student
+    blocked_res = _submit_assignment(client, assignment["id"])
+    assert blocked_res.status_code == 400, blocked_res.text
+    assert blocked_res.json()["detail"] == "Assignment due time has passed"
+
+    UserContext.current_user = teacher
+    missing_res = client.delete(
+        f"/api/v1/teacher/assignments/{assignment['id']}/extensions/{student.id}"
+    )
+    assert missing_res.status_code == 404, missing_res.text
+
+
+def test_assignment_extension_rejects_bad_targets(education_client):
+    client, teacher, other_teacher, student, outsider, _ = education_client
+    assignment, _classroom = _open_past_due_assignment(client, teacher, [student])
+    future_due_at = int(time.time()) + 3600
+
+    UserContext.current_user = other_teacher
+    foreign_res = client.put(
+        f"/api/v1/teacher/assignments/{assignment['id']}/extensions/{student.id}",
+        json={"due_at": future_due_at},
+    )
+    assert foreign_res.status_code == 403, foreign_res.text
+
+    UserContext.current_user = teacher
+    # outsider 没有加入这个班级
+    stranger_res = client.put(
+        f"/api/v1/teacher/assignments/{assignment['id']}/extensions/{outsider.id}",
+        json={"due_at": future_due_at},
+    )
+    assert stranger_res.status_code == 404, stranger_res.text
+
+    past_res = client.put(
+        f"/api/v1/teacher/assignments/{assignment['id']}/extensions/{student.id}",
+        json={"due_at": 1},
+    )
+    assert past_res.status_code == 400, past_res.text
+    assert past_res.json()["detail"] == "Extension due time must be in the future"
 
 
 def test_education_teacher_review_access_control(education_client):

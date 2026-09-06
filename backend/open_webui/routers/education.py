@@ -20,6 +20,8 @@ from open_webui.models.folders import FolderForm, Folders
 from open_webui.models.education import (
     AssignmentModel,
     AssignmentCreateForm,
+    AssignmentExtensionForm,
+    AssignmentExtensionModel,
     AssignmentRemindForm,
     AssignmentRemindResult,
     AssignmentUpdateForm,
@@ -412,7 +414,16 @@ def _load_submission_rounds_with_reviews(
     return rounds, reviews
 
 
-def _resolve_effective_due_at(assignment, rounds: list, reviews: dict) -> Optional[int]:
+def _resolve_effective_due_at(
+    assignment, rounds: list, reviews: dict, extension_due_at: Optional[int] = None
+) -> Optional[int]:
+    """这个学生在这个作业上真正生效的截止时间。
+
+    优先级只有一条:个人延期存在就是它。教师是对着某个学生单独设的,比退回轮次的
+    resubmit_due_at 和全班的 due_at 都更具体;要改就改这条延期,名单页会显示它在。
+    """
+    if extension_due_at is not None:
+        return extension_due_at
     for submission in rounds:
         review = reviews.get(submission.id)
         if review is None or review.review_status == "pending":
@@ -427,14 +438,20 @@ def _get_effective_due_at(
     assignment, student_id: str, db: Session
 ) -> Optional[int]:
     rounds, reviews = _load_submission_rounds_with_reviews(assignment, student_id, db)
-    return _resolve_effective_due_at(assignment, rounds, reviews)
+    extension = Education.get_assignment_extension(assignment.id, student_id, db=db)
+    return _resolve_effective_due_at(
+        assignment, rounds, reviews, extension.due_at if extension else None
+    )
 
 
 def _build_student_review_view(
     assignment, student_id: str, db: Session
 ) -> tuple[Optional[dict], Optional[int]]:
     rounds, reviews = _load_submission_rounds_with_reviews(assignment, student_id, db)
-    effective_due_at = _resolve_effective_due_at(assignment, rounds, reviews)
+    extension = Education.get_assignment_extension(assignment.id, student_id, db=db)
+    effective_due_at = _resolve_effective_due_at(
+        assignment, rounds, reviews, extension.due_at if extension else None
+    )
     submission = next(
         (item for item in rounds if item.is_current == 1),
         None,
@@ -1016,17 +1033,103 @@ async def get_assignment_unsubmitted_students(
     assignment: AssignmentModel = Depends(require_teacher_assignment),
     db: Session = Depends(get_session),
 ):
+    extensions = Education.get_assignment_extensions(assignment.id, db=db)
     items = []
     for member in _get_unsubmitted_members(assignment, db):
         member_user = await Users.get_user_by_id(member.user_id, db=db)
+        extension = extensions.get(member.user_id)
         items.append(
             UnsubmittedStudentItem(
                 user_id=member.user_id,
                 user_name=member_user.name if member_user else member.user_id,
                 user_email=member_user.email if member_user else None,
+                extension=extension,
+                effective_due_at=(
+                    extension.due_at if extension else assignment.due_at
+                ),
             )
         )
     return items
+
+
+def _require_assignment_student(assignment, student_user_id: str, db: Session):
+    """个人延期只能给本作业所属班级里的学生,避免跨班误授。"""
+    if not assignment.classroom_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Assignment is not bound to a classroom",
+        )
+    member = Education.get_classroom_member(
+        assignment.classroom_id, student_user_id, db=db
+    )
+    if member is None or member.member_role != "student":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Student is not in this classroom",
+        )
+    return member
+
+
+@router.put(
+    "/teacher/assignments/{assignment_id}/extensions/{student_user_id}",
+    response_model=AssignmentExtensionModel,
+)
+async def grant_assignment_extension(
+    student_user_id: str,
+    form_data: AssignmentExtensionForm,
+    assignment: AssignmentModel = Depends(require_teacher_assignment),
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+):
+    _require_assignment_student(assignment, student_user_id, db)
+    if form_data.due_at <= int(time.time()):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Extension due time must be in the future",
+        )
+    extension = Education.upsert_assignment_extension(
+        assignment.id, student_user_id, user.id, form_data, db=db
+    )
+    await _send_education_notifications(
+        [student_user_id],
+        "assignment_extension_granted",
+        {
+            "assignment_id": assignment.id,
+            "assignment_title": assignment.title,
+            "due_at": extension.due_at,
+        },
+        db,
+    )
+    return extension
+
+
+@router.delete(
+    "/teacher/assignments/{assignment_id}/extensions/{student_user_id}",
+    response_model=bool,
+)
+async def revoke_assignment_extension(
+    student_user_id: str,
+    assignment: AssignmentModel = Depends(require_teacher_assignment),
+    db: Session = Depends(get_session),
+):
+    if not Education.delete_assignment_extension(
+        assignment.id, student_user_id, db=db
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Extension not found"
+        )
+    # 撤销把学生的截止时间改回全班口径,不通知等于让他按错的时间写。
+    await _send_education_notifications(
+        [student_user_id],
+        "assignment_extension_revoked",
+        {
+            "assignment_id": assignment.id,
+            "assignment_title": assignment.title,
+            "due_at": assignment.due_at,
+        },
+        db,
+    )
+    return True
 
 
 @router.post(
@@ -2047,7 +2150,10 @@ async def get_writing_home(
                         writing_session_id=None,
                         status="not_started",
                         updated_at=assignment.updated_at,
-                        effective_due_at=assignment.due_at,
+                        # 还没开写也可能已经拿到个人延期,这里不能直接回落到全班 due_at
+                        effective_due_at=_get_effective_due_at(
+                            assignment, user.id, db
+                        ),
                     )
                 )
                 continue

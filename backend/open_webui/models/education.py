@@ -109,6 +109,33 @@ class Assignment(Base):
     updated_at = Column(BigInteger, nullable=False)
 
 
+class AssignmentExtension(Base):
+    """单个学生在某个作业上的个人截止时间。
+
+    作业的 due_at 是全班一刀切的硬闸门,提交接口过期即 403。学生请假、设备故障
+    这类情况没有第二条路——改 due_at 会把全班一起放开。这张表让教师只给一个人
+    放开,一个学生在一个作业上至多一条。
+    """
+
+    __tablename__ = "assignment_extension"
+    __table_args__ = (
+        UniqueConstraint(
+            "assignment_id", "student_id", name="assignment_extension_identity_idx"
+        ),
+    )
+
+    id = Column(Text, primary_key=True, unique=True)
+    assignment_id = Column(
+        Text, ForeignKey("assignment.id", ondelete="CASCADE"), nullable=False
+    )
+    student_id = Column(Text, nullable=False)
+    due_at = Column(BigInteger, nullable=False)
+    reason = Column(Text, nullable=True)
+    granted_by = Column(Text, nullable=False)
+    created_at = Column(BigInteger, nullable=False)
+    updated_at = Column(BigInteger, nullable=False)
+
+
 class Classroom(Base):
     __tablename__ = "classroom"
 
@@ -1189,10 +1216,38 @@ class ClassroomMembersActionResult(BaseModel):
     skipped_users: list[str] = Field(default_factory=list)
 
 
+class AssignmentExtensionModel(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    assignment_id: str
+    student_id: str
+    due_at: int
+    reason: Optional[str] = None
+    granted_by: str
+    created_at: int
+    updated_at: int
+
+
+class AssignmentExtensionForm(BaseModel):
+    due_at: int = Field(gt=0)
+    reason: Optional[str] = Field(default=None, max_length=200)
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def strip_reason(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+
 class UnsubmittedStudentItem(BaseModel):
     user_id: str
     user_name: Optional[str] = None
     user_email: Optional[str] = None
+    extension: Optional[AssignmentExtensionModel] = None
+    effective_due_at: Optional[int] = None
 
 
 class AssignmentRemindForm(BaseModel):
@@ -2359,6 +2414,8 @@ class EducationTable:
                             "assignment_published",
                             "assignment_updated",
                             "assignment_reminder",
+                            "assignment_extension_granted",
+                            "assignment_extension_revoked",
                         ]
                     )
                 )
@@ -2372,6 +2429,96 @@ class EducationTable:
                     deleted += 1
             db.commit()
             return deleted
+
+    def get_assignment_extension(
+        self, assignment_id: str, student_id: str, db: Optional[Session] = None
+    ) -> Optional[AssignmentExtensionModel]:
+        with get_db_context(db) as db:
+            extension = (
+                db.query(AssignmentExtension)
+                .filter(
+                    AssignmentExtension.assignment_id == assignment_id,
+                    AssignmentExtension.student_id == student_id,
+                )
+                .first()
+            )
+            return (
+                AssignmentExtensionModel.model_validate(extension)
+                if extension
+                else None
+            )
+
+    def get_assignment_extensions(
+        self, assignment_id: str, db: Optional[Session] = None
+    ) -> dict[str, AssignmentExtensionModel]:
+        """一个作业下的全部个人延期,按 student_id 索引,供名单页一次取齐。"""
+        with get_db_context(db) as db:
+            extensions = (
+                db.query(AssignmentExtension)
+                .filter(AssignmentExtension.assignment_id == assignment_id)
+                .all()
+            )
+            return {
+                extension.student_id: AssignmentExtensionModel.model_validate(extension)
+                for extension in extensions
+            }
+
+    def upsert_assignment_extension(
+        self,
+        assignment_id: str,
+        student_id: str,
+        granted_by: str,
+        form_data: AssignmentExtensionForm,
+        db: Optional[Session] = None,
+    ) -> AssignmentExtensionModel:
+        with get_db_context(db) as db:
+            now = int(time.time())
+            extension = (
+                db.query(AssignmentExtension)
+                .filter(
+                    AssignmentExtension.assignment_id == assignment_id,
+                    AssignmentExtension.student_id == student_id,
+                )
+                .first()
+            )
+            if extension is None:
+                extension = AssignmentExtension(
+                    id=str(uuid.uuid4()),
+                    assignment_id=assignment_id,
+                    student_id=student_id,
+                    due_at=form_data.due_at,
+                    reason=form_data.reason,
+                    granted_by=granted_by,
+                    created_at=now,
+                    updated_at=now,
+                )
+                db.add(extension)
+            else:
+                extension.due_at = form_data.due_at
+                extension.reason = form_data.reason
+                extension.granted_by = granted_by
+                extension.updated_at = now
+            db.commit()
+            db.refresh(extension)
+            return AssignmentExtensionModel.model_validate(extension)
+
+    def delete_assignment_extension(
+        self, assignment_id: str, student_id: str, db: Optional[Session] = None
+    ) -> bool:
+        with get_db_context(db) as db:
+            extension = (
+                db.query(AssignmentExtension)
+                .filter(
+                    AssignmentExtension.assignment_id == assignment_id,
+                    AssignmentExtension.student_id == student_id,
+                )
+                .first()
+            )
+            if extension is None:
+                return False
+            db.delete(extension)
+            db.commit()
+            return True
 
     def get_assignments_by_classroom(
         self, classroom_id: str, db: Optional[Session] = None
