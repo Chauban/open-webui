@@ -32,6 +32,7 @@ from open_webui.models.education import (
     AssignmentExtension,
     ChallengeInsight,
     ChallengeSession,
+    CritiqueAttempt,
     ChallengeTurn,
     Classroom,
     ClassroomMember,
@@ -539,6 +540,7 @@ def education_client():
             ChallengeSession.__table__,
             ChallengeTurn.__table__,
             ChallengeInsight.__table__,
+            CritiqueAttempt.__table__,
             WritingVersion.__table__,
             ProvenanceSegment.__table__,
             EditorOperation.__table__,
@@ -5414,6 +5416,216 @@ def test_challenge_insight_is_cached_until_the_input_changes(education_client):
     assert second_calls == []
     assert second["categories"] == first["categories"]
     assert second["generated_at"] == first["generated_at"]
+
+
+_CRITIQUE_TEXT = (
+    "所有人都认为短视频毁掉了这一代人的专注力。"
+    "我表弟每天刷五个小时，成绩一落千丈，可见这个结论是成立的。"
+)
+_CRITIQUE_FLAWS = [
+    {
+        "key": "overgeneralized",
+        "description": "用「所有人都认为」代替论证，没有给出依据。",
+        "focus_key": "ideas",
+    },
+    {
+        "key": "single-case",
+        "description": "只用表弟一个例子就推出普遍结论。",
+        "focus_key": "evidence",
+    },
+]
+
+
+def _enable_critique(client, assignment_id):
+    return client.patch(
+        f"/api/v1/assignments/{assignment_id}",
+        json={
+            "critique_enabled": True,
+            "critique_text": _CRITIQUE_TEXT,
+            "critique_flaws": _CRITIQUE_FLAWS,
+        },
+    )
+
+
+def test_critique_gate_records_hits_without_scoring(education_client):
+    """写作前评析：只报命中，不给分、不给等级，找出一条也放行。"""
+
+    client, teacher, _, student, _, _ = education_client
+    assignment, _ = _setup_challenge_assignment(
+        client,
+        teacher,
+        student,
+        rounds=2,
+        focus_keys=("ideas", "evidence"),
+        title="Critique Essay",
+    )
+
+    UserContext.current_user = teacher
+    enabled = _enable_critique(client, assignment["id"])
+    assert enabled.status_code == 200, enabled.text
+
+    UserContext.current_user = student
+    state = client.get(f"/api/v1/assignments/{assignment['id']}/critique").json()
+    assert state["enabled"] is True
+    assert state["completed"] is False
+    assert _CRITIQUE_TEXT in state["text"]
+
+    with _fake_challenge_model(
+        raw_turns=[json.dumps({"hits": ["single-case"]}, ensure_ascii=False)]
+    ):
+        # 只写一条也放行 —— 不设及格线。
+        res = client.post(
+            f"/api/v1/assignments/{assignment['id']}/critique",
+            json={"items": ["只举了表弟一个例子"], "model": "test-model"},
+        )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["completed"] is True
+
+    matches = {match["key"]: match for match in body["attempt"]["matches_json"]}
+    assert matches["single-case"]["hit"] is True
+    assert matches["overgeneralized"]["hit"] is False
+    # 不给分、不给等级：载荷里不该出现任何分数字段。
+    assert "score" not in body["attempt"]
+    assert "grade" not in body["attempt"]
+
+    # 一次作业至多一条，重复提交直接拒。
+    assert (
+        client.post(
+            f"/api/v1/assignments/{assignment['id']}/critique",
+            json={"items": ["再来一次"], "model": "test-model"},
+        ).status_code
+        == 400
+    )
+
+
+def test_critique_needs_rubric_criteria_and_a_target_text(education_client):
+    """未配评分维度、没有靶文、或一条漏洞都没预设，都不允许启用。"""
+
+    client, teacher, _, student, _, _ = education_client
+    assignment, _ = _setup_challenge_assignment(
+        client, teacher, student, rounds=2, title="Critique Guard"
+    )
+
+    UserContext.current_user = teacher
+    # 开了但没靶文。
+    assert (
+        client.patch(
+            f"/api/v1/assignments/{assignment['id']}",
+            json={"critique_enabled": True, "critique_text": "  ", "critique_flaws": []},
+        ).status_code
+        in (400, 422)
+    )
+    # 有靶文但一条漏洞都没预设 —— 没有标准答案就无从判定。
+    assert (
+        client.patch(
+            f"/api/v1/assignments/{assignment['id']}",
+            json={
+                "critique_enabled": True,
+                "critique_text": _CRITIQUE_TEXT,
+                "critique_flaws": [],
+            },
+        ).status_code
+        in (400, 422)
+    )
+    # 漏洞绑到了不存在的维度。
+    assert (
+        client.patch(
+            f"/api/v1/assignments/{assignment['id']}",
+            json={
+                "critique_enabled": True,
+                "critique_text": _CRITIQUE_TEXT,
+                "critique_flaws": [
+                    {"key": "x", "description": "问题", "focus_key": "no-such-key"}
+                ],
+            },
+        ).status_code
+        in (400, 422)
+    )
+
+
+def test_critique_judgement_failure_does_not_block_writing(education_client):
+    """模型抽风判不出来，也不能把学生挡在写作区外面 —— 这道门拦在写作之前。"""
+
+    client, teacher, _, student, _, _ = education_client
+    assignment, _ = _setup_challenge_assignment(
+        client,
+        teacher,
+        student,
+        rounds=2,
+        focus_keys=("ideas", "evidence"),
+        title="Critique Resilient",
+    )
+
+    UserContext.current_user = teacher
+    _enable_critique(client, assignment["id"])
+
+    UserContext.current_user = student
+    with _fake_challenge_model(raw_turns=["这根本不是 JSON"]):
+        res = client.post(
+            f"/api/v1/assignments/{assignment['id']}/critique",
+            json={"items": ["只举了一个例子"], "model": "test-model"},
+        )
+    assert res.status_code == 200, res.text
+    # 判不出来记为待判定（空命中表），不等同于「一条都没找到」。
+    assert res.json()["completed"] is True
+    assert res.json()["attempt"]["matches_json"] == []
+
+
+def test_dashboard_shows_critique_hits_per_criterion(education_client):
+    """写前认得出这个毛病的人次，和质疑命中率并进同一张按维度的表。"""
+
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id = _setup_challenge_assignment(
+        client,
+        teacher,
+        student,
+        rounds=2,
+        focus_keys=("ideas", "evidence"),
+        title="Critique Dashboard",
+    )
+
+    UserContext.current_user = teacher
+    _enable_critique(client, assignment["id"])
+
+    UserContext.current_user = student
+    with _fake_challenge_model(
+        raw_turns=[json.dumps({"hits": ["single-case"]}, ensure_ascii=False)]
+    ):
+        client.post(
+            f"/api/v1/assignments/{assignment['id']}/critique",
+            json={"items": ["只举了表弟一个例子"], "model": "test-model"},
+        )
+
+    with _fake_challenge_model(
+        closing={"stood": [], "unresolved": [{"text": "证据不足", "turn_no": 2}]}
+    ):
+        challenge_id = _start_challenge(client, assignment["id"], session_id).json()[
+            "session"
+        ]["id"]
+        _respond(client, challenge_id, 1)
+        _respond(client, challenge_id, 2)
+
+    client.post(
+        f"/api/v1/assignments/{assignment['id']}/submit",
+        json=_submit_body(session_id, _long_draft()),
+    )
+
+    UserContext.current_user = teacher
+    dashboard = client.get(
+        f"/api/v1/teacher/assignments/{assignment['id']}/dashboard"
+    ).json()
+    by_key = {
+        row["focus_key"]: row
+        for row in dashboard["distributions"]["challenge"]["criteria"]
+    }
+    # 证据这一维：写前看出来了，写自己的时候仍然被问住 —— 正是这两个环节的对照。
+    assert by_key["evidence"]["critique_hits"] == 1
+    assert by_key["evidence"]["critique_total"] == 1
+    assert by_key["evidence"]["unresolved"] == 1
+    # 立意这一维：写前没看出来。
+    assert by_key["ideas"]["critique_hits"] == 0
+    assert by_key["ideas"]["critique_total"] == 1
 
 
 def test_challenge_config_survives_assignment_update(education_client):

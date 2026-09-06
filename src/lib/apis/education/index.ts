@@ -920,6 +920,53 @@ export const updateChallengeChecklist = async (
 	}).then(handleJson);
 };
 
+/** 一处预设漏洞有没有被找出来。只报命中，不给分、不给等级。 */
+export type CritiqueMatch = {
+	key: string;
+	focus_key: string;
+	hit: boolean;
+};
+
+export type CritiqueAttempt = {
+	id: string;
+	assignment_id: string;
+	student_id: string;
+	items_json: string[];
+	matches_json: CritiqueMatch[];
+	completed_at: number;
+};
+
+export type CritiqueState = {
+	enabled: boolean;
+	text: string;
+	completed: boolean;
+	attempt: CritiqueAttempt | null;
+};
+
+export const getAssignmentCritique = async (
+	token: string,
+	assignmentId: string
+): Promise<CritiqueState> => {
+	return fetch(`${WEBUI_API_BASE_URL}/assignments/${assignmentId}/critique`, {
+		method: 'GET',
+		headers: withAuth(token)
+	}).then(handleJson);
+};
+
+/** 不设及格线：找出一条也放行，命中数只记录。 */
+export const submitAssignmentCritique = async (
+	token: string,
+	assignmentId: string,
+	items: string[],
+	model: string
+): Promise<CritiqueState> => {
+	return fetch(`${WEBUI_API_BASE_URL}/assignments/${assignmentId}/critique`, {
+		method: 'POST',
+		headers: withAuth(token),
+		body: JSON.stringify({ items, model })
+	}).then(handleJson);
+};
+
 /** 一类「本班普遍站不住的论证」。只报频次，不对班级下评价性结论。 */
 export type ChallengeInsightCategory = {
 	name: string;

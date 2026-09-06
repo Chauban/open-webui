@@ -16,6 +16,7 @@ from open_webui.models.education import (
     ProfileEvidenceDocument,
     ProfileEvidenceEditorEvent,
     ProfileEvidenceChallenge,
+    ProfileEvidenceCritique,
     ProfileEvidencePayload,
     ProfileEvidencePreviousRound,
     ProfileEvidenceProvenanceEvent,
@@ -50,7 +51,7 @@ from open_webui.services.education.profile import (
     _summarize_help_types,
 )
 
-PROFILE_EVIDENCE_SCHEMA_VERSION = "2026-09-06.2"
+PROFILE_EVIDENCE_SCHEMA_VERSION = "2026-09-06.3"
 PROFILE_EVIDENCE_COLLECTOR_VERSION = "2026-09-03.1"
 
 
@@ -197,6 +198,14 @@ def capture_profile_evidence(
         total_spans=int(revision.get("total_spans") or 0),
     )
 
+    frozen_critique = submission.stats_json.get("critique") or {}
+    critique = ProfileEvidenceCritique(
+        enabled=bool(frozen_critique.get("enabled", False)),
+        completed=bool(frozen_critique.get("completed", False)),
+        hits=int(frozen_critique.get("hits") or 0),
+        total=int(frozen_critique.get("total") or 0),
+    )
+
     payload = ProfileEvidencePayload(
         evidence_schema_version=PROFILE_EVIDENCE_SCHEMA_VERSION,
         submission_id=submission.id,
@@ -324,6 +333,7 @@ def capture_profile_evidence(
             created_at=reflection.created_at,
         ),
         challenge=challenge,
+        critique=critique,
         capture_manifest=ProfileEvidenceCaptureManifest(
             collector_version=PROFILE_EVIDENCE_COLLECTOR_VERSION,
             application_build=profile_code_commit_sha(),
@@ -593,6 +603,13 @@ def build_metric_projection(
         challenge_unresolved_count=(
             facts.challenge.unresolved_count
             if facts.challenge.enabled and facts.challenge.status == "completed"
+            else None
+        ),
+        critique_hit_ratio=(
+            round(facts.critique.hits * 100 / facts.critique.total)
+            if facts.critique.enabled
+            and facts.critique.completed
+            and facts.critique.total > 0
             else None
         ),
         challenge_revised=(

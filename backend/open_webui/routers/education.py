@@ -31,6 +31,8 @@ from open_webui.models.education import (
     ChallengeChecklistForm,
     ChallengeInsightForm,
     ChallengeInsightResponse,
+    CritiqueStateResponse,
+    CritiqueSubmitForm,
     ChallengeRespondForm,
     ChallengeSkipBeforeStartForm,
     ChallengeSessionDetail,
@@ -102,6 +104,7 @@ from open_webui.services.education.analysis import (
     get_materialized_submission_analyses,
     get_prompt_timeline,
 )
+from open_webui.services.education.critique import match_critique_items
 from open_webui.services.education.challenge_insight import (
     build_challenge_distribution,
     build_challenge_insight,
@@ -2645,6 +2648,82 @@ async def get_current_assignment_challenge(
     return _challenge_detail(challenge_session, db)
 
 
+@router.get(
+    "/assignments/{assignment_id}/critique", response_model=CritiqueStateResponse
+)
+async def get_assignment_critique(
+    assignment_id: str,
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+):
+    """写作前的评析状态。未启用或已完成时前端不再拦人。"""
+
+    assignment = _get_assignment_or_404(assignment_id, db)
+    _ensure_student_challenge_access(user, assignment, db)
+
+    attempt = Education.get_critique_attempt(assignment.id, user.id, db=db)
+    return CritiqueStateResponse(
+        enabled=bool(assignment.critique_enabled),
+        text=(assignment.critique_text or "") if assignment.critique_enabled else "",
+        completed=attempt is not None,
+        attempt=attempt,
+    )
+
+
+@router.post(
+    "/assignments/{assignment_id}/critique", response_model=CritiqueStateResponse
+)
+async def submit_assignment_critique(
+    request: Request,
+    assignment_id: str,
+    form_data: CritiqueSubmitForm,
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+):
+    """交出学生认为站不住的地方。
+
+    不设及格线，找出一条也放行——一旦设卡，学生会转而猜测系统想要什么答案。
+    """
+
+    assignment = _get_assignment_or_404(assignment_id, db)
+    _ensure_student_challenge_access(user, assignment, db)
+
+    if not assignment.critique_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Critique is not enabled for this assignment",
+        )
+    if Education.get_critique_attempt(assignment.id, user.id, db=db) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Critique for this assignment is already done",
+        )
+
+    items = [item.strip() for item in form_data.items if item.strip()]
+    try:
+        matches = await match_critique_items(
+            request, user, assignment, items, form_data.model
+        )
+    except ChallengeError as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)
+        ) from error
+
+    attempt = Education.insert_critique_attempt(
+        assignment.id,
+        user.id,
+        items,
+        [match.model_dump() for match in matches],
+        db=db,
+    )
+    return CritiqueStateResponse(
+        enabled=True,
+        text=assignment.critique_text or "",
+        completed=True,
+        attempt=attempt,
+    )
+
+
 @router.post(
     "/assignments/{assignment_id}/challenge/skip",
     response_model=ChallengeSessionDetail,
@@ -2929,6 +3008,27 @@ async def submit_assignment(
     stats["coaching"] = {
         "style": assignment.coaching_style,
         "prompt": await _get_coaching_prompt(assignment.coaching_style),
+    }
+    critique_attempt = Education.get_critique_attempt(
+        assignment.id, session.owner_user_id, db=db
+    )
+    stats["critique"] = {
+        "enabled": bool(assignment.critique_enabled),
+        "completed": critique_attempt is not None,
+        "hits": (
+            sum(1 for match in critique_attempt.matches_json if match.hit)
+            if critique_attempt
+            else 0
+        ),
+        "total": len(critique_attempt.matches_json) if critique_attempt else 0,
+        "focus_hits": (
+            [
+                {"focus_key": match.focus_key, "hit": match.hit}
+                for match in critique_attempt.matches_json
+            ]
+            if critique_attempt
+            else []
+        ),
     }
     # 质疑措辞同理，管理员随时可改，已交的这一轮不能跟着变。
     challenge_round_no = Education.resolve_next_submission_round_no(

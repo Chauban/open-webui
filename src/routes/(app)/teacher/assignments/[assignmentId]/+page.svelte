@@ -24,6 +24,7 @@
 	import RubricCriteriaEditor from '$lib/components/education/RubricCriteriaEditor.svelte';
 	import CoachingStyleSelector from '$lib/components/education/CoachingStyleSelector.svelte';
 	import ChallengeSettings from '$lib/components/education/ChallengeSettings.svelte';
+	import CritiqueSettings from '$lib/components/education/CritiqueSettings.svelte';
 	import { EDU_FIELD_CLASS } from '$lib/components/education/styles';
 	import {
 		formatDateTimeInput,
@@ -52,6 +53,9 @@
 	let challengeEnabled = false;
 	let challengeRounds = 3;
 	let challengeFocusKeys: string[] = [];
+	let critiqueEnabled = false;
+	let critiqueText = '';
+	let critiqueFlaws: Array<{ key: string; description: string; focus_key: string }> = [];
 	let rubricCriteria = [];
 	let showArchiveConfirm = false;
 	let showDeleteConfirm = false;
@@ -88,6 +92,9 @@
 		challengeEnabled = item.assignment.challenge_enabled ?? false;
 		challengeRounds = item.assignment.challenge_rounds ?? 3;
 		challengeFocusKeys = [...(item.assignment.challenge_focus_keys ?? [])];
+		critiqueEnabled = item.assignment.critique_enabled ?? false;
+		critiqueText = item.assignment.critique_text ?? '';
+		critiqueFlaws = [...(item.assignment.critique_flaws ?? [])];
 		rubricCriteria = item.assignment.rubric_schema.criteria.map((criterion) => ({
 			key: criterion.key,
 			label: criterion.label,
@@ -155,6 +162,9 @@
 				challenge_enabled: challengeEnabled,
 				challenge_rounds: challengeRounds,
 				challenge_focus_keys: challengeEnabled ? challengeFocusKeys : [],
+				critique_enabled: critiqueEnabled,
+				critique_text: critiqueEnabled ? critiqueText.trim() : null,
+				critique_flaws: critiqueEnabled ? critiqueFlaws : [],
 				rubric_schema: { criteria: parsedCriteria }
 			});
 			await loadData();
@@ -312,6 +322,12 @@
 							bind:enabled={challengeEnabled}
 							bind:rounds={challengeRounds}
 							bind:focusKeys={challengeFocusKeys}
+						/>
+						<CritiqueSettings
+							criteria={rubricCriteria}
+							bind:enabled={critiqueEnabled}
+							bind:text={critiqueText}
+							bind:flaws={critiqueFlaws}
 						/>
 						<div class="flex flex-wrap justify-between gap-2">
 							<div class="flex flex-wrap gap-2">

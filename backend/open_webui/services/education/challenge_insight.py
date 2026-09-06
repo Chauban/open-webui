@@ -66,8 +66,21 @@ def build_challenge_distribution(assignment, submissions: Iterable) -> Optional[
     challenged: dict[str, set[str]] = {}
     unresolved: dict[str, set[str]] = {}
     unchanged: dict[str, set[str]] = {}
+    # 写作前的评析：这个维度上预设的漏洞，有几人次找出来 / 一共几人次。
+    critique_hits: dict[str, int] = {}
+    critique_total: dict[str, int] = {}
 
     for submission in submissions:
+        for entry in ((submission.stats_json or {}).get("critique") or {}).get(
+            "focus_hits"
+        ) or []:
+            focus_key = entry.get("focus_key")
+            if not focus_key:
+                continue
+            critique_total[focus_key] = critique_total.get(focus_key, 0) + 1
+            if entry.get("hit"):
+                critique_hits[focus_key] = critique_hits.get(focus_key, 0) + 1
+
         stats = _challenge_stats(submission)
         status = stats.get("status")
         if status == "skipped":
@@ -99,7 +112,7 @@ def build_challenge_distribution(assignment, submissions: Iterable) -> Optional[
             if not focus_changed.get(focus_key, False):
                 unchanged.setdefault(focus_key, set()).add(student_id)
 
-    if completed == 0 and skipped == 0:
+    if completed == 0 and skipped == 0 and not critique_total:
         return None
 
     labels = _criterion_labels(assignment)
@@ -111,10 +124,18 @@ def build_challenge_distribution(assignment, submissions: Iterable) -> Optional[
             "challenged": len(students),
             "unresolved": len(unresolved.get(focus_key, set())),
             "unresolved_unchanged": len(unchanged.get(focus_key, set())),
+            # 写前认得出这个毛病的人次 / 总人次。认得出别人的、写自己时照样犯，
+            # 这个对照才是这两个环节合起来的价值。
+            "critique_hits": critique_hits.get(focus_key, 0),
+            "critique_total": critique_total.get(focus_key, 0),
         }
         # 命中最多的排前面,教师那一屏第一眼看到的就是最该讲的那个维度。
         for focus_key, students in sorted(
-            challenged.items(),
+            # 只被评析、没被质疑的维度也要出现，否则那一行整个消失。
+            {
+                **{key: set() for key in critique_total},
+                **challenged,
+            }.items(),
             key=lambda item: (-len(unresolved.get(item[0], set())), item[0]),
         )
     ]
