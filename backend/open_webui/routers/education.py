@@ -1,8 +1,11 @@
 import csv
 import difflib
+import hashlib
+import hmac
 import io
 import time
 import uuid
+import zipfile
 from datetime import datetime
 from typing import NamedTuple, Optional
 
@@ -12,6 +15,7 @@ from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from open_webui.env import WEBUI_SECRET_KEY
 from open_webui.internal.db import get_session
 from open_webui.models.chats import ChatForm, Chats
 from open_webui.models.config import Config
@@ -128,12 +132,13 @@ from open_webui.services.education.profile_aggregates import (
 from open_webui.services.education.profile_evidence import (
     build_analysis_from_evidence,
     capture_profile_evidence,
+    profile_algorithm_code_checksum,
     project_profile_evidence,
 )
 from open_webui.models.notes import Note, NoteForm, Notes, sanitize_note_data
 from open_webui.models.users import Users
 from open_webui.socket.main import emit_to_users
-from open_webui.utils.auth import get_verified_user
+from open_webui.utils.auth import get_admin_user, get_verified_user
 
 router = APIRouter()
 
@@ -4029,3 +4034,328 @@ async def mark_my_notifications_read(
         db=db,
     )
     return {"marked": marked}
+
+
+# ---------------------------------------------------------------------------
+# 教研数据导出
+#
+# 教师端那个班级进度 CSV 是给教师看谁交了没交的：姓名邮箱明文、七列、零过程指标。
+# 做前后测和统计分析要的是另一份东西，所以另开一个接口，而不是往那份上加列。
+#
+# 每一行都带 metric_version 与 algorithm_checksum：画像算法是会改版的，跨学期取的
+# 两批数据只要算法不同版就不可比。带上版本号，做分析时至少能发现「这两批不能直接
+# 比」；不带就是悄悄得出一个错误结论。
+# ---------------------------------------------------------------------------
+
+RESEARCH_EXPORT_SCHEMA_VERSION = "2026-09-07.1"
+
+_RESEARCH_SUBMISSION_COLUMNS = (
+    "pseudo_id",
+    "assignment_id",
+    "assignment_title",
+    "round_no",
+    "is_current",
+    "submitted_at",
+    "review_status",
+    "score",
+    "score_max",
+    "normalized_score",
+    "total_chars",
+    "inserted_chars",
+    "revised_chars",
+    "revision_depth",
+    "writing_span_seconds",
+    "active_writing_seconds",
+    "lead_time_seconds",
+    "end_loaded_ratio",
+    "deadline_window_ratio",
+    "process_index",
+    "typed_ratio",
+    "ai_ratio",
+    "unknown_ratio",
+    "prompt_count",
+    "digestion_ratio",
+    "reflection_quality",
+    "collaboration_index",
+    "challenge_status",
+    "challenge_answer_ratio",
+    "challenge_unresolved_count",
+    "challenge_revised",
+    "critique_hit_ratio",
+    "burst_count",
+    "suspected_unmarked_import_count",
+    "version_data_completeness",
+    "editor_operations_completeness",
+    "source_tracking_completeness",
+    "scoring_completeness",
+    "metric_version",
+    "algorithm_checksum",
+)
+
+_RESEARCH_ROUND_COLUMNS = (
+    "pseudo_id",
+    "assignment_id",
+    "from_round",
+    "to_round",
+    "char_delta",
+    "revision_ratio",
+    "score_delta",
+    "turnaround_seconds",
+    "metric_version",
+    "algorithm_checksum",
+)
+
+_RESEARCH_REFLECTION_COLUMNS = (
+    "pseudo_id",
+    "assignment_id",
+    "round_no",
+    "submitted_at",
+    "ai_used",
+    "ai_help_types",
+    "action_chars",
+    "location_chars",
+    "judgement_chars",
+    "next_step_chars",
+    "reflection_quality",
+    "action_text",
+    "location_text",
+    "judgement_text",
+    "next_step_text",
+    "other_ai_help_text",
+)
+
+
+def _research_pseudo_id(student_id: str) -> str:
+    """稳定且不可逆的假名:同一个人在多次导出里是同一个 id,但反推不回账号。"""
+    digest = hmac.new(
+        WEBUI_SECRET_KEY.encode("utf-8"),
+        student_id.encode("utf-8"),
+        hashlib.sha256,
+    )
+    return digest.hexdigest()[:16]
+
+
+def _research_readme(
+    metric_version: str,
+    checksum: str,
+    row_count: int,
+    include_text: bool,
+    classroom_id: Optional[str],
+) -> str:
+    generated_at = datetime.fromtimestamp(int(time.time())).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
+    lines = [
+        "写作教学平台 · 教研数据导出",
+        "",
+        f"导出时间：{generated_at}",
+        f"导出格式版本：{RESEARCH_EXPORT_SCHEMA_VERSION}",
+        f"指标算法版本：{metric_version}",
+        f"算法代码校验和：{checksum}",
+        f"班级范围：{classroom_id or '全部班级'}",
+        f"提交行数：{row_count}",
+        f"含原始文本：{'是' if include_text else '否'}",
+        "",
+        "口径说明",
+        "--------",
+        "* pseudo_id 由账号 id 经服务端密钥 HMAC 得到，稳定但不可逆；导出不含姓名与邮箱。",
+        "* 每行都带 metric_version 与 algorithm_checksum。算法改版后同一份证据会算出不同",
+        "  结果，跨学期比较前必须先确认这两列一致，否则两批数据不可比。",
+        "* 来源占比（typed_ratio / ai_ratio / unknown_ratio）与 digestion_ratio 由学生浏览器",
+        "  上报，可能不完整也可以被绕过，只用于讨论写作过程，不作为学术不端判据。",
+        "* challenge_* 与 critique_hit_ratio 由服务端快照比对得出，不依赖客户端上报；作业未",
+        "  开启提交前试读时全为空，那是「不适用」而不是「表现差」。",
+        "* reflection_quality 由教师批改时给的 1—5 分折算到 0—100，未批改为空。",
+        "* 空值一律留空，不填 0 —— 0 和「没有数据」在统计上必须分得开。",
+        "",
+        "文件",
+        "----",
+        "submissions.csv    每份提交一行，当前算法下的最新投影（最新证据 × 最新批改）",
+        "round_progress.csv 退回—重交之间的改动幅度与分数变化",
+        "reflections.csv    提交时的反思自述",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def _research_csv_bytes(columns: tuple[str, ...], rows: list[list]) -> bytes:
+    stream = io.StringIO()
+    writer = csv.writer(stream, lineterminator="\n")
+    writer.writerow(columns)
+    writer.writerows(rows)
+    # utf-8-sig BOM 前缀，避免 Excel 打开含中文的 CSV 乱码
+    return ("﻿" + stream.getvalue()).encode("utf-8")
+
+
+@router.get("/research/export")
+async def export_research_dataset(
+    user=Depends(get_admin_user),
+    classroom_id: Optional[str] = Query(default=None, min_length=1),
+    start_at: Optional[int] = Query(default=None, ge=0),
+    end_at: Optional[int] = Query(default=None, ge=0),
+    include_text: bool = Query(default=False),
+    db: Session = Depends(get_session),
+):
+    if start_at is not None and end_at is not None and start_at > end_at:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="start_at must not be later than end_at",
+        )
+
+    assignment_ids: Optional[list[str]] = None
+    if classroom_id is not None:
+        classroom = Education.get_classroom_by_id(classroom_id, db=db)
+        if classroom is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Classroom not found"
+            )
+        assignment_ids = [
+            assignment.id
+            for assignment in Education.get_assignments_by_classroom(
+                classroom_id, db=db
+            )
+        ]
+
+    metric_version = (
+        Education.get_active_profile_metric_version(db=db) or PROFILE_METRIC_VERSION
+    )
+    checksum = profile_algorithm_code_checksum()
+    projections = Education.get_profile_metric_projections_for_export(
+        metric_version,
+        assignment_ids=assignment_ids,
+        start_at=start_at,
+        end_at=end_at,
+        db=db,
+    )
+    evidence_by_id = Education.get_profile_evidence_snapshots_by_ids(
+        [projection.evidence_snapshot_id for projection in projections], db=db
+    )
+
+    submission_rows: list[list] = []
+    round_rows: list[list] = []
+    reflection_rows: list[list] = []
+    for projection in projections:
+        pseudo_id = _research_pseudo_id(projection.student_id)
+        point = projection.projection_json.point
+        completeness = point.data_completeness
+        submission_rows.append(
+            [
+                pseudo_id,
+                point.assignment_id,
+                point.assignment_title,
+                point.round_no,
+                point.is_current,
+                point.submitted_at,
+                point.review_status,
+                point.score,
+                point.score_max,
+                point.normalized_score,
+                point.total_chars,
+                point.inserted_chars,
+                point.revised_chars,
+                point.revision_depth,
+                point.writing_span_seconds,
+                point.active_writing_seconds,
+                point.lead_time_seconds,
+                point.end_loaded_ratio,
+                point.deadline_window_ratio,
+                point.process_index,
+                point.typed_ratio,
+                point.ai_ratio,
+                point.unknown_ratio,
+                point.prompt_count,
+                point.digestion_ratio,
+                point.reflection_quality,
+                point.collaboration_index,
+                point.challenge_status,
+                point.challenge_answer_ratio,
+                point.challenge_unresolved_count,
+                point.challenge_revised,
+                point.critique_hit_ratio,
+                point.burst_count,
+                point.suspected_unmarked_import_count,
+                completeness.version_data,
+                completeness.editor_operations,
+                completeness.source_tracking,
+                completeness.scoring,
+                projection.metric_version,
+                checksum,
+            ]
+        )
+
+        round_progress = projection.projection_json.round_progress
+        if round_progress is not None:
+            round_rows.append(
+                [
+                    pseudo_id,
+                    round_progress.assignment_id,
+                    round_progress.from_round,
+                    round_progress.to_round,
+                    round_progress.char_delta,
+                    round_progress.revision_ratio,
+                    round_progress.score_delta,
+                    round_progress.turnaround_seconds,
+                    projection.metric_version,
+                    checksum,
+                ]
+            )
+
+        evidence = evidence_by_id.get(projection.evidence_snapshot_id)
+        if evidence is not None:
+            reflection_facts = evidence.evidence_json.reflection
+            sections = reflection_facts.reflection
+
+            def section(key: str) -> str:
+                return (getattr(sections, key, "") or "").strip()
+
+            reflection_rows.append(
+                [
+                    pseudo_id,
+                    point.assignment_id,
+                    point.round_no,
+                    point.submitted_at,
+                    reflection_facts.ai_used,
+                    "|".join(reflection_facts.ai_help_types),
+                    len(section("action")),
+                    len(section("location")),
+                    len(section("judgement")),
+                    len(section("next_step")),
+                    point.reflection_quality,
+                    section("action") if include_text else "",
+                    section("location") if include_text else "",
+                    section("judgement") if include_text else "",
+                    section("next_step") if include_text else "",
+                    section("other_ai_help") if include_text else "",
+                ]
+            )
+
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
+        bundle.writestr(
+            "README.txt",
+            _research_readme(
+                metric_version,
+                checksum,
+                len(submission_rows),
+                include_text,
+                classroom_id,
+            ).encode("utf-8"),
+        )
+        bundle.writestr(
+            "submissions.csv",
+            _research_csv_bytes(_RESEARCH_SUBMISSION_COLUMNS, submission_rows),
+        )
+        bundle.writestr(
+            "round_progress.csv",
+            _research_csv_bytes(_RESEARCH_ROUND_COLUMNS, round_rows),
+        )
+        bundle.writestr(
+            "reflections.csv",
+            _research_csv_bytes(_RESEARCH_REFLECTION_COLUMNS, reflection_rows),
+        )
+
+    filename = f"research-export-{metric_version}-{int(time.time())}.zip"
+    return Response(
+        content=archive.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

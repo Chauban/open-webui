@@ -1,8 +1,11 @@
 import asyncio
+import csv
+import io
 import json
 import tempfile
 import time
 import uuid
+import zipfile
 from contextlib import contextmanager
 from pathlib import Path
 import sys
@@ -96,7 +99,7 @@ from open_webui.services.education.profile_evidence import (
 from open_webui.services.education.profile_aggregates import (
     materialize_student_profile_aggregate,
 )
-from open_webui.utils.auth import get_verified_user
+from open_webui.utils.auth import get_admin_user, get_verified_user
 
 
 def _reflection_payload(
@@ -626,8 +629,17 @@ def education_client():
                 raise HTTPException(status_code=401, detail="Missing test user")
             return UserContext.current_user
 
+        def override_admin_user():
+            user = override_verified_user()
+            # 教研导出挂在 get_admin_user 上,这里照样校验 role,好让「教师访问被拒」
+            # 这条断言真的走到权限判断而不是被 override 放行。
+            if user.role != "admin":
+                raise HTTPException(status_code=401, detail="Admin required")
+            return user
+
         app.dependency_overrides[get_session] = override_session
         app.dependency_overrides[get_verified_user] = override_verified_user
+        app.dependency_overrides[get_admin_user] = override_admin_user
 
         client = TestClient(app)
         try:
@@ -5813,3 +5825,76 @@ def test_skipped_challenge_reaches_profile_without_answer_ratio(education_client
         assert point["challenge_status"] == "skipped"
         assert point["challenge_answer_ratio"] is None
         assert point["challenge_revised"] is None
+
+
+def test_research_export_is_admin_only_and_pseudonymized(education_client):
+    client, teacher, _, student, _, _ = education_client
+    assignment, _, submission_id = _setup_submitted_assignment(
+        client, teacher, student, "Research Export"
+    )
+    UserContext.current_user = teacher
+    reviewed = client.post(
+        f"/api/v1/teacher/submissions/{submission_id}/review",
+        json={
+            "review_status": "reviewed",
+            "score": 88,
+            "reflection_score": 4,
+            "rubric_scores": {"ideas": 30, "structure": 29, "evidence": 29},
+        },
+    )
+    assert reviewed.status_code == 200, reviewed.text
+
+    # 教师够不到教研导出:这份数据跨班、含全部过程指标,只给管理员。
+    forbidden = client.get("/api/v1/research/export")
+    assert forbidden.status_code == 401, forbidden.text
+
+    admin = teacher.model_copy(update={"role": "admin"})
+    UserContext.current_user = admin
+    export_res = client.get("/api/v1/research/export")
+    assert export_res.status_code == 200, export_res.text
+    assert export_res.headers["content-type"] == "application/zip"
+
+    with zipfile.ZipFile(io.BytesIO(export_res.content)) as bundle:
+        assert sorted(bundle.namelist()) == [
+            "README.txt",
+            "reflections.csv",
+            "round_progress.csv",
+            "submissions.csv",
+        ]
+        readme = bundle.read("README.txt").decode("utf-8")
+        submissions = bundle.read("submissions.csv").decode("utf-8-sig")
+        reflections = bundle.read("reflections.csv").decode("utf-8-sig")
+
+    assert PROFILE_METRIC_VERSION in readme
+    rows = list(csv.DictReader(io.StringIO(submissions)))
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["assignment_id"] == assignment["id"]
+    assert row["score"] == "88"
+    # 教师给 4 分 → (4-1)/4 = 75
+    assert row["reflection_quality"] == "75"
+    # 跨学期比较前要能发现「这两批不是同一版算法算的」,所以每行都带版本与校验和。
+    assert row["metric_version"] == PROFILE_METRIC_VERSION
+    assert len(row["algorithm_checksum"]) == 64
+    # 导出不含姓名邮箱,学号换成稳定但不可逆的假名。
+    assert student.id not in submissions
+    assert student.email not in submissions
+    assert student.name not in submissions
+    assert len(row["pseudo_id"]) == 16
+
+    # 反思原文默认不导出,只留各段字数。
+    reflection_rows = list(csv.DictReader(io.StringIO(reflections)))
+    assert len(reflection_rows) == 1
+    assert reflection_rows[0]["action_text"] == ""
+    assert int(reflection_rows[0]["action_chars"]) > 0
+    assert reflection_rows[0]["pseudo_id"] == row["pseudo_id"]
+
+    with_text = client.get("/api/v1/research/export?include_text=true")
+    assert with_text.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(with_text.content)) as bundle:
+        text_rows = list(
+            csv.DictReader(
+                io.StringIO(bundle.read("reflections.csv").decode("utf-8-sig"))
+            )
+        )
+    assert text_rows[0]["action_text"] != ""

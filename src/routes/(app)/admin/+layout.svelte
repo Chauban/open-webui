@@ -94,6 +94,15 @@
 							>
 						{/if}
 
+						<!-- Fork 定制：教学模块的管理员入口（教研数据导出） -->
+						<a
+							draggable="false"
+							class="min-w-fit px-1 text-sm {$page.url.pathname.includes('/admin/education')
+								? ''
+								: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition select-none"
+							href="/admin/education">{$i18n.t('Education')}</a
+						>
+
 						<a
 							draggable="false"
 							class="min-w-fit px-1 text-sm {$page.url.pathname.includes('/admin/settings')

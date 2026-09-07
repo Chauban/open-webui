@@ -653,6 +653,45 @@ export const exportClassroomProgress = async (token: string, classroomId: string
 	return res.text();
 };
 
+export type ResearchExportFilters = {
+	classroom_id?: string;
+	start_at?: number;
+	end_at?: number;
+	include_text?: boolean;
+};
+
+// 教研导出返回的是 zip（README + 三张 CSV），不是 CSV 文本，所以取 blob。
+export const exportResearchDataset = async (
+	token: string,
+	filters: ResearchExportFilters = {}
+): Promise<{ blob: Blob; filename: string }> => {
+	const params = new URLSearchParams();
+	if (filters.classroom_id) params.set('classroom_id', filters.classroom_id);
+	if (filters.start_at != null) params.set('start_at', String(filters.start_at));
+	if (filters.end_at != null) params.set('end_at', String(filters.end_at));
+	if (filters.include_text) params.set('include_text', 'true');
+	const query = params.toString();
+	const res = await fetch(
+		`${WEBUI_API_BASE_URL}/research/export${query ? `?${query}` : ''}`,
+		{
+			method: 'GET',
+			headers: {
+				Accept: 'application/zip',
+				authorization: `Bearer ${token}`
+			}
+		}
+	);
+	if (!res.ok) {
+		throw await parseErrorResponse(res);
+	}
+	const disposition = res.headers.get('Content-Disposition') ?? '';
+	const matched = disposition.match(/filename="([^"]+)"/);
+	return {
+		blob: await res.blob(),
+		filename: matched?.[1] ?? 'research-export.zip'
+	};
+};
+
 export const getMyWritingProfile = async (
 	token: string,
 	filters: StudentProfileFilters = {}

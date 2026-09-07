@@ -4169,6 +4169,21 @@ class EducationTable:
             rows = query.order_by(ProfileEvidenceSnapshot.id.asc()).limit(limit).all()
             return [ProfileEvidenceSnapshotModel.model_validate(row) for row in rows]
 
+    def get_profile_evidence_snapshots_by_ids(
+        self, snapshot_ids: list[str], db: Optional[Session] = None
+    ) -> dict[str, ProfileEvidenceSnapshotModel]:
+        if not snapshot_ids:
+            return {}
+        with get_db_context(db) as db:
+            rows = (
+                db.query(ProfileEvidenceSnapshot)
+                .filter(ProfileEvidenceSnapshot.id.in_(snapshot_ids))
+                .all()
+            )
+            return {
+                row.id: ProfileEvidenceSnapshotModel.model_validate(row) for row in rows
+            }
+
     def _latest_profile_evidence_query(
         self,
         db: Session,
@@ -4553,9 +4568,10 @@ class EducationTable:
     def _latest_profile_projection_query(
         self,
         db: Session,
-        student_id: str,
+        student_id: Optional[str],
         metric_version: str,
     ):
+        """student_id 为 None 表示跨学生:教研导出要的是全量,不是某个人的画像。"""
         latest_evidence = (
             db.query(
                 ProfileEvidenceSnapshot.submission_id.label("submission_id"),
@@ -4579,7 +4595,7 @@ class EducationTable:
             .group_by(ProfileMetricProjection.evidence_snapshot_id)
             .subquery()
         )
-        return (
+        query = (
             db.query(ProfileMetricProjection)
             .join(
                 ProfileEvidenceSnapshot,
@@ -4604,11 +4620,41 @@ class EducationTable:
                     == ProfileMetricProjection.review_revision,
                 ),
             )
-            .filter(
-                ProfileMetricProjection.student_id == student_id,
-                ProfileMetricProjection.metric_version == metric_version,
-            )
+            .filter(ProfileMetricProjection.metric_version == metric_version)
         )
+        if student_id is not None:
+            query = query.filter(ProfileMetricProjection.student_id == student_id)
+        return query
+
+    def get_profile_metric_projections_for_export(
+        self,
+        metric_version: str,
+        assignment_ids: Optional[list[str]] = None,
+        start_at: Optional[int] = None,
+        end_at: Optional[int] = None,
+        db: Optional[Session] = None,
+    ) -> list[ProfileMetricProjectionModel]:
+        """教研导出:跨学生取当前算法下的最新投影,不分页。"""
+        if assignment_ids is not None and not assignment_ids:
+            return []
+        with get_db_context(db) as db:
+            query = self._latest_profile_projection_query(db, None, metric_version)
+            if assignment_ids is not None:
+                query = query.filter(
+                    ProfileMetricProjection.assignment_id.in_(assignment_ids)
+                )
+            if start_at is not None:
+                query = query.filter(ProfileMetricProjection.submitted_at >= start_at)
+            if end_at is not None:
+                query = query.filter(ProfileMetricProjection.submitted_at <= end_at)
+            query = query.order_by(
+                ProfileMetricProjection.student_id.asc(),
+                ProfileMetricProjection.submitted_at.asc(),
+                ProfileMetricProjection.round_no.asc(),
+            )
+            return [
+                ProfileMetricProjectionModel.model_validate(row) for row in query.all()
+            ]
 
     def get_profile_metric_projections(
         self,
