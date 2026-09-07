@@ -9,6 +9,7 @@
 	import { resolveErrorMessage } from '$lib/utils/education';
 	import EduButton from '$lib/components/education/EduButton.svelte';
 	import EduCard from '$lib/components/education/EduCard.svelte';
+	import EduDataNotice from '$lib/components/education/EduDataNotice.svelte';
 	import EduTile from '$lib/components/education/EduTile.svelte';
 	import { EDU_FIELD_CLASS } from '$lib/components/education/styles';
 	import { user } from '$lib/stores';
@@ -74,6 +75,8 @@
 					placeholder={$i18n.t('Enter invite code')}
 				/>
 			</div>
+			<!-- 加入班级是学生第一次被纳入教师可见范围，告知放在动作之前。 -->
+			<EduDataNotice scope="classroom" class="mt-6" />
 			<EduButton variant="primary" class="mt-6 w-full" disabled={joining} on:click={join}>
 				{joining ? $i18n.t('Joining...') : $i18n.t('Join Classroom')}
 			</EduButton>

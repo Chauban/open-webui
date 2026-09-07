@@ -13,6 +13,7 @@
 	import WritingComposition from '$lib/components/education/WritingComposition.svelte';
 	import SubmissionHistoryModal from '$lib/components/education/SubmissionHistoryModal.svelte';
 	import AssignmentBrief from '$lib/components/education/AssignmentBrief.svelte';
+	import EduDataNotice from '$lib/components/education/EduDataNotice.svelte';
 	import ChallengeDialog from '$lib/components/education/ChallengeDialog.svelte';
 	import CritiqueDialog from '$lib/components/education/CritiqueDialog.svelte';
 	import ChallengeChecklist from '$lib/components/education/ChallengeChecklist.svelte';
@@ -964,6 +965,7 @@
 						onDetailChange={onChallengeDetailChange}
 					/>
 				{/if}
+				<EduDataNotice {scope} class="mt-3" />
 			</div>
 			<div class="min-h-0 flex-1 overflow-y-auto px-5 py-5">
 				{#if isAssignment && review}
@@ -1080,6 +1082,7 @@
 							onDetailChange={onChallengeDetailChange}
 						/>
 					{/if}
+					<EduDataNotice {scope} class="mt-3" />
 				</div>
 				<div class="min-h-0 flex-1 overflow-y-auto px-5 py-5">
 					{#if isAssignment && review}
