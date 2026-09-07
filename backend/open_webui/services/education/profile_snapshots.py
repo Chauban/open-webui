@@ -254,10 +254,6 @@ async def build_student_profile(
         ai_help_type_distribution=aggregate.ai_help_type_distribution,
         ai_help_type_shift=aggregate.ai_help_type_shift,
         reflection_quality=aggregate.reflection_quality,
-        index_formula=StudentProfileIndexFormula.model_validate(
-            Education.get_profile_formula_config(selected_metric_version, db=db)
-            or _profile_index_formula().model_dump(mode="json")
-        ),
         insights=aggregate.insights,
         data_completeness=aggregate.data_completeness,
         growth_goals=Education.get_student_growth_goals(
@@ -270,6 +266,10 @@ async def build_student_profile(
     if teacher_notes is not None:
         return TeacherStudentProfileResponse(
             **response_data,
+            index_formula=StudentProfileIndexFormula.model_validate(
+                Education.get_profile_formula_config(selected_metric_version, db=db)
+                or _profile_index_formula().model_dump(mode="json")
+            ),
             teacher_notes=teacher_notes,
         )
     return StudentProfileResponse(**response_data)

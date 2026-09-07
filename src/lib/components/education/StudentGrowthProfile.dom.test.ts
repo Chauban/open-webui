@@ -67,7 +67,7 @@ const makeProfile = (teacher = false): any => ({
 		recent: { generative: 0, refining: 0, refining_ratio: null },
 		refining_ratio_delta: null
 	},
-	reflection_quality: { count: 0, average_score: null, average_chars: null },
+	reflection_quality: { count: 0, average_score: null },
 	index_formula: {
 		process_index: {
 			revision_depth: { metric: 'revised_chars / inserted_chars', weight: 1 / 3 },
@@ -80,12 +80,6 @@ const makeProfile = (teacher = false): any => ({
 			reflection: { metric: 'reflection_quality', weight: 1 / 3 },
 			no_ai_fallback_metric: 'reflection_quality'
 		},
-		reflection_quality: {
-			action: { target_chars: 60, max_score: 30 },
-			location: { target_chars: 20, max_score: 20 },
-			judgement: { target_chars: 60, max_score: 30 },
-			next_step: { target_chars: 40, max_score: 20 }
-		}
 	},
 	insights: [],
 	data_completeness: {

@@ -136,8 +136,7 @@ export type StudentProfileTimelinePoint = {
 	unknown_ratio: number | null;
 	prompt_count: number | null;
 	digestion_ratio: number | null;
-	reflection_char_count: number;
-	reflection_quality: number;
+	reflection_quality: number | null;
 	ai_help_types: AIHelpType[];
 	collaboration_index: number | null;
 	burst_count: number | null;
@@ -253,10 +252,6 @@ export type StudentProfileIndexFormula = {
 		reflection: ProfileFormulaTerm;
 		no_ai_fallback_metric: 'reflection_quality';
 	};
-	reflection_quality: Record<
-		'action' | 'location' | 'judgement' | 'next_step',
-		{ target_chars: number; max_score: number }
-	>;
 };
 
 export type StudentProfile = {
@@ -308,9 +303,7 @@ export type StudentProfile = {
 	reflection_quality: {
 		count: number;
 		average_score: number | null;
-		average_chars: number | null;
 	};
-	index_formula: StudentProfileIndexFormula;
 	insights: StudentProfileInsight[];
 	data_completeness: {
 		point_count: number;
@@ -329,7 +322,10 @@ export type StudentProfile = {
 	growth_goals: StudentGrowthGoal[];
 };
 
+// 指数公式只发给教师：教师要能逐项核对、向学生解释这个分怎么来的。
+// 学生端拿到的是自己的指标值与趋势，没有阈值 —— 阈值一公开就是刷分说明书。
 export type TeacherStudentProfile = StudentProfile & {
+	index_formula: StudentProfileIndexFormula;
 	teacher_notes: TeacherStudentNote[];
 };
 

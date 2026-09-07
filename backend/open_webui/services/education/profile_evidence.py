@@ -46,7 +46,7 @@ from open_webui.services.education.profile import (
     _compute_revision_depth,
     _estimate_active_writing_seconds,
     _profile_index_formula,
-    _score_reflection,
+    _reflection_quality_from_review,
     _slice_round_versions,
     _summarize_help_types,
 )
@@ -85,7 +85,7 @@ def profile_algorithm_code_checksum() -> str:
         _compute_process_index,
         _compute_revision_depth,
         _estimate_active_writing_seconds,
-        _score_reflection,
+        _reflection_quality_from_review,
         _build_profile_insights,
         _build_trend,
         _summarize_help_types,
@@ -478,7 +478,9 @@ def build_metric_projection(
         if version_complete
         else None
     )
-    reflection_score = _score_reflection(facts.reflection.reflection)
+    reflection_quality = _reflection_quality_from_review(
+        review_event.reflection_score if review_event else None
+    )
     score_complete = bool(
         review_event
         and review_event.score is not None
@@ -569,13 +571,12 @@ def build_metric_projection(
         ),
         prompt_count=prompt_count,
         digestion_ratio=digestion_ratio,
-        reflection_char_count=reflection_score["char_count"],
-        reflection_quality=reflection_score["score"],
+        reflection_quality=reflection_quality,
         ai_help_types=list(facts.reflection.ai_help_types),
         collaboration_index=_compute_collaboration_index(
             digestion_ratio,
             prompt_count,
-            reflection_score["score"],
+            reflection_quality,
             ai_ratio,
             facts.reflection.ai_used,
         ),

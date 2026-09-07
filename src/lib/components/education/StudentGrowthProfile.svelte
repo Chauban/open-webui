@@ -1242,8 +1242,10 @@
 			</EduCard>
 		{/if}
 
-		<!-- 指数不做黑箱：构成随接口一起返回，这里如实列出 -->
-		{#if activeSection === 'overview'}
+		<!-- 指数对教师不做黑箱：构成随教师端接口返回，这里如实列出。
+		     学生端不给 —— 阈值一公开就是刷分说明书（改够三成、写满三天、问够十条），
+		     学生看到的是自己的指标值和趋势。 -->
+		{#if activeSection === 'overview' && variant === 'teacher'}
 			<EduCard tone="muted">
 				<details>
 					<summary class="cursor-pointer text-sm font-semibold">
@@ -1273,7 +1275,7 @@
 						</p>
 						<p>
 							{$i18n.t(
-								'Reflection quality = concrete action (30) + location (20) + judgement (30) + next step (20). Each part grows with detail up to its target.'
+								'Reflection quality is the 1—5 rating you give the reflection when you review, mapped onto 0—100. It stays empty until the submission is reviewed.'
 							)}
 						</p>
 						<p class="text-gray-500 dark:text-gray-500">

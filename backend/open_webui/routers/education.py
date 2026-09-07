@@ -3523,6 +3523,12 @@ async def save_submission_review(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Reviewed submissions require a total score and complete rubric scores",
         )
+    # 反思质量是教师给的,批完不给分这一维就永远是空的,所以定稿批改时必填。
+    if form_data.review_status == "reviewed" and form_data.reflection_score is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Reviewed submissions require a reflection score",
+        )
     if not submission.is_current:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

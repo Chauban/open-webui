@@ -9,8 +9,6 @@ from open_webui.models.education import (
     StudentProfileInsight,
     StudentProfileMetricTrend,
     StudentProfileProcessFormula,
-    StudentProfileReflectionFormula,
-    StudentProfileReflectionFormulaTerm,
     StudentProfileReflectionQuality,
 )
 
@@ -31,17 +29,14 @@ _DEADLINE_WINDOW_SECONDS = 24 * 3600
 _PROCESS_TARGET_REVISION_RATIO = 0.3
 _PROCESS_TARGET_SPAN_SECONDS = 3 * 24 * 3600
 _COLLABORATION_TARGET_PROMPTS = 10
-_REFLECTION_EVIDENCE_TARGETS = {
-    "action": (60, 30),
-    "location": (20, 20),
-    "judgement": (60, 30),
-    "next_step": (40, 20),
-}
+# 教师给的 1—5 分折算到 0—100,好让它和其他比率型指标同尺度参与合成。
+_REFLECTION_TEACHER_SCORE_MIN = 1
+_REFLECTION_TEACHER_SCORE_MAX = 5
 _PROFILE_MAX_INSIGHTS = 5
 _TREND_FLAT_TOLERANCE = 0.05
 _TREND_MIN_SAMPLES = 3
 _TREND_MAX_WINDOW = 3
-PROFILE_METRIC_VERSION = "2026-09-06.3"
+PROFILE_METRIC_VERSION = "2026-09-07.1"
 PROFILE_INSIGHT_VERSION = "2026-09-03.1"
 
 _INSIGHT_META = {
@@ -92,7 +87,12 @@ _PROFILE_TREND_KEYS = (
 )
 
 def _profile_index_formula() -> StudentProfileIndexFormula:
-    """把两个合成指数的构成如实返回,前端可展开查看,避免出现黑箱分数。"""
+    """把两个合成指数的构成如实返回。
+
+    只发给教师端 —— 教师要能逐项核对、向学生解释这个分怎么来的。学生端不给,
+    阈值一旦公开就是一份刷分说明书(改够三成、写满三天、问够十条),学生看到的
+    是自己的指标值与趋势。
+    """
     return StudentProfileIndexFormula(
         process_index=StudentProfileProcessFormula(
             revision_depth=StudentProfileFormulaTerm(
@@ -122,15 +122,16 @@ def _profile_index_formula() -> StudentProfileIndexFormula:
                 metric="reflection_quality", weight=1 / 3
             ),
         ),
-        reflection_quality=StudentProfileReflectionFormula(
-            **{
-                key: StudentProfileReflectionFormulaTerm(
-                    target_chars=target, max_score=weight
-                )
-                for key, (target, weight) in _REFLECTION_EVIDENCE_TARGETS.items()
-            }
-        ),
     )
+
+
+def _reflection_quality_from_review(reflection_score: Optional[int]) -> Optional[int]:
+    """教师给的 1—5 分折算成 0—100;没批改就是空,不折算成 0。"""
+    if reflection_score is None:
+        return None
+    span = _REFLECTION_TEACHER_SCORE_MAX - _REFLECTION_TEACHER_SCORE_MIN
+    ratio = (reflection_score - _REFLECTION_TEACHER_SCORE_MIN) / span
+    return int(round(min(max(ratio, 0.0), 1.0) * 100))
 
 
 def _estimate_active_writing_seconds(marks: list[int]) -> Optional[int]:
@@ -182,29 +183,6 @@ def _compute_deadline_window_ratio(
     return round(deadline_window_inserted / total_inserted, 4)
 
 
-def _score_reflection(reflection) -> dict:
-    if reflection is None:
-        return {"char_count": 0, "score": 0}
-
-    def _value(key: str) -> str:
-        value = (
-            reflection.get(key, "")
-            if isinstance(reflection, dict)
-            else getattr(reflection, key, "")
-        )
-        return (value or "").strip()
-
-    sections = {key: _value(key) for key in _REFLECTION_EVIDENCE_TARGETS}
-    score = sum(
-        min(len(sections[key]) / target, 1.0) * weight
-        for key, (target, weight) in _REFLECTION_EVIDENCE_TARGETS.items()
-    )
-    return {
-        "char_count": sum(len(value) for value in sections.values()),
-        "score": int(round(score)),
-    }
-
-
 def _compute_revision_depth(revised_chars: int, inserted_chars: int) -> Optional[int]:
     """回头删改的字符量占写入量的比例,折算成 0-100。
 
@@ -233,10 +211,15 @@ def _compute_process_index(
 def _compute_collaboration_index(
     digestion_ratio: Optional[int],
     prompt_count: Optional[int],
-    reflection_quality: int,
+    reflection_quality: Optional[int],
     ai_ratio: Optional[float],
     ai_used: bool,
 ) -> Optional[int]:
+    # 反思质量来自教师批改,批改之前这一维就是空的 —— 未批改的提交本来也还没有
+    # 完整评价,留空比先给个假分诚实。
+    if reflection_quality is None:
+        return None
+
     # 没用 AI 的提交不该被「消化度 0」拖成低分,这一维退化为只看反思质量。
     if not ai_used:
         return int(round(reflection_quality))
@@ -500,6 +483,7 @@ def _build_profile_insights(
         and latest.ai_ratio >= 0.1
         and latest.digestion_ratio is not None
         and latest.digestion_ratio >= 50
+        and latest.reflection_quality is not None
         and latest.reflection_quality >= 60
         and latest.revision_depth is not None
         and latest.revision_depth >= 40
@@ -526,6 +510,7 @@ def _build_profile_insights(
         and latest.ai_ratio >= 0.3
         and latest.digestion_ratio is not None
         and latest.digestion_ratio < 30
+        and latest.reflection_quality is not None
         and latest.reflection_quality < 50
         and latest.revision_depth is not None
         and latest.revision_depth < 20

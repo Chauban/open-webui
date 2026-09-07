@@ -64,7 +64,7 @@ const profile: StudentProfile = {
 		recent: { generative: 0, refining: 0, refining_ratio: null },
 		refining_ratio_delta: null
 	},
-	reflection_quality: { count: 0, average_score: null, average_chars: null },
+	reflection_quality: { count: 0, average_score: null },
 	index_formula: {
 		process_index: { revision_depth: term, span_effort: term, pacing: term },
 		collaboration_index: {
@@ -73,12 +73,6 @@ const profile: StudentProfile = {
 			reflection: term,
 			no_ai_fallback_metric: 'reflection_quality'
 		},
-		reflection_quality: {
-			action: { target_chars: 60, max_score: 30 },
-			location: { target_chars: 20, max_score: 20 },
-			judgement: { target_chars: 60, max_score: 30 },
-			next_step: { target_chars: 40, max_score: 20 }
-		}
 	},
 	insights: [
 		{

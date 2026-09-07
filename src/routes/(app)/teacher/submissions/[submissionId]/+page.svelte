@@ -66,6 +66,7 @@
 	let highlight = true;
 	let reviewStatus = 'pending';
 	let score = '';
+	let reflectionScore = '';
 	let overallComment = '';
 	let rubricScores = {};
 	let returnedComment = '';
@@ -218,6 +219,7 @@
 	const syncReview = () => {
 		const review = detail?.review;
 		reviewStatus = review?.review_status || 'pending';
+		reflectionScore = review?.reflection_score != null ? String(review.reflection_score) : '';
 		overallComment = review?.overall_comment || '';
 		rubricScores = Object.fromEntries(
 			(detail?.assignment?.rubric_schema?.criteria ?? []).map((criterion) => [
@@ -254,6 +256,11 @@
 			toast.error(t('Reviewed submissions require a total score and complete rubric scores.'));
 			return false;
 		}
+		const parsedReflectionScore = reflectionScore === '' ? null : Number(reflectionScore);
+		if (effectiveStatus === 'reviewed' && parsedReflectionScore == null) {
+			toast.error(t('Rate the reflection before marking this submission reviewed.'));
+			return false;
+		}
 		let resubmitDueAt: number | null = null;
 		if (effectiveStatus === 'returned') {
 			resubmitDueAt = toEpoch(resubmitDueLocal);
@@ -268,6 +275,7 @@
 			const response = await saveSubmissionReview(localStorage.token, $page.params.submissionId, {
 				review_status: effectiveStatus,
 				score: parsedScore,
+				reflection_score: parsedReflectionScore,
 				overall_comment: overallComment.trim(),
 				rubric_scores: parsedRubricScores,
 				returned_comment: returnedComment.trim(),
@@ -732,6 +740,35 @@
 											<span class="text-lg font-semibold tabular-nums">{score === '' ? '—' : score}</span>
 											<span class="text-sm text-gray-400"> / {detail.assignment.score_max}</span>
 										</span>
+									</div>
+								</div>
+
+								<!-- Reflection quality: the only source of this metric; character counts never were one -->
+								<div>
+									<div class="mb-1.5 text-xs font-medium uppercase tracking-[0.12em] text-gray-400">
+										{$i18n.t('Reflection Quality')}
+									</div>
+									<div class="rounded-2xl border border-gray-200 dark:border-gray-800 px-4 py-3">
+										<div class="flex items-center gap-1.5">
+											{#each [1, 2, 3, 4, 5] as option}
+												<button
+													type="button"
+													disabled={isHistoricalRound}
+													on:click={() => (reflectionScore = String(option))}
+													class="h-9 flex-1 rounded-xl border text-sm font-semibold tabular-nums transition-colors disabled:opacity-50 {reflectionScore ===
+													String(option)
+														? 'border-gray-900 bg-gray-900 text-white dark:border-white dark:bg-white dark:text-gray-900'
+														: 'border-gray-200 text-gray-500 hover:border-gray-400 dark:border-gray-800 dark:text-gray-400'}"
+												>
+													{option}
+												</button>
+											{/each}
+										</div>
+										<p class="mt-2 text-xs text-gray-400 dark:text-gray-500">
+											{$i18n.t(
+												'Rate how well the reflection names what the student actually did and judged. 1 = perfunctory, 5 = specific and self-aware.'
+											)}
+										</p>
 									</div>
 								</div>
 

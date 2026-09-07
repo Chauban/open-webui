@@ -99,27 +99,17 @@ def build_student_profile_aggregate(
     for point in cross_assignment_timeline:
         for help_type in point.ai_help_types:
             help_distribution[help_type] = help_distribution.get(help_type, 0) + 1
+    # 只统计教师已批改的提交;未批改的反思还没有质量分,不能当 0 拉低平均。
     reflection_scores = [
-        point.reflection_quality for point in cross_assignment_timeline
+        point.reflection_quality
+        for point in cross_assignment_timeline
+        if point.reflection_quality is not None
     ]
     reflection_quality = StudentProfileReflectionQuality(
         count=len(reflection_scores),
         average_score=(
             int(round(sum(reflection_scores) / len(reflection_scores)))
             if reflection_scores
-            else None
-        ),
-        average_chars=(
-            int(
-                round(
-                    sum(
-                        point.reflection_char_count
-                        for point in cross_assignment_timeline
-                    )
-                    / len(cross_assignment_timeline)
-                )
-            )
-            if cross_assignment_timeline
             else None
         ),
     )

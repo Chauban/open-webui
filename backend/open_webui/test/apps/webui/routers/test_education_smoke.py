@@ -1217,6 +1217,7 @@ def test_teacher_review_lifecycle_assignment_update_and_classroom_progress(
         f"/api/v1/teacher/submissions/{submission_id}/review",
         json={
             "review_status": "reviewed",
+            "reflection_score": 4,
             "score": 92,
             "overall_comment": "Strong revision and clear structure.",
             "rubric_scores": {"ideas": 30, "structure": 31, "evidence": 31},
@@ -1367,8 +1368,11 @@ def test_student_assignment_and_profile_views(education_client):
     assert point["submission_id"] == submission_id
     assert point["assignment_id"] == assignment["id"]
     assert point["ai_help_types"] == ["Outline"]
-    assert point["reflection_quality"] > 0
+    # 反思质量来自教师批改,这份还没批,所以是空的。
+    assert point["reflection_quality"] is None
     assert point["process_index"] is None or 0 <= point["process_index"] <= 100
+    # 指数阈值只发给教师端;学生拿到的是自己的值和趋势,没有及格线。
+    assert "index_formula" not in profile
     assert point["data_completeness"] == {
         "version_data": "complete",
         "editor_operations": "complete",
@@ -1385,7 +1389,6 @@ def test_student_assignment_and_profile_views(education_client):
     assert insight_codes[0] == "not_enough_data"
     assert "reflection_thin" not in insight_codes
     assert profile["insights"][0]["action_code"] == "complete_more_submissions"
-    assert profile["index_formula"]["process_index"]["revision_depth"]["target"] > 0
 
     blank_invite_res = client.post(
         "/api/v1/classrooms/join", json={"invite_code": "   "}
@@ -2157,6 +2160,7 @@ def test_student_workspace_exposes_review_after_grading(education_client):
         f"/api/v1/teacher/submissions/{submission_id}/review",
         json={
             "review_status": "reviewed",
+            "reflection_score": 4,
             "score": 88,
             "overall_comment": "Strong structure",
             "rubric_scores": {"ideas": 30, "structure": 29, "evidence": 29},
@@ -2238,6 +2242,8 @@ def test_resubmit_before_review_overwrites_same_round(education_client):
     )
     assert profile.status_code == 200, profile.text
     assert profile.json()["timeline_pagination"]["total"] == 1
+    # 教师要能逐项核对这个分怎么来的,所以公式只发给教师端。
+    assert profile.json()["index_formula"]["process_index"]["revision_depth"]["target"] > 0
 
 
 def test_returned_submission_opens_new_round_and_keeps_history(education_client):
@@ -2296,7 +2302,7 @@ def test_returned_submission_opens_new_round_and_keeps_history(education_client)
     # 历史轮禁止再保存评语
     historic_save = client.post(
         f"/api/v1/teacher/submissions/{submission_id}/review",
-        json={"review_status": "reviewed", "score": 80},
+        json={"review_status": "reviewed", "score": 80, "reflection_score": 4},
     )
     assert historic_save.status_code == 400, historic_save.text
 
@@ -2327,6 +2333,7 @@ def test_reviewed_submission_cannot_be_resubmitted(education_client):
         f"/api/v1/teacher/submissions/{submission_id}/review",
         json={
             "review_status": "reviewed",
+            "reflection_score": 4,
             "score": 85,
             "rubric_scores": {"ideas": 29, "structure": 28, "evidence": 28},
         },
@@ -2477,6 +2484,7 @@ def test_notifications_flow(education_client):
         f"/api/v1/teacher/submissions/{submission_id}/review",
         json={
             "review_status": "reviewed",
+            "reflection_score": 4,
             "score": 90,
             "rubric_scores": {"ideas": 30, "structure": 30, "evidence": 30},
         },
@@ -2900,20 +2908,12 @@ def test_deadline_window_ratio_uses_the_final_24_hours():
     assert education_profile_module._compute_deadline_window_ratio(diffs, due_at) == 0.5
 
 
-def test_reflection_score_separates_concrete_from_generic():
-    generic = education_profile_module._score_reflection(
-        _reflection_payload(
-            action="改了部分内容",
-            location="第二段",
-            judgement="感觉这样会更好一些",
-            next_step="继续改进",
-        )
-    )
-    concrete = education_profile_module._score_reflection(_reflection_payload())
-
-    assert concrete["score"] > generic["score"]
-    assert concrete["score"] >= 60
-    assert education_profile_module._score_reflection(None)["score"] == 0
+def test_reflection_quality_comes_from_the_teacher_rating():
+    # 教师给的 1—5 分线性折算到 0—100;没批改就是空,不折算成 0。
+    assert education_profile_module._reflection_quality_from_review(1) == 0
+    assert education_profile_module._reflection_quality_from_review(3) == 50
+    assert education_profile_module._reflection_quality_from_review(5) == 100
+    assert education_profile_module._reflection_quality_from_review(None) is None
 
 
 def test_collaboration_index_falls_back_to_reflection_without_ai():
@@ -2933,8 +2933,18 @@ def test_collaboration_index_falls_back_to_reflection_without_ai():
         ai_used=True,
     )
 
+    unreviewed = education_profile_module._compute_collaboration_index(
+        digestion_ratio=60,
+        prompt_count=8,
+        reflection_quality=None,
+        ai_ratio=0.5,
+        ai_used=True,
+    )
+
     assert without_ai == 80
     assert with_ai < without_ai
+    # 反思质量来自教师批改,批改之前这一维留空而不是先给个假分。
+    assert unreviewed is None
 
 
 def test_submission_form_allows_no_ai_and_rejects_unknown_help_types():
@@ -2997,13 +3007,14 @@ def test_profile_normalizes_scores_by_assignment_maximum(education_client):
     UserContext.current_user = teacher
     too_high = client.post(
         f"/api/v1/teacher/submissions/{submission_id}/review",
-        json={"review_status": "reviewed", "score": 51},
+        json={"review_status": "reviewed", "score": 51, "reflection_score": 4},
     )
     assert too_high.status_code == 400
     invalid_rubric = client.post(
         f"/api/v1/teacher/submissions/{submission_id}/review",
         json={
             "review_status": "reviewed",
+            "reflection_score": 4,
             "score": 40,
             "rubric_scores": {"ideas": 40, "structure": 0, "evidence": 0},
         },
@@ -3013,6 +3024,7 @@ def test_profile_normalizes_scores_by_assignment_maximum(education_client):
         f"/api/v1/teacher/submissions/{submission_id}/review",
         json={
             "review_status": "reviewed",
+            "reflection_score": 4,
             "score": 40,
             "rubric_scores": {"ideas": 14, "structure": 13, "evidence": 13},
         },
@@ -3064,6 +3076,7 @@ def test_student_profile_tracks_round_progress_and_trends(
         f"/api/v1/teacher/submissions/{second_submission_id}/review",
         json={
             "review_status": "reviewed",
+            "reflection_score": 4,
             "score": 88,
             "overall_comment": "Much stronger evidence",
             "rubric_scores": {"ideas": 30, "structure": 29, "evidence": 29},
@@ -3216,6 +3229,7 @@ def test_profile_snapshot_failure_rolls_back_review(education_client, monkeypatc
             f"/api/v1/teacher/submissions/{submission_id}/review",
             json={
                 "review_status": "reviewed",
+                "reflection_score": 4,
                 "score": 80,
                 "rubric_scores": {"ideas": 27, "structure": 27, "evidence": 26},
             },
@@ -3604,6 +3618,7 @@ def test_submission_review_events_are_append_only(education_client):
         f"/api/v1/teacher/submissions/{submission_id}/review",
         json={
             "review_status": "reviewed",
+            "reflection_score": 4,
             "score": 80,
             "rubric_scores": {"ideas": 27, "structure": 27, "evidence": 26},
         },
@@ -3933,9 +3948,7 @@ def test_profile_insights_rank_confidence_and_combine_ai_evidence():
         early=StudentProfileHelpTypeSummary(),
         recent=StudentProfileHelpTypeSummary(),
     )
-    reflection_quality = StudentProfileReflectionQuality(
-        count=3, average_score=30, average_chars=20
-    )
+    reflection_quality = StudentProfileReflectionQuality(count=3, average_score=30)
 
     insights = education_profile_module._build_profile_insights(
         timeline, round_progress, trends, help_shift, reflection_quality

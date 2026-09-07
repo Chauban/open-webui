@@ -1,5 +1,7 @@
 {
 	"Breadcrumb": "Breadcrumb",
+	"Rate how well the reflection names what the student actually did and judged. 1 = perfunctory, 5 = specific and self-aware.": "Rate how well the reflection names what the student actually did and judged. 1 = perfunctory, 5 = specific and self-aware.",
+	"Rate the reflection before marking this submission reviewed.": "Rate the reflection before marking this submission reviewed.",
 	"Recorded by the student browser while writing, so it can be incomplete or bypassed. Use it to talk through the writing process, not as proof of academic misconduct.": "Recorded by the student browser while writing, so it can be incomplete or bypassed. Use it to talk through the writing process, not as proof of academic misconduct.",
 	"A heuristic pointer for where to look first, not a conclusion.": "A heuristic pointer for where to look first, not a conclusion.",
 	"Extend": "Extend",
@@ -7,6 +9,7 @@
 	"Change Due Time": "Change Due Time",
 	"New due time for this student": "New due time for this student",
 	"Reason (optional)": "Reason (optional)",
+	"Reflection quality is the 1—5 rating you give the reflection when you review, mapped onto 0—100. It stays empty until the submission is reviewed.": "Reflection quality is the 1—5 rating you give the reflection when you review, mapped onto 0—100. It stays empty until the submission is reviewed.",
 	"Sick leave, device failure, ...": "Sick leave, device failure, ...",
 	"Remove Extension": "Remove Extension",
 	"Extension saved.": "Extension saved.",
@@ -2495,7 +2498,6 @@
 	"Reflection Quality": "",
 	"Reflection Text": "Reflection Text",
 	"Reflection must be at least 30 characters.": "Reflection must be at least 30 characters.",
-	"Reflection quality = concrete action (30) + location (20) + judgement (30) + next step (20). Each part grows with detail up to its target.": "Reflection quality = concrete action (30) + location (20) + judgement (30) + next step (20). Each part grows with detail up to its target.",
 	"Reflection quality = length (up to 40) + concrete action (20) + concrete location (20) + self-judgement (20).": "",
 	"Reflections are mostly generic (average quality {{score}}/100).": "",
 	"Refresh": "",
