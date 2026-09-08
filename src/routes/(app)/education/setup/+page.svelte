@@ -111,7 +111,7 @@
 					<input
 						bind:value={classroomName}
 						class="w-full {EDU_FIELD_CLASS}"
-						placeholder={$i18n.t('Example: Grade 8 Writing')}
+						placeholder={$i18n.t('Example: Writing and Communication, 2025 Section 2')}
 					/>
 					<div class="mt-2 text-sm text-gray-500 dark:text-gray-400">
 						{$i18n.t('Create your first classroom now. You can add more classrooms later from Teaching.')}

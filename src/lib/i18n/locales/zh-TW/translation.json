@@ -1120,7 +1120,7 @@
 	"Example": "",
 	"Example: (&(objectClass=inetOrgPerson)(uid=%s))": "範例：(&(objectClass=inetOrgPerson)(uid=%s))",
 	"Example: ALL": "範例：ALL",
-	"Example: Grade 8 Writing": "例如：八年級寫作班",
+	"Example: Writing and Communication, 2025 Section 2": "例如：寫作與交流 · 2025 級 2 班",
 	"Example: mail": "範例：mail",
 	"Example: ou=users,dc=foo,dc=example": "範例：ou=users,dc=foo,dc=example",
 	"Example: sAMAccountName or uid or userPrincipalName": "範例：sAMAccountName 或 uid 或 userPrincipalName",

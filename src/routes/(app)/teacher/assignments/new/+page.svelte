@@ -232,7 +232,7 @@
 					<input
 						bind:value={title}
 						class="w-full {EDU_FIELD_CLASS}"
-						placeholder={$i18n.t('Argument Essay 1')}
+						placeholder={$i18n.t('Academic Argument 1')}
 					/>
 				</div>
 				<div>
@@ -240,7 +240,7 @@
 					<textarea
 						bind:value={description}
 						class="min-h-32 w-full {EDU_FIELD_CLASS}"
-						placeholder={$i18n.t('Write a short argument essay.')}
+						placeholder={$i18n.t('Write a short academic argument.')}
 					></textarea>
 				</div>
 				<div>

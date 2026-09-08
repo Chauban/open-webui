@@ -86,7 +86,7 @@
 				<input
 					bind:value={classroomName}
 					class={EDU_FIELD_CLASS}
-					placeholder={$i18n.t('Example: Grade 8 Writing')}
+					placeholder={$i18n.t('Example: Writing and Communication, 2025 Section 2')}
 				/>
 				<EduButton variant="primary" on:click={submitCreateClassroom} disabled={creating}>
 					{creating ? $i18n.t('Creating...') : $i18n.t('Create Classroom')}
