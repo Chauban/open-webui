@@ -87,10 +87,6 @@ def upgrade() -> None:
             "analysis_result_scope_type_idx",
             ["writing_session_id", "submission_id", "result_type"],
         )
-    with op.batch_alter_table("micro_reflection") as batch:
-        batch.create_check_constraint(
-            "micro_reflection_ai_used_check", "ai_used IN (0, 1)"
-        )
     with op.batch_alter_table("editor_operation") as batch:
         batch.add_column(sa.Column("occurred_at_ms", sa.BigInteger(), nullable=False))
         batch.add_column(sa.Column("client_sequence", sa.BigInteger(), nullable=False))

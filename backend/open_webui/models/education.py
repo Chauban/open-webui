@@ -311,9 +311,6 @@ class AnalysisResult(Base):
 
 class MicroReflection(Base):
     __tablename__ = "micro_reflection"
-    __table_args__ = (
-        CheckConstraint("ai_used IN (0, 1)", name="micro_reflection_ai_used_check"),
-    )
 
     id = Column(Text, primary_key=True, unique=True)
     assignment_id = Column(Text, nullable=False)
