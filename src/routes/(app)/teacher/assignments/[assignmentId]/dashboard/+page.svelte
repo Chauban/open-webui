@@ -184,18 +184,6 @@
 								)}
 							</div>
 							<div class="flex items-center gap-3">
-								{#if row.critique_total > 0}
-									<!--
-										写前认得出这个毛病的人次。认得出别人的、写自己时照样犯，
-										这个对照才是写前评析和提交前质疑合起来的价值。
-									-->
-									<span class="text-xs text-gray-400">
-										{$i18n.t('{{hits}} of {{total}} spotted it before writing', {
-											hits: row.critique_hits,
-											total: row.critique_total
-										})}
-									</span>
-								{/if}
 								<EduButton variant="link" on:click={() => useAsNextFocus(row.focus_key)}>
 									{$i18n.t('Use as next challenge focus')}
 								</EduButton>

@@ -116,10 +116,6 @@ class Assignment(Base):
     challenge_enabled = Column(Boolean, nullable=False, default=False)
     challenge_rounds = Column(Integer, nullable=False, default=3)
     challenge_focus_keys = Column(JSONField, nullable=False, default=list)
-    # 写作前的评析靶文与预设漏洞。与质疑构成对称：写前建立判断标准，写后用于自己。
-    critique_enabled = Column(Boolean, nullable=False, default=False)
-    critique_text = Column(Text, nullable=True)
-    critique_flaws = Column(JSONField, nullable=False, default=list)
     rubric_schema = Column(JSONField, nullable=False)
     archived_at = Column(BigInteger, nullable=True)
     created_at = Column(BigInteger, nullable=False)
@@ -393,30 +389,6 @@ class ChallengeTurn(Base):
     response_text = Column(Text, nullable=True)
     responded_at = Column(BigInteger, nullable=True)
     created_at = Column(BigInteger, nullable=False)
-
-
-class CritiqueAttempt(Base):
-    """一个学生对靶文的一次评析。
-
-    一次作业至多一条:这是写作前的一道门,不是可以反复刷的练习。靶文与预设漏洞挂在
-    assignment 上,不随 attempt 复制。
-    """
-
-    __tablename__ = "critique_attempt"
-    __table_args__ = (
-        UniqueConstraint(
-            "assignment_id", "student_id", name="critique_attempt_student_idx"
-        ),
-    )
-
-    id = Column(Text, primary_key=True, unique=True)
-    assignment_id = Column(
-        Text, ForeignKey("assignment.id", ondelete="CASCADE"), nullable=False
-    )
-    student_id = Column(Text, nullable=False)
-    items_json = Column(JSONField, nullable=False, default=list)
-    matches_json = Column(JSONField, nullable=False, default=list)
-    completed_at = Column(BigInteger, nullable=False)
 
 
 class ChallengeInsight(Base):
@@ -848,95 +820,6 @@ class RubricSchema(BaseModel):
         return sum(criterion.max_score for criterion in self.criteria)
 
 
-CRITIQUE_MAX_ITEMS = 3
-
-
-class CritiqueFlaw(BaseModel):
-    """靶文里一处预设的漏洞。
-
-    绑定 rubric 维度,命中情况才能并进按维度的班级统计。教师必须逐条确认——AI 生成的
-    漏洞未必真成立,挂上去就是教错。
-    """
-
-    key: str = Field(min_length=1, max_length=64)
-    description: str = Field(min_length=1, max_length=500)
-    focus_key: str = Field(min_length=1)
-
-
-class CritiqueMatch(BaseModel):
-    """一处预设漏洞有没有被这个学生找出来。只报命中,不给分、不给等级。"""
-
-    key: str
-    focus_key: str
-    hit: bool = False
-
-
-class CritiqueAttemptModel(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: str
-    assignment_id: str
-    student_id: str
-    items_json: list[str] = Field(default_factory=list)
-    matches_json: list[CritiqueMatch] = Field(default_factory=list)
-    completed_at: int
-
-
-class CritiqueSubmitForm(BaseModel):
-    """学生写出他认为站不住的地方。
-
-    至多三条,且**不设及格线**——找出一条也放行。一旦设卡,学生会转而猜测系统想要
-    什么答案,训练目标当场失效。
-    """
-
-    items: list[str] = Field(default_factory=list, max_length=CRITIQUE_MAX_ITEMS)
-    model: str
-
-
-class CritiqueStateResponse(BaseModel):
-    enabled: bool = False
-    text: str = ""
-    completed: bool = False
-    attempt: Optional[CritiqueAttemptModel] = None
-
-
-def validate_critique_config(
-    enabled: bool,
-    text: Optional[str],
-    flaws: list,
-    rubric: RubricSchema,
-) -> tuple[Optional[str], list[dict]]:
-    """靶文配置的唯一校验入口。
-
-    与质疑同一条约束:漏洞绑的维度必须是本作业已有的评分维度。没有维度就没有对齐的
-    方向,命中情况也并不进按维度的统计。
-    """
-
-    if not enabled:
-        return (text or None), []
-
-    body = (text or "").strip()
-    if not body:
-        raise ValueError("Critique needs a target text")
-
-    parsed = [CritiqueFlaw.model_validate(flaw) for flaw in flaws]
-    if not parsed:
-        raise ValueError("Critique needs at least one preset flaw")
-
-    valid_keys = {criterion.key for criterion in rubric.criteria}
-    if not valid_keys:
-        raise ValueError("Critique requires rubric criteria")
-    for flaw in parsed:
-        if flaw.focus_key not in valid_keys:
-            raise ValueError(f"Unknown rubric criterion: {flaw.focus_key}")
-
-    keys = [flaw.key for flaw in parsed]
-    if len(set(keys)) != len(keys):
-        raise ValueError("Critique flaw keys must be unique")
-
-    return body, [flaw.model_dump() for flaw in parsed]
-
-
 class AssignmentModel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -952,9 +835,6 @@ class AssignmentModel(BaseModel):
     challenge_enabled: bool
     challenge_rounds: int
     challenge_focus_keys: list[str] = Field(default_factory=list)
-    critique_enabled: bool = False
-    critique_text: Optional[str] = None
-    critique_flaws: list[CritiqueFlaw] = Field(default_factory=list)
     rubric_schema: RubricSchema
     archived_at: Optional[int] = None
     created_at: int
@@ -1313,9 +1193,6 @@ class AssignmentCreateForm(BaseModel):
     challenge_enabled: bool = False
     challenge_rounds: int = 3
     challenge_focus_keys: list[str] = Field(default_factory=list)
-    critique_enabled: bool = False
-    critique_text: Optional[str] = None
-    critique_flaws: list[CritiqueFlaw] = Field(default_factory=list)
     rubric_schema: RubricSchema
 
     @model_validator(mode="after")
@@ -1335,18 +1212,6 @@ class AssignmentCreateForm(BaseModel):
         )
         return self
 
-    @model_validator(mode="after")
-    def validate_critique(self):
-        text, flaws = validate_critique_config(
-            self.critique_enabled,
-            self.critique_text,
-            [flaw.model_dump() for flaw in self.critique_flaws],
-            self.rubric_schema,
-        )
-        self.critique_text = text
-        self.critique_flaws = [CritiqueFlaw.model_validate(flaw) for flaw in flaws]
-        return self
-
 
 class AssignmentUpdateForm(BaseModel):
     title: Optional[str] = None
@@ -1361,11 +1226,6 @@ class AssignmentUpdateForm(BaseModel):
     # 焦点 key 要对着「更新后」的 rubric 校验,而 rubric 可能不在本次请求里,
     # 所以交叉校验放在 update_assignment 里做,那里能拿到库里的现值。
     challenge_focus_keys: Optional[list[str]] = None
-    # 靶文同理：漏洞绑的维度要对着「更新后」的 rubric 校验，交叉校验放在
-    # update_assignment 里做。
-    critique_enabled: Optional[bool] = None
-    critique_text: Optional[str] = None
-    critique_flaws: Optional[list[CritiqueFlaw]] = None
     rubric_schema: Optional[RubricSchema] = None
 
     @model_validator(mode="after")
@@ -1983,18 +1843,6 @@ class ProfileEvidencePreviousRound(StrictProfileModel):
     resubmit_due_at: Optional[int] = Field(default=None, ge=0)
 
 
-class ProfileEvidenceCritique(StrictProfileModel):
-    """写作前评析的事实,提交时已冻在 stats_json 里。
-
-    只记做没做、命中几条。**不记分数、不记等级**——这个环节从设计上就不给分。
-    """
-
-    enabled: bool = False
-    completed: bool = False
-    hits: int = Field(default=0, ge=0)
-    total: int = Field(default=0, ge=0)
-
-
 class ProfileEvidenceChallenge(StrictProfileModel):
     """这一轮提交前读者试读的事实,提交时已冻在 stats_json 里。
 
@@ -2015,7 +1863,7 @@ class ProfileEvidenceChallenge(StrictProfileModel):
 
 
 class ProfileEvidencePayload(StrictProfileModel):
-    evidence_schema_version: Literal["2026-09-06.3"] = "2026-09-06.3"
+    evidence_schema_version: Literal["2026-09-08.1"] = "2026-09-08.1"
     submission_id: str = Field(min_length=1)
     student_id: str = Field(min_length=1)
     assignment_id: str = Field(min_length=1)
@@ -2032,9 +1880,6 @@ class ProfileEvidencePayload(StrictProfileModel):
     provenance: list[ProfileEvidenceProvenanceEvent]
     conversation: list[ProfileEvidenceConversationEvent]
     reflection: ProfileEvidenceReflection
-    critique: ProfileEvidenceCritique = Field(
-        default_factory=ProfileEvidenceCritique
-    )
     challenge: ProfileEvidenceChallenge = Field(
         default_factory=ProfileEvidenceChallenge
     )
@@ -2138,7 +1983,6 @@ class StudentProfileTimelinePoint(StrictProfileModel):
     challenge_answer_ratio: Optional[int] = Field(default=None, ge=0, le=100)
     challenge_unresolved_count: Optional[int] = Field(default=None, ge=0)
     challenge_revised: Optional[bool] = None
-    critique_hit_ratio: Optional[int] = Field(default=None, ge=0, le=100)
 
     # 风险信号:只做展示,不参与任何成长指数。
     burst_count: Optional[int] = Field(default=None, ge=0)
@@ -2821,26 +2665,6 @@ class EducationTable:
                 bool(assignment.challenge_enabled),
             )
 
-            if "critique_enabled" in form_data.model_fields_set:
-                if form_data.critique_enabled is None:
-                    raise ValueError("Critique switch is required")
-                assignment.critique_enabled = form_data.critique_enabled
-            if "critique_text" in form_data.model_fields_set:
-                assignment.critique_text = form_data.critique_text
-            if "critique_flaws" in form_data.model_fields_set:
-                assignment.critique_flaws = [
-                    flaw.model_dump() for flaw in (form_data.critique_flaws or [])
-                ]
-            # 与焦点同理：靶文漏洞绑的维度要对着更新后的 rubric 与开关重新校验。
-            assignment.critique_text, assignment.critique_flaws = (
-                validate_critique_config(
-                    bool(assignment.critique_enabled),
-                    assignment.critique_text,
-                    list(assignment.critique_flaws or []),
-                    RubricSchema.model_validate(assignment.rubric_schema),
-                )
-            )
-
             assignment.updated_at = int(time.time())
             db.commit()
             db.refresh(assignment)
@@ -2888,9 +2712,6 @@ class EducationTable:
                 due_at=form_data.due_at,
                 score_max=form_data.score_max,
                 coaching_style=form_data.coaching_style,
-                critique_enabled=form_data.critique_enabled,
-                critique_text=form_data.critique_text,
-                critique_flaws=[flaw.model_dump() for flaw in form_data.critique_flaws],
                 challenge_enabled=form_data.challenge_enabled,
                 challenge_rounds=form_data.challenge_rounds,
                 challenge_focus_keys=list(form_data.challenge_focus_keys),
@@ -3754,59 +3575,6 @@ class EducationTable:
             if review is not None and review.review_status == "returned":
                 return current.round_no + 1
             return current.round_no
-
-    def get_critique_attempt(
-        self, assignment_id: str, student_id: str, db: Optional[Session] = None
-    ) -> Optional[CritiqueAttemptModel]:
-        with get_db_context(db) as db:
-            attempt = (
-                db.query(CritiqueAttempt)
-                .filter(
-                    CritiqueAttempt.assignment_id == assignment_id,
-                    CritiqueAttempt.student_id == student_id,
-                )
-                .first()
-            )
-            return CritiqueAttemptModel.model_validate(attempt) if attempt else None
-
-    def insert_critique_attempt(
-        self,
-        assignment_id: str,
-        student_id: str,
-        items: list[str],
-        matches: list[dict],
-        commit: bool = True,
-        db: Optional[Session] = None,
-    ) -> CritiqueAttemptModel:
-        with get_db_context(db) as db:
-            attempt = CritiqueAttempt(
-                id=str(uuid.uuid4()),
-                assignment_id=assignment_id,
-                student_id=student_id,
-                items_json=list(items),
-                matches_json=list(matches),
-                completed_at=int(time.time()),
-            )
-            db.add(attempt)
-            if commit:
-                db.commit()
-            else:
-                db.flush()
-            db.refresh(attempt)
-            return CritiqueAttemptModel.model_validate(attempt)
-
-    def get_critique_attempts_by_assignment(
-        self, assignment_id: str, db: Optional[Session] = None
-    ) -> list[CritiqueAttemptModel]:
-        with get_db_context(db) as db:
-            attempts = (
-                db.query(CritiqueAttempt)
-                .filter(CritiqueAttempt.assignment_id == assignment_id)
-                .all()
-            )
-            return [
-                CritiqueAttemptModel.model_validate(attempt) for attempt in attempts
-            ]
 
     def get_challenge_insight(
         self, assignment_id: str, db: Optional[Session] = None

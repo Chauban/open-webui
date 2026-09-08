@@ -15,7 +15,6 @@
 	import AssignmentBrief from '$lib/components/education/AssignmentBrief.svelte';
 	import EduDataNotice from '$lib/components/education/EduDataNotice.svelte';
 	import ChallengeDialog from '$lib/components/education/ChallengeDialog.svelte';
-	import CritiqueDialog from '$lib/components/education/CritiqueDialog.svelte';
 	import ChallengeChecklist from '$lib/components/education/ChallengeChecklist.svelte';
 	import EduButton from '$lib/components/education/EduButton.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
@@ -39,8 +38,7 @@
 		getWritingProcessSummary,
 		setWritingSessionActiveChat,
 		submitAssignment,
-		getCurrentAssignmentChallenge,
-		getAssignmentCritique
+		getCurrentAssignmentChallenge
 	} from '$lib/apis/education';
 	import { updateFolderById } from '$lib/apis/folders';
 	import { updateNoteById } from '$lib/apis/notes';
@@ -73,8 +71,6 @@
 	// 提交前的读者试读。质疑读者不进聊天框，所以它的状态挂在写作面板这一侧。
 	let showChallenge = false;
 	let challengeDetail = null;
-	// 写作前的评析。只在首次进入时拦一次，完成后不再挡路。
-	let critiqueState = null;
 	let selectedModelId = '';
 	let isSubmitted = false;
 	let titleSaving = false;
@@ -616,11 +612,6 @@
 	// 顺序是 试读 -> 收尾清单 -> 反思 -> 提交。
 
 	$: challengeEnabled = isAssignment && assignment?.challenge_enabled === true;
-	$: showCritique =
-		isAssignment &&
-		critiqueState?.enabled === true &&
-		critiqueState?.completed === false &&
-		!!selectedModelId;
 	$: challengeSettledThisRound =
 		challengeDetail?.session?.status === 'completed' ||
 		challengeDetail?.session?.status === 'skipped';
@@ -662,19 +653,6 @@
 
 	const onChallengeDetailChange = (next) => {
 		challengeDetail = next;
-	};
-
-	const loadCritique = async () => {
-		if (!isAssignment || assignment?.critique_enabled !== true) {
-			critiqueState = null;
-			return;
-		}
-		try {
-			critiqueState = await getAssignmentCritique(localStorage.token, assignment.id);
-		} catch (error) {
-			// 评析拿不到不该把学生挡在写作区外面，这道门本来就是可选的。
-			critiqueState = null;
-		}
 	};
 
 	const closeChallengeAndRevise = () => {
@@ -775,7 +753,6 @@
 			currentChatId = $page.url.searchParams.get('chat') ?? '';
 			await selectedFolder.set(workspaceProject);
 			await refreshChallenge();
-			await loadCritique();
 			loaded = true;
 		} catch (error) {
 			loadError = resolveErrorMessage(error, t);
@@ -1131,15 +1108,6 @@
 
 	{#if isAssignment && assignment}
 		<SubmissionHistoryModal bind:show={showSubmissionHistory} {assignment} />
-	{/if}
-
-	{#if showCritique && assignment && critiqueState}
-		<CritiqueDialog
-			assignmentId={assignment.id}
-			state={critiqueState}
-			modelId={selectedModelId}
-			onDone={(next) => (critiqueState = next)}
-		/>
 	{/if}
 
 	{#if isAssignment && showChallenge && assignment}
