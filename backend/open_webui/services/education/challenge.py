@@ -16,6 +16,7 @@ import logging
 from typing import Optional
 
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from open_webui.models.config import Config
@@ -585,14 +586,21 @@ async def submit_challenge_response(
     current = next((turn for turn in turns if turn.turn_no == turn_no), None)
     if current is None:
         raise ChallengeError("Challenge turn not found")
-    if current.response_text is not None:
-        raise ChallengeError("Challenge turn already answered")
     if turn_no != len(turns):
         raise ChallengeError("Challenge turns must be answered in order")
 
-    Education.record_challenge_response(
-        challenge_session.id, turn_no, response_text, commit=False, db=db
-    )
+    # 学生的回应先单独提交，不要和后面的模型调用共用一个事务。
+    # 模型调用要几秒到几十秒，夹在未提交的写事务里等于把整个 SQLite 锁住那么久，
+    # 第二个并发请求会在 flush 上等到 busy timeout 然后抛 database is locked。
+    #
+    # response_text 已有值，说明上一次请求把回应写进去了、却在模型调用那一步断了
+    # （turn_no == len(turns) 保证了下一轮确实还没生成，答旧轮会被上面的顺序检查拦掉）。
+    # 这时不覆盖学生已经写下的字，直接往下走把缺的那一轮补出来——否则他会卡在
+    # 「答过了但没有下一轮」的死局里，界面既回不到提问也进不了收尾。
+    if current.response_text is None:
+        Education.record_challenge_response(
+            challenge_session.id, turn_no, response_text, commit=True, db=db
+        )
     turns = Education.get_challenge_turns(challenge_session.id, db=db)
 
     if turn_no < challenge_session.planned_rounds:
@@ -623,16 +631,33 @@ async def submit_challenge_response(
             ),
             draft_text,
         )
-        next_turn = Education.insert_challenge_turn(
-            challenge_session.id,
-            next_turn_no,
-            focus_key,
-            challenge_text,
-            quoted_span,
-            commit=False,
-            db=db,
-        )
-        db.commit()
+        try:
+            next_turn = Education.insert_challenge_turn(
+                challenge_session.id,
+                next_turn_no,
+                focus_key,
+                challenge_text,
+                quoted_span,
+                commit=True,
+                db=db,
+            )
+        except IntegrityError:
+            # 两发并发请求各自生成了下一轮，(challenge_session_id, turn_no) 的唯一约束
+            # 让后到的这发插不进去。这不是错误：先到的那一轮已经落库，直接把它读回来返回，
+            # 学生看到的是同一轮质疑，不会因为手抖点了两次就吃一个 500。
+            db.rollback()
+            next_turn = next(
+                (
+                    turn
+                    for turn in Education.get_challenge_turns(
+                        challenge_session.id, db=db
+                    )
+                    if turn.turn_no == next_turn_no
+                ),
+                None,
+            )
+            if next_turn is None:
+                raise
         return {"session": challenge_session, "turn": next_turn, "closing": None}
 
     closing_prompt = await get_challenge_prompt("closing")
@@ -647,7 +672,6 @@ async def submit_challenge_response(
         closing = parse_closing(raw, turns)
 
     session = Education.complete_challenge_session(
-        challenge_session.id, closing, commit=False, db=db
+        challenge_session.id, closing, commit=True, db=db
     )
-    db.commit()
     return {"session": session, "turn": None, "closing": closing}
