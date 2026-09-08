@@ -18,6 +18,7 @@
 	import type { CritiqueState } from '$lib/apis/education';
 
 	const i18n = getContext('i18n');
+	const t = (key: string, options?: Record<string, unknown>) => $i18n.t(key, options);
 
 	export let assignmentId: string;
 	export let state: CritiqueState;
@@ -47,7 +48,7 @@
 		try {
 			onDone(await submitAssignmentCritique(localStorage.token, assignmentId, payload, modelId));
 		} catch (error) {
-			toast.error(resolveErrorMessage(error, $i18n.t('Could not send your critique.')));
+			toast.error(resolveErrorMessage(error, t));
 		} finally {
 			busy = false;
 		}

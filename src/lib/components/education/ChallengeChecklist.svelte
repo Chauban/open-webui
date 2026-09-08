@@ -16,6 +16,7 @@
 	import type { ChallengeDetail } from '$lib/apis/education';
 
 	const i18n = getContext('i18n');
+	const t = (key: string, options?: Record<string, unknown>) => $i18n.t(key, options);
 
 	export let detail: ChallengeDetail | null = null;
 	export let onDetailChange: (next: ChallengeDetail) => void = () => {};
@@ -47,7 +48,7 @@
 				await updateChallengeChecklist(localStorage.token, detail.session.id, [...next])
 			);
 		} catch (error) {
-			toast.error(resolveErrorMessage(error, $i18n.t('Could not save the checklist.')));
+			toast.error(resolveErrorMessage(error, t));
 		} finally {
 			saving = false;
 		}

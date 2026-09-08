@@ -23,6 +23,7 @@
 	import type { ChallengeDetail } from '$lib/apis/education';
 
 	const i18n = getContext('i18n');
+	const t = (key: string, options?: Record<string, unknown>) => $i18n.t(key, options);
 
 	export let assignment: any;
 	export let writingSessionId: string;
@@ -61,7 +62,7 @@
 				})
 			);
 		} catch (error) {
-			toast.error(resolveErrorMessage(error, $i18n.t('Could not start the read-through.')));
+			toast.error(resolveErrorMessage(error, t));
 		} finally {
 			busy = false;
 		}
@@ -84,7 +85,7 @@
 				})
 			);
 		} catch (error) {
-			toast.error(resolveErrorMessage(error, $i18n.t('Could not send your response.')));
+			toast.error(resolveErrorMessage(error, t));
 		} finally {
 			busy = false;
 		}
@@ -110,7 +111,7 @@
 			}
 			onContinue();
 		} catch (error) {
-			toast.error(resolveErrorMessage(error, $i18n.t('Could not skip the read-through.')));
+			toast.error(resolveErrorMessage(error, t));
 		} finally {
 			busy = false;
 		}
