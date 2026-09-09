@@ -914,6 +914,11 @@ async def signup_handler(
 
         Education.ensure_classroom_member(classroom.id, user.id, 'student', db=db)
 
+        # 邀请码即审批:教师发码时已经做过「是不是我班上的人」这一判断,
+        # 管理员没有更多信息可加,再排一次队只是拖慢开课。
+        if user.role == 'pending':
+            user = await Users.update_user_role_by_id(user.id, 'user', db=db)
+
     await publish_event(
         request,
         EVENTS.USER_CREATED,
@@ -952,7 +957,15 @@ async def signup(
     if await Users.get_user_by_email(form_data.email.lower(), db=db):
         raise HTTPException(400, detail=ERROR_MESSAGES.EMAIL_TAKEN)
 
-    if form_data.classroom_invite_code and form_data.education_role == "student":
+    # 学生必须持有效邀请码注册:码由任课教师发放,守门人是教师而非管理员。
+    # 空库时例外——首个注册者会成为管理员,此时还不存在任何班级。
+    if form_data.education_role == "student" and has_users:
+        if not (form_data.classroom_invite_code or "").strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Classroom invite code is required",
+            )
+
         classroom = Education.get_classroom_by_invite_code(form_data.classroom_invite_code, db=db)
         if classroom is None:
             raise HTTPException(
