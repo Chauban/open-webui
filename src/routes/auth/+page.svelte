@@ -40,6 +40,7 @@
 	let password = '';
 	let confirmPassword = '';
 	let educationRole = 'student';
+	let classroomInviteCode = '';
 
 	let ldapUsername = '';
 
@@ -93,7 +94,8 @@
 			email,
 			password,
 			generateInitialsImage(name),
-			educationRole
+			educationRole,
+			educationRole === 'student' ? classroomInviteCode.trim() : null
 		).catch(
 			(error) => {
 				toast.error(`${error}`);
@@ -333,6 +335,35 @@
 												</select>
 											</div>
 
+											{#if educationRole === 'student'}
+												<div class="mb-2">
+													<label
+														for="classroom-invite-code"
+														class="text-sm font-normal text-left mb-1 block"
+														>{$i18n.t('Classroom Invite Code')}</label
+													>
+													<input
+														bind:value={classroomInviteCode}
+														type="text"
+														id="classroom-invite-code"
+														class="my-0.5 w-full text-sm outline-hidden bg-transparent uppercase placeholder:normal-case placeholder:text-gray-300 dark:placeholder:text-gray-600"
+														autocomplete="off"
+														placeholder={$i18n.t('Enter classroom invite code')}
+														required
+													/>
+													<div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+														{$i18n.t(
+															'Ask your teacher for the code. You join the class the moment you sign up.'
+														)}
+													</div>
+												</div>
+											{:else}
+												<div class="mb-2 text-xs text-gray-500 dark:text-gray-400">
+													{$i18n.t(
+														'Teacher accounts are reviewed by an administrator before they can be used.'
+													)}
+												</div>
+											{/if}
 										{/if}
 
 										{#if mode === 'ldap'}

@@ -346,7 +346,8 @@ export const userSignUp = async (
 	email: string,
 	password: string,
 	profile_image_url: string,
-	education_role: string | null = 'student'
+	education_role: string | null = 'student',
+	classroom_invite_code: string | null = null
 ) => {
 	let error = null;
 
@@ -361,7 +362,8 @@ export const userSignUp = async (
 			email: email,
 			password: password,
 			profile_image_url: profile_image_url,
-			...(education_role && { education_role: education_role })
+			...(education_role && { education_role: education_role }),
+			...(classroom_invite_code && { classroom_invite_code: classroom_invite_code })
 		})
 	})
 		.then(async (res) => {

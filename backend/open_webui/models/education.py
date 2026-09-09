@@ -2440,7 +2440,10 @@ class EducationTable:
         with get_db_context(db) as db:
             classroom = (
                 db.query(Classroom)
-                .filter(Classroom.invite_code == invite_code.strip().upper())
+                .filter(
+                    Classroom.invite_code == invite_code.strip().upper(),
+                    Classroom.status == "active",
+                )
                 .first()
             )
             return ClassroomModel.model_validate(classroom) if classroom else None
