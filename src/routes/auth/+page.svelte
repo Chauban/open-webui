@@ -99,6 +99,8 @@
 			}
 		}
 
+		const joiningWithInviteCode = educationRole === 'student' && classroomInviteCode.trim() !== '';
+
 		const sessionUser = await userSignUp(
 			name,
 			email,
@@ -113,7 +115,8 @@
 			}
 		);
 
-		await setSessionUser(sessionUser);
+		// 注册时已凭邀请码入班，不再回到 /join 让学生把码填第二遍。
+		await setSessionUser(sessionUser, joiningWithInviteCode ? '/me/writing' : null);
 	};
 
 	const ldapSignInHandler = async () => {
@@ -172,6 +175,26 @@
 
 	let onboarding = false;
 
+	// 邀请链接形如 /join?code=XXXX；未登录时会被重定向到 /auth?redirect=%2Fjoin%3Fcode%3DXXXX，
+	// 邀请码要从 redirect 里取回来，否则学生得手工再抄一遍。
+	const readInviteCodeFromUrl = (url: URL) => {
+		const direct = url.searchParams.get('code');
+		if (direct) {
+			return direct;
+		}
+
+		const redirectPath = url.searchParams.get('redirect');
+		if (!redirectPath) {
+			return null;
+		}
+
+		try {
+			return new URL(redirectPath, url.origin).searchParams.get('code');
+		} catch {
+			return null;
+		}
+	};
+
 	onMount(async () => {
 		const redirectPath = $page.url.searchParams.get('redirect');
 		const logout = $page.url.searchParams.get('state') === 'logout';
@@ -181,6 +204,13 @@
 		} else {
 			if (redirectPath) {
 				localStorage.setItem('redirectPath', redirectPath);
+			}
+
+			const inviteCode = readInviteCodeFromUrl($page.url);
+			if (inviteCode && $config?.features?.enable_signup) {
+				classroomInviteCode = inviteCode.trim();
+				educationRole = 'student';
+				mode = 'signup';
 			}
 		}
 
