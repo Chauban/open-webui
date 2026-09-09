@@ -53,6 +53,8 @@
 		'flex flex-1 my-0.5 items-center rounded-lg border border-gray-200 dark:border-white/[0.06] bg-gray-50 dark:bg-gray-950 px-3 py-1.5 transition-colors focus-within:border-gray-400 dark:focus-within:border-white/25';
 	const fieldInnerClass =
 		'w-full text-sm bg-transparent outline-hidden placeholder:text-gray-300 dark:placeholder:text-gray-600';
+	// 邀请码大写显示，和教师端展示的码对得上；提示文字不跟着大写
+	const inviteCodeFieldClass = `${fieldClass} uppercase placeholder:normal-case`;
 
 	const setSessionUser = async (sessionUser, redirectPath: string | null = null) => {
 		if (sessionUser) {
@@ -344,7 +346,7 @@
 											</div>
 
 											{#if educationRole === 'student'}
-												<div class="mb-2">
+												<div class="mb-3">
 													<label
 														for="classroom-invite-code"
 														class="text-sm font-normal text-left mb-1 block"
@@ -354,7 +356,7 @@
 														bind:value={classroomInviteCode}
 														type="text"
 														id="classroom-invite-code"
-														class="my-0.5 w-full text-sm outline-hidden bg-transparent uppercase placeholder:normal-case placeholder:text-gray-300 dark:placeholder:text-gray-600"
+														class={inviteCodeFieldClass}
 														autocomplete="off"
 														placeholder={$i18n.t('Enter classroom invite code')}
 														required
@@ -366,7 +368,7 @@
 													</div>
 												</div>
 											{:else}
-												<div class="mb-2 text-xs text-gray-500 dark:text-gray-400">
+												<div class="mb-3 text-xs text-gray-500 dark:text-gray-400">
 													{$i18n.t(
 														'Teacher accounts are reviewed by an administrator before they can be used.'
 													)}
