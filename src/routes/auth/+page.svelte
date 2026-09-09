@@ -45,6 +45,14 @@
 
 	let submitting = false;
 
+	// 登录/注册表单的统一输入框样式：细边框 + 轻底色 + 聚焦描边
+	const fieldClass =
+		'my-0.5 w-full text-sm rounded-lg border border-gray-200 dark:border-white/[0.06] bg-gray-50 dark:bg-gray-950 px-3 py-2 outline-hidden transition-colors focus:border-gray-400 dark:focus:border-white/25 placeholder:text-gray-300 dark:placeholder:text-gray-600';
+	const fieldWrapperClass =
+		'flex flex-1 my-0.5 items-center rounded-lg border border-gray-200 dark:border-white/[0.06] bg-gray-50 dark:bg-gray-950 px-3 py-1.5 transition-colors focus-within:border-gray-400 dark:focus-within:border-white/25';
+	const fieldInnerClass =
+		'w-full text-sm bg-transparent outline-hidden placeholder:text-gray-300 dark:placeholder:text-gray-600';
+
 	const setSessionUser = async (sessionUser, redirectPath: string | null = null) => {
 		if (sessionUser) {
 			console.log(sessionUser);
@@ -304,7 +312,7 @@
 								{#if $config?.features.enable_login_form || $config?.features.enable_ldap || form}
 									<div class="flex flex-col mt-4">
 										{#if mode === 'signup'}
-											<div class="mb-2">
+											<div class="mb-3">
 												<label for="name" class="text-sm font-normal text-left mb-1 block"
 													>{$i18n.t('Name')}</label
 												>
@@ -312,21 +320,21 @@
 													bind:value={name}
 													type="text"
 													id="name"
-													class="my-0.5 w-full text-sm outline-hidden bg-transparent placeholder:text-gray-300 dark:placeholder:text-gray-600"
+													class={fieldClass}
 													autocomplete="name"
 													placeholder={$i18n.t('Enter Your Full Name')}
 													required
 												/>
 											</div>
 
-											<div class="mb-2">
+											<div class="mb-3">
 												<label for="education-role" class="text-sm font-medium text-left mb-1 block"
 													>{$i18n.t('Identity')}</label
 												>
 												<select
 													bind:value={educationRole}
 													id="education-role"
-													class="my-0.5 w-full text-sm outline-hidden bg-transparent"
+													class={fieldClass}
 												>
 													<option value="student">{$i18n.t('Student')}</option>
 													<option value="teacher">{$i18n.t('Teacher')}</option>
@@ -336,14 +344,14 @@
 										{/if}
 
 										{#if mode === 'ldap'}
-											<div class="mb-2">
+											<div class="mb-3">
 												<label for="username" class="text-sm font-normal text-left mb-1 block"
 													>{$i18n.t('Username')}</label
 												>
 												<input
 													bind:value={ldapUsername}
 													type="text"
-													class="my-0.5 w-full text-sm outline-hidden bg-transparent placeholder:text-gray-300 dark:placeholder:text-gray-600"
+													class={fieldClass}
 													autocomplete="username"
 													name="username"
 													id="username"
@@ -352,7 +360,7 @@
 												/>
 											</div>
 										{:else}
-											<div class="mb-2">
+											<div class="mb-3">
 												<label for="email" class="text-sm font-normal text-left mb-1 block"
 													>{$i18n.t('Email')}</label
 												>
@@ -360,7 +368,7 @@
 													bind:value={email}
 													type="email"
 													id="email"
-													class="my-0.5 w-full text-sm outline-hidden bg-transparent placeholder:text-gray-300 dark:placeholder:text-gray-600"
+													class={fieldClass}
 													autocomplete="email"
 													name="email"
 													placeholder={$i18n.t('Enter Your Email')}
@@ -377,7 +385,8 @@
 												bind:value={password}
 												type="password"
 												id="password"
-												class="my-0.5 w-full text-sm outline-hidden bg-transparent placeholder:text-gray-300 dark:placeholder:text-gray-600"
+												class={fieldInnerClass}
+												outerClassName={fieldWrapperClass}
 												placeholder={$i18n.t('Enter Your Password')}
 												autocomplete={mode === 'signup' ? 'new-password' : 'current-password'}
 												name="password"
@@ -388,7 +397,7 @@
 										</div>
 
 										{#if mode === 'signup' && $config?.features?.enable_signup_password_confirmation}
-											<div class="mt-2">
+											<div class="mt-3">
 												<label
 													for="confirm-password"
 													class="text-sm font-normal text-left mb-1 block"
@@ -398,7 +407,8 @@
 													bind:value={confirmPassword}
 													type="password"
 													id="confirm-password"
-													class="my-0.5 w-full text-sm outline-hidden bg-transparent"
+													class={fieldInnerClass}
+													outerClassName={fieldWrapperClass}
 													placeholder={$i18n.t('Confirm Your Password')}
 													autocomplete="new-password"
 													name="confirm-password"
@@ -661,3 +671,26 @@
 		{/if}
 	{/if}
 </div>
+
+<style>
+	/* Chrome 自动填充默认铺一层浅蓝底色，且无法用 background-color 覆盖；
+	   用 inset 阴影把它盖成输入框自身的底色，transition 阻止聚焦时蓝色渐变回来。 */
+	:global(#auth-login-card input:-webkit-autofill),
+	:global(#auth-login-card input:-webkit-autofill:hover),
+	:global(#auth-login-card input:-webkit-autofill:focus),
+	:global(#auth-login-card input:-webkit-autofill:active) {
+		box-shadow: inset 0 0 0 1000px var(--color-gray-50);
+		-webkit-text-fill-color: var(--color-gray-900);
+		caret-color: var(--color-gray-900);
+		transition: background-color 9999s ease-in-out 0s;
+	}
+
+	:global(.dark #auth-login-card input:-webkit-autofill),
+	:global(.dark #auth-login-card input:-webkit-autofill:hover),
+	:global(.dark #auth-login-card input:-webkit-autofill:focus),
+	:global(.dark #auth-login-card input:-webkit-autofill:active) {
+		box-shadow: inset 0 0 0 1000px var(--color-gray-950);
+		-webkit-text-fill-color: var(--color-gray-100);
+		caret-color: var(--color-gray-100);
+	}
+</style>
