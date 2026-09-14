@@ -20,13 +20,12 @@ if str(BACKEND_ROOT) not in sys.path:
 
 import open_webui.internal.db as internal_db
 from open_webui.internal.db import get_async_session
-from open_webui.models.auths import Auth
-from open_webui.models.config import Config
 from open_webui.models.education import Classroom, ClassroomMember
-from open_webui.models.groups import Group, GroupMember
+from open_webui.models.groups import GroupMember
 from open_webui.models.users import User
 from open_webui.routers.auths import router as auths_router
 from open_webui.services.education.identity import GROUP_ID_BY_ROLE
+from open_webui.test.util.database import engine_kwargs, migrated_database
 
 TEACHER_ID = "teacher-1"
 CLASSROOM_ID = "classroom-1"
@@ -34,27 +33,14 @@ INVITE_CODE = "ABCD1234"
 
 
 @contextmanager
-def _signup_app(tmp_path):
-    sync_url = f"sqlite:///{tmp_path / 'signup.db'}"
-    engine = create_engine(sync_url, connect_args={"check_same_thread": False})
+def _signup_app(sync_url):
+    engine = create_engine(sync_url, **engine_kwargs(sync_url))
     SessionLocal = sessionmaker(
         autocommit=False, autoflush=False, bind=engine, expire_on_commit=False
     )
 
-    for table in [
-        Config.__table__,
-        User.__table__,
-        Auth.__table__,
-        Group.__table__,
-        GroupMember.__table__,
-        Classroom.__table__,
-        ClassroomMember.__table__,
-    ]:
-        table.create(bind=engine, checkfirst=True)
-
     async_engine = create_async_engine(
-        internal_db._make_async_url(sync_url),
-        connect_args={"check_same_thread": False},
+        internal_db._make_async_url(sync_url), **engine_kwargs(sync_url)
     )
     TestAsyncSessionLocal = async_sessionmaker(
         bind=async_engine,
@@ -66,7 +52,7 @@ def _signup_app(tmp_path):
 
     # 注册接口拿到的是 AsyncSession,把它传给 Education 的同步仓储方法时
     # get_db_context() 的 isinstance(db, Session) 判定不成立,会退回**进程级**
-    # 的同步 SessionLocal。两个工厂都要指向同一个 sqlite 文件,班级查询才看得见
+    # 的同步 SessionLocal。两个工厂都要指向同一个测试库,班级查询才看得见
     # 本测试种下的数据。
     original_async_session_local = internal_db.AsyncSessionLocal
     original_session_local = internal_db.SessionLocal
@@ -75,18 +61,7 @@ def _signup_app(tmp_path):
 
     now = int(time.time())
     with SessionLocal() as session:
-        # 教学身份组由启动播种建立;组行不存在时 add_users_to_group 会静默返回
-        for group_id in GROUP_ID_BY_ROLE.values():
-            session.add(
-                Group(
-                    id=group_id,
-                    user_id="",
-                    name=group_id,
-                    description="",
-                    created_at=now,
-                    updated_at=now,
-                )
-            )
+        # 教学身份组由迁移播种,这里只种教师和班级
         session.add(
             User(
                 id=TEACHER_ID,
@@ -100,6 +75,7 @@ def _signup_app(tmp_path):
                 updated_at=now,
             )
         )
+        session.flush()
         session.add(
             Classroom(
                 id=CLASSROOM_ID,
@@ -134,8 +110,8 @@ def _signup_app(tmp_path):
 
 
 @pytest.fixture
-def signup_client(tmp_path):
-    with _signup_app(tmp_path) as ctx:
+def signup_client():
+    with migrated_database() as sync_url, _signup_app(sync_url) as ctx:
         yield ctx
 
 

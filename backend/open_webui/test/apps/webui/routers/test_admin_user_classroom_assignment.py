@@ -17,13 +17,13 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 import open_webui.internal.db as internal_db
-from open_webui.models.auths import Auth
 from open_webui.models.education import Classroom, ClassroomMember, Education
-from open_webui.models.groups import Group, GroupMember
+from open_webui.models.groups import GroupMember
 from open_webui.models.users import User, UserModel
 from open_webui.services.education.identity import GROUP_ID_BY_ROLE
 from open_webui.routers.groups import router as groups_router
 from open_webui.routers.users import router as users_router
+from open_webui.test.util.database import engine_kwargs, migrated_database
 from open_webui.utils.auth import get_admin_user
 
 
@@ -52,21 +52,12 @@ def _seed_user(session, name: str, email: str, role: str, education_role: str | 
         updated_at=now,
     )
     session.add(user_row)
+    # group_member.user_id 在库里有外键,ORM 模型却没声明,flush 顺序不可靠
+    session.flush()
 
-    # 教学身份来自权限组,种子数据同样按组写入
+    # 教学身份来自权限组(组本身由迁移播种),种子数据按组成员写入
     group_id = GROUP_ID_BY_ROLE.get(education_role or "")
     if group_id:
-        if session.get(Group, group_id) is None:
-            session.add(
-                Group(
-                    id=group_id,
-                    user_id="",
-                    name=group_id,
-                    description="",
-                    created_at=now,
-                    updated_at=now,
-                )
-            )
         session.add(
             GroupMember(
                 id=uuid.uuid4().hex,
@@ -83,22 +74,12 @@ def _seed_user(session, name: str, email: str, role: str, education_role: str | 
 
 
 @contextmanager
-def _harness(tmp_name: str):
-    """A FastAPI client and a session factory, both bound to one throwaway sqlite file."""
+def _harness():
+    """A FastAPI client and a session factory, both bound to one throwaway migrated database."""
     internal_db.DATABASE_ENABLE_SESSION_SHARING = True
 
-    tmp_root = BACKEND_ROOT / ".tmp" / tmp_name
-    tmp_root.mkdir(parents=True, exist_ok=True)
-    db_path = tmp_root / f"{uuid.uuid4().hex}.db"
-    original_async_session_local = internal_db.AsyncSessionLocal
-    original_session_local = internal_db.SessionLocal
-    async_engine = None
-    try:
-        sync_url = f"sqlite:///{db_path}"
-        engine = create_engine(
-            sync_url,
-            connect_args={"check_same_thread": False},
-        )
+    with migrated_database() as sync_url:
+        engine = create_engine(sync_url, **engine_kwargs(sync_url))
         SessionLocal = sessionmaker(
             autocommit=False,
             autoflush=False,
@@ -106,26 +87,14 @@ def _harness(tmp_name: str):
             expire_on_commit=False,
         )
 
-        for table in [
-            User.__table__,
-            Auth.__table__,
-            Classroom.__table__,
-            ClassroomMember.__table__,
-            Group.__table__,
-            GroupMember.__table__,
-        ]:
-            table.create(bind=engine, checkfirst=True)
-
-        with engine.begin() as connection:
-            connection.exec_driver_sql("DROP INDEX IF EXISTS classroom_member_user_idx")
-
         # users router 端点的 db 来自 get_async_session(全局 AsyncSessionLocal),
         # 端点内的 sync Education 调用则回落到全局 SessionLocal —— 两者都指向
-        # 本测试的 sqlite 文件,保证完全隔离(参照 test_education_smoke 的做法)
+        # 本测试库,保证完全隔离(参照 test_education_smoke 的做法)
         async_engine = create_async_engine(
-            internal_db._make_async_url(sync_url),
-            connect_args={"check_same_thread": False},
+            internal_db._make_async_url(sync_url), **engine_kwargs(sync_url)
         )
+        original_async_session_local = internal_db.AsyncSessionLocal
+        original_session_local = internal_db.SessionLocal
         internal_db.AsyncSessionLocal = async_sessionmaker(
             bind=async_engine,
             class_=AsyncSession,
@@ -156,17 +125,10 @@ def _harness(tmp_name: str):
         finally:
             client.close()
             engine.dispose()
-            AdminContext.current_user = None
-    finally:
-        internal_db.AsyncSessionLocal = original_async_session_local
-        internal_db.SessionLocal = original_session_local
-        if async_engine is not None:
             asyncio.run(async_engine.dispose())
-        if db_path.exists():
-            try:
-                db_path.unlink()
-            except PermissionError:
-                pass
+            internal_db.AsyncSessionLocal = original_async_session_local
+            internal_db.SessionLocal = original_session_local
+            AdminContext.current_user = None
 
 
 def _seed_classroom(session, name: str, teacher_id: str, invite_code: str):
@@ -211,7 +173,7 @@ def _group_ids_of(session, user_id: str) -> set:
 
 
 def test_admin_can_assign_student_to_classroom():
-    with _harness("pytest-admin-user-classroom") as (SessionLocal, client):
+    with _harness() as (SessionLocal, client):
         with SessionLocal() as session:
             admin = _seed_user(session, "Admin", "admin@example.com", "admin")
             teacher_one = _seed_user(
@@ -296,7 +258,7 @@ def test_admin_can_assign_student_to_classroom():
 
 def test_leaving_the_student_identity_clears_every_classroom():
     """一个学生可能同时在多个班里,身份一变,所有班籍都必须跟着掉。"""
-    with _harness("pytest-admin-user-classroom") as (SessionLocal, client):
+    with _harness() as (SessionLocal, client):
         with SessionLocal() as session:
             admin = _seed_user(session, "Admin", "admin@example.com", "admin")
             teacher = _seed_user(session, "Teacher", "teacher@example.com", "user", "teacher")
@@ -329,7 +291,7 @@ def test_leaving_the_student_identity_clears_every_classroom():
 
 def test_teacher_owning_classrooms_cannot_lose_the_teaching_identity():
     """班级跟着 teacher_id 走,教师被降级会留下没人管的班,所以直接拦住。"""
-    with _harness("pytest-admin-user-classroom") as (SessionLocal, client):
+    with _harness() as (SessionLocal, client):
         with SessionLocal() as session:
             admin = _seed_user(session, "Admin", "admin@example.com", "admin")
             teacher = _seed_user(session, "Teacher", "teacher@example.com", "user", "teacher")
@@ -359,7 +321,7 @@ def test_teacher_owning_classrooms_cannot_lose_the_teaching_identity():
 
 def test_identity_groups_reject_direct_membership_edits():
     """身份只能在用户编辑里改,从用户组页面直接增删成员会绕开班籍清理。"""
-    with _harness("pytest-admin-user-classroom") as (SessionLocal, client):
+    with _harness() as (SessionLocal, client):
         with SessionLocal() as session:
             admin = _seed_user(session, "Admin", "admin@example.com", "admin")
             student = _seed_user(session, "Student", "student@example.com", "user", "student")

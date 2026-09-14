@@ -2,7 +2,6 @@ import asyncio
 import csv
 import io
 import json
-import tempfile
 import time
 import uuid
 import zipfile
@@ -24,26 +23,14 @@ if str(BACKEND_ROOT) not in sys.path:
 
 import open_webui.internal.db as internal_db
 from open_webui.internal.db import get_session
-from open_webui.models.access_grants import AccessGrant
-from open_webui.models.automations import AutomationRun
 from open_webui.models.chats import Chat
 from open_webui.models.chat_messages import ChatMessage
-from open_webui.models.shared_chats import SharedChat
 from open_webui.models.education import (
     AnalysisResult,
     Assignment,
-    AssignmentExtension,
-    ChallengeInsight,
-    ChallengeSession,
-    ChallengeTurn,
-    Classroom,
-    ClassroomMember,
-    EditorOperation,
     EditorOperationInput,
     Education,
-    EducationNotification,
     MicroReflection,
-    ProvenanceSegment,
     ProfileAlgorithmRelease,
     ProfileEvidenceSnapshot,
     ProfileMetricProjection,
@@ -51,7 +38,6 @@ from open_webui.models.education import (
     Submission,
     SubmissionCreateForm,
     SubmissionReview,
-    StudentGrowthGoal,
     StudentProfileHelpTypeShift,
     StudentProfileHelpTypeSummary,
     StudentProfileMetricTrend,
@@ -66,7 +52,7 @@ from open_webui.models.education import (
 from open_webui.models.config import Config
 from open_webui.models.folders import Folder, FolderForm, FolderUpdateForm, Folders
 from open_webui.models.groups import Group, GroupMember
-from open_webui.models.notes import Note, PinnedNote
+from open_webui.models.notes import Note
 from open_webui.models.users import User, UserModel
 from open_webui.services.education.identity import GROUP_ID_BY_ROLE
 import open_webui.routers.education as education_router_module
@@ -87,6 +73,7 @@ from open_webui.services.education.analysis import (
 from open_webui.services.education.profile_recompute import (
     recompute_profile_projections,
 )
+from open_webui.test.util.database import engine_kwargs, migrated_database
 from open_webui.services.education.profile import (
     PROFILE_METRIC_VERSION,
 )
@@ -356,25 +343,15 @@ def _seed_user(session, user_id: str, name: str, email: str, education_role: str
         updated_at=now,
     )
     session.add(user_row)
+    # group_member.user_id 在库里有外键,ORM 模型却没声明,flush 顺序不可靠
+    session.flush()
 
-    # Teaching identity is group membership, so seed the group and the member
-    # row in the same session the router will read through.
-    group_id = GROUP_ID_BY_ROLE[education_role]
-    if session.get(Group, group_id) is None:
-        session.add(
-            Group(
-                id=group_id,
-                user_id="",
-                name=group_id,
-                description="",
-                created_at=now,
-                updated_at=now,
-            )
-        )
+    # Teaching identity is group membership; the identity groups themselves are
+    # seeded by the migrations, so only the member row is needed.
     session.add(
         GroupMember(
             id=str(uuid.uuid4()),
-            group_id=group_id,
+            group_id=GROUP_ID_BY_ROLE[education_role],
             user_id=user_id,
             created_at=now,
             updated_at=now,
@@ -507,60 +484,14 @@ def _prepare_assignment_flow(client, teacher, student):
 def education_client():
     internal_db.DATABASE_ENABLE_SESSION_SHARING = True
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        db_path = Path(tmpdir) / "education_smoke.db"
-        sync_url = f"sqlite:///{db_path}"
-        engine = create_engine(
-            sync_url,
-            connect_args={"check_same_thread": False},
-        )
+    with migrated_database() as sync_url:
+        engine = create_engine(sync_url, **engine_kwargs(sync_url))
         SessionLocal = sessionmaker(
             autocommit=False,
             autoflush=False,
             bind=engine,
             expire_on_commit=False,
         )
-
-        for table in [
-            User.__table__,
-            Config.__table__,
-            AccessGrant.__table__,
-            Note.__table__,
-            PinnedNote.__table__,
-            Group.__table__,
-            GroupMember.__table__,
-            Folder.__table__,
-            Chat.__table__,
-            ChatMessage.__table__,
-            AutomationRun.__table__,
-            SharedChat.__table__,
-            Classroom.__table__,
-            ClassroomMember.__table__,
-            Assignment.__table__,
-            AssignmentExtension.__table__,
-            WritingSession.__table__,
-            ChallengeSession.__table__,
-            ChallengeTurn.__table__,
-            ChallengeInsight.__table__,
-            WritingVersion.__table__,
-            ProvenanceSegment.__table__,
-            EditorOperation.__table__,
-            MicroReflection.__table__,
-            Submission.__table__,
-            AnalysisResult.__table__,
-            SubmissionReview.__table__,
-            ProfileEvidenceSnapshot.__table__,
-            SubmissionReviewEvent.__table__,
-            ProfileAlgorithmRelease.__table__,
-            ProfileProjectionRun.__table__,
-            ProfileMetricProjection.__table__,
-            StudentProfileAggregateProjection.__table__,
-            StudentGrowthGoal.__table__,
-            TeacherStudentNote.__table__,
-            TeacherStudentNoteRevision.__table__,
-            EducationNotification.__table__,
-        ]:
-            table.create(bind=engine, checkfirst=True)
 
         # The education router (open_webui/routers/education.py) still takes a
         # sync `db: Session = Depends(get_session)`, but forwards it as `db=db`
@@ -575,8 +506,7 @@ def education_client():
         # point the process-wide AsyncSessionLocal at an async engine bound to the
         # exact same sqlite file for the lifetime of this fixture, then restore it.
         async_engine = create_async_engine(
-            internal_db._make_async_url(sync_url),
-            connect_args={"check_same_thread": False},
+            internal_db._make_async_url(sync_url), **engine_kwargs(sync_url)
         )
         TestAsyncSessionLocal = async_sessionmaker(
             bind=async_engine,
@@ -1865,6 +1795,7 @@ def test_delete_chat_endpoint_persists_sidebar_chat_deletion(education_client):
                 updated_at=1,
             )
         )
+        session.flush()
         session.add(
             ChatMessage(
                 id="sidebar-chat-delete-message",
