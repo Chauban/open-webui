@@ -3,6 +3,7 @@ import difflib
 import hashlib
 import hmac
 import io
+import json
 import time
 import uuid
 import zipfile
@@ -63,6 +64,7 @@ from open_webui.models.education import (
     PersonalWritingCreateForm,
     PersonalWorkspaceListItem,
     ProvenanceCreateForm,
+    ReflectionQuestionSetItem,
     SubmissionAlreadyReviewedError,
     SubmissionCreateForm,
     SubmissionDetailResponse,
@@ -90,6 +92,7 @@ from open_webui.models.education import (
     WritingSessionModel,
     WritingProcessSummaryResponse,
     WritingVersionSummaryModel,
+    build_reflection_record,
 )
 from open_webui.services.education.analysis import (
     NormalizedSegment,
@@ -1345,6 +1348,58 @@ async def get_teacher_assignments(
         await _build_teacher_assignment_list_item(assignment, db)
         for assignment in assignments
     ]
+
+
+_REFLECTION_QUESTION_SET_LIMIT = 10
+
+
+@router.get(
+    "/teacher/reflection-question-sets",
+    response_model=list[ReflectionQuestionSetItem],
+)
+async def get_teacher_reflection_question_sets(
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+):
+    """教师以往作业里用过的反思题,新的在前,内容相同的只留最近一份。
+
+    一次发布到多个班级会建出多份一模一样的作业,不去重的话列表里全是重复项。
+    比较时忽略题目 id —— id 只是前端随手生成的,不代表内容不同。
+    """
+
+    await _ensure_teacher_identity(user)
+    assignments = sorted(
+        Education.get_assignments_by_teacher(user.id, db=db),
+        key=lambda assignment: assignment.created_at,
+        reverse=True,
+    )
+    seen: set[str] = set()
+    items: list[ReflectionQuestionSetItem] = []
+    for assignment in assignments:
+        if not assignment.reflection_questions:
+            continue
+        fingerprint = json.dumps(
+            [
+                question.model_dump(exclude={"id"})
+                for question in assignment.reflection_questions
+            ],
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        if fingerprint in seen:
+            continue
+        seen.add(fingerprint)
+        items.append(
+            ReflectionQuestionSetItem(
+                assignment_id=assignment.id,
+                assignment_title=assignment.title,
+                created_at=assignment.created_at,
+                questions=assignment.reflection_questions,
+            )
+        )
+        if len(items) >= _REFLECTION_QUESTION_SET_LIMIT:
+            break
+    return items
 
 
 @router.get(
@@ -2819,6 +2874,18 @@ async def submit_assignment(
         )
     _ensure_workspace_session_owner(user, session)
 
+    # 反思答案对着作业「此刻」的题目校验;教师中途改题,已交的反思存的是当时的快照。
+    try:
+        reflection_record = build_reflection_record(
+            assignment.reflection_questions,
+            form_data.ai_used,
+            form_data.reflection_answers,
+        )
+    except ValueError as err:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(err)
+        ) from err
+
     # 已批改即定稿,提前拦下,免得白跑一遍保存与分析。
     current_submission = Education.get_current_submission(
         assignment.id, session.owner_user_id, db=db
@@ -2980,8 +3047,7 @@ async def submit_assignment(
         session.owner_user_id,
         session.id,
         form_data.ai_used,
-        form_data.ai_help_types,
-        form_data.reflection,
+        reflection_record,
         commit=False,
         db=db,
     )
@@ -3947,7 +4013,7 @@ async def mark_my_notifications_read(
 # 比」；不带就是悄悄得出一个错误结论。
 # ---------------------------------------------------------------------------
 
-RESEARCH_EXPORT_SCHEMA_VERSION = "2026-09-08.1"
+RESEARCH_EXPORT_SCHEMA_VERSION = "2026-09-14.1"
 
 _RESEARCH_SUBMISSION_COLUMNS = (
     "pseudo_id",
@@ -4010,17 +4076,17 @@ _RESEARCH_REFLECTION_COLUMNS = (
     "round_no",
     "submitted_at",
     "ai_used",
-    "ai_help_types",
-    "action_chars",
-    "location_chars",
-    "judgement_chars",
-    "next_step_chars",
     "reflection_quality",
-    "action_text",
-    "location_text",
-    "judgement_text",
-    "next_step_text",
-    "other_ai_help_text",
+    "question_position",
+    "question_id",
+    "question_kind",
+    "question_prompt",
+    "question_required",
+    "selected_options",
+    "other_chosen",
+    "answer_chars",
+    "other_text",
+    "answer_text",
 )
 
 
@@ -4071,7 +4137,9 @@ def _research_readme(
         "----",
         "submissions.csv    每份提交一行，当前算法下的最新投影（最新证据 × 最新批改）",
         "round_progress.csv 退回—重交之间的改动幅度与分数变化",
-        "reflections.csv    提交时的反思自述",
+        "reflections.csv    提交时的反思，每道题一行；题目由教师按作业自定，存的是提交当时的",
+        "                   题目快照。一道题都没设的提交也留一行（题目列为空），保住 ai_used。",
+        "                   selected_options 以 | 分隔；answer_chars 为填空题回答或「其他」说明的字数。",
     ]
     return "\n".join(lines) + "\n"
 
@@ -4200,31 +4268,33 @@ async def export_research_dataset(
         evidence = evidence_by_id.get(projection.evidence_snapshot_id)
         if evidence is not None:
             reflection_facts = evidence.evidence_json.reflection
-            sections = reflection_facts.reflection
-
-            def section(key: str) -> str:
-                return (getattr(sections, key, "") or "").strip()
-
-            reflection_rows.append(
-                [
-                    pseudo_id,
-                    point.assignment_id,
-                    point.round_no,
-                    point.submitted_at,
-                    reflection_facts.ai_used,
-                    "|".join(reflection_facts.ai_help_types),
-                    len(section("action")),
-                    len(section("location")),
-                    len(section("judgement")),
-                    len(section("next_step")),
-                    point.reflection_quality,
-                    section("action") if include_text else "",
-                    section("location") if include_text else "",
-                    section("judgement") if include_text else "",
-                    section("next_step") if include_text else "",
-                    section("other_ai_help") if include_text else "",
-                ]
-            )
+            row_prefix = [
+                pseudo_id,
+                point.assignment_id,
+                point.round_no,
+                point.submitted_at,
+                reflection_facts.ai_used,
+                point.reflection_quality,
+            ]
+            items = reflection_facts.reflection.items
+            if not items:
+                reflection_rows.append(row_prefix + [""] * 10)
+            for position, item in enumerate(items, start=1):
+                reflection_rows.append(
+                    row_prefix
+                    + [
+                        position,
+                        item.id,
+                        item.kind,
+                        item.prompt,
+                        item.required,
+                        "|".join(item.selected),
+                        item.other_text is not None,
+                        len(item.text or item.other_text or ""),
+                        (item.other_text or "") if include_text else "",
+                        (item.text or "") if include_text else "",
+                    ]
+                )
 
     archive = io.BytesIO()
     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:

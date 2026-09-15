@@ -33,7 +33,6 @@
 		formatEpochDate,
 		formatRatioPercent,
 		formatShortDate,
-		getAiHelpTypeLabel,
 		getReviewStatusLabel,
 		resolveErrorMessage
 	} from '$lib/utils/education';
@@ -118,10 +117,6 @@
 			'Resubmissions changed less than {{ratio}}% of the text.',
 			{ ratio: p.revision_ratio ?? 0 }
 		],
-		help_type_shift_refining: (p) => [
-			'AI use shifted from generating text toward revising own writing (+{{delta}} points).',
-			{ delta: Math.round((p.delta ?? 0) * 100) }
-		],
 		deadline_rush: (p) => [
 			'{{ratio}}% of the latest draft was written during the final 24 hours before the deadline or later.',
 			{ ratio: Math.round((p.ratio ?? 0) * 100) }
@@ -156,7 +151,6 @@
 			'Next: reuse the revision method that produced the strongest score improvement.',
 		revise_feedback_deeply:
 			'Next: make one structural or evidence-level revision before resubmitting.',
-		continue_refining_own_writing: 'Next: continue using AI to question and refine your own draft.',
 		start_next_assignment_earlier:
 			'Next: create the outline at least two days before the deadline.',
 		keep_current_process: 'Next: keep the current revision and pacing routine.',
@@ -233,11 +227,6 @@
 	);
 	$: rubricDimensions = buildRubricDimensions(crossTimeline, rubricCriteriaByAssignment);
 	const RUBRIC_TONES = ['sky', 'emerald', 'violet', 'amber', 'rose'];
-
-	$: helpDistribution = Object.entries(profile?.ai_help_type_distribution ?? {}).sort(
-		(left, right) => right[1] - left[1]
-	);
-	$: helpShift = profile?.ai_help_type_shift ?? {};
 
 	const seriesOf = (
 		key: ProfileMetricKey,
@@ -1111,28 +1100,6 @@
 						/>
 					</div>
 				</div>
-
-				{#if helpDistribution.length}
-					<div class="mt-8">
-						<div class="mb-3 text-xs font-medium text-gray-500 dark:text-gray-400">
-							{$i18n.t('What AI was used for')}
-						</div>
-						<div class="mb-4 flex flex-wrap gap-2">
-							{#each helpDistribution as [helpType, count]}
-								<EduBadge>{getAiHelpTypeLabel(helpType, t)} × {count}</EduBadge>
-							{/each}
-						</div>
-						{#if helpShift.recent}
-							<div class="text-xs text-gray-500 dark:text-gray-400">
-								{$i18n.t('Share of AI use aimed at revising own writing')}:
-								<span class="font-medium text-gray-700 dark:text-gray-300">
-									{formatRatioPercent(helpShift.early?.refining_ratio ?? 0)} →
-									{formatRatioPercent(helpShift.recent?.refining_ratio ?? 0)}
-								</span>
-							</div>
-						{/if}
-					</div>
-				{/if}
 			</EduCard>
 		{/if}
 

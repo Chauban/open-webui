@@ -1,6 +1,9 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 import type {
 	EditorOperationType,
+	ReflectionAnswer,
+	ReflectionQuestion,
+	ReflectionQuestionSet,
 	StudentGrowthGoal,
 	StudentProfile,
 	StudentProfileFilters,
@@ -194,6 +197,7 @@ export const createAssignment = async (
 		challenge_enabled?: boolean;
 		challenge_rounds?: number;
 		challenge_focus_keys?: string[];
+		reflection_questions: ReflectionQuestion[];
 		rubric_schema: {
 			criteria: Array<{ key: string; label: string; max_score: number }>;
 		};
@@ -203,6 +207,16 @@ export const createAssignment = async (
 		method: 'POST',
 		headers: withAuth(token),
 		body: JSON.stringify(payload)
+	}).then(handleJson);
+};
+
+/** 教师以往作业里用过的反思题，新的在前，内容相同的只留最近一份。 */
+export const getTeacherReflectionQuestionSets = async (
+	token: string
+): Promise<ReflectionQuestionSet[]> => {
+	return fetch(`${WEBUI_API_BASE_URL}/teacher/reflection-question-sets`, {
+		method: 'GET',
+		headers: withAuth(token)
 	}).then(handleJson);
 };
 
@@ -283,6 +297,7 @@ export const updateAssignment = async (
 		challenge_enabled?: boolean;
 		challenge_rounds?: number;
 		challenge_focus_keys?: string[];
+		reflection_questions?: ReflectionQuestion[];
 		rubric_schema?: {
 			criteria: Array<{ key: string; label: string; max_score: number }>;
 		};
@@ -463,18 +478,11 @@ export const submitAssignment = async (
 		final_content_html?: string;
 		final_content_text: string;
 		ai_used: boolean;
-		ai_help_types: string[];
+		reflection_answers: ReflectionAnswer[];
 		data_completeness: {
 			version_data_complete: boolean;
 			editor_operations_complete: boolean;
 			source_tracking_complete: boolean;
-		};
-		reflection: {
-			action: string;
-			location: string;
-			judgement: string;
-			next_step: string;
-			other_ai_help?: string | null;
 		};
 	}
 ) => {

@@ -1,14 +1,34 @@
-export type AIHelpType =
-	| 'Understand Assignment'
-	| 'Outline'
-	| 'Examples'
-	| 'Explain Concepts'
-	| 'Revise Structure'
-	| 'Polish'
-	| 'Check Errors'
-	| "Help Break Through Writer's Block"
-	| 'Strengthen Reasoning'
-	| 'Other';
+// 提交前反思。「这次用了 AI 吗」由系统固定询问，其余题目由教师按作业自定。
+export type ReflectionQuestionKind = 'single_choice' | 'multi_choice' | 'text';
+export type ReflectionShowWhen = 'always' | 'ai_used' | 'ai_not_used';
+
+export type ReflectionQuestion = {
+	id: string;
+	kind: ReflectionQuestionKind;
+	prompt: string;
+	options: string[];
+	allow_other: boolean;
+	placeholder: string | null;
+	required: boolean;
+	show_when: ReflectionShowWhen;
+};
+
+export type ReflectionAnswer = {
+	question_id: string;
+	selected: string[];
+	other_text: string | null;
+	text: string | null;
+};
+
+/** 提交时冻结的题目快照 + 学生的回答。 */
+export type ReflectionItem = ReflectionQuestion & Omit<ReflectionAnswer, 'question_id'>;
+
+export type ReflectionQuestionSet = {
+	assignment_id: string;
+	assignment_title: string;
+	created_at: number;
+	questions: ReflectionQuestion[];
+};
 export type WritingSourceType =
 	| 'ai_inserted'
 	| 'ai_pasted'
@@ -49,7 +69,6 @@ export type ProfileInsightCode =
 	| 'ai_share_changed'
 	| 'round_improvement'
 	| 'round_revision_thin'
-	| 'help_type_shift_refining'
 	| 'deadline_rush'
 	| 'process_up'
 	| 'reflection_thin'
@@ -62,7 +81,6 @@ export type ProfileInsightActionCode =
 	| 'review_ai_use_pattern'
 	| 'reuse_successful_revision'
 	| 'revise_feedback_deeply'
-	| 'continue_refining_own_writing'
 	| 'start_next_assignment_earlier'
 	| 'keep_current_process'
 	| 'add_specific_reflection_evidence'
@@ -137,7 +155,6 @@ export type StudentProfileTimelinePoint = {
 	prompt_count: number | null;
 	digestion_ratio: number | null;
 	reflection_quality: number | null;
-	ai_help_types: AIHelpType[];
 	collaboration_index: number | null;
 	burst_count: number | null;
 	suspected_unmarked_import_count: number | null;
@@ -294,12 +311,6 @@ export type StudentProfile = {
 	cross_assignment_timeline: StudentProfileTimelinePoint[];
 	round_progress: StudentProfileRoundProgress[];
 	trends: StudentProfileMetricTrend[];
-	ai_help_type_distribution: Partial<Record<AIHelpType, number>>;
-	ai_help_type_shift: {
-		early: { generative: number; refining: number; refining_ratio: number | null };
-		recent: { generative: number; refining: number; refining_ratio: number | null };
-		refining_ratio_delta: number | null;
-	};
 	reflection_quality: {
 		count: number;
 		average_score: number | null;

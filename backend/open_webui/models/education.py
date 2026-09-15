@@ -51,18 +51,11 @@ CHALLENGE_STATUSES = ("in_progress", "completed", "skipped")
 # 只给 2 或 3。无限回合会把质疑变成打击,而且学生看不到终点就会中途退出。
 CHALLENGE_ROUND_CHOICES = (2, 3)
 CHALLENGE_MAX_FOCUS_KEYS = 2
-AIHelpType = Literal[
-    "Understand Assignment",
-    "Outline",
-    "Examples",
-    "Explain Concepts",
-    "Revise Structure",
-    "Polish",
-    "Check Errors",
-    "Help Break Through Writer's Block",
-    "Strengthen Reasoning",
-    "Other",
-]
+# 提交前反思。「这次用了 AI 吗」是系统固定题(ai_used),其余题目由教师按作业自定。
+ReflectionQuestionKind = Literal["single_choice", "multi_choice", "text"]
+ReflectionShowWhen = Literal["always", "ai_used", "ai_not_used"]
+REFLECTION_MAX_QUESTIONS = 20
+REFLECTION_MAX_OPTIONS = 12
 WritingSourceType = Literal[
     "ai_inserted",
     "ai_pasted",
@@ -116,6 +109,7 @@ class Assignment(Base):
     challenge_enabled = Column(Boolean, nullable=False, default=False)
     challenge_rounds = Column(Integer, nullable=False, default=3)
     challenge_focus_keys = Column(JSONField, nullable=False, default=list)
+    reflection_questions = Column(JSONField, nullable=False, default=list)
     rubric_schema = Column(JSONField, nullable=False)
     archived_at = Column(BigInteger, nullable=True)
     created_at = Column(BigInteger, nullable=False)
@@ -313,7 +307,6 @@ class MicroReflection(Base):
     student_id = Column(Text, nullable=False)
     writing_session_id = Column(Text, nullable=False)
     ai_used = Column(Boolean, nullable=False)
-    ai_help_types = Column(JSONField, nullable=False, default=[])
     reflection_json = Column(JSONField, nullable=False)
     created_at = Column(BigInteger, nullable=False)
 
@@ -820,6 +813,184 @@ class RubricSchema(BaseModel):
         return sum(criterion.max_score for criterion in self.criteria)
 
 
+def _strip_optional(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    return value.strip() or None
+
+
+class ReflectionQuestion(BaseModel):
+    """教师给一份作业设定的一道反思题。
+
+    id 由前端生成,只用来把学生的答案对回题目;题目随时可改,已交的反思里存的是
+    提交当时的题目快照,不会跟着变。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1, max_length=64)
+    kind: ReflectionQuestionKind
+    prompt: str = Field(min_length=1, max_length=300)
+    options: list[str] = Field(default_factory=list)
+    # 选择题末尾追加一个「其他」,选了就必须写一句。
+    allow_other: bool = False
+    placeholder: Optional[str] = Field(default=None, max_length=200)
+    required: bool = True
+    show_when: ReflectionShowWhen = "always"
+
+    @field_validator("prompt", mode="before")
+    @classmethod
+    def strip_prompt(cls, value: str) -> str:
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("placeholder", mode="before")
+    @classmethod
+    def strip_placeholder(cls, value: Optional[str]) -> Optional[str]:
+        return _strip_optional(value)
+
+    @field_validator("options", mode="before")
+    @classmethod
+    def strip_options(cls, value: list) -> list:
+        if not isinstance(value, list):
+            return value
+        return [item.strip() if isinstance(item, str) else item for item in value]
+
+    @model_validator(mode="after")
+    def validate_shape(self):
+        if self.kind == "text":
+            if self.options or self.allow_other:
+                raise ValueError("Text reflection questions cannot have options")
+            return self
+        if self.placeholder is not None:
+            raise ValueError("Choice reflection questions cannot have a placeholder")
+        if any(not option or len(option) > 100 for option in self.options):
+            raise ValueError("Reflection options must be 1-100 characters")
+        if len(self.options) != len(set(self.options)):
+            raise ValueError("Reflection options must be unique")
+        if len(self.options) > REFLECTION_MAX_OPTIONS:
+            raise ValueError(
+                f"A reflection question accepts at most {REFLECTION_MAX_OPTIONS} options"
+            )
+        if len(self.options) + int(self.allow_other) < 2:
+            raise ValueError("Choice reflection questions need at least two choices")
+        return self
+
+
+def validate_reflection_questions(
+    questions: list[ReflectionQuestion],
+) -> list[ReflectionQuestion]:
+    if len(questions) > REFLECTION_MAX_QUESTIONS:
+        raise ValueError(
+            f"An assignment accepts at most {REFLECTION_MAX_QUESTIONS} reflection questions"
+        )
+    ids = [question.id for question in questions]
+    if len(ids) != len(set(ids)):
+        raise ValueError("Reflection question ids must be unique")
+    return questions
+
+
+class ReflectionItem(ReflectionQuestion):
+    """提交时冻结的一道题及学生的回答。"""
+
+    selected: list[str] = Field(default_factory=list)
+    other_text: Optional[str] = Field(default=None, max_length=300)
+    text: Optional[str] = Field(default=None, max_length=2000)
+
+
+class ReflectionRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # 只含提交时对该学生可见的题(按 show_when 过滤),顺序与作业设定一致。
+    items: list[ReflectionItem] = Field(default_factory=list)
+
+
+class ReflectionAnswerForm(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    question_id: str = Field(min_length=1, max_length=64)
+    selected: list[str] = Field(default_factory=list, max_length=REFLECTION_MAX_OPTIONS)
+    other_text: Optional[str] = Field(default=None, max_length=300)
+    text: Optional[str] = Field(default=None, max_length=2000)
+
+    @field_validator("other_text", "text", mode="before")
+    @classmethod
+    def strip_text(cls, value: Optional[str]) -> Optional[str]:
+        return _strip_optional(value)
+
+
+class ReflectionQuestionSetItem(BaseModel):
+    """教师以往作业里用过的一套反思题,供新建作业时沿用或导入。"""
+
+    assignment_id: str
+    assignment_title: str
+    created_at: int
+    questions: list[ReflectionQuestion]
+
+
+def is_reflection_question_visible(question: ReflectionQuestion, ai_used: bool) -> bool:
+    if question.show_when == "ai_used":
+        return ai_used
+    if question.show_when == "ai_not_used":
+        return not ai_used
+    return True
+
+
+def build_reflection_record(
+    questions: list[ReflectionQuestion],
+    ai_used: bool,
+    answers: list[ReflectionAnswerForm],
+) -> ReflectionRecord:
+    """按作业当前的题目校验学生答案,并冻结成提交快照。"""
+
+    visible = [
+        question
+        for question in questions
+        if is_reflection_question_visible(question, ai_used)
+    ]
+    visible_ids = {question.id for question in visible}
+    answer_by_id: dict[str, ReflectionAnswerForm] = {}
+    for answer in answers:
+        if answer.question_id in answer_by_id:
+            raise ValueError("Each reflection question can be answered only once")
+        if answer.question_id not in visible_ids:
+            raise ValueError("Reflection answer does not match a question")
+        answer_by_id[answer.question_id] = answer
+
+    items: list[ReflectionItem] = []
+    for question in visible:
+        answer = answer_by_id.get(question.id) or ReflectionAnswerForm(
+            question_id=question.id
+        )
+        if question.kind == "text":
+            if answer.selected or answer.other_text is not None:
+                raise ValueError("Text reflection questions take a text answer")
+            if question.required and answer.text is None:
+                raise ValueError("Please answer every required reflection question")
+        else:
+            if answer.text is not None:
+                raise ValueError("Choice reflection questions take selected options")
+            if len(answer.selected) != len(set(answer.selected)):
+                raise ValueError("Selected reflection options must be unique")
+            if any(option not in question.options for option in answer.selected):
+                raise ValueError("Selected reflection option is not available")
+            if answer.other_text is not None and not question.allow_other:
+                raise ValueError("This reflection question has no Other option")
+            choice_count = len(answer.selected) + int(answer.other_text is not None)
+            if question.kind == "single_choice" and choice_count > 1:
+                raise ValueError("Single-choice reflection questions take one answer")
+            if question.required and choice_count == 0:
+                raise ValueError("Please answer every required reflection question")
+        items.append(
+            ReflectionItem(
+                **question.model_dump(),
+                selected=list(answer.selected),
+                other_text=answer.other_text,
+                text=answer.text,
+            )
+        )
+    return ReflectionRecord(items=items)
+
+
 class AssignmentModel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -835,6 +1006,7 @@ class AssignmentModel(BaseModel):
     challenge_enabled: bool
     challenge_rounds: int
     challenge_focus_keys: list[str] = Field(default_factory=list)
+    reflection_questions: list[ReflectionQuestion] = Field(default_factory=list)
     rubric_schema: RubricSchema
     archived_at: Optional[int] = None
     created_at: int
@@ -1107,23 +1279,6 @@ class AnalysisResultModel(BaseModel):
     updated_at: int
 
 
-class StructuredReflection(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    action: str = Field(min_length=10, max_length=1000)
-    location: str = Field(min_length=2, max_length=300)
-    judgement: str = Field(min_length=10, max_length=1000)
-    next_step: str = Field(min_length=5, max_length=500)
-    other_ai_help: Optional[str] = Field(default=None, max_length=300)
-
-    @field_validator(
-        "action", "location", "judgement", "next_step", "other_ai_help", mode="before"
-    )
-    @classmethod
-    def strip_text(cls, value: Optional[str]) -> Optional[str]:
-        return value.strip() if value is not None else None
-
-
 class MicroReflectionModel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -1132,8 +1287,7 @@ class MicroReflectionModel(BaseModel):
     student_id: str
     writing_session_id: str
     ai_used: bool
-    ai_help_types: list[AIHelpType] = Field(default_factory=list)
-    reflection_json: StructuredReflection
+    reflection_json: ReflectionRecord
     created_at: int
 
 
@@ -1193,7 +1347,13 @@ class AssignmentCreateForm(BaseModel):
     challenge_enabled: bool = False
     challenge_rounds: int = 3
     challenge_focus_keys: list[str] = Field(default_factory=list)
+    reflection_questions: list[ReflectionQuestion] = Field(default_factory=list)
     rubric_schema: RubricSchema
+
+    @model_validator(mode="after")
+    def validate_reflection_config(self):
+        validate_reflection_questions(self.reflection_questions)
+        return self
 
     @model_validator(mode="after")
     def validate_rubric_total(self):
@@ -1226,7 +1386,14 @@ class AssignmentUpdateForm(BaseModel):
     # 焦点 key 要对着「更新后」的 rubric 校验,而 rubric 可能不在本次请求里,
     # 所以交叉校验放在 update_assignment 里做,那里能拿到库里的现值。
     challenge_focus_keys: Optional[list[str]] = None
+    reflection_questions: Optional[list[ReflectionQuestion]] = None
     rubric_schema: Optional[RubricSchema] = None
+
+    @model_validator(mode="after")
+    def validate_updated_reflection_questions(self):
+        if self.reflection_questions is not None:
+            validate_reflection_questions(self.reflection_questions)
+        return self
 
     @model_validator(mode="after")
     def validate_updated_challenge_rounds(self):
@@ -1476,23 +1643,11 @@ class SubmissionCreateForm(BaseModel):
     final_content_html: Optional[str] = None
     final_content_text: str = Field(max_length=1_000_000)
     ai_used: bool
-    ai_help_types: list[AIHelpType] = Field(default_factory=list)
-    reflection: StructuredReflection
+    # 答案要对着作业当前的题目校验,题目不在请求里,所以交叉校验放在提交接口做。
+    reflection_answers: list[ReflectionAnswerForm] = Field(
+        default_factory=list, max_length=REFLECTION_MAX_QUESTIONS
+    )
     data_completeness: SubmissionEvidenceCompleteness
-
-    @model_validator(mode="after")
-    def validate_ai_reflection(self):
-        if len(self.ai_help_types) != len(set(self.ai_help_types)):
-            raise ValueError("AI help types must be unique")
-        if self.ai_used and not self.ai_help_types:
-            raise ValueError("At least one AI help type is required when AI was used")
-        if not self.ai_used and self.ai_help_types:
-            raise ValueError("AI help types must be empty when AI was not used")
-        if "Other" in self.ai_help_types and not self.reflection.other_ai_help:
-            raise ValueError("Other AI help requires a description")
-        if "Other" not in self.ai_help_types and self.reflection.other_ai_help:
-            raise ValueError("Other AI help description requires the Other help type")
-        return self
 
 
 class SubmissionReviewForm(BaseModel):
@@ -1674,7 +1829,6 @@ ProfileInsightCode = Literal[
     "ai_share_changed",
     "round_improvement",
     "round_revision_thin",
-    "help_type_shift_refining",
     "deadline_rush",
     "process_up",
     "reflection_thin",
@@ -1688,7 +1842,6 @@ ProfileInsightActionCode = Literal[
     "review_ai_use_pattern",
     "reuse_successful_revision",
     "revise_feedback_deeply",
-    "continue_refining_own_writing",
     "start_next_assignment_earlier",
     "keep_current_process",
     "add_specific_reflection_evidence",
@@ -1792,8 +1945,7 @@ class ProfileEvidenceConversationEvent(StrictProfileModel):
 class ProfileEvidenceReflection(StrictProfileModel):
     id: str = Field(min_length=1)
     ai_used: bool
-    ai_help_types: list[AIHelpType] = Field(default_factory=list)
-    reflection: StructuredReflection
+    reflection: ReflectionRecord
     created_at: int = Field(ge=0)
 
 
@@ -1863,7 +2015,7 @@ class ProfileEvidenceChallenge(StrictProfileModel):
 
 
 class ProfileEvidencePayload(StrictProfileModel):
-    evidence_schema_version: Literal["2026-09-08.1"] = "2026-09-08.1"
+    evidence_schema_version: Literal["2026-09-14.1"] = "2026-09-14.1"
     submission_id: str = Field(min_length=1)
     student_id: str = Field(min_length=1)
     assignment_id: str = Field(min_length=1)
@@ -1974,7 +2126,6 @@ class StudentProfileTimelinePoint(StrictProfileModel):
     digestion_ratio: Optional[int] = Field(default=None, ge=0, le=100)
     # 教师批改时给的 1—5 分折算而来;批改之前为空,不给假分。
     reflection_quality: Optional[int] = Field(default=None, ge=0, le=100)
-    ai_help_types: list[AIHelpType] = Field(default_factory=list)
     collaboration_index: Optional[int] = Field(default=None, ge=0, le=100)
 
     # 面对质疑维。作业没开试读时全为 None——这是「不适用」,不是「表现差」,
@@ -2171,18 +2322,6 @@ class StudentProfilePagination(StrictProfileModel):
     offset: int = Field(ge=0)
 
 
-class StudentProfileHelpTypeSummary(StrictProfileModel):
-    generative: int = 0
-    refining: int = 0
-    refining_ratio: Optional[float] = None
-
-
-class StudentProfileHelpTypeShift(StrictProfileModel):
-    early: StudentProfileHelpTypeSummary
-    recent: StudentProfileHelpTypeSummary
-    refining_ratio_delta: Optional[float] = None
-
-
 class StudentProfileReflectionQuality(StrictProfileModel):
     count: int = 0
     average_score: Optional[int] = None
@@ -2268,8 +2407,6 @@ class StudentProfileAggregatePayload(StrictProfileModel):
     )
     round_progress: list[StudentProfileRoundProgress] = Field(default_factory=list)
     trends: list[StudentProfileMetricTrend] = Field(default_factory=list)
-    ai_help_type_distribution: dict[AIHelpType, int] = Field(default_factory=dict)
-    ai_help_type_shift: StudentProfileHelpTypeShift
     reflection_quality: StudentProfileReflectionQuality
     insights: list[StudentProfileInsight] = Field(default_factory=list)
     data_completeness: StudentProfileCompletenessSummary
@@ -2316,8 +2453,6 @@ class StudentProfileResponse(StrictProfileModel):
     )
     round_progress: list[StudentProfileRoundProgress] = Field(default_factory=list)
     trends: list[StudentProfileMetricTrend] = Field(default_factory=list)
-    ai_help_type_distribution: dict[AIHelpType, int] = Field(default_factory=dict)
-    ai_help_type_shift: StudentProfileHelpTypeShift
     reflection_quality: StudentProfileReflectionQuality
     insights: list[StudentProfileInsight] = Field(default_factory=list)
     data_completeness: StudentProfileCompletenessSummary
@@ -2656,6 +2791,12 @@ class EducationTable:
                 if form_data.challenge_rounds is None:
                     raise ValueError("Challenge rounds are required")
                 assignment.challenge_rounds = form_data.challenge_rounds
+            if "reflection_questions" in form_data.model_fields_set:
+                if form_data.reflection_questions is None:
+                    raise ValueError("Reflection questions are required")
+                assignment.reflection_questions = [
+                    question.model_dump() for question in form_data.reflection_questions
+                ]
             if "challenge_focus_keys" in form_data.model_fields_set:
                 assignment.challenge_focus_keys = list(
                     form_data.challenge_focus_keys or []
@@ -2718,6 +2859,9 @@ class EducationTable:
                 challenge_enabled=form_data.challenge_enabled,
                 challenge_rounds=form_data.challenge_rounds,
                 challenge_focus_keys=list(form_data.challenge_focus_keys),
+                reflection_questions=[
+                    question.model_dump() for question in form_data.reflection_questions
+                ],
                 rubric_schema=form_data.rubric_schema.model_dump(),
                 archived_at=None,
                 created_at=now,
@@ -3515,8 +3659,7 @@ class EducationTable:
         student_id: str,
         writing_session_id: str,
         ai_used: bool,
-        ai_help_types: list[AIHelpType],
-        reflection: StructuredReflection,
+        reflection: ReflectionRecord,
         commit: bool = True,
         db: Optional[Session] = None,
     ) -> MicroReflectionModel:
@@ -3527,7 +3670,6 @@ class EducationTable:
                 student_id=student_id,
                 writing_session_id=writing_session_id,
                 ai_used=ai_used,
-                ai_help_types=ai_help_types,
                 reflection_json=reflection.model_dump(),
                 created_at=int(time.time()),
             )

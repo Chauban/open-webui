@@ -9,23 +9,6 @@ type Translate = (key: string, options?: Record<string, unknown>) => string;
 export const getClassroomDisplayName = (name: string | null | undefined, t: Translate) =>
 	name?.trim() === 'Default Classroom' ? t('Default Classroom') : (name ?? '');
 
-const AI_HELP_TYPE_KEYS = [
-	'Understand Assignment',
-	'Outline',
-	'Examples',
-	'Explain Concepts',
-	'Revise Structure',
-	'Polish',
-	'Check Errors',
-	"Help Break Through Writer's Block",
-	'Strengthen Reasoning',
-	'Other'
-];
-
-/** 微反思里学生勾选的 AI 帮助类型；未知值原样返回。 */
-export const getAiHelpTypeLabel = (value: string, t: Translate) =>
-	AI_HELP_TYPE_KEYS.includes(value) ? t(value) : value;
-
 const REVIEW_STATUS_KEYS: Record<string, string> = {
 	pending: 'Pending Review',
 	reviewed: 'Reviewed',

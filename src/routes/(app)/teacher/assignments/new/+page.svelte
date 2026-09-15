@@ -5,8 +5,13 @@
 	import { get } from 'svelte/store';
 	import { toast } from 'svelte-sonner';
 
-	import { createAssignment, getTeacherAssignment, getTeacherClassrooms } from '$lib/apis/education';
-	import type { CoachingStyle } from '$lib/apis/education';
+	import {
+		createAssignment,
+		getTeacherAssignment,
+		getTeacherClassrooms,
+		getTeacherReflectionQuestionSets
+	} from '$lib/apis/education';
+	import type { CoachingStyle, ReflectionQuestion, ReflectionQuestionSet } from '$lib/apis/education';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
 	import EduButton from '$lib/components/education/EduButton.svelte';
@@ -16,6 +21,13 @@
 	import RubricCriteriaEditor from '$lib/components/education/RubricCriteriaEditor.svelte';
 	import CoachingStyleSelector from '$lib/components/education/CoachingStyleSelector.svelte';
 	import ChallengeSettings from '$lib/components/education/ChallengeSettings.svelte';
+	import ReflectionQuestionsEditor from '$lib/components/education/ReflectionQuestionsEditor.svelte';
+	import {
+		cloneReflectionQuestions,
+		getDefaultReflectionQuestions,
+		getReflectionQuestionsError,
+		normalizeReflectionQuestions
+	} from '$lib/utils/reflection-questions';
 	import { EDU_FIELD_CLASS, eduSegmentClass } from '$lib/components/education/styles';
 	import { formatDateTimeInput, getClassroomDisplayName, resolveErrorMessage } from '$lib/utils/education';
 
@@ -32,6 +44,9 @@
 	let challengeEnabled = false;
 	let challengeRounds = 3;
 	let challengeFocusKeys: string[] = [];
+	let reflectionQuestions: ReflectionQuestion[] = [];
+	let reflectionQuestionSets: ReflectionQuestionSet[] = [];
+	let reflectionNotice = '';
 	// 默认维度走词条，教师看到的是母语名称；key 只是后端字段名，教师不填。
 	let rubricCriteria = [
 		{ key: 'criterion_1', label: t('Ideas'), maxScore: '34' },
@@ -56,7 +71,29 @@
 
 	onMount(async () => {
 		try {
-			classrooms = await getTeacherClassrooms(localStorage.token);
+			// 以往题组读不出来不该挡住建作业，退回默认题即可。
+			const [teacherClassrooms, questionSets] = await Promise.all([
+				getTeacherClassrooms(localStorage.token),
+				getTeacherReflectionQuestionSets(localStorage.token).catch((error) => {
+					console.error(error);
+					return [];
+				})
+			]);
+			classrooms = teacherClassrooms;
+			reflectionQuestionSets = questionSets;
+			// 教师大多一门课一套反思，所以默认沿用最近一份作业的题；第一次出题才给推荐题。
+			if (questionSets.length > 0) {
+				reflectionQuestions = cloneReflectionQuestions(questionSets[0].questions);
+				reflectionNotice = t(
+					'Pre-filled with the questions from your last assignment "{{title}}". Edit them, import another set, or restore defaults.',
+					{ title: questionSets[0].assignment_title }
+				);
+			} else {
+				reflectionQuestions = getDefaultReflectionQuestions(t);
+				reflectionNotice = t(
+					'Pre-filled with recommended questions. Add, remove, or rewrite them to fit this assignment.'
+				);
+			}
 			const params = get(page).url.searchParams;
 			const presetClassroomId = params.get('classroomId');
 			const duplicateFromId = params.get('from');
@@ -74,6 +111,12 @@
 					challengeEnabled = source.assignment.challenge_enabled ?? false;
 					challengeRounds = source.assignment.challenge_rounds ?? 3;
 					challengeFocusKeys = [...(source.assignment.challenge_focus_keys ?? [])];
+					reflectionQuestions = cloneReflectionQuestions(
+						source.assignment.reflection_questions ?? []
+					);
+					reflectionNotice = t('Copied the reflection questions from "{{title}}".', {
+						title: source.assignment.title
+					});
 					rubricCriteria = source.assignment.rubric_schema.criteria.map((criterion) => ({
 						key: criterion.key,
 						label: criterion.label,
@@ -142,6 +185,12 @@
 			toast.error(t('Rubric maximum scores must add up to the assignment maximum.'));
 			return;
 		}
+		const reflectionQuestionsPayload = normalizeReflectionQuestions(reflectionQuestions);
+		const reflectionError = getReflectionQuestionsError(reflectionQuestionsPayload);
+		if (reflectionError) {
+			toast.error(t(reflectionError.key, reflectionError.params));
+			return;
+		}
 
 		saving = true;
 		try {
@@ -155,6 +204,7 @@
 				challenge_enabled: challengeEnabled,
 				challenge_rounds: challengeRounds,
 				challenge_focus_keys: challengeEnabled ? challengeFocusKeys : [],
+				reflection_questions: reflectionQuestionsPayload,
 				rubric_schema: { criteria: parsedCriteria }
 			});
 			toast.success(
@@ -258,6 +308,11 @@
 					bind:enabled={challengeEnabled}
 					bind:rounds={challengeRounds}
 					bind:focusKeys={challengeFocusKeys}
+				/>
+				<ReflectionQuestionsEditor
+					bind:questions={reflectionQuestions}
+					questionSets={reflectionQuestionSets}
+					notice={reflectionNotice}
 				/>
 				<div class="flex justify-end">
 					<EduButton variant="primary" on:click={submit} disabled={saving}>

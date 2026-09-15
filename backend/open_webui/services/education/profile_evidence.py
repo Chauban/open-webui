@@ -47,10 +47,9 @@ from open_webui.services.education.profile import (
     _profile_index_formula,
     _reflection_quality_from_review,
     _slice_round_versions,
-    _summarize_help_types,
 )
 
-PROFILE_EVIDENCE_SCHEMA_VERSION = "2026-09-08.1"
+PROFILE_EVIDENCE_SCHEMA_VERSION = "2026-09-14.1"
 PROFILE_EVIDENCE_COLLECTOR_VERSION = "2026-09-03.1"
 
 
@@ -87,7 +86,6 @@ def profile_algorithm_code_checksum() -> str:
         _reflection_quality_from_review,
         _build_profile_insights,
         _build_trend,
-        _summarize_help_types,
     )
     return hashlib.sha256(
         "\n".join(inspect.getsource(function) for function in functions).encode("utf-8")
@@ -319,7 +317,6 @@ def capture_profile_evidence(
         reflection=ProfileEvidenceReflection(
             id=reflection.id,
             ai_used=reflection.ai_used,
-            ai_help_types=list(reflection.ai_help_types),
             reflection=reflection.reflection_json,
             created_at=reflection.created_at,
         ),
@@ -562,7 +559,6 @@ def build_metric_projection(
         prompt_count=prompt_count,
         digestion_ratio=digestion_ratio,
         reflection_quality=reflection_quality,
-        ai_help_types=list(facts.reflection.ai_help_types),
         collaboration_index=_compute_collaboration_index(
             digestion_ratio,
             prompt_count,

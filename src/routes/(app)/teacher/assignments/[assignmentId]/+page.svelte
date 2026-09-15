@@ -10,9 +10,10 @@
 		deleteAssignment,
 		getTeacherAssignment,
 		getTeacherClassrooms,
+		getTeacherReflectionQuestionSets,
 		updateAssignment
 	} from '$lib/apis/education';
-	import type { CoachingStyle } from '$lib/apis/education';
+	import type { CoachingStyle, ReflectionQuestion, ReflectionQuestionSet } from '$lib/apis/education';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
@@ -24,6 +25,11 @@
 	import RubricCriteriaEditor from '$lib/components/education/RubricCriteriaEditor.svelte';
 	import CoachingStyleSelector from '$lib/components/education/CoachingStyleSelector.svelte';
 	import ChallengeSettings from '$lib/components/education/ChallengeSettings.svelte';
+	import ReflectionQuestionsEditor from '$lib/components/education/ReflectionQuestionsEditor.svelte';
+	import {
+		getReflectionQuestionsError,
+		normalizeReflectionQuestions
+	} from '$lib/utils/reflection-questions';
 	import { EDU_FIELD_CLASS } from '$lib/components/education/styles';
 	import {
 		formatDateTimeInput,
@@ -52,6 +58,8 @@
 	let challengeEnabled = false;
 	let challengeRounds = 3;
 	let challengeFocusKeys: string[] = [];
+	let reflectionQuestions: ReflectionQuestion[] = [];
+	let reflectionQuestionSets: ReflectionQuestionSet[] = [];
 	let rubricCriteria = [];
 	let showArchiveConfirm = false;
 	let showDeleteConfirm = false;
@@ -88,6 +96,10 @@
 		challengeEnabled = item.assignment.challenge_enabled ?? false;
 		challengeRounds = item.assignment.challenge_rounds ?? 3;
 		challengeFocusKeys = [...(item.assignment.challenge_focus_keys ?? [])];
+		reflectionQuestions = (item.assignment.reflection_questions ?? []).map((question) => ({
+			...question,
+			options: [...question.options]
+		}));
 		rubricCriteria = item.assignment.rubric_schema.criteria.map((criterion) => ({
 			key: criterion.key,
 			label: criterion.label,
@@ -96,11 +108,16 @@
 	};
 
 	const loadData = async () => {
-		const [assignmentItem, teacherClassrooms] = await Promise.all([
+		const [assignmentItem, teacherClassrooms, questionSets] = await Promise.all([
 			getTeacherAssignment(localStorage.token, assignmentId()),
-			getTeacherClassrooms(localStorage.token)
+			getTeacherClassrooms(localStorage.token),
+			getTeacherReflectionQuestionSets(localStorage.token).catch((error) => {
+				console.error(error);
+				return [];
+			})
 		]);
 		classrooms = teacherClassrooms;
+		reflectionQuestionSets = questionSets;
 		item = assignmentItem;
 		syncForm();
 	};
@@ -141,6 +158,12 @@
 			toast.error(t('Rubric maximum scores must add up to the assignment maximum.'));
 			return;
 		}
+		const reflectionQuestionsPayload = normalizeReflectionQuestions(reflectionQuestions);
+		const reflectionError = getReflectionQuestionsError(reflectionQuestionsPayload);
+		if (reflectionError) {
+			toast.error(t(reflectionError.key, reflectionError.params));
+			return;
+		}
 
 		saving = true;
 		try {
@@ -155,6 +178,7 @@
 				challenge_enabled: challengeEnabled,
 				challenge_rounds: challengeRounds,
 				challenge_focus_keys: challengeEnabled ? challengeFocusKeys : [],
+				reflection_questions: reflectionQuestionsPayload,
 				rubric_schema: { criteria: parsedCriteria }
 			});
 			await loadData();
@@ -313,6 +337,12 @@
 							bind:rounds={challengeRounds}
 							bind:focusKeys={challengeFocusKeys}
 						/>
+						<ReflectionQuestionsEditor
+							bind:questions={reflectionQuestions}
+							questionSets={reflectionQuestionSets}
+							currentAssignmentId={item.assignment.id}
+							hasSubmissions={item.submission_count > 0}
+						/>
 						<div class="flex flex-wrap justify-between gap-2">
 							<div class="flex flex-wrap gap-2">
 								<EduButton variant="danger" on:click={() => (showArchiveConfirm = true)}>
@@ -329,7 +359,7 @@
 					</div>
 				</EduCard>
 
-				<div class="grid gap-4 md:grid-cols-1">
+				<div class="grid content-start gap-4 self-start md:grid-cols-1">
 					<EduCard
 						interactive
 						on:click={() => goto(`/teacher/assignments/${item.assignment.id}/submissions`)}

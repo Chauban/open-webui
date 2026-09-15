@@ -25,7 +25,6 @@
 		formatDateTimeInput,
 		formatEpoch,
 		formatEpochTime,
-		getAiHelpTypeLabel,
 		resolveErrorMessage,
 		toLocalDateTimeInput
 	} from '$lib/utils/education';
@@ -1180,44 +1179,48 @@
 									</div>
 								{/if}
 
-								<!-- AI help types -->
+								<!-- AI use: the one fixed question -->
 								<div class="rounded-2xl bg-gray-50 dark:bg-gray-800 px-4 py-4">
 									<div class="mb-2 text-[11px] uppercase tracking-[0.14em] text-gray-400">
-										{$i18n.t('AI Help Types')}
+										{$i18n.t('Did you use AI for this submission?')}
 									</div>
-									<div class="flex flex-wrap gap-2">
-										{#if !detail.micro_reflection.ai_used}
-											<span class="rounded-full border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-3 py-1 text-xs text-gray-700 dark:text-gray-300">
-												{$i18n.t('Did not use AI')}
-											</span>
-										{:else}
-											{#each detail.micro_reflection.ai_help_types as item}
-												<span class="rounded-full border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-3 py-1 text-xs text-gray-700 dark:text-gray-300">
-													{getAiHelpTypeLabel(item, t)}
-												</span>
-											{/each}
-										{/if}
-									</div>
+									<span class="rounded-full border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-3 py-1 text-xs text-gray-700 dark:text-gray-300">
+										{detail.micro_reflection.ai_used ? $i18n.t('Used AI') : $i18n.t('Did not use AI')}
+									</span>
 								</div>
 
-								<!-- Structured reflection evidence -->
-								<div class="grid gap-3 md:grid-cols-2">
-									{#each [
-										['What did you change?', detail.micro_reflection.reflection_json.action],
-										['Where did you make this change?', detail.micro_reflection.reflection_json.location],
-										['Why did you make this judgement?', detail.micro_reflection.reflection_json.judgement],
-										['What will you do next time?', detail.micro_reflection.reflection_json.next_step]
-									] as [label, value]}
-										<div class="rounded-2xl bg-gray-50 dark:bg-gray-800 px-4 py-4">
-											<div class="mb-2 text-[11px] uppercase tracking-[0.14em] text-gray-400">
-												{$i18n.t(label)}
-											</div>
-											<div class="whitespace-pre-wrap text-sm leading-7 text-gray-700 dark:text-gray-300">
-												{value}
-											</div>
+								<!-- Teacher-defined questions, frozen as they were when the student submitted -->
+								{#each detail.micro_reflection.reflection_json.items as item (item.id)}
+									<div class="rounded-2xl bg-gray-50 dark:bg-gray-800 px-4 py-4">
+										<div class="mb-2 whitespace-pre-wrap text-xs text-gray-500 dark:text-gray-400">
+											{item.prompt}
 										</div>
-									{/each}
-								</div>
+										{#if item.kind === 'text'}
+											{#if item.text}
+												<div class="whitespace-pre-wrap text-sm leading-7 text-gray-700 dark:text-gray-300">
+													{item.text}
+												</div>
+											{:else}
+												<div class="text-sm text-gray-400">{$i18n.t('Not answered')}</div>
+											{/if}
+										{:else if item.selected.length || item.other_text}
+											<div class="flex flex-wrap gap-2">
+												{#each item.selected as option}
+													<span class="rounded-full border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-3 py-1 text-xs text-gray-700 dark:text-gray-300">
+														{option}
+													</span>
+												{/each}
+												{#if item.other_text}
+													<span class="rounded-full border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-3 py-1 text-xs text-gray-700 dark:text-gray-300">
+														{$i18n.t('Other')}: {item.other_text}
+													</span>
+												{/if}
+											</div>
+										{:else}
+											<div class="text-sm text-gray-400">{$i18n.t('Not answered')}</div>
+										{/if}
+									</div>
+								{/each}
 
 								<!-- Version history -->
 								<div>

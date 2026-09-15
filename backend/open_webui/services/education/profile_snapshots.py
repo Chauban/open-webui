@@ -251,8 +251,6 @@ async def build_student_profile(
         cross_assignment_timeline=aggregate.cross_assignment_timeline,
         round_progress=page_round_progress,
         trends=aggregate.trends,
-        ai_help_type_distribution=aggregate.ai_help_type_distribution,
-        ai_help_type_shift=aggregate.ai_help_type_shift,
         reflection_quality=aggregate.reflection_quality,
         insights=aggregate.insights,
         data_completeness=aggregate.data_completeness,

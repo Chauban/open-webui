@@ -81,12 +81,17 @@ def test_fresh_database_upgrades_to_head(tmp_path, monkeypatch):
         reflection_columns = {
             column["name"] for column in schema.get_columns("micro_reflection")
         }
-        assert {"ai_used", "ai_help_types", "reflection_json"} <= reflection_columns
+        assert {"ai_used", "reflection_json"} <= reflection_columns
+        assert "ai_help_types" not in reflection_columns
         assert "reflection_text" not in reflection_columns
         assignment_columns = {
             column["name"] for column in schema.get_columns("assignment")
         }
-        assert {"score_max", "rubric_schema"} <= assignment_columns
+        assert {
+            "score_max",
+            "rubric_schema",
+            "reflection_questions",
+        } <= assignment_columns
         review_columns = {
             column["name"] for column in schema.get_columns("submission_review")
         }
@@ -286,5 +291,102 @@ def test_quoted_span_upgrade_requires_empty_evidence(tmp_path, monkeypatch):
             )
         with pytest.raises(RuntimeError, match="2026-09-06.2"):
             command.upgrade(config, "head")
+    finally:
+        engine.dispose()
+
+
+def test_fixed_reflection_converts_to_teacher_defined_questions(tmp_path, monkeypatch):
+    """固定反思转写成题目快照:学生看到的题不变,已写的回答一个字不丢。"""
+
+    import json
+
+    from open_webui.models.education import ReflectionQuestion, ReflectionRecord
+
+    backend_dir = Path(__file__).resolve().parents[5]
+    database_path = tmp_path / "reflection-questions.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    _set_database_url(monkeypatch, database_url)
+    config = _alembic_config(backend_dir)
+
+    command.upgrade(config, "d4f6b8a0c2e3")
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                "INSERT INTO assignment "
+                "(id, title, teacher_id, status, score_max, coaching_style, "
+                "challenge_enabled, challenge_rounds, challenge_focus_keys, "
+                "rubric_schema, created_at, updated_at) "
+                "VALUES ('assignment', 'Essay', 'teacher', 'active', 100, "
+                "'balanced', 0, 3, '[]', '{\"criteria\": []}', 1, 1)"
+            )
+            legacy = {
+                "action": "改写了论点",
+                "location": "第二段",
+                "judgement": "原来的论证太空泛",
+                "next_step": "先核对证据",
+                "other_ai_help": "查资料",
+            }
+            for reflection_id, ai_used, help_types in (
+                ("with-ai", 1, ["Outline", "Other"]),
+                ("no-ai", 0, []),
+            ):
+                connection.exec_driver_sql(
+                    "INSERT INTO micro_reflection "
+                    "(id, assignment_id, student_id, writing_session_id, ai_used, "
+                    "ai_help_types, reflection_json, created_at) "
+                    "VALUES (?, 'assignment', 'student', 'session', ?, ?, ?, 1)",
+                    (
+                        reflection_id,
+                        ai_used,
+                        json.dumps(help_types),
+                        json.dumps(
+                            legacy if ai_used else {**legacy, "other_ai_help": None},
+                            ensure_ascii=False,
+                        ),
+                    ),
+                )
+
+        command.upgrade(config, "head")
+
+        schema = inspect(engine)
+        assert "ai_help_types" not in {
+            column["name"] for column in schema.get_columns("micro_reflection")
+        }
+        with engine.connect() as connection:
+            questions = json.loads(
+                connection.exec_driver_sql(
+                    "SELECT reflection_questions FROM assignment"
+                ).scalar_one()
+            )
+            records = {
+                row[0]: ReflectionRecord.model_validate(json.loads(row[1]))
+                for row in connection.exec_driver_sql(
+                    "SELECT id, reflection_json FROM micro_reflection"
+                )
+            }
+        assert [ReflectionQuestion(**question).id for question in questions] == [
+            "ai_help",
+            "action",
+            "location",
+            "judgement",
+            "next_step",
+        ]
+        with_ai = records["with-ai"].items
+        assert with_ai[0].selected == ["列提纲"]
+        assert with_ai[0].other_text == "查资料"
+        assert [item.text for item in with_ai[1:]] == [
+            "改写了论点",
+            "第二段",
+            "原来的论证太空泛",
+            "先核对证据",
+        ]
+        # 没用 AI 的学生当时就没被问「AI 帮了什么」,快照里也不该有这道题。
+        assert [item.id for item in records["no-ai"].items] == [
+            "action",
+            "location",
+            "judgement",
+            "next_step",
+        ]
     finally:
         engine.dispose()

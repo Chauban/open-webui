@@ -25,7 +25,6 @@
 	import {
 		formatDateTimeInput,
 		formatEpoch,
-		getAiHelpTypeLabel,
 		getReviewStatusLabel,
 		resolveErrorMessage,
 		toLocalDateTimeInput
@@ -383,7 +382,7 @@
 						<tr>
 							<th class="px-4 py-3">{$i18n.t('Student')}</th>
 							<th class="px-4 py-3">{$i18n.t('Submitted At')}</th>
-							<th class="px-4 py-3">{$i18n.t('AI Help')}</th>
+							<th class="px-4 py-3">{$i18n.t('AI Use')}</th>
 							<th class="px-4 py-3">{$i18n.t('Status')}</th>
 							<th class="px-4 py-3">{$i18n.t('Open')}</th>
 						</tr>
@@ -394,8 +393,10 @@
 								<td class="px-4 py-4">{item.student_name}</td>
 								<td class="px-4 py-4">{formatEpoch(item.submission.submitted_at)}</td>
 								<td class="px-4 py-4">
-									{item.reflection?.ai_help_types?.length
-										? item.reflection.ai_help_types.map(getAiHelpTypeLabel).join(' / ')
+									{item.reflection
+										? item.reflection.ai_used
+											? $i18n.t('Used AI')
+											: $i18n.t('Did not use AI')
 										: '-'}
 								</td>
 								<td class="px-4 py-4">{getReviewStatusLabel(item.review_status, t)}</td>

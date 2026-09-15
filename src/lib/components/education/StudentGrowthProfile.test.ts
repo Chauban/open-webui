@@ -58,12 +58,6 @@ const profile: StudentProfile = {
 	cross_assignment_timeline: [],
 	round_progress: [],
 	trends: [],
-	ai_help_type_distribution: {},
-	ai_help_type_shift: {
-		early: { generative: 0, refining: 0, refining_ratio: null },
-		recent: { generative: 0, refining: 0, refining_ratio: null },
-		refining_ratio_delta: null
-	},
 	reflection_quality: { count: 0, average_score: null },
 	index_formula: {
 		process_index: { revision_depth: term, span_effort: term, pacing: term },

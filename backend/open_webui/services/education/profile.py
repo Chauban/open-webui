@@ -3,8 +3,6 @@ from typing import Optional
 from open_webui.models.education import (
     StudentProfileCollaborationFormula,
     StudentProfileFormulaTerm,
-    StudentProfileHelpTypeShift,
-    StudentProfileHelpTypeSummary,
     StudentProfileIndexFormula,
     StudentProfileInsight,
     StudentProfileMetricTrend,
@@ -36,8 +34,8 @@ _PROFILE_MAX_INSIGHTS = 5
 _TREND_FLAT_TOLERANCE = 0.05
 _TREND_MIN_SAMPLES = 3
 _TREND_MAX_WINDOW = 3
-PROFILE_METRIC_VERSION = "2026-09-08.1"
-PROFILE_INSIGHT_VERSION = "2026-09-03.1"
+PROFILE_METRIC_VERSION = "2026-09-14.1"
+PROFILE_INSIGHT_VERSION = "2026-09-14.1"
 
 _INSIGHT_META = {
     "not_enough_data": ("low", 5, "all"),
@@ -46,7 +44,6 @@ _INSIGHT_META = {
     "ai_share_changed": ("low", 3, "source"),
     "round_improvement": ("low", 5, "round"),
     "round_revision_thin": ("high", 5, "round"),
-    "help_type_shift_refining": ("low", 4, "source"),
     "deadline_rush": ("high", 5, "version"),
     "process_up": ("low", 4, "process"),
     "reflection_thin": ("medium", 5, "reflection"),
@@ -54,22 +51,6 @@ _INSIGHT_META = {
     "ai_use_needs_review": ("high", 5, "combined"),
 }
 _INSIGHT_SEVERITY_WEIGHT = {"high": 3, "medium": 2, "low": 1}
-
-# 学生自报的 AI 用途分两类:让 AI「生成」内容,和让 AI「打磨」自己的内容。
-# 从前者迁移到后者是很强的成长信号。
-_AI_HELP_GENERATIVE_TYPES = {
-    "Understand Assignment",
-    "Outline",
-    "Examples",
-    "Explain Concepts",
-    "Help Break Through Writer's Block",
-}
-_AI_HELP_REFINING_TYPES = {
-    "Revise Structure",
-    "Polish",
-    "Check Errors",
-    "Strengthen Reasoning",
-}
 
 _PROFILE_TREND_KEYS = (
     "total_chars",
@@ -274,23 +255,6 @@ def _build_trend(key: str, values: list[float]) -> Optional[StudentProfileMetric
     )
 
 
-def _summarize_help_types(points: list) -> StudentProfileHelpTypeSummary:
-    generative = 0
-    refining = 0
-    for point in points:
-        for help_type in point.ai_help_types:
-            if help_type in _AI_HELP_GENERATIVE_TYPES:
-                generative += 1
-            elif help_type in _AI_HELP_REFINING_TYPES:
-                refining += 1
-    total = generative + refining
-    return StudentProfileHelpTypeSummary(
-        generative=generative,
-        refining=refining,
-        refining_ratio=round(refining / total, 4) if total else None,
-    )
-
-
 def _point_completeness_ratio(point) -> float:
     statuses = [
         point.data_completeness.version_data,
@@ -325,7 +289,6 @@ def _build_profile_insights(
     timeline: list,
     round_progress: list,
     trends: dict,
-    help_shift: StudentProfileHelpTypeShift,
     reflection_quality: StudentProfileReflectionQuality,
 ) -> list[StudentProfileInsight]:
     candidates: list[StudentProfileInsight] = []
@@ -413,19 +376,6 @@ def _build_profile_insights(
                 params={"revision_ratio": max(item.revision_ratio for item in round_progress)},
                 action_code="revise_feedback_deeply",
                 submission_id=latest.submission_id,
-            )
-        )
-
-    if (
-        help_shift.refining_ratio_delta is not None
-        and help_shift.refining_ratio_delta >= 0.2
-    ):
-        candidates.append(
-            StudentProfileInsight(
-                code="help_type_shift_refining",
-                tone="positive",
-                params={"delta": help_shift.refining_ratio_delta},
-                action_code="continue_refining_own_writing",
             )
         )
 

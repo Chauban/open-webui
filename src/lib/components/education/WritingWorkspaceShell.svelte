@@ -18,10 +18,15 @@
 	import ChallengeChecklist from '$lib/components/education/ChallengeChecklist.svelte';
 	import EduButton from '$lib/components/education/EduButton.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
-	import { EDU_FIELD_CLASS, eduSegmentClass } from '$lib/components/education/styles';
+	import ReflectionAnswerForm from '$lib/components/education/ReflectionAnswerForm.svelte';
 	import { prepareAssistantContentForWriting } from '$lib/utils/writing-content';
 	import { createSerializedSaveRunner } from '$lib/utils/save-coordinator';
-	import { getStructuredReflectionError } from '$lib/utils/structured-reflection';
+	import {
+		buildReflectionAnswers,
+		getReflectionAnswersError,
+		type AiUsage,
+		type ReflectionAnswerDrafts
+	} from '$lib/utils/reflection-questions';
 	import { formatEpoch, resolveErrorMessage } from '$lib/utils/education';
 	import {
 		applySourceMapChange,
@@ -89,13 +94,8 @@
 	let saveRetryTimer: ReturnType<typeof setTimeout> | null = null;
 	let hasUnsavedFailure = false;
 
-	let aiUsage: 'used' | 'none' | null = null;
-	let aiHelpTypes = [];
-	let otherAiHelpText = '';
-	let reflectionAction = '';
-	let reflectionLocation = '';
-	let reflectionJudgement = '';
-	let reflectionNextStep = '';
+	let aiUsage: AiUsage = null;
+	let reflectionDrafts: ReflectionAnswerDrafts = {};
 
 	let lastText = '';
 	// 最近一次真正落成版本的正文，用来跳过「内容没变」的自动保存。
@@ -123,19 +123,6 @@
 	let clientOperationSequence = 0;
 	let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
 	let lastPersistedActiveChatId: string | null | undefined = undefined;
-
-	const helpTypes = [
-		'Understand Assignment',
-		'Outline',
-		'Examples',
-		'Explain Concepts',
-		'Revise Structure',
-		'Polish',
-		'Check Errors',
-		"Help Break Through Writer's Block",
-		'Strengthen Reasoning',
-		'Other'
-	];
 
 	const isAssignment = scope === 'assignment';
 	$: activeDueAt = isAssignment ? (effectiveDueAt ?? assignment?.due_at ?? null) : null;
@@ -210,45 +197,20 @@
 			? `${$i18n.t('Retrying...')} (${saveRetryAttempt}/${MAX_SAVE_RETRIES})`
 			: $i18n.t(saveStatusKey);
 
-	$: if (!aiHelpTypes.includes('Other') && otherAiHelpText) {
-		otherAiHelpText = '';
-	}
-	$: if (aiUsage !== 'used' && aiHelpTypes.length > 0) {
-		aiHelpTypes = [];
-	}
-
-	const toggleAiHelpType = (helpType: string) => {
-		aiHelpTypes = aiHelpTypes.includes(helpType)
-			? aiHelpTypes.filter((item) => item !== helpType)
-			: [...aiHelpTypes, helpType];
-		saveReflectionDraft();
-	};
-
-	const selectAiUsage = (value: 'used' | 'none') => {
-		aiUsage = value;
-		if (value === 'none') {
-			aiHelpTypes = [];
-			otherAiHelpText = '';
-		}
-		saveReflectionDraft();
-	};
+	$: reflectionQuestions = assignment?.reflection_questions ?? [];
 
 	const getReflectionDraftKey = () => `education:reflection-draft:${assignment?.id ?? ''}`;
 
+	// 草稿按题目 id 存；教师中途改了题，对不上的旧答案提交时自然被丢弃。
 	const loadReflectionDraft = () => {
 		if (!isAssignment || !assignment?.id) return;
 		try {
 			const raw = localStorage.getItem(getReflectionDraftKey());
 			if (!raw) return;
 			const draft = JSON.parse(raw);
-			reflectionAction = draft?.reflectionAction ?? '';
-			reflectionLocation = draft?.reflectionLocation ?? '';
-			reflectionJudgement = draft?.reflectionJudgement ?? '';
-			reflectionNextStep = draft?.reflectionNextStep ?? '';
-			otherAiHelpText = draft?.otherAiHelpText ?? otherAiHelpText;
 			aiUsage = draft?.aiUsage === 'used' || draft?.aiUsage === 'none' ? draft.aiUsage : null;
-			aiHelpTypes = Array.isArray(draft?.aiHelpTypes) ? draft.aiHelpTypes : [];
-			if (aiUsage == null && aiHelpTypes.length > 0) aiUsage = 'used';
+			reflectionDrafts =
+				draft?.answers && typeof draft.answers === 'object' ? draft.answers : {};
 		} catch (error) {
 			console.error(error);
 		}
@@ -259,15 +221,7 @@
 		try {
 			localStorage.setItem(
 				getReflectionDraftKey(),
-				JSON.stringify({
-					reflectionAction,
-					reflectionLocation,
-					reflectionJudgement,
-					reflectionNextStep,
-					otherAiHelpText,
-					aiUsage,
-					aiHelpTypes
-				})
+				JSON.stringify({ aiUsage, answers: reflectionDrafts })
 			);
 		} catch (error) {
 			console.error(error);
@@ -666,27 +620,13 @@
 
 	const submit = async () => {
 		if (!canSubmitAssignment || isSubmitting) return;
-		if (aiUsage == null) {
-			toast.error($i18n.t('Choose whether AI was used.'));
-			return;
-		}
-		if (aiUsage === 'used' && aiHelpTypes.length === 0) {
-			toast.error($i18n.t('Select at least one AI help type.'));
-			return;
-		}
-		if (aiHelpTypes.includes('Other') && otherAiHelpText.trim().length === 0) {
-			toast.error($i18n.t('Please add a short note about what else AI helped with.'));
-			return;
-		}
-
-		const reflectionError = getStructuredReflectionError({
-			action: reflectionAction,
-			location: reflectionLocation,
-			judgement: reflectionJudgement,
-			next_step: reflectionNextStep
-		});
+		const reflectionError = getReflectionAnswersError(
+			reflectionQuestions,
+			aiUsage,
+			reflectionDrafts
+		);
 		if (reflectionError) {
-			toast.error($i18n.t(reflectionError));
+			toast.error($i18n.t(reflectionError.key, reflectionError.params));
 			return;
 		}
 
@@ -704,18 +644,11 @@
 				final_content_html: noteHtml,
 				final_content_text: noteText,
 				ai_used: aiUsage === 'used',
-				ai_help_types: aiHelpTypes,
+				reflection_answers: buildReflectionAnswers(reflectionQuestions, aiUsage, reflectionDrafts),
 				data_completeness: {
 					version_data_complete: true,
 					editor_operations_complete: true,
 					source_tracking_complete: true
-				},
-				reflection: {
-					action: reflectionAction.trim(),
-					location: reflectionLocation.trim(),
-					judgement: reflectionJudgement.trim(),
-					next_step: reflectionNextStep.trim(),
-					other_ai_help: aiHelpTypes.includes('Other') ? otherAiHelpText.trim() : null
 				}
 			});
 			clearReflectionDraft();
@@ -1123,148 +1056,35 @@
 	{/if}
 
 	{#if isAssignment && showSubmitModal}
-		<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-			<div class="w-full max-w-xl rounded-3xl bg-white dark:bg-gray-850 p-6 shadow-2xl">
-				<h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100">
-					{$i18n.t('Reflection Before Submitting Assignment')}
-				</h2>
-				<p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-					{$i18n.t('Complete your reflection before submitting your assignment.')}
-				</p>
-
-				<div class="mt-5">
-					<div class="mb-2 block text-sm font-medium text-gray-800 dark:text-gray-200">
-						{$i18n.t('Did you use AI for this submission?')}
-					</div>
-					<div class="flex flex-wrap gap-2">
-						<button
-							type="button"
-							aria-pressed={aiUsage === 'used'}
-							class={eduSegmentClass(aiUsage === 'used')}
-							on:click={() => selectAiUsage('used')}
-						>
-							{$i18n.t('Used AI')}
-						</button>
-						<button
-							type="button"
-							aria-pressed={aiUsage === 'none'}
-							class={eduSegmentClass(aiUsage === 'none')}
-							on:click={() => selectAiUsage('none')}
-						>
-							{$i18n.t('Did not use AI')}
-						</button>
-					</div>
-					{#if aiUsage === 'used'}
-						<div class="mb-2 mt-4 block text-sm font-medium text-gray-800 dark:text-gray-200">
-							{$i18n.t('What did AI help you with? Select all that apply.')}
-						</div>
-						<div class="flex flex-wrap gap-2">
-							{#each helpTypes as item}
-								<button
-									type="button"
-									aria-pressed={aiHelpTypes.includes(item)}
-									class={eduSegmentClass(aiHelpTypes.includes(item))}
-									on:click={() => toggleAiHelpType(item)}
-								>
-									{$i18n.t(item)}
-								</button>
-							{/each}
-						</div>
-					{/if}
+		<!--
+			弹窗高度卡在视口内：题目由教师自定、数量不定，只让中间的题目区滚动，
+			标题和「提交作业」按钮始终留在可见处。之前整块跟着内容长高，矮屏上按钮被挤出屏幕点不到。
+		-->
+		<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+			<div
+				class="flex max-h-[calc(100dvh-2rem)] w-full max-w-xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl dark:bg-gray-850"
+			>
+				<div class="shrink-0 px-6 pb-3 pt-6">
+					<h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100">
+						{$i18n.t('Reflection Before Submitting Assignment')}
+					</h2>
+					<p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+						{$i18n.t('Complete your reflection before submitting your assignment.')}
+					</p>
 				</div>
 
-				<div class="mt-4 space-y-4">
-					{#if aiHelpTypes.includes('Other')}
-						<div>
-							<label
-								for="other-ai-help-text"
-								class="mb-2 block text-sm font-medium text-gray-800 dark:text-gray-200"
-							>
-								{$i18n.t('Please briefly describe what else AI helped with.')}
-							</label>
-							<input
-								id="other-ai-help-text"
-								bind:value={otherAiHelpText}
-								on:input={saveReflectionDraft}
-								class="w-full {EDU_FIELD_CLASS}"
-								placeholder={$i18n.t(
-									'For example: helping me understand the topic or organize evidence.'
-								)}
-							/>
-							{#if otherAiHelpText.trim().length === 0}
-								<div class="mt-1 text-xs text-rose-600 dark:text-rose-400">
-									{$i18n.t('Please add a short note about what else AI helped with.')}
-								</div>
-							{/if}
-						</div>
-					{/if}
-					<div>
-						<label
-							for="reflection-action"
-							class="mb-2 block text-sm font-medium text-gray-800 dark:text-gray-200"
-						>
-							{$i18n.t('What did you change?')}
-						</label>
-						<textarea
-							id="reflection-action"
-							bind:value={reflectionAction}
-							on:input={saveReflectionDraft}
-							class="min-h-20 w-full {EDU_FIELD_CLASS}"
-							placeholder={$i18n.t('Describe the concrete revision you made.')}
-						></textarea>
-					</div>
-					<div>
-						<label
-							for="reflection-location"
-							class="mb-2 block text-sm font-medium text-gray-800 dark:text-gray-200"
-						>
-							{$i18n.t('Where did you make this change?')}
-						</label>
-						<input
-							id="reflection-location"
-							bind:value={reflectionLocation}
-							on:input={saveReflectionDraft}
-							class="w-full {EDU_FIELD_CLASS}"
-							placeholder={$i18n.t(
-								'For example: paragraph 2, the conclusion, or the evidence section.'
-							)}
-						/>
-					</div>
-					<div>
-						<label
-							for="reflection-judgement"
-							class="mb-2 block text-sm font-medium text-gray-800 dark:text-gray-200"
-						>
-							{$i18n.t('Why did you make this judgement?')}
-						</label>
-						<textarea
-							id="reflection-judgement"
-							bind:value={reflectionJudgement}
-							on:input={saveReflectionDraft}
-							class="min-h-20 w-full {EDU_FIELD_CLASS}"
-							placeholder={$i18n.t(
-								'Explain why you accepted, rejected, or changed the suggestion or feedback.'
-							)}
-						></textarea>
-					</div>
-					<div>
-						<label
-							for="reflection-next-step"
-							class="mb-2 block text-sm font-medium text-gray-800 dark:text-gray-200"
-						>
-							{$i18n.t('What will you do next time?')}
-						</label>
-						<textarea
-							id="reflection-next-step"
-							bind:value={reflectionNextStep}
-							on:input={saveReflectionDraft}
-							class="min-h-20 w-full {EDU_FIELD_CLASS}"
-							placeholder={$i18n.t('Write one concrete action for your next assignment.')}
-						></textarea>
-					</div>
+				<div class="min-h-0 flex-1 overflow-y-auto px-6 py-2">
+					<ReflectionAnswerForm
+						questions={reflectionQuestions}
+						bind:aiUsage
+						bind:drafts={reflectionDrafts}
+						onChange={saveReflectionDraft}
+					/>
 				</div>
 
-				<div class="mt-6 flex justify-end gap-3">
+				<div
+					class="flex shrink-0 justify-end gap-3 border-t border-gray-100 px-6 py-4 dark:border-gray-800"
+				>
 					<EduButton
 						on:click={() => {
 							showSubmitModal = false;

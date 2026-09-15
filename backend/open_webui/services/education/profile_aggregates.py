@@ -7,7 +7,6 @@ from open_webui.models.education import (
     StudentProfileAggregatePayload,
     StudentProfileCompletenessSummary,
     StudentProfileFilteredSummary,
-    StudentProfileHelpTypeShift,
     StudentProfileReflectionQuality,
 )
 from open_webui.services.education.profile import (
@@ -15,7 +14,6 @@ from open_webui.services.education.profile import (
     _PROFILE_TREND_KEYS,
     _build_profile_insights,
     _build_trend,
-    _summarize_help_types,
 )
 from open_webui.services.education.profile_evidence import canonical_json_hash
 
@@ -79,26 +77,6 @@ def build_student_profile_aggregate(
         if trend is not None:
             trends[key] = trend
 
-    half = len(cross_assignment_timeline) // 2
-    early_help = _summarize_help_types(cross_assignment_timeline[:half] if half else [])
-    recent_help = _summarize_help_types(
-        cross_assignment_timeline[half:] if half else cross_assignment_timeline
-    )
-    help_shift = StudentProfileHelpTypeShift(
-        early=early_help,
-        recent=recent_help,
-        refining_ratio_delta=(
-            round(recent_help.refining_ratio - early_help.refining_ratio, 4)
-            if early_help.refining_ratio is not None
-            and recent_help.refining_ratio is not None
-            else None
-        ),
-    )
-
-    help_distribution = {}
-    for point in cross_assignment_timeline:
-        for help_type in point.ai_help_types:
-            help_distribution[help_type] = help_distribution.get(help_type, 0) + 1
     # 只统计教师已批改的提交;未批改的反思还没有质量分,不能当 0 拉低平均。
     reflection_scores = [
         point.reflection_quality
@@ -185,14 +163,11 @@ def build_student_profile_aggregate(
         cross_assignment_timeline=cross_assignment_timeline,
         round_progress=round_progress,
         trends=list(trends.values()),
-        ai_help_type_distribution=help_distribution,
-        ai_help_type_shift=help_shift,
         reflection_quality=reflection_quality,
         insights=_build_profile_insights(
             cross_assignment_timeline,
             round_progress,
             trends,
-            help_shift,
             reflection_quality,
         ),
         data_completeness=completeness,

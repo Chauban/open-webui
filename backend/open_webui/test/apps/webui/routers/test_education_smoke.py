@@ -37,9 +37,12 @@ from open_webui.models.education import (
     ProfileProjectionRun,
     Submission,
     SubmissionCreateForm,
+    ReflectionAnswerForm,
+    ReflectionQuestion,
+    build_reflection_record,
+    ReflectionQuestion,
+    build_reflection_record,
     SubmissionReview,
-    StudentProfileHelpTypeShift,
-    StudentProfileHelpTypeSummary,
     StudentProfileMetricTrend,
     StudentProfileReflectionQuality,
     StudentProfileAggregateProjection,
@@ -88,20 +91,36 @@ from open_webui.services.education.profile_aggregates import (
 from open_webui.utils.auth import get_admin_user, get_verified_user
 
 
-def _reflection_payload(
-    action="I rewrote the claim and replaced weak evidence with a clearer example.",
-    location="The second paragraph and conclusion",
-    judgement="The original reasoning was vague, so the revision better supports my own conclusion.",
-    next_step="I will verify the evidence before writing the final draft.",
-    other_ai_help=None,
-):
-    return {
-        "action": action,
-        "location": location,
-        "judgement": judgement,
-        "next_step": next_step,
-        "other_ai_help": other_ai_help,
-    }
+def _reflection_questions():
+    return [
+        {
+            "id": "ai_help",
+            "kind": "multi_choice",
+            "prompt": "AI 在哪些方面帮助了你？",
+            "options": ["列提纲", "举例子", "润色表达"],
+            "allow_other": True,
+            "required": True,
+            "show_when": "ai_used",
+        },
+        {
+            "id": "change",
+            "kind": "text",
+            "prompt": "你具体修改了什么？",
+            "placeholder": "描述一处具体修改",
+            "required": True,
+            "show_when": "always",
+        },
+    ]
+
+
+def _reflection_answers(selected=("列提纲",), other_text=None):
+    return [
+        {"question_id": "ai_help", "selected": list(selected), "other_text": other_text},
+        {
+            "question_id": "change",
+            "text": "I rewrote the claim and replaced weak evidence with a clearer example.",
+        },
+    ]
 
 
 def _evidence_completeness(source_tracking_complete=True):
@@ -465,9 +484,8 @@ def _prepare_assignment_flow(client, teacher, student):
             "final_content_html": "<p>AI outline draft. My final draft. This looks like a very large typed burst that should be treated as suspicious imported text for teacher review.</p>",
             "final_content_text": "AI outline draft. My final draft. This looks like a very large typed burst that should be treated as suspicious imported text for teacher review.",
             "ai_used": True,
-            "ai_help_types": ["Outline"],
             "data_completeness": _evidence_completeness(),
-            "reflection": _reflection_payload(),
+            "reflection_answers": [],
         },
     )
     assert submit_res.status_code == 200, submit_res.text
@@ -678,8 +696,7 @@ def test_education_classroom_main_flow(education_client):
     detail = detail_res.json()
     assert detail["submission"]["id"] == submission_payload["submission_id"]
     assert detail["micro_reflection"]["ai_used"] is True
-    assert detail["micro_reflection"]["ai_help_types"] == ["Outline"]
-    assert "action" in detail["micro_reflection"]["reflection_json"]
+    assert detail["micro_reflection"]["reflection_json"] == {"items": []}
     assert detail["final_version"]["trigger_type"] == "submit"
     assert len(detail["versions"]) >= 1
     assert detail["analysis"]["summary"]["ai_inserted_chars"] >= 1
@@ -727,12 +744,12 @@ def test_education_classroom_main_flow(education_client):
     assert foreign_workspace_res.status_code == 403, foreign_workspace_res.text
 
 
-def test_submission_accepts_multiple_ai_help_types(education_client):
+def test_submission_freezes_teacher_defined_reflection(education_client):
     client, teacher, _, student, _, _ = education_client
 
     UserContext.current_user = teacher
     create_classroom_res = client.post(
-        "/api/v1/classrooms", json={"name": "Grade 8 Multi Help"}
+        "/api/v1/classrooms", json={"name": "Grade 8 Reflection"}
     )
     assert create_classroom_res.status_code == 200, create_classroom_res.text
     classroom = create_classroom_res.json()["classroom"]
@@ -746,10 +763,15 @@ def test_submission_accepts_multiple_ai_help_types(education_client):
             "score_max": 100,
             "rubric_schema": _rubric_schema(),
             "due_at": 2000000000,
+            "reflection_questions": _reflection_questions(),
         },
     )
     assert create_assignment_res.status_code == 200, create_assignment_res.text
     assignment = create_assignment_res.json()[0]
+    assert [q["id"] for q in assignment["reflection_questions"]] == [
+        "ai_help",
+        "change",
+    ]
 
     UserContext.current_user = student
     join_res = client.post(
@@ -761,31 +783,95 @@ def test_submission_accepts_multiple_ai_help_types(education_client):
     workspace_res = client.get(f"/api/v1/assignments/{assignment['id']}/workspace")
     assert workspace_res.status_code == 200, workspace_res.text
     session_id = workspace_res.json()["writing_session"]["id"]
+    assert len(workspace_res.json()["assignment"]["reflection_questions"]) == 2
 
-    submit_res = client.post(
-        f"/api/v1/assignments/{assignment['id']}/submit",
-        json={
-            "writing_session_id": session_id,
-            "final_content_json": None,
-            "final_content_html": "<p>I revised the essay after reviewing AI suggestions.</p>",
-            "final_content_text": "I revised the essay after reviewing AI suggestions.",
-            "ai_used": True,
-            "ai_help_types": ["Outline", "Examples", "Strengthen Reasoning"],
-            "data_completeness": _evidence_completeness(),
-            "reflection": _reflection_payload(),
-        },
+    def submit(ai_used, answers):
+        return client.post(
+            f"/api/v1/assignments/{assignment['id']}/submit",
+            json={
+                "writing_session_id": session_id,
+                "final_content_json": None,
+                "final_content_html": "<p>I revised the essay after reviewing AI suggestions.</p>",
+                "final_content_text": "I revised the essay after reviewing AI suggestions.",
+                "ai_used": ai_used,
+                "data_completeness": _evidence_completeness(),
+                "reflection_answers": answers,
+            },
+        )
+
+    # 必答题没答、选了题目里没有的选项、没用 AI 却答了只给用了 AI 的学生看的题,都拒收。
+    missing = submit(True, _reflection_answers()[1:])
+    assert missing.status_code == 400, missing.text
+    unknown_option = submit(True, _reflection_answers(selected=["帮我写完"]))
+    assert unknown_option.status_code == 400, unknown_option.text
+    hidden_answer = submit(False, _reflection_answers())
+    assert hidden_answer.status_code == 400, hidden_answer.text
+
+    submit_res = submit(
+        True, _reflection_answers(selected=["列提纲", "举例子"], other_text="查资料")
     )
     assert submit_res.status_code == 200, submit_res.text
     submission_id = submit_res.json()["submission_id"]
 
+    # 教师事后改题,已交的反思仍是提交当时的题目快照。
     UserContext.current_user = teacher
+    update_res = client.patch(
+        f"/api/v1/assignments/{assignment['id']}",
+        json={
+            "reflection_questions": [
+                {
+                    "id": "next",
+                    "kind": "single_choice",
+                    "prompt": "下次你会先做哪一步？",
+                    "options": ["先列提纲", "先找论据"],
+                }
+            ]
+        },
+    )
+    assert update_res.status_code == 200, update_res.text
+
     detail_res = client.get(f"/api/v1/teacher/submissions/{submission_id}")
     assert detail_res.status_code == 200, detail_res.text
-    assert detail_res.json()["micro_reflection"]["ai_help_types"] == [
-        "Outline",
-        "Examples",
-        "Strengthen Reasoning",
+    items = detail_res.json()["micro_reflection"]["reflection_json"]["items"]
+    assert [item["prompt"] for item in items] == [
+        "AI 在哪些方面帮助了你？",
+        "你具体修改了什么？",
     ]
+    assert items[0]["selected"] == ["列提纲", "举例子"]
+    assert items[0]["other_text"] == "查资料"
+    assert items[1]["text"].startswith("I rewrote the claim")
+
+    sets_res = client.get("/api/v1/teacher/reflection-question-sets")
+    assert sets_res.status_code == 200, sets_res.text
+    assert [item["assignment_id"] for item in sets_res.json()] == [assignment["id"]]
+    assert sets_res.json()[0]["questions"][0]["id"] == "next"
+
+
+def test_reflection_question_sets_skip_duplicates_across_classrooms(education_client):
+    client, teacher, _, _, _, _ = education_client
+
+    UserContext.current_user = teacher
+    classroom_ids = [
+        client.post("/api/v1/classrooms", json={"name": name}).json()["classroom"]["id"]
+        for name in ("Set A", "Set B")
+    ]
+    created = client.post(
+        "/api/v1/assignments",
+        json={
+            "title": "Shared Reflection",
+            "classroom_ids": classroom_ids,
+            "score_max": 100,
+            "rubric_schema": _rubric_schema(),
+            "due_at": 2000000000,
+            "reflection_questions": _reflection_questions(),
+        },
+    )
+    assert created.status_code == 200, created.text
+    assert len(created.json()) == 2
+
+    sets_res = client.get("/api/v1/teacher/reflection-question-sets")
+    assert sets_res.status_code == 200, sets_res.text
+    assert len(sets_res.json()) == 1
 
 
 def test_student_resubmission_overwrites_previous_submission(education_client):
@@ -804,9 +890,8 @@ def test_student_resubmission_overwrites_previous_submission(education_client):
             "final_content_html": "<p>Second final draft with substantial revisions.</p>",
             "final_content_text": "Second final draft with substantial revisions.",
             "ai_used": True,
-            "ai_help_types": ["Polish"],
             "data_completeness": _evidence_completeness(),
-            "reflection": _reflection_payload(),
+            "reflection_answers": [],
         },
     )
     assert second_submit_res.status_code == 200, second_submit_res.text
@@ -828,7 +913,7 @@ def test_student_resubmission_overwrites_previous_submission(education_client):
         submissions[0]["submission"]["final_version_id"]
         == second_submission["final_version_id"]
     )
-    assert submissions[0]["reflection"]["ai_help_types"] == ["Polish"]
+    assert submissions[0]["reflection"]["ai_used"] is True
 
     with SessionLocal() as session:
         stored_submissions = (
@@ -887,9 +972,8 @@ def test_student_cannot_submit_after_assignment_due_time(education_client):
             "final_content_html": "<p>Late submission.</p>",
             "final_content_text": "Late submission.",
             "ai_used": True,
-            "ai_help_types": ["Outline"],
             "data_completeness": _evidence_completeness(),
-            "reflection": _reflection_payload(),
+            "reflection_answers": [],
         },
     )
     assert submit_res.status_code == 400, submit_res.text
@@ -942,9 +1026,8 @@ def _submit_assignment(client, assignment_id, html="<p>Essay body.</p>"):
             "final_content_html": html,
             "final_content_text": "Essay body.",
             "ai_used": True,
-            "ai_help_types": ["Outline"],
             "data_completeness": _evidence_completeness(),
-            "reflection": _reflection_payload(),
+            "reflection_answers": [],
         },
     )
 
@@ -1307,7 +1390,7 @@ def test_student_assignment_and_profile_views(education_client):
     point = profile["timeline"][0]
     assert point["submission_id"] == submission_id
     assert point["assignment_id"] == assignment["id"]
-    assert point["ai_help_types"] == ["Outline"]
+    assert "ai_help_types" not in point
     # 反思质量来自教师批改,这份还没批,所以是空的。
     assert point["reflection_quality"] is None
     assert point["process_index"] is None or 0 <= point["process_index"] <= 100
@@ -1526,15 +1609,14 @@ def test_workspace_editing_and_submission_validation(education_client):
         json={
             "writing_session_id": session_id,
             "final_content_json": None,
-            "final_content_html": "<p>Too short reflection test.</p>",
-            "final_content_text": "Too short reflection test.",
+            "final_content_html": "<p>Unknown reflection question test.</p>",
+            "final_content_text": "Unknown reflection question test.",
             "ai_used": True,
-            "ai_help_types": ["Outline"],
             "data_completeness": _evidence_completeness(),
-            "reflection": _reflection_payload(action="Too short"),
+            "reflection_answers": [{"question_id": "missing", "text": "answer"}],
         },
     )
-    assert short_reflection_res.status_code == 422, short_reflection_res.text
+    assert short_reflection_res.status_code == 400, short_reflection_res.text
 
     UserContext.current_user = outsider
     forbidden_autosave_res = client.post(
@@ -2035,21 +2117,26 @@ def test_personal_writing_folder_rename_allows_duplicate_titles(education_client
     assert first_workspace["project"]["id"] != second_workspace["project"]["id"]
 
 
-def _submit_body(session_id: str, text: str):
+def _submit_body(session_id: str, text: str, reflection_answers=None):
     return {
         "writing_session_id": session_id,
         "final_content_json": None,
         "final_content_html": f"<p>{text}</p>",
         "final_content_text": text,
         "ai_used": True,
-        "ai_help_types": ["Outline"],
         "data_completeness": _evidence_completeness(),
-        "reflection": _reflection_payload(),
+        "reflection_answers": reflection_answers or [],
     }
 
 
 def _setup_submitted_assignment(
-    client, teacher, student, title="Round Essay", score_max=100
+    client,
+    teacher,
+    student,
+    title="Round Essay",
+    score_max=100,
+    reflection_questions=None,
+    reflection_answers=None,
 ):
     UserContext.current_user = teacher
     classroom = client.post("/api/v1/classrooms", json={"name": f"CR {title}"}).json()[
@@ -2069,6 +2156,7 @@ def _setup_submitted_assignment(
             "due_at": 2000000000,
             "score_max": score_max,
             "rubric_schema": _rubric_schema(score_max),
+            "reflection_questions": reflection_questions or [],
         },
     ).json()[0]
 
@@ -2077,7 +2165,11 @@ def _setup_submitted_assignment(
     session_id = workspace["writing_session"]["id"]
     submit_res = client.post(
         f"/api/v1/assignments/{assignment['id']}/submit",
-        json=_submit_body(session_id, "first draft text for the round essay"),
+        json=_submit_body(
+            session_id,
+            "first draft text for the round essay",
+            reflection_answers,
+        ),
     )
     assert submit_res.status_code == 200, submit_res.text
     return assignment, session_id, submit_res.json()["submission_id"]
@@ -2888,34 +2980,86 @@ def test_collaboration_index_falls_back_to_reflection_without_ai():
     assert unreviewed is None
 
 
-def test_submission_form_allows_no_ai_and_rejects_unknown_help_types():
+def test_submission_form_rejects_the_retired_fixed_reflection_fields():
     form = SubmissionCreateForm(
         writing_session_id="session",
         final_content_text="student draft",
         ai_used=False,
-        ai_help_types=[],
         data_completeness=_evidence_completeness(),
-        reflection=_reflection_payload(),
     )
-    assert form.ai_help_types == []
+    assert form.reflection_answers == []
     with pytest.raises(ValueError):
         SubmissionCreateForm(
             writing_session_id="session",
             final_content_text="draft",
             ai_used=True,
-            ai_help_types=["Magic answer generator"],
+            ai_help_types=["Outline"],
             data_completeness=_evidence_completeness(),
-            reflection=_reflection_payload(),
+        )
+
+
+def test_reflection_question_shape_is_validated():
+    ReflectionQuestion(
+        id="q", kind="single_choice", prompt="选一个", options=["是"], allow_other=True
+    )
+    with pytest.raises(ValueError):
+        ReflectionQuestion(id="q", kind="single_choice", prompt="选一个", options=["是"])
+    with pytest.raises(ValueError):
+        ReflectionQuestion(id="q", kind="multi_choice", prompt="选", options=["是", "是"])
+    with pytest.raises(ValueError):
+        ReflectionQuestion(id="q", kind="text", prompt="写", options=["是", "否"])
+    with pytest.raises(ValueError):
+        ReflectionQuestion(id="q", kind="text", prompt="   ")
+
+
+def test_build_reflection_record_filters_by_ai_use_and_checks_answers():
+    questions = [ReflectionQuestion(**question) for question in _reflection_questions()]
+    questions.append(
+        ReflectionQuestion(
+            id="why_not",
+            kind="single_choice",
+            prompt="为什么没用 AI？",
+            options=["不需要", "不信任"],
+            required=False,
+            show_when="ai_not_used",
+        )
+    )
+
+    def answers(*items):
+        return [ReflectionAnswerForm(**item) for item in items]
+
+    no_ai = build_reflection_record(
+        questions, False, answers({"question_id": "change", "text": "改了结论"})
+    )
+    assert [item.id for item in no_ai.items] == ["change", "why_not"]
+    assert no_ai.items[1].selected == []
+
+    with pytest.raises(ValueError):
+        build_reflection_record(
+            questions,
+            False,
+            answers(
+                {"question_id": "change", "text": "改了结论"},
+                {"question_id": "why_not", "selected": ["不需要", "不信任"]},
+            ),
         )
     with pytest.raises(ValueError):
-        SubmissionCreateForm(
-            writing_session_id="session",
-            final_content_text="draft",
-            ai_used=False,
-            ai_help_types=[],
-            data_completeness=_evidence_completeness(),
-            reflection=_reflection_payload(),
-            legacy_reflection_text="not accepted",
+        build_reflection_record(
+            questions,
+            True,
+            answers(
+                {"question_id": "ai_help", "selected": ["列提纲"]},
+                {"question_id": "change", "text": "   "},
+            ),
+        )
+    with pytest.raises(ValueError):
+        build_reflection_record(
+            questions,
+            True,
+            answers(
+                {"question_id": "ai_help", "selected": ["列提纲"]},
+                {"question_id": "change", "selected": ["列提纲"]},
+            ),
         )
 
 
@@ -3885,14 +4029,10 @@ def test_profile_insights_rank_confidence_and_combine_ai_evidence():
             sample_count=3,
         )
     }
-    help_shift = StudentProfileHelpTypeShift(
-        early=StudentProfileHelpTypeSummary(),
-        recent=StudentProfileHelpTypeSummary(),
-    )
     reflection_quality = StudentProfileReflectionQuality(count=3, average_score=30)
 
     insights = education_profile_module._build_profile_insights(
-        timeline, round_progress, trends, help_shift, reflection_quality
+        timeline, round_progress, trends, reflection_quality
     )
 
     assert insights[0].severity == "high"
@@ -5549,7 +5689,12 @@ def test_skipped_challenge_reaches_profile_without_answer_ratio(education_client
 def test_research_export_is_admin_only_and_pseudonymized(education_client):
     client, teacher, _, student, _, _ = education_client
     assignment, _, submission_id = _setup_submitted_assignment(
-        client, teacher, student, "Research Export"
+        client,
+        teacher,
+        student,
+        "Research Export",
+        reflection_questions=_reflection_questions(),
+        reflection_answers=_reflection_answers(),
     )
     UserContext.current_user = teacher
     reviewed = client.post(
@@ -5601,11 +5746,12 @@ def test_research_export_is_admin_only_and_pseudonymized(education_client):
     assert student.name not in submissions
     assert len(row["pseudo_id"]) == 16
 
-    # 反思原文默认不导出,只留各段字数。
+    # 反思每道题一行;学生写的原文默认不导出,只留字数,选项照常导出。
     reflection_rows = list(csv.DictReader(io.StringIO(reflections)))
-    assert len(reflection_rows) == 1
-    assert reflection_rows[0]["action_text"] == ""
-    assert int(reflection_rows[0]["action_chars"]) > 0
+    assert [item["question_id"] for item in reflection_rows] == ["ai_help", "change"]
+    assert reflection_rows[0]["selected_options"] == "列提纲"
+    assert reflection_rows[1]["answer_text"] == ""
+    assert int(reflection_rows[1]["answer_chars"]) > 0
     assert reflection_rows[0]["pseudo_id"] == row["pseudo_id"]
 
     with_text = client.get("/api/v1/research/export?include_text=true")
@@ -5616,4 +5762,4 @@ def test_research_export_is_admin_only_and_pseudonymized(education_client):
                 io.StringIO(bundle.read("reflections.csv").decode("utf-8-sig"))
             )
         )
-    assert text_rows[0]["action_text"] != ""
+    assert text_rows[1]["answer_text"] != ""
