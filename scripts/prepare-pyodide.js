@@ -27,6 +27,7 @@ const pypiPackages = ['black', 'pathspec', 'mypy_extensions', 'pytokens'];
 import { loadPyodide } from 'pyodide';
 import { setGlobalDispatcher, ProxyAgent } from 'undici';
 import { writeFile, readFile, copyFile, readdir, rmdir, access } from 'fs/promises';
+import { createHash } from 'crypto';
 
 /**
  * Loading network proxy configurations from the environment variables.
@@ -125,6 +126,60 @@ async function copyPyodide() {
 }
 
 /**
+ * Resolve the latest pure-Python wheel for `pkg` on PyPI and make sure it is saved
+ * into static/pyodide/. Throws on network failure; returns null when PyPI answers
+ * but has no usable wheel.
+ */
+async function fetchPyPIWheel(pkg) {
+	const res = await fetch(`https://pypi.org/pypi/${pkg}/json`);
+	if (!res.ok) {
+		console.error(`Failed to fetch PyPI metadata for ${pkg}: ${res.status}`);
+		return null;
+	}
+	const meta = await res.json();
+	const version = meta.info.version;
+	const files = meta.urls || [];
+	// Find the pure-Python wheel (py3-none-any)
+	const wheel = files.find(
+		(f) => f.filename.endsWith('.whl') && f.filename.includes('py3-none-any')
+	);
+	if (!wheel) {
+		console.warn(`No pure-Python wheel found for ${pkg}==${version}, skipping`);
+		return null;
+	}
+	const dest = `static/pyodide/${wheel.filename}`;
+	// Download wheel if not already present
+	try {
+		await access(dest);
+		console.log(`  Already exists: ${wheel.filename}`);
+	} catch {
+		console.log(`  Downloading: ${wheel.filename}`);
+		const wheelRes = await fetch(wheel.url);
+		if (!wheelRes.ok) {
+			console.error(`  Failed to download ${wheel.filename}: ${wheelRes.status}`);
+			return null;
+		}
+		const buffer = Buffer.from(await wheelRes.arrayBuffer());
+		await writeFile(dest, buffer);
+		console.log(`  Saved: ${dest} (${buffer.length} bytes)`);
+	}
+	return { version, filename: wheel.filename, sha256: wheel.digests?.sha256 || '' };
+}
+
+/** Offline fallback: the newest `<name>-<version>-py3-none-any.whl` already in static/pyodide/. */
+async function findLocalWheel(normalizedName) {
+	const candidates = (await readdir('static/pyodide'))
+		.filter((file) => file.startsWith(`${normalizedName}-`) && file.endsWith('-py3-none-any.whl'))
+		.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+	const filename = candidates.at(-1);
+	if (!filename) return null;
+	const sha256 = createHash('sha256')
+		.update(await readFile(`static/pyodide/${filename}`))
+		.digest('hex');
+	return { version: filename.split('-')[1], filename, sha256 };
+}
+
+/**
  * Download pure-Python wheels from PyPI and save them into static/pyodide/.
  * Also injects entries into pyodide-lock.json so that micropip resolves these
  * packages from the local server instead of fetching them from the internet.
@@ -140,54 +195,38 @@ async function downloadPyPIWheels() {
 	}
 
 	for (const pkg of pypiPackages) {
+		const normalizedName = pkg.replace(/-/g, '_');
 		console.log(`Fetching PyPI metadata for: ${pkg}`);
-		const res = await fetch(`https://pypi.org/pypi/${pkg}/json`);
-		if (!res.ok) {
-			console.error(`Failed to fetch PyPI metadata for ${pkg}: ${res.status}`);
-			continue;
-		}
-		const meta = await res.json();
-		const version = meta.info.version;
-		const files = meta.urls || [];
-		// Find the pure-Python wheel (py3-none-any)
-		const wheel = files.find(
-			(f) => f.filename.endsWith('.whl') && f.filename.includes('py3-none-any')
-		);
-		if (!wheel) {
-			console.warn(`No pure-Python wheel found for ${pkg}==${version}, skipping`);
-			continue;
-		}
-		const dest = `static/pyodide/${wheel.filename}`;
-		// Download wheel if not already present
+		let wheel;
 		try {
-			await access(dest);
-			console.log(`  Already exists: ${wheel.filename}`);
-		} catch {
-			console.log(`  Downloading: ${wheel.filename}`);
-			const wheelRes = await fetch(wheel.url);
-			if (!wheelRes.ok) {
-				console.error(`  Failed to download ${wheel.filename}: ${wheelRes.status}`);
+			wheel = await fetchPyPIWheel(pkg);
+		} catch (err) {
+			// 连不上 PyPI（断网、TLS 被重置）时改用本地已下载的 wheel 登记。
+			// 不接住的话异常会让整个脚本退出，`npm run dev` 后面的 vite 根本起不来；
+			// 只跳过不登记的话，copyPyodide 刚用原版 lock 覆盖过，这几个包就从 lock 里丢了。
+			console.warn(`  Could not reach PyPI for ${pkg}: ${err.cause?.code ?? err.message ?? err}`);
+			wheel = await findLocalWheel(normalizedName);
+			if (!wheel) {
+				console.warn(`  No local wheel for ${pkg} either, skipping`);
 				continue;
 			}
-			const buffer = Buffer.from(await wheelRes.arrayBuffer());
-			await writeFile(dest, buffer);
-			console.log(`  Saved: ${dest} (${buffer.length} bytes)`);
+			console.log(`  Using local wheel: ${wheel.filename}`);
 		}
+		if (!wheel) continue;
 
 		// Inject into pyodide-lock.json so micropip resolves locally
-		const normalizedName = pkg.replace(/-/g, '_');
 		if (!lockData.packages[normalizedName]) {
 			lockData.packages[normalizedName] = {
 				name: normalizedName,
-				version: version,
+				version: wheel.version,
 				file_name: wheel.filename,
 				install_dir: 'site',
-				sha256: wheel.digests?.sha256 || '',
+				sha256: wheel.sha256,
 				package_type: 'package',
 				imports: [normalizedName],
 				depends: []
 			};
-			console.log(`  Added ${normalizedName}==${version} to pyodide-lock.json`);
+			console.log(`  Added ${normalizedName}==${wheel.version} to pyodide-lock.json`);
 		}
 	}
 
