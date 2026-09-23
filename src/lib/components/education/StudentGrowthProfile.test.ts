@@ -25,6 +25,15 @@ const context = new Map([
 ]);
 
 const term = { metric: 'prompt_count' as const, weight: 1 / 3, target: null, inverted: false };
+const indexFormula: TeacherStudentProfile['index_formula'] = {
+	process_index: { revision_depth: term, span_effort: term, pacing: term },
+	collaboration_index: {
+		digestion: term,
+		inquiry: term,
+		reflection: term,
+		no_ai_fallback_metric: 'reflection_quality'
+	}
+};
 const profile: StudentProfile = {
 	metric_version: '2026-09-03.1',
 	active_metric_version: '2026-09-03.1',
@@ -36,7 +45,17 @@ const profile: StudentProfile = {
 	student_id: 'student-1',
 	student_name: 'Student',
 	student_email: 'student@example.com',
-	classrooms: [{ id: 'class-1', name: 'Class 1' }],
+	classrooms: [
+		{
+			id: 'class-1',
+			name: 'Class 1',
+			teacher_id: 'teacher-1',
+			invite_code: 'ABC123',
+			status: 'active',
+			created_at: 0,
+			updated_at: 0
+		}
+	],
 	portfolio_summary: {
 		assignment_count: 0,
 		submitted_count: 0,
@@ -59,15 +78,6 @@ const profile: StudentProfile = {
 	round_progress: [],
 	trends: [],
 	reflection_quality: { count: 0, average_score: null },
-	index_formula: {
-		process_index: { revision_depth: term, span_effort: term, pacing: term },
-		collaboration_index: {
-			digestion: term,
-			inquiry: term,
-			reflection: term,
-			no_ai_fallback_metric: 'reflection_quality'
-		},
-	},
 	insights: [
 		{
 			code: 'not_enough_data',
@@ -100,7 +110,11 @@ const profile: StudentProfile = {
 	},
 	growth_goals: []
 };
-const teacherProfile: TeacherStudentProfile = { ...profile, teacher_notes: [] };
+const teacherProfile: TeacherStudentProfile = {
+	...profile,
+	index_formula: indexFormula,
+	teacher_notes: []
+};
 
 describe('StudentGrowthProfile', () => {
 	test('renders responsive filters, six sections, and evidence metadata', () => {

@@ -1,4 +1,4 @@
-import { Marked } from 'marked';
+import { Marked, type MarkedExtension } from 'marked';
 
 import markedExtension from '$lib/utils/marked/extension';
 import markedKatexExtension from '$lib/utils/marked/katex-extension';
@@ -19,9 +19,10 @@ const markedForWriting = new Marked({
 
 markedForWriting.use(markedKatexExtension({ throwOnError: false }));
 markedForWriting.use(markedExtension({ throwOnError: false }));
-markedForWriting.use(citationExtension({ throwOnError: false }));
-markedForWriting.use(footnoteExtension({ throwOnError: false }));
-markedForWriting.use(disableSingleTilde);
+markedForWriting.use(citationExtension());
+markedForWriting.use(footnoteExtension());
+// 上游这个扩展整文件 @ts-nocheck，返回值形状 marked 的类型认不出来，只能在这里声明。
+markedForWriting.use(disableSingleTilde as MarkedExtension);
 markedForWriting.use({
 	extensions: [
 		mentionExtension({ triggerChar: '@' }),

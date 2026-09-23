@@ -9,10 +9,12 @@ import RichTextInput from '$lib/components/common/RichTextInput.svelte';
 // 回填后又整体标成 user_typed，来源追踪和过程指标一起失真。
 const context = new Map([['i18n', readable({ t: (key: string) => key })]]);
 
-const doc = (text: string) => ({
-	type: 'doc',
-	content: [{ type: 'paragraph', content: [{ type: 'text', text }] }]
-});
+// json 模式下 value 实际收的是 ProseMirror 文档，上游组件把 prop 类型写死成了 string。
+const doc = (text: string) =>
+	({
+		type: 'doc',
+		content: [{ type: 'paragraph', content: [{ type: 'text', text }] }]
+	}) as unknown as string;
 
 const emissions = (onChange: ReturnType<typeof vi.fn>) =>
 	onChange.mock.calls.map(([change]) => ({

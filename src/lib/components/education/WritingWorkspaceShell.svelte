@@ -1,4 +1,7 @@
 <script lang="ts">
+	import type { Writable } from 'svelte/store';
+	import type { i18n as i18nType } from 'i18next';
+	import type { WritingVersionTrigger } from '$lib/apis/education/types';
 	import { getContext, onDestroy, onMount } from 'svelte';
 	import { get } from 'svelte/store';
 	import { page } from '$app/stores';
@@ -52,7 +55,7 @@
 	export let projectBaseUrl = '/me/writing';
 	export let loadWorkspace: () => Promise<any>;
 
-	const i18n = getContext('i18n');
+	const i18n = getContext<Writable<i18nType>>('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
 
 	let loaded = false;
@@ -325,7 +328,7 @@
 		}, 1200);
 	};
 
-	const performPersistDraft = async (triggerType = 'autosave') => {
+	const performPersistDraft = async (triggerType: WritingVersionTrigger = 'autosave') => {
 		if (!writingSession || isReadOnly) return;
 		saving = true;
 		hasUnsavedFailure = false;
@@ -403,7 +406,7 @@
 
 	const runPersistDraft = createSerializedSaveRunner(performPersistDraft);
 
-	const persistDraft = async (triggerType = 'autosave', options = {}) => {
+	const persistDraft = async (triggerType: WritingVersionTrigger = 'autosave', options = {}) => {
 		return runPersistDraft(triggerType, options);
 	};
 

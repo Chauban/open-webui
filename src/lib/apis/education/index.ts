@@ -520,6 +520,8 @@ export const saveSubmissionReview = async (
 	payload: {
 		review_status: string;
 		score?: number | null;
+		/** 教师给反思打的 1—5 分；标为「已批改」时必填。 */
+		reflection_score?: number | null;
 		overall_comment?: string;
 		rubric_scores?: Record<string, number> | null;
 		returned_comment?: string;

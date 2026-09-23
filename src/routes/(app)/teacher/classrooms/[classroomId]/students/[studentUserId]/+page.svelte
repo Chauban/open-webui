@@ -1,4 +1,6 @@
 <script lang="ts">
+	import type { Writable } from 'svelte/store';
+	import type { i18n as i18nType } from 'i18next';
 	import { getContext, onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
@@ -15,7 +17,7 @@
 	import { getClassroomDisplayName, resolveErrorMessage } from '$lib/utils/education';
 	import { createLatestRequestGate } from '$lib/utils/latest-request';
 
-	const i18n = getContext('i18n');
+	const i18n = getContext<Writable<i18nType>>('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
 
 	let profile: TeacherStudentProfile | null = null;

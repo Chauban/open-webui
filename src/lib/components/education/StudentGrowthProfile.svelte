@@ -1,4 +1,6 @@
 <script lang="ts">
+	import type { Writable } from 'svelte/store';
+	import type { i18n as i18nType } from 'i18next';
 	import { createEventDispatcher, getContext } from 'svelte';
 	import { get } from 'svelte/store';
 	import { toast } from 'svelte-sonner';
@@ -44,7 +46,7 @@
 	export let variant: 'teacher' | 'student' = 'teacher';
 	export let filters: StudentProfileFilters = {};
 
-	const i18n = getContext('i18n');
+	const i18n = getContext<Writable<i18nType>>('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
 	const dispatch = createEventDispatcher<{
 		open: { submissionId: string };
@@ -84,7 +86,7 @@
 		{ key: 'assignments', label: 'Assignment History' }
 	];
 
-	const STATUS_TONES = {
+	const STATUS_TONES: Record<string, 'gray' | 'amber' | 'emerald' | 'rose'> = {
 		unsubmitted: 'gray',
 		pending: 'amber',
 		reviewed: 'emerald',
@@ -226,7 +228,7 @@
 		])
 	);
 	$: rubricDimensions = buildRubricDimensions(crossTimeline, rubricCriteriaByAssignment);
-	const RUBRIC_TONES = ['sky', 'emerald', 'violet', 'amber', 'rose'];
+	const RUBRIC_TONES = ['sky', 'emerald', 'violet', 'amber', 'rose'] as const;
 
 	const seriesOf = (
 		key: ProfileMetricKey,
@@ -1212,7 +1214,7 @@
 		<!-- 指数对教师不做黑箱：构成随教师端接口返回，这里如实列出。
 		     学生端不给 —— 阈值一公开就是刷分说明书（改够三成、写满三天、问够十条），
 		     学生看到的是自己的指标值和趋势。 -->
-		{#if activeSection === 'overview' && variant === 'teacher'}
+		{#if activeSection === 'overview' && variant === 'teacher' && 'index_formula' in profile}
 			<EduCard tone="muted">
 				<details>
 					<summary class="cursor-pointer text-sm font-semibold">

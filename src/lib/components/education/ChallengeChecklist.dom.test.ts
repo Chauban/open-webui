@@ -13,7 +13,7 @@ vi.mock('$lib/apis/education', () => ({
 afterEach(cleanup);
 beforeEach(() => {
 	vi.clearAllMocks();
-	// @ts-expect-error jsdom 里没有真实登录态，组件只把它当 bearer 透传。
+	// jsdom 里没有真实登录态，组件只把它当 bearer 透传。
 	globalThis.localStorage.token = 'test-token';
 });
 

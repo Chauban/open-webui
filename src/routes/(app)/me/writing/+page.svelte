@@ -1,4 +1,6 @@
 <script lang="ts">
+	import type { Writable } from 'svelte/store';
+	import type { i18n as i18nType } from 'i18next';
 	import { getContext, onDestroy, onMount } from 'svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import SidebarIcon from '$lib/components/icons/Sidebar.svelte';
@@ -6,15 +8,14 @@
 	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
 	import {
-		chats,
 		educationNotificationSummary,
 		folders,
 		mobile,
-		pinnedChats,
 		selectedFolder,
 		showSidebar,
 		user
 	} from '$lib/stores';
+	import { refreshChatList } from '$lib/stores/chatList';
 
 	import {
 		createPersonalWriting,
@@ -31,7 +32,7 @@
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 	import { EDU_FIELD_CLASS, eduSegmentClass } from '$lib/components/education/styles';
 
-	const i18n = getContext('i18n');
+	const i18n = getContext<Writable<i18nType>>('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
 
 	let home = null;
@@ -157,7 +158,8 @@
 	};
 
 	const isPersonalWritingAlreadyDeleted = (error: unknown) => {
-		return error?.status === 404 || error?.detail === 'Writing session not found';
+		const { status, detail } = (error ?? {}) as { status?: number; detail?: unknown };
+		return status === 404 || detail === 'Writing session not found';
 	};
 
 	// 删除会连带清掉对应的项目文件夹与对话，且不可撤销，所以先确认。
@@ -219,22 +221,13 @@
 			folders.update((items) =>
 				(items ?? []).filter((folder) => !deletedFolderIds.has(folder?.id))
 			);
-			chats.update((items) =>
-				(items ?? []).filter(
-					(chat) => !deletedFolderIds.has(chat?.folder_id) && !deletedChatIds.has(chat?.id)
-				)
-			);
-			pinnedChats.update((items) =>
-				(items ?? []).filter(
-					(chat) => !deletedFolderIds.has(chat?.folder_id) && !deletedChatIds.has(chat?.id)
-				)
-			);
 			if (deletedFolderIds.has(get(selectedFolder)?.id)) {
 				selectedFolder.set(null);
 			}
-		} else if (deletedChatIds.size > 0) {
-			chats.update((items) => (items ?? []).filter((chat) => !deletedChatIds.has(chat?.id)));
-			pinnedChats.update((items) => (items ?? []).filter((chat) => !deletedChatIds.has(chat?.id)));
+		}
+		// 对话列表 store 自 0.11 起是只读的，只能整页重拉；置顶里的对话也可能被一并删掉。
+		if (deletedFolderIds.size > 0 || deletedChatIds.size > 0) {
+			await refreshChatList(localStorage.token, { refreshPinned: true });
 		}
 
 		toast.success(t('Deleted'));

@@ -41,7 +41,18 @@
 		}
 	};
 
-	let _user = {
+	// id / oauth 由 selectedUser 带进来，初始空表单里没有。
+	let _user: {
+		id?: string;
+		oauth?: Record<string, { sub?: string }>;
+		profile_image_url: string;
+		role: string;
+		education_role: string;
+		classroom_id: string;
+		name: string;
+		email: string;
+		password: string;
+	} = {
 		profile_image_url: '',
 		role: 'pending',
 		education_role: 'student',
@@ -298,7 +309,6 @@
 											<SensitiveInput
 												class="w-full text-sm bg-transparent outline-hidden"
 												type="password"
-												aria-label={$i18n.t('New Password')}
 												placeholder={$i18n.t('Enter New Password')}
 												bind:value={_user.password}
 												autocomplete="new-password"
