@@ -522,6 +522,8 @@ export const saveSubmissionReview = async (
 		score?: number | null;
 		/** 教师给反思打的 1—5 分；标为「已批改」时必填。 */
 		reflection_score?: number | null;
+		/** 教师给提问打的 1—5 分；本轮有 AI 对话且标为「已批改」时必填，没有对话时不能给。 */
+		prompt_score?: number | null;
 		overall_comment?: string;
 		rubric_scores?: Record<string, number> | null;
 		returned_comment?: string;
@@ -681,16 +683,13 @@ export const exportResearchDataset = async (
 	if (filters.end_at != null) params.set('end_at', String(filters.end_at));
 	if (filters.include_text) params.set('include_text', 'true');
 	const query = params.toString();
-	const res = await fetch(
-		`${WEBUI_API_BASE_URL}/research/export${query ? `?${query}` : ''}`,
-		{
-			method: 'GET',
-			headers: {
-				Accept: 'application/zip',
-				authorization: `Bearer ${token}`
-			}
+	const res = await fetch(`${WEBUI_API_BASE_URL}/research/export${query ? `?${query}` : ''}`, {
+		method: 'GET',
+		headers: {
+			Accept: 'application/zip',
+			authorization: `Bearer ${token}`
 		}
-	);
+	});
 	if (!res.ok) {
 		throw await parseErrorResponse(res);
 	}
@@ -996,14 +995,11 @@ export const generateChallengeInsight = async (
 	assignmentId: string,
 	model: string
 ): Promise<ChallengeInsight> => {
-	return fetch(
-		`${WEBUI_API_BASE_URL}/teacher/assignments/${assignmentId}/challenge-insight`,
-		{
-			method: 'POST',
-			headers: withAuth(token),
-			body: JSON.stringify({ model })
-		}
-	).then(handleJson);
+	return fetch(`${WEBUI_API_BASE_URL}/teacher/assignments/${assignmentId}/challenge-insight`, {
+		method: 'POST',
+		headers: withAuth(token),
+		body: JSON.stringify({ model })
+	}).then(handleJson);
 };
 
 export const getSubmissionChallenge = async (

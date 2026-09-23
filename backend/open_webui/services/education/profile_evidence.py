@@ -45,7 +45,7 @@ from open_webui.services.education.profile import (
     _compute_revision_depth,
     _estimate_active_writing_seconds,
     _profile_index_formula,
-    _reflection_quality_from_review,
+    _quality_from_teacher_score,
     _slice_round_versions,
 )
 
@@ -83,7 +83,7 @@ def profile_algorithm_code_checksum() -> str:
         _compute_process_index,
         _compute_revision_depth,
         _estimate_active_writing_seconds,
-        _reflection_quality_from_review,
+        _quality_from_teacher_score,
         _build_profile_insights,
         _build_trend,
     )
@@ -375,6 +375,11 @@ def capture_profile_evidence(
     )
 
 
+def evidence_prompt_count(facts: ProfileEvidencePayload) -> int:
+    """这一轮里学生向 AI 发出的消息数。批改时是否必须打提问质量也按它判断。"""
+    return len([item for item in facts.conversation if item.role == "user"])
+
+
 def _as_namespace(value):
     return SimpleNamespace(**value.model_dump())
 
@@ -465,8 +470,11 @@ def build_metric_projection(
         if version_complete
         else None
     )
-    reflection_quality = _reflection_quality_from_review(
+    reflection_quality = _quality_from_teacher_score(
         review_event.reflection_score if review_event else None
+    )
+    prompt_quality = _quality_from_teacher_score(
+        review_event.prompt_score if review_event else None
     )
     score_complete = bool(
         review_event
@@ -498,7 +506,7 @@ def build_metric_projection(
     digestion_ratio = (
         int(summary.get("average_rewrite_ratio", 0)) if source_complete else None
     )
-    prompt_count = len([item for item in facts.conversation if item.role == "user"])
+    prompt_count = evidence_prompt_count(facts)
     point = StudentProfileTimelinePoint(
         submission_id=facts.submission_id,
         assignment_id=facts.assignment_id,
@@ -559,12 +567,9 @@ def build_metric_projection(
         prompt_count=prompt_count,
         digestion_ratio=digestion_ratio,
         reflection_quality=reflection_quality,
+        prompt_quality=prompt_quality,
         collaboration_index=_compute_collaboration_index(
-            digestion_ratio,
-            prompt_count,
-            reflection_quality,
-            ai_ratio,
-            facts.reflection.ai_used,
+            prompt_count, prompt_quality, reflection_quality
         ),
         burst_count=(int(summary.get("burst_count", 0)) if editor_complete else None),
         suspected_unmarked_import_count=(

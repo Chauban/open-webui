@@ -61,7 +61,8 @@ export type ProfileMetricKey =
 	| 'ai_ratio'
 	| 'digestion_ratio'
 	| 'prompt_count'
-	| 'reflection_quality';
+	| 'reflection_quality'
+	| 'prompt_quality';
 export type ProfileInsightCode =
 	| 'not_enough_data'
 	| 'digestion_up'
@@ -90,8 +91,7 @@ export type ProfileFormulaMetric =
 	| 'revised_chars / inserted_chars'
 	| 'writing_span_seconds'
 	| 'end_loaded_ratio'
-	| 'digestion_ratio'
-	| 'prompt_count'
+	| 'prompt_quality'
 	| 'reflection_quality';
 
 export type RubricCriterion = { key: string; label: string; max_score: number };
@@ -155,6 +155,8 @@ export type StudentProfileTimelinePoint = {
 	prompt_count: number | null;
 	digestion_ratio: number | null;
 	reflection_quality: number | null;
+	// 本轮没有 AI 对话时为 null（不适用）。
+	prompt_quality: number | null;
 	collaboration_index: number | null;
 	burst_count: number | null;
 	suspected_unmarked_import_count: number | null;
@@ -264,10 +266,9 @@ export type StudentProfileIndexFormula = {
 		pacing: ProfileFormulaTerm;
 	};
 	collaboration_index: {
-		digestion: ProfileFormulaTerm;
 		inquiry: ProfileFormulaTerm;
 		reflection: ProfileFormulaTerm;
-		no_ai_fallback_metric: 'reflection_quality';
+		no_conversation_fallback_metric: 'reflection_quality';
 	};
 };
 

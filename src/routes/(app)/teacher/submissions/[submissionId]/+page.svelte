@@ -67,6 +67,7 @@
 	let reviewStatus = 'pending';
 	let score = '';
 	let reflectionScore = '';
+	let promptScore = '';
 	let overallComment = '';
 	let rubricScores = {};
 	let returnedComment = '';
@@ -215,10 +216,14 @@
 				)
 			: '';
 
+	// 本轮没和 AI 对话过就没有提问可评，提问质量这一项不显示也不提交。
+	$: hasRoundPrompts = (detail?.round_prompt_count ?? 0) > 0;
+
 	const syncReview = () => {
 		const review = detail?.review;
 		reviewStatus = review?.review_status || 'pending';
 		reflectionScore = review?.reflection_score != null ? String(review.reflection_score) : '';
+		promptScore = review?.prompt_score != null ? String(review.prompt_score) : '';
 		overallComment = review?.overall_comment || '';
 		rubricScores = Object.fromEntries(
 			(detail?.assignment?.rubric_schema?.criteria ?? []).map((criterion) => [
@@ -260,6 +265,12 @@
 			toast.error(t('Rate the reflection before marking this submission reviewed.'));
 			return false;
 		}
+		const parsedPromptScore =
+			hasRoundPrompts && promptScore !== '' ? Number(promptScore) : null;
+		if (effectiveStatus === 'reviewed' && hasRoundPrompts && parsedPromptScore == null) {
+			toast.error(t('Rate the AI prompts before marking this submission reviewed.'));
+			return false;
+		}
 		let resubmitDueAt: number | null = null;
 		if (effectiveStatus === 'returned') {
 			resubmitDueAt = toEpoch(resubmitDueLocal);
@@ -275,6 +286,7 @@
 				review_status: effectiveStatus,
 				score: parsedScore,
 				reflection_score: parsedReflectionScore,
+				prompt_score: parsedPromptScore,
 				overall_comment: overallComment.trim(),
 				rubric_scores: parsedRubricScores,
 				returned_comment: returnedComment.trim(),
@@ -770,6 +782,37 @@
 										</p>
 									</div>
 								</div>
+
+								<!-- Prompt quality: replaces counting prompts, which only rewarded asking more -->
+								{#if hasRoundPrompts}
+									<div>
+										<div class="mb-1.5 text-xs font-medium uppercase tracking-[0.12em] text-gray-400">
+											{$i18n.t('Prompt Quality')}
+										</div>
+										<div class="rounded-2xl border border-gray-200 dark:border-gray-800 px-4 py-3">
+											<div class="flex items-center gap-1.5">
+												{#each [1, 2, 3, 4, 5] as option}
+													<button
+														type="button"
+														disabled={isHistoricalRound}
+														on:click={() => (promptScore = String(option))}
+														class="h-9 flex-1 rounded-xl border text-sm font-semibold tabular-nums transition-colors disabled:opacity-50 {promptScore ===
+														String(option)
+															? 'border-gray-900 bg-gray-900 text-white dark:border-white dark:bg-white dark:text-gray-900'
+															: 'border-gray-200 text-gray-500 hover:border-gray-400 dark:border-gray-800 dark:text-gray-400'}"
+													>
+														{option}
+													</button>
+												{/each}
+											</div>
+											<p class="mt-2 text-xs text-gray-400 dark:text-gray-500">
+												{$i18n.t(
+													'Rate how the student questioned the AI this round, not how often. 1 = asked it to write for them, 5 = specific questions that pushed their own thinking.'
+												)}
+											</p>
+										</div>
+									</div>
+								{/if}
 
 								<!-- Overall comment -->
 								<div>

@@ -382,7 +382,7 @@ def _seed_user(session, user_id: str, name: str, email: str, education_role: str
     return UserModel.model_validate(user_row)
 
 
-def _prepare_assignment_flow(client, teacher, student):
+def _prepare_assignment_flow(client, teacher, student, *, ai_prompt=None):
     UserContext.current_user = teacher
     create_classroom_res = client.post(
         "/api/v1/classrooms", json={"name": "Grade 8 Writing Missing Due"}
@@ -475,6 +475,20 @@ def _prepare_assignment_flow(client, teacher, student):
         },
     )
     assert operations_res.status_code == 200, operations_res.text
+
+    if ai_prompt is not None:
+        chat_res = client.post(
+            f"/api/v1/writing-sessions/{session_id}/chat/messages/msg-seed",
+            json={
+                "message": {
+                    "id": "msg-seed",
+                    "role": "user",
+                    "content": ai_prompt,
+                    "timestamp": int(time.time()),
+                }
+            },
+        )
+        assert chat_res.status_code == 200, chat_res.text
 
     submit_res = client.post(
         f"/api/v1/assignments/{assignment['id']}/submit",
@@ -3052,43 +3066,111 @@ def test_deadline_window_ratio_uses_the_final_24_hours():
     assert education_profile_module._compute_deadline_window_ratio(diffs, due_at) == 0.5
 
 
-def test_reflection_quality_comes_from_the_teacher_rating():
-    # 教师给的 1—5 分线性折算到 0—100;没批改就是空,不折算成 0。
-    assert education_profile_module._reflection_quality_from_review(1) == 0
-    assert education_profile_module._reflection_quality_from_review(3) == 50
-    assert education_profile_module._reflection_quality_from_review(5) == 100
-    assert education_profile_module._reflection_quality_from_review(None) is None
+def test_teacher_scores_map_linearly_onto_quality():
+    # 教师给的 1—5 分线性折算到 0—100;没打分就是空,不折算成 0。
+    assert education_profile_module._quality_from_teacher_score(1) == 0
+    assert education_profile_module._quality_from_teacher_score(3) == 50
+    assert education_profile_module._quality_from_teacher_score(5) == 100
+    assert education_profile_module._quality_from_teacher_score(None) is None
 
 
-def test_collaboration_index_falls_back_to_reflection_without_ai():
-    # 完全没用 AI 的提交不该被「消化度 0」拖成低分。
-    without_ai = education_profile_module._compute_collaboration_index(
-        digestion_ratio=0,
-        prompt_count=0,
-        reflection_quality=80,
-        ai_ratio=0.0,
-        ai_used=False,
+def test_collaboration_index_averages_prompt_and_reflection_quality():
+    compute = education_profile_module._compute_collaboration_index
+
+    assert compute(prompt_count=3, prompt_quality=50, reflection_quality=100) == 75
+    # 提问条数不再计分:问一条好问题和刷十条一样,只看教师给的提问质量。
+    assert compute(prompt_count=1, prompt_quality=100, reflection_quality=100) == 100
+    assert compute(prompt_count=10, prompt_quality=0, reflection_quality=100) == 50
+    # 没有 AI 对话就没有提问可评,只看反思,不因为少用 AI 被扣分。
+    assert compute(prompt_count=0, prompt_quality=None, reflection_quality=80) == 80
+    # 两项都来自教师批改,批改之前留空而不是先给个假分。
+    assert compute(prompt_count=3, prompt_quality=None, reflection_quality=80) is None
+    assert compute(prompt_count=0, prompt_quality=None, reflection_quality=None) is None
+
+
+_REVIEWED_BODY = {
+    "review_status": "reviewed",
+    "reflection_score": 4,
+    "score": 92,
+    "rubric_scores": {"ideas": 30, "structure": 31, "evidence": 31},
+}
+
+
+def test_review_requires_prompt_score_only_when_there_is_an_ai_conversation(
+    education_client,
+):
+    client, teacher, _, student, _, _ = education_client
+    flow = _prepare_assignment_flow(
+        client, teacher, student, ai_prompt="Which of my claims needs evidence?"
     )
-    with_ai = education_profile_module._compute_collaboration_index(
-        digestion_ratio=0,
-        prompt_count=0,
-        reflection_quality=80,
-        ai_ratio=0.5,
-        ai_used=True,
-    )
+    submission_id = flow["submission"]["submission_id"]
 
-    unreviewed = education_profile_module._compute_collaboration_index(
-        digestion_ratio=60,
-        prompt_count=8,
-        reflection_quality=None,
-        ai_ratio=0.5,
-        ai_used=True,
+    UserContext.current_user = teacher
+    missing_res = client.post(
+        f"/api/v1/teacher/submissions/{submission_id}/review", json=_REVIEWED_BODY
     )
+    assert missing_res.status_code == 400, missing_res.text
+    assert "prompt score" in missing_res.text
 
-    assert without_ai == 80
-    assert with_ai < without_ai
-    # 反思质量来自教师批改,批改之前这一维留空而不是先给个假分。
-    assert unreviewed is None
+    # 退回时不要求打分,和反思分一致。
+    returned_res = client.post(
+        f"/api/v1/teacher/submissions/{submission_id}/review",
+        json={
+            "review_status": "returned",
+            "returned_comment": "Add evidence.",
+            "resubmit_due_at": int(time.time()) + 86400,
+        },
+    )
+    assert returned_res.status_code == 200, returned_res.text
+
+
+def test_prompt_score_feeds_the_collaboration_index(education_client):
+    client, teacher, _, student, _, _ = education_client
+    flow = _prepare_assignment_flow(
+        client, teacher, student, ai_prompt="Which of my claims needs evidence?"
+    )
+    submission_id = flow["submission"]["submission_id"]
+
+    UserContext.current_user = teacher
+    review_res = client.post(
+        f"/api/v1/teacher/submissions/{submission_id}/review",
+        json={**_REVIEWED_BODY, "prompt_score": 2},
+    )
+    assert review_res.status_code == 200, review_res.text
+    assert review_res.json()["prompt_score"] == 2
+
+    UserContext.current_user = student
+    profile_res = client.get("/api/v1/me/writing/profile")
+    assert profile_res.status_code == 200, profile_res.text
+    point = profile_res.json()["timeline"][0]
+    assert point["prompt_count"] == 1
+    assert point["prompt_quality"] == 25
+    assert point["reflection_quality"] == 75
+    assert point["collaboration_index"] == 50
+
+
+def test_prompt_score_is_rejected_without_an_ai_conversation(education_client):
+    client, teacher, _, student, _, _ = education_client
+    flow = _prepare_assignment_flow(client, teacher, student)
+    submission_id = flow["submission"]["submission_id"]
+
+    UserContext.current_user = teacher
+    rejected_res = client.post(
+        f"/api/v1/teacher/submissions/{submission_id}/review",
+        json={**_REVIEWED_BODY, "prompt_score": 3},
+    )
+    assert rejected_res.status_code == 400, rejected_res.text
+
+    review_res = client.post(
+        f"/api/v1/teacher/submissions/{submission_id}/review", json=_REVIEWED_BODY
+    )
+    assert review_res.status_code == 200, review_res.text
+
+    UserContext.current_user = student
+    point = client.get("/api/v1/me/writing/profile").json()["timeline"][0]
+    assert point["prompt_quality"] is None
+    # 没和 AI 对话过,协作指数只看反思质量。
+    assert point["collaboration_index"] == 75
 
 
 def test_submission_form_rejects_the_retired_fixed_reflection_fields():

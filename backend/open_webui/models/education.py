@@ -457,6 +457,10 @@ class SubmissionReview(Base):
             "reflection_score IS NULL OR reflection_score BETWEEN 1 AND 5",
             name="submission_review_reflection_score_check",
         ),
+        CheckConstraint(
+            "prompt_score IS NULL OR prompt_score BETWEEN 1 AND 5",
+            name="submission_review_prompt_score_check",
+        ),
     )
 
     id = Column(Text, primary_key=True, unique=True)
@@ -468,6 +472,10 @@ class SubmissionReview(Base):
     # 反思质量由教师 1—5 分给出,是这一维唯一的来源。曾经按反思字数折算,
     # 那个口径只数字符、内容不看,凑字数即可满分,已废弃。
     reflection_score = Column(Integer, nullable=True)
+    # 提问质量同理由教师 1—5 分给出,替代按提问条数折算的「提问投入」:
+    # 条数只奖励多问,刷几条「继续」就能拿满,问一个准问题的反而吃亏。
+    # 这份提交没有 AI 对话时不适用,留空。
+    prompt_score = Column(Integer, nullable=True)
     overall_comment = Column(Text, nullable=True)
     rubric_scores = Column(JSONField, nullable=True)
     returned_comment = Column(Text, nullable=True)
@@ -539,6 +547,10 @@ class SubmissionReviewEvent(Base):
             "reflection_score IS NULL OR reflection_score BETWEEN 1 AND 5",
             name="submission_review_event_reflection_score_check",
         ),
+        CheckConstraint(
+            "prompt_score IS NULL OR prompt_score BETWEEN 1 AND 5",
+            name="submission_review_event_prompt_score_check",
+        ),
     )
 
     id = Column(Text, primary_key=True)
@@ -558,6 +570,7 @@ class SubmissionReviewEvent(Base):
     review_status = Column(Text, nullable=False)
     score = Column(BigInteger, nullable=True)
     reflection_score = Column(Integer, nullable=True)
+    prompt_score = Column(Integer, nullable=True)
     rubric_scores = Column(JSONField, nullable=True)
     overall_comment = Column(Text, nullable=True)
     returned_comment = Column(Text, nullable=True)
@@ -1325,6 +1338,7 @@ class SubmissionReviewModel(BaseModel):
     review_status: str
     score: Optional[int] = Field(default=None, ge=0)
     reflection_score: Optional[int] = Field(default=None, ge=1, le=5)
+    prompt_score: Optional[int] = Field(default=None, ge=1, le=5)
     overall_comment: Optional[str] = None
     rubric_scores: Optional[dict[str, int]] = None
     returned_comment: Optional[str] = None
@@ -1665,6 +1679,7 @@ class SubmissionReviewForm(BaseModel):
     review_status: Literal["pending", "reviewed", "returned"] = "reviewed"
     score: Optional[int] = Field(default=None, ge=0)
     reflection_score: Optional[int] = Field(default=None, ge=1, le=5)
+    prompt_score: Optional[int] = Field(default=None, ge=1, le=5)
     overall_comment: Optional[str] = None
     rubric_scores: Optional[dict[str, int]] = None
     returned_comment: Optional[str] = None
@@ -1756,6 +1771,9 @@ class SubmissionDetailResponse(BaseModel):
     version_count: int = 0
     provenance_segments: list[ProvenanceSegmentModel]
     prompt_timeline: list[dict]
+    # prompt_timeline 是整个写作会话的对话;这个是本轮证据里学生发出的消息数,
+    # 批改时要不要打提问质量按它判断,和后端校验同一口径。
+    round_prompt_count: int
     micro_reflection: MicroReflectionModel
     review: Optional[SubmissionReviewModel] = None
     note: dict
@@ -1870,13 +1888,13 @@ ProfileMetricKey = Literal[
     "digestion_ratio",
     "prompt_count",
     "reflection_quality",
+    "prompt_quality",
 ]
 ProfileFormulaMetric = Literal[
     "revised_chars / inserted_chars",
     "writing_span_seconds",
     "end_loaded_ratio",
-    "digestion_ratio",
-    "prompt_count",
+    "prompt_quality",
     "reflection_quality",
 ]
 
@@ -2135,6 +2153,8 @@ class StudentProfileTimelinePoint(StrictProfileModel):
     digestion_ratio: Optional[int] = Field(default=None, ge=0, le=100)
     # 教师批改时给的 1—5 分折算而来;批改之前为空,不给假分。
     reflection_quality: Optional[int] = Field(default=None, ge=0, le=100)
+    # 同上;没有 AI 对话的提交不适用,也为空。
+    prompt_quality: Optional[int] = Field(default=None, ge=0, le=100)
     collaboration_index: Optional[int] = Field(default=None, ge=0, le=100)
 
     # 面对质疑维。作业没开试读时全为 None——这是「不适用」,不是「表现差」,
@@ -2350,10 +2370,11 @@ class StudentProfileProcessFormula(StrictProfileModel):
 
 
 class StudentProfileCollaborationFormula(StrictProfileModel):
-    digestion: StudentProfileFormulaTerm
     inquiry: StudentProfileFormulaTerm
     reflection: StudentProfileFormulaTerm
-    no_ai_fallback_metric: Literal["reflection_quality"] = "reflection_quality"
+    no_conversation_fallback_metric: Literal["reflection_quality"] = (
+        "reflection_quality"
+    )
 
 
 class StudentProfileIndexFormula(StrictProfileModel):
@@ -2379,6 +2400,7 @@ class SubmissionReviewEventModel(StrictProfileModel):
     review_status: Literal["pending", "reviewed", "returned"]
     score: Optional[int] = Field(default=None, ge=0)
     reflection_score: Optional[int] = Field(default=None, ge=1, le=5)
+    prompt_score: Optional[int] = Field(default=None, ge=1, le=5)
     rubric_scores: Optional[dict[str, int]] = None
     overall_comment: Optional[str] = None
     returned_comment: Optional[str] = None
@@ -4230,6 +4252,7 @@ class EducationTable:
                 review_status=review.review_status,
                 score=review.score,
                 reflection_score=review.reflection_score,
+                prompt_score=review.prompt_score,
                 rubric_scores=review.rubric_scores,
                 overall_comment=review.overall_comment,
                 returned_comment=review.returned_comment,
@@ -4961,6 +4984,7 @@ class EducationTable:
                     review_status=form_data.review_status,
                     score=form_data.score,
                     reflection_score=form_data.reflection_score,
+                    prompt_score=form_data.prompt_score,
                     overall_comment=form_data.overall_comment,
                     rubric_scores=form_data.rubric_scores,
                     returned_comment=form_data.returned_comment,
@@ -4976,6 +5000,7 @@ class EducationTable:
                 review.review_status = form_data.review_status
                 review.score = form_data.score
                 review.reflection_score = form_data.reflection_score
+                review.prompt_score = form_data.prompt_score
                 review.overall_comment = form_data.overall_comment
                 review.rubric_scores = form_data.rubric_scores
                 review.returned_comment = form_data.returned_comment

@@ -133,6 +133,7 @@ from open_webui.services.education.profile_aggregates import (
 from open_webui.services.education.profile_evidence import (
     build_analysis_from_evidence,
     capture_profile_evidence,
+    evidence_prompt_count,
     profile_algorithm_code_checksum,
     project_profile_evidence,
 )
@@ -3238,6 +3239,12 @@ async def get_submission_detail(
     )
     review = Education.get_submission_review_by_submission_id(submission.id, db=db)
     prompt_timeline = await get_prompt_timeline(session, db)
+    evidence = Education.get_latest_profile_evidence_snapshot(submission.id, db=db)
+    if evidence is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Submission evidence snapshot is missing",
+        )
     student = await Users.get_user_by_id(submission.student_id, db=db)
     note = await Notes.get_note_by_id(session.note_id, db=db)
     if note is None:
@@ -3284,6 +3291,7 @@ async def get_submission_detail(
         version_count=len(versions),
         provenance_segments=provenance_segments,
         prompt_timeline=prompt_timeline,
+        round_prompt_count=evidence_prompt_count(evidence.evidence_json),
         micro_reflection=reflection,
         review=review,
         note=note.model_dump(),
@@ -3514,6 +3522,26 @@ async def save_submission_review(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Reviewed submissions require a reflection score",
         )
+    evidence = Education.get_latest_profile_evidence_snapshot(submission.id, db=db)
+    if evidence is None:
+        raise RuntimeError("Submission evidence snapshot is missing")
+    # 提问质量同样必填,但只在这一轮真有 AI 对话时才有东西可评;没对话的
+    # 提交给了分也不会用,直接拒掉,免得分数存进去却对不上任何提问。
+    has_prompts = evidence_prompt_count(evidence.evidence_json) > 0
+    if not has_prompts and form_data.prompt_score is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This submission has no AI conversation to score",
+        )
+    if (
+        form_data.review_status == "reviewed"
+        and has_prompts
+        and form_data.prompt_score is None
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Reviewed submissions with an AI conversation require a prompt score",
+        )
     if not submission.is_current:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -3553,9 +3581,6 @@ async def save_submission_review(
             commit=False,
             db=db,
         )
-        evidence = Education.get_latest_profile_evidence_snapshot(submission.id, db=db)
-        if evidence is None:
-            raise RuntimeError("Submission evidence snapshot is missing")
         review_event = Education.append_submission_review_event(
             review, evidence.id, commit=False, db=db
         )
@@ -4027,7 +4052,7 @@ async def mark_my_notifications_read(
 # 比」；不带就是悄悄得出一个错误结论。
 # ---------------------------------------------------------------------------
 
-RESEARCH_EXPORT_SCHEMA_VERSION = "2026-09-14.1"
+RESEARCH_EXPORT_SCHEMA_VERSION = "2026-09-23.1"
 
 _RESEARCH_SUBMISSION_COLUMNS = (
     "pseudo_id",
@@ -4056,6 +4081,7 @@ _RESEARCH_SUBMISSION_COLUMNS = (
     "prompt_count",
     "digestion_ratio",
     "reflection_quality",
+    "prompt_quality",
     "collaboration_index",
     "challenge_status",
     "challenge_answer_ratio",
@@ -4144,7 +4170,10 @@ def _research_readme(
         "  上报，可能不完整也可以被绕过，只用于讨论写作过程，不作为学术不端判据。",
         "* challenge_* 由服务端快照比对得出，不依赖客户端上报；作业未开启提交前试读时",
         "  全为空，那是「不适用」而不是「表现差」。",
-        "* reflection_quality 由教师批改时给的 1—5 分折算到 0—100，未批改为空。",
+        "* reflection_quality / prompt_quality 由教师批改时给的 1—5 分折算到 0—100，",
+        "  未批改为空；这一轮没有 AI 对话的提交 prompt_quality 也为空（不适用）。",
+        "* collaboration_index = (prompt_quality + reflection_quality) / 2；没有 AI 对话的",
+        "  提交只看 reflection_quality。digestion_ratio 与 prompt_count 仅作参考，不计入。",
         "* 空值一律留空，不填 0 —— 0 和「没有数据」在统计上必须分得开。",
         "",
         "文件",
@@ -4246,6 +4275,7 @@ async def export_research_dataset(
                 point.prompt_count,
                 point.digestion_ratio,
                 point.reflection_quality,
+                point.prompt_quality,
                 point.collaboration_index,
                 point.challenge_status,
                 point.challenge_answer_ratio,

@@ -26,16 +26,15 @@ _DEADLINE_WINDOW_SECONDS = 24 * 3600
 # 回头删改的字符量达到写入量的三成,就算把稿子认真打磨过一遍。
 _PROCESS_TARGET_REVISION_RATIO = 0.3
 _PROCESS_TARGET_SPAN_SECONDS = 3 * 24 * 3600
-_COLLABORATION_TARGET_PROMPTS = 10
-# 教师给的 1—5 分折算到 0—100,好让它和其他比率型指标同尺度参与合成。
-_REFLECTION_TEACHER_SCORE_MIN = 1
-_REFLECTION_TEACHER_SCORE_MAX = 5
+# 教师给的 1—5 分(反思质量、提问质量)折算到 0—100,好和其他比率型指标同尺度。
+_TEACHER_SCORE_MIN = 1
+_TEACHER_SCORE_MAX = 5
 _PROFILE_MAX_INSIGHTS = 5
 _TREND_FLAT_TOLERANCE = 0.05
 _TREND_MIN_SAMPLES = 3
 _TREND_MAX_WINDOW = 3
-PROFILE_METRIC_VERSION = "2026-09-14.1"
-PROFILE_INSIGHT_VERSION = "2026-09-14.1"
+PROFILE_METRIC_VERSION = "2026-09-23.1"
+PROFILE_INSIGHT_VERSION = "2026-09-23.1"
 
 _INSIGHT_META = {
     "not_enough_data": ("low", 5, "all"),
@@ -65,14 +64,15 @@ _PROFILE_TREND_KEYS = (
     "digestion_ratio",
     "prompt_count",
     "reflection_quality",
+    "prompt_quality",
 )
 
 def _profile_index_formula() -> StudentProfileIndexFormula:
     """把两个合成指数的构成如实返回。
 
     只发给教师端 —— 教师要能逐项核对、向学生解释这个分怎么来的。学生端不给,
-    阈值一旦公开就是一份刷分说明书(改够三成、写满三天、问够十条),学生看到的
-    是自己的指标值与趋势。
+    阈值一旦公开就是一份刷分说明书(改够三成、写满三天),学生看到的是自己的
+    指标值与趋势。
     """
     return StudentProfileIndexFormula(
         process_index=StudentProfileProcessFormula(
@@ -91,27 +91,20 @@ def _profile_index_formula() -> StudentProfileIndexFormula:
             ),
         ),
         collaboration_index=StudentProfileCollaborationFormula(
-            digestion=StudentProfileFormulaTerm(
-                metric="digestion_ratio", weight=1 / 3
-            ),
-            inquiry=StudentProfileFormulaTerm(
-                metric="prompt_count",
-                target=_COLLABORATION_TARGET_PROMPTS,
-                weight=1 / 3,
-            ),
+            inquiry=StudentProfileFormulaTerm(metric="prompt_quality", weight=1 / 2),
             reflection=StudentProfileFormulaTerm(
-                metric="reflection_quality", weight=1 / 3
+                metric="reflection_quality", weight=1 / 2
             ),
         ),
     )
 
 
-def _reflection_quality_from_review(reflection_score: Optional[int]) -> Optional[int]:
-    """教师给的 1—5 分折算成 0—100;没批改就是空,不折算成 0。"""
-    if reflection_score is None:
+def _quality_from_teacher_score(teacher_score: Optional[int]) -> Optional[int]:
+    """教师给的 1—5 分折算成 0—100;没打分就是空,不折算成 0。"""
+    if teacher_score is None:
         return None
-    span = _REFLECTION_TEACHER_SCORE_MAX - _REFLECTION_TEACHER_SCORE_MIN
-    ratio = (reflection_score - _REFLECTION_TEACHER_SCORE_MIN) / span
+    span = _TEACHER_SCORE_MAX - _TEACHER_SCORE_MIN
+    ratio = (teacher_score - _TEACHER_SCORE_MIN) / span
     return int(round(min(max(ratio, 0.0), 1.0) * 100))
 
 
@@ -190,26 +183,24 @@ def _compute_process_index(
 
 
 def _compute_collaboration_index(
-    digestion_ratio: Optional[int],
-    prompt_count: Optional[int],
+    prompt_count: int,
+    prompt_quality: Optional[int],
     reflection_quality: Optional[int],
-    ai_ratio: Optional[float],
-    ai_used: bool,
 ) -> Optional[int]:
-    # 反思质量来自教师批改,批改之前这一维就是空的 —— 未批改的提交本来也还没有
-    # 完整评价,留空比先给个假分诚实。
+    """提问质量与反思质量的平均,两项都来自教师批改。
+
+    只评实际发生过的环节,不评用了多少 AI:没有 AI 对话的提交只看反思质量,
+    AI 用得少既不扣分也不加分(用量另由 ai_ratio 呈现)。是否有对话看系统记录,
+    不看学生自己勾的「用了 AI」。消化度只测改写程度、不测理解,不计入。
+    """
+    # 两项都来自教师批改,批改之前留空比先给个假分诚实。
     if reflection_quality is None:
         return None
-
-    # 没用 AI 的提交不该被「消化度 0」拖成低分,这一维退化为只看反思质量。
-    if not ai_used:
+    if prompt_count == 0:
         return int(round(reflection_quality))
-
-    if digestion_ratio is None or prompt_count is None or ai_ratio is None:
+    if prompt_quality is None:
         return None
-
-    inquiry = min(prompt_count / _COLLABORATION_TARGET_PROMPTS, 1.0) * 100
-    return int(round((digestion_ratio + inquiry + reflection_quality) / 3))
+    return int(round((prompt_quality + reflection_quality) / 2))
 
 
 def _slice_round_versions(versions, previous_final_version_id, final_version_id):

@@ -1048,10 +1048,10 @@
 					)}
 				</div>
 
-				<div class="mb-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+				<div class="mb-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
 					<EduTrendStat
 						label="Collaboration Index"
-						hint="Average of digestion, question effort, and reflection quality. See how it is calculated below."
+						hint="Average of prompt quality and reflection quality, both rated by the teacher. See how it is calculated below."
 						value={latest?.collaboration_index ?? null}
 						delta={trendOf('collaboration_index')?.delta ?? null}
 						direction={trendOf('collaboration_index')?.direction ?? null}
@@ -1068,7 +1068,7 @@
 					/>
 					<EduTrendStat
 						label="Digestion"
-						hint="How much of the AI-sourced text was rewritten before submitting. Higher means more digested."
+						hint="How much of the AI-sourced text was rewritten before submitting. For reference only; it does not count toward the collaboration index."
 						value={latest?.digestion_ratio ?? null}
 						delta={trendOf('digestion_ratio')?.delta ?? null}
 						direction={trendOf('digestion_ratio')?.direction ?? null}
@@ -1077,10 +1077,19 @@
 					/>
 					<EduTrendStat
 						label="Reflection Quality"
-						hint="Structured evidence score from the action, location, judgement, and next step."
+						hint="The teacher's 1—5 rating of the reflection, mapped onto 0—100."
 						value={latest?.reflection_quality ?? null}
 						delta={trendOf('reflection_quality')?.delta ?? null}
 						direction={trendOf('reflection_quality')?.direction ?? null}
+						higherIsBetter="yes"
+						format={(value) => `${Math.round(value)}`}
+					/>
+					<EduTrendStat
+						label="Prompt Quality"
+						hint="The teacher's 1—5 rating of how the AI was questioned, mapped onto 0—100. Empty when there was no AI conversation."
+						value={latest?.prompt_quality ?? null}
+						delta={trendOf('prompt_quality')?.delta ?? null}
+						direction={trendOf('prompt_quality')?.direction ?? null}
 						higherIsBetter="yes"
 						format={(value) => `${Math.round(value)}`}
 					/>
@@ -1105,13 +1114,15 @@
 					</div>
 					<div>
 						<div class="mb-2 text-xs font-medium text-gray-500 dark:text-gray-400">
-							{$i18n.t('Prompts and Reflection')}
+							{$i18n.t('Prompt and Reflection Quality')}
 						</div>
 						<EduTrendChart
 							{labels}
 							{axisLabels}
+							min={0}
+							max={100}
 							series={[
-								seriesOf('prompt_count', 'Prompts', 'sky'),
+								seriesOf('prompt_quality', 'Prompt Quality', 'sky'),
 								seriesOf('reflection_quality', 'Reflection Quality', 'amber')
 							]}
 							formatValue={(value) => `${Math.round(value)}`}
@@ -1234,7 +1245,7 @@
 		{/if}
 
 		<!-- 指数对教师不做黑箱：构成随教师端接口返回，这里如实列出。
-		     学生端不给 —— 阈值一公开就是刷分说明书（改够三成、写满三天、问够十条），
+		     学生端不给 —— 阈值一公开就是刷分说明书（改够三成、写满三天），
 		     学生看到的是自己的指标值和趋势。 -->
 		{#if activeSection === 'overview' && variant === 'teacher' && 'index_formula' in profile}
 			<EduCard tone="muted">
@@ -1258,15 +1269,12 @@
 						</p>
 						<p>
 							{$i18n.t(
-								'Collaboration Index = average of digestion (rewrite ratio of AI text), question effort (prompts / {{prompts}}), and reflection quality. Submissions with no AI use fall back to reflection quality only.',
-								{
-									prompts: profile.index_formula?.collaboration_index?.inquiry?.target ?? 10
-								}
+								'Collaboration Index = average of prompt quality and reflection quality. Submissions with no AI conversation fall back to reflection quality only, so using little AI is neither penalised nor rewarded. Digestion and prompt count are shown for reference and do not count.'
 							)}
 						</p>
 						<p>
 							{$i18n.t(
-								'Reflection quality is the 1—5 rating you give the reflection when you review, mapped onto 0—100. It stays empty until the submission is reviewed.'
+								'Reflection and prompt quality are the 1—5 ratings you give when you review, mapped onto 0—100. They stay empty until the submission is reviewed.'
 							)}
 						</p>
 						<p class="text-gray-500 dark:text-gray-500">

@@ -69,11 +69,10 @@ const makeProfile = (teacher = false): any => ({
 			pacing: { metric: 'end_loaded_ratio', weight: 1 / 3 }
 		},
 		collaboration_index: {
-			digestion: { metric: 'digestion_ratio', weight: 1 / 3 },
-			inquiry: { metric: 'prompt_count', weight: 1 / 3 },
-			reflection: { metric: 'reflection_quality', weight: 1 / 3 },
-			no_ai_fallback_metric: 'reflection_quality'
-		},
+			inquiry: { metric: 'prompt_quality', weight: 1 / 2 },
+			reflection: { metric: 'reflection_quality', weight: 1 / 2 },
+			no_conversation_fallback_metric: 'reflection_quality'
+		}
 	},
 	insights: [],
 	data_completeness: {

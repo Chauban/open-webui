@@ -24,14 +24,13 @@ const context = new Map([
 	]
 ]);
 
-const term = { metric: 'prompt_count' as const, weight: 1 / 3, target: null, inverted: false };
+const term = { metric: 'prompt_quality' as const, weight: 1 / 2, target: null, inverted: false };
 const indexFormula: TeacherStudentProfile['index_formula'] = {
 	process_index: { revision_depth: term, span_effort: term, pacing: term },
 	collaboration_index: {
-		digestion: term,
 		inquiry: term,
 		reflection: term,
-		no_ai_fallback_metric: 'reflection_quality'
+		no_conversation_fallback_metric: 'reflection_quality'
 	}
 };
 const profile: StudentProfile = {
