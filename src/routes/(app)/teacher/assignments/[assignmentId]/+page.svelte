@@ -32,7 +32,6 @@
 	} from '$lib/utils/reflection-questions';
 	import { EDU_FIELD_CLASS } from '$lib/components/education/styles';
 	import {
-		formatDateTimeInput,
 		formatEpoch,
 		getAssignmentStatusLabel,
 		getClassroomDisplayName,
@@ -70,7 +69,6 @@
 		item?.assignment?.status === 'active' &&
 		item?.assignment?.due_at &&
 		item.assignment.due_at * 1000 < Date.now();
-	$: dueAtPreview = formatDateTimeInput(dueAt);
 
 	// datetime-local expects a LOCAL "YYYY-MM-DDTHH:mm" string; toISOString() would shift to UTC.
 
@@ -301,9 +299,6 @@
 							<div>
 								<div class="mb-2 text-sm font-medium">{$i18n.t('Due At')}</div>
 								<EduDateTimeField bind:value={dueAt} required className="w-full {EDU_FIELD_CLASS}" />
-								{#if dueAtPreview}
-									<div class="mt-1.5 text-xs text-gray-400 dark:text-gray-500">{dueAtPreview}</div>
-								{/if}
 							</div>
 							<div>
 								<div class="mb-2 text-sm font-medium">{$i18n.t('Maximum Score')}</div>

@@ -22,7 +22,6 @@
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
 	import { buildSubmissionReviewOverview } from '$lib/utils/submission-review';
 	import {
-		formatDateTimeInput,
 		formatEpoch,
 		formatEpochTime,
 		resolveErrorMessage,
@@ -101,7 +100,6 @@
 	// datetime-local expects a LOCAL "YYYY-MM-DDTHH:mm" string; toISOString() would shift to UTC.
 
 	$: submissionId = $page.params.submissionId;
-	$: resubmitDuePreview = formatDateTimeInput(resubmitDueLocal);
 	$: isHistoricalRound = detail ? !detail.submission.is_current : false;
 
 	$: queueIndex = queueIds.indexOf(submissionId);
@@ -828,9 +826,6 @@
 										disabled={isHistoricalRound}
 										className="w-full rounded-2xl border border-gray-200 dark:border-gray-800 px-4 py-3 text-sm outline-none focus:border-gray-400 transition-colors disabled:opacity-50"
 									/>
-									{#if resubmitDuePreview}
-										<div class="mt-1.5 text-xs text-gray-400 dark:text-gray-500">{resubmitDuePreview}</div>
-									{/if}
 								</div>
 
 								<!-- Actions + persistent save status -->

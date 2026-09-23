@@ -7,6 +7,7 @@
 	import { getAdminClassrooms } from '$lib/apis/users';
 	import { resolveErrorMessage } from '$lib/utils/education';
 	import EduButton from '$lib/components/education/EduButton.svelte';
+	import EduDateTimeField from '$lib/components/education/EduDateTimeField.svelte';
 	import EduCard from '$lib/components/education/EduCard.svelte';
 	import EduTile from '$lib/components/education/EduTile.svelte';
 	import { EDU_FIELD_CLASS } from '$lib/components/education/styles';
@@ -90,26 +91,16 @@
 				</label>
 			</div>
 			<div>
-				<label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300" for="research-start">
+				<div class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
 					{$i18n.t('Submitted after')}
-				</label>
-				<input
-					id="research-start"
-					type="datetime-local"
-					bind:value={startLocal}
-					class="w-full {EDU_FIELD_CLASS}"
-				/>
+				</div>
+				<EduDateTimeField bind:value={startLocal} defaultTime="00:00" className="w-full {EDU_FIELD_CLASS}" />
 			</div>
 			<div>
-				<label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300" for="research-end">
+				<div class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
 					{$i18n.t('Submitted before')}
-				</label>
-				<input
-					id="research-end"
-					type="datetime-local"
-					bind:value={endLocal}
-					class="w-full {EDU_FIELD_CLASS}"
-				/>
+				</div>
+				<EduDateTimeField bind:value={endLocal} defaultTime="23:59" className="w-full {EDU_FIELD_CLASS}" />
 			</div>
 		</div>
 

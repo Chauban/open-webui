@@ -23,7 +23,6 @@
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 	import { EDU_FIELD_CLASS, eduSegmentClass } from '$lib/components/education/styles';
 	import {
-		formatDateTimeInput,
 		formatEpoch,
 		getReviewStatusLabel,
 		resolveErrorMessage,
@@ -320,11 +319,6 @@
 														bind:value={extendDueAt}
 														className="w-full {EDU_FIELD_CLASS}"
 													/>
-													{#if formatDateTimeInput(extendDueAt)}
-														<div class="mt-1 text-xs text-gray-400 dark:text-gray-500">
-															{formatDateTimeInput(extendDueAt)}
-														</div>
-													{/if}
 												</div>
 												<div class="min-w-56 flex-1">
 													<div class="mb-1 text-xs text-gray-500 dark:text-gray-400">
