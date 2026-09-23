@@ -26,6 +26,10 @@
 	import {
 		formatEpoch,
 		formatEpochTime,
+		getEditorOperationLabel,
+		getRewriteLevelLabel,
+		getVersionTriggerLabel,
+		getWritingSourceLabel,
 		resolveErrorMessage,
 		toLocalDateTimeInput
 	} from '$lib/utils/education';
@@ -38,14 +42,35 @@
 	const i18n = getContext<Writable<i18nType>>('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
 	const DEFAULT_VISIBLE_VERSIONS = 10;
-	const getReviewTriggerTypeLabel = (value: string) =>
-		(
-			({
-				autosave: t('Autosave'),
-				submit: t('Submit'),
-				submit_preflight: t('Submit Preflight')
-			}) as Record<string, string>
-		)[value] || value;
+	// 后端时间线条目只带结构化字段（外加一条调试用的英文 label/message），
+	// 展示文案一律在这里按 event_type 翻译，不显示后端拼的英文串。
+	const describeAnalysisEvent = (item) => {
+		if (item.event_type === 'version') {
+			return {
+				meta: getVersionTriggerLabel(item.trigger_type, t),
+				label: t('Version {{number}}', { number: item.version_no }),
+				inserted_length: null
+			};
+		}
+		if (item.event_type === 'source_operation') {
+			return {
+				meta: getWritingSourceLabel(item.source_type, t),
+				label: getEditorOperationLabel(item.op_type, t),
+				inserted_length: item.inserted_length ?? null
+			};
+		}
+		if (item.event_type === 'large_burst') {
+			return {
+				meta: t('Large insertion'),
+				label: t('Added a large block of text at once'),
+				inserted_length: item.inserted_length ?? null
+			};
+		}
+		if (item.event_type === 'submit') {
+			return { meta: t('Submit'), label: t('Submitted this round'), inserted_length: null };
+		}
+		return { meta: item.event_type, label: item.label ?? '', inserted_length: null };
+	};
 	const getTimelineRoleLabel = (value: string) =>
 		(
 			({
@@ -178,10 +203,8 @@
 			.map((item) => ({
 				kind: 'analysis',
 				role: null,
-				label: item.label ?? item.message ?? item.event_type,
-				meta: item.source_type ?? item.trigger_type ?? item.event_type,
-				created_at: item.created_at,
-				inserted_length: item.inserted_length ?? null
+				...describeAnalysisEvent(item),
+				created_at: item.created_at
 			})),
 		...filteredPromptTimeline.map((item) => ({
 			kind: 'prompt',
@@ -938,7 +961,7 @@
 												>
 													<!-- Segment header row -->
 													<div class="flex items-center justify-between gap-2">
-														<div class="font-medium text-gray-900 dark:text-gray-100">{segment.origin_type}</div>
+														<div class="font-medium text-gray-900 dark:text-gray-100">{getWritingSourceLabel(segment.origin_type, t)}</div>
 														<div class="flex shrink-0 items-center gap-2">
 															{#if segment.is_suspected_unmarked_import}
 																<EduBadge soft tone="rose">{$i18n.t('Suspected')}</EduBadge>
@@ -980,7 +1003,7 @@
 																</div>
 																<div class="col-span-2 flex items-center justify-between">
 																	<span class="text-gray-400">{$i18n.t('Rewrite Level')}</span>
-																	<span class="font-medium text-gray-700 dark:text-gray-300">{segment.rewrite_level}</span>
+																	<span class="font-medium text-gray-700 dark:text-gray-300">{getRewriteLevelLabel(segment.rewrite_level, t)}</span>
 																</div>
 																{#if segment.suspicion_score}
 																	<div class="col-span-2 flex items-center justify-between">
@@ -991,7 +1014,7 @@
 															</div>
 															{#if segment.suspicion_reason}
 																<div class="mt-2 rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:text-rose-300">
-																	{segment.suspicion_reason}
+																	{$i18n.t(segment.suspicion_reason)}
 																</div>
 															{/if}
 														</div>
@@ -1289,7 +1312,7 @@
 												<div class="flex items-center gap-2 text-right">
 													{#if !isAutosave}
 														<EduBadge soft tone="emerald">
-															{getReviewTriggerTypeLabel(version.trigger_type)}
+															{getVersionTriggerLabel(version.trigger_type, t)}
 														</EduBadge>
 													{/if}
 													<span class="text-xs text-gray-400 tabular-nums">

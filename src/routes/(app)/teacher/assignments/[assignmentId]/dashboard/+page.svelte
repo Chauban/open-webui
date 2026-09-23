@@ -9,7 +9,7 @@
 
 	import { generateChallengeInsight, getTeacherDashboard } from '$lib/apis/education';
 	import type { ChallengeInsight } from '$lib/apis/education';
-	import { resolveErrorMessage } from '$lib/utils/education';
+	import { getRewriteLevelLabel, resolveErrorMessage } from '$lib/utils/education';
 	import { educationNotificationSummary, models } from '$lib/stores';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
@@ -66,13 +66,6 @@
 			`/teacher/assignments/new?from=${$page.params.assignmentId}` +
 				`&challengeFocus=${encodeURIComponent(focusKey)}`
 		);
-	};
-
-	const rewriteLevelLabels = {
-		unchanged: 'unchanged',
-		lightly_edited: 'lightly_edited',
-		moderately_rewritten: 'moderately_rewritten',
-		deeply_rewritten: 'deeply_rewritten'
 	};
 
 	const loadDashboard = async () => {
@@ -255,7 +248,7 @@
 					{#each rewriteLevels as [level, count]}
 						<div>
 							<div class="mb-1 flex items-center justify-between text-sm text-gray-700 dark:text-gray-300">
-								<span>{$i18n.t(rewriteLevelLabels[level] ?? level)}</span>
+								<span>{getRewriteLevelLabel(level, t)}</span>
 								<span>{count}</span>
 							</div>
 							<div class="h-2 rounded-full bg-gray-100 dark:bg-gray-800">

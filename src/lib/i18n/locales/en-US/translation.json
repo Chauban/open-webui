@@ -3914,5 +3914,22 @@
 	"Share of reader questions answered in the latest read-through.": "Share of reader questions answered in the latest read-through.",
 	"Revised after the read-through": "Revised after the read-through",
 	"Rounds where the draft actually changed after the reader's closing notes.": "Rounds where the draft actually changed after the reader's closing notes.",
-	"Skipped the read-through in {{count}} rounds.": "Skipped the read-through in {{count}} rounds."
+	"Skipped the read-through in {{count}} rounds.": "Skipped the read-through in {{count}} rounds.",
+	"Typed text": "Typed text",
+	"Replaced text": "Replaced text",
+	"Deleted text": "Deleted text",
+	"Inserted AI reply": "Inserted AI reply",
+	"Pasted text": "Pasted text",
+	"Copied part of an AI reply": "Copied part of an AI reply",
+	"Copied an AI reply": "Copied an AI reply",
+	"Saved before read-through": "Saved before read-through",
+	"Unchanged": "Unchanged",
+	"Lightly edited": "Lightly edited",
+	"Moderately rewritten": "Moderately rewritten",
+	"Deeply rewritten": "Deeply rewritten",
+	"Version {{number}}": "Version {{number}}",
+	"Large insertion": "Large insertion",
+	"Added a large block of text at once": "Added a large block of text at once",
+	"Submitted this round": "Submitted this round",
+	"Large typed burst without explicit paste/AI source and with high final retention.": "Large typed burst without explicit paste/AI source and with high final retention."
 }

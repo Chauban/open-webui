@@ -348,9 +348,10 @@
 				// 正文没变就不要再存一版。编辑器在选区/格式变化时也会触发 onChange，
 				// 照存的话一篇稿子能攒出两百多个一模一样的版本：既撑大版本历史让老师
 				// 没法看，也让「改了几版」这类过程指标彻底失去意义。
-				// 提交类快照（submit / submit_preflight）必须留痕，不受此限。
-				const isAutosave = triggerType === 'autosave';
-				if (!version && (!isAutosave || noteText !== lastVersionedText)) {
+				// 试读前（manual）和提交前（submit_preflight）同样适用：正文没变时服务端
+				// 最新一版就是当前稿，试读照样读得到；提交本身会由后端另存 submit 版。
+				// 以前这两类强制存版，一次提交就叠出两三个一模一样的版本。
+				if (!version && noteText !== lastVersionedText) {
 					version = await createWritingVersion(localStorage.token, writingSession.id, {
 						trigger_type: triggerType,
 						content_json: noteJson,

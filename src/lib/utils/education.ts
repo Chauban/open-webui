@@ -28,6 +28,59 @@ const ASSIGNMENT_STATUS_KEYS: Record<string, string> = {
 export const getAssignmentStatusLabel = (value: string, t: Translate) =>
 	ASSIGNMENT_STATUS_KEYS[value] ? t(ASSIGNMENT_STATUS_KEYS[value]) : value;
 
+// 以下是写作留痕的枚举值（后端原样存的英文 key）到教师可读文案的映射。
+// 批改页和看板都要显示这些值，绝不能把 ai_pasted 之类的原始 key 直接露给老师。
+
+const WRITING_SOURCE_KEYS: Record<string, string> = {
+	user_typed: 'Typed',
+	ai_inserted: 'AI inserted',
+	ai_pasted: 'AI pasted',
+	external_paste: 'External paste',
+	suspected_unmarked_import: 'Suspected Unmarked Import',
+	unknown: 'Unknown'
+};
+
+/** 文字来源（provenance source_type / 片段 origin_type）的展示文案。 */
+export const getWritingSourceLabel = (value: string, t: Translate) =>
+	WRITING_SOURCE_KEYS[value] ? t(WRITING_SOURCE_KEYS[value]) : value;
+
+const EDITOR_OPERATION_KEYS: Record<string, string> = {
+	keyboard_input: 'Typed text',
+	replace: 'Replaced text',
+	delete_text: 'Deleted text',
+	ai_insert_clicked: 'Inserted AI reply',
+	platform_ai_insert: 'Inserted AI reply',
+	paste_detected: 'Pasted text',
+	ai_reply_selection_copied: 'Copied part of an AI reply',
+	ai_copy_button_clicked: 'Copied an AI reply'
+};
+
+/** 编辑器操作（EditorOperation.op_type）的展示文案。 */
+export const getEditorOperationLabel = (value: string, t: Translate) =>
+	EDITOR_OPERATION_KEYS[value] ? t(EDITOR_OPERATION_KEYS[value]) : value;
+
+const VERSION_TRIGGER_KEYS: Record<string, string> = {
+	autosave: 'Autosave',
+	manual: 'Saved before read-through',
+	submit_preflight: 'Submit Preflight',
+	submit: 'Submit'
+};
+
+/** 版本快照触发方式（WritingVersion.trigger_type）的展示文案。 */
+export const getVersionTriggerLabel = (value: string, t: Translate) =>
+	VERSION_TRIGGER_KEYS[value] ? t(VERSION_TRIGGER_KEYS[value]) : value;
+
+const REWRITE_LEVEL_KEYS: Record<string, string> = {
+	unchanged: 'Unchanged',
+	lightly_edited: 'Lightly edited',
+	moderately_rewritten: 'Moderately rewritten',
+	deeply_rewritten: 'Deeply rewritten'
+};
+
+/** 导入片段改写程度（rewrite_level）的展示文案。 */
+export const getRewriteLevelLabel = (value: string, t: Translate) =>
+	REWRITE_LEVEL_KEYS[value] ? t(REWRITE_LEVEL_KEYS[value]) : value;
+
 /** epoch 秒 → `<input type="datetime-local">` 需要的本地时间字符串。 */
 export const toLocalDateTimeInput = (epoch: number) => {
 	const date = new Date(epoch * 1000);
