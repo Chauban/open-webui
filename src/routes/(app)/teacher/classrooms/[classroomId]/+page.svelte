@@ -17,7 +17,6 @@
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
-	import EduBadge from '$lib/components/education/EduBadge.svelte';
 	import EduButton from '$lib/components/education/EduButton.svelte';
 	import EduCard from '$lib/components/education/EduCard.svelte';
 	import EduEmpty from '$lib/components/education/EduEmpty.svelte';
@@ -151,24 +150,6 @@
 			<EduStatCard label="Reviewed" value={progress?.reviewed_count ?? 0} />
 			<EduStatCard label="To Review" value={progress?.pending_review_count ?? 0} />
 		</div>
-		<div class="mb-8 grid gap-4 md:grid-cols-4">
-			<EduStatCard
-				tone="rose"
-				label="Suspected Unmarked Imports"
-				value={progress?.risk_summary?.suspected_unmarked_import_count ?? 0}
-			/>
-			<EduStatCard
-				tone="amber"
-				label="Large Bursts"
-				value={progress?.risk_summary?.burst_count ?? 0}
-			/>
-			<EduStatCard
-				tone="sky"
-				label="AI pasted"
-				value={progress?.risk_summary?.ai_pasted_chars ?? 0}
-			/>
-			<EduStatCard label="AI inserted" value={progress?.risk_summary?.ai_inserted_chars ?? 0} />
-		</div>
 
 		<div class="mb-8 grid gap-4 lg:grid-cols-3">
 			<EduCard interactive on:click={() => goto(`/teacher/classrooms/${classroom.id}/students`)}>
@@ -209,15 +190,6 @@
 								<div>{$i18n.t('Reviewed')}: {item.reviewed_count}</div>
 								<div>{$i18n.t('To Review')}: {item.pending_review_count}</div>
 							</div>
-							<div class="mt-3 flex flex-wrap gap-2 text-xs">
-								<EduBadge tone="rose">
-									{$i18n.t('Suspected Unmarked Imports')}: {item.risk_summary
-										?.suspected_unmarked_import_count ?? 0}
-								</EduBadge>
-								<EduBadge tone="amber">
-									{$i18n.t('Large Bursts')}: {item.risk_summary?.burst_count ?? 0}
-								</EduBadge>
-							</div>
 						</EduTile>
 					{/each}
 				</div>
@@ -244,15 +216,6 @@
 								<div class="font-medium text-gray-900 dark:text-gray-100">{item.assignment.title}</div>
 								<div class="mt-1 text-gray-500 dark:text-gray-400">
 									{item.assignment.description || $i18n.t('No description')}
-								</div>
-								<div class="mt-3 flex flex-wrap gap-2 text-xs">
-									<EduBadge tone="rose">
-										{$i18n.t('Suspected Unmarked Imports')}: {item.risk_summary
-											?.suspected_unmarked_import_count ?? 0}
-									</EduBadge>
-									<EduBadge tone="amber">
-										{$i18n.t('Large Bursts')}: {item.risk_summary?.burst_count ?? 0}
-									</EduBadge>
 								</div>
 							</div>
 							<div class="flex flex-wrap gap-2">

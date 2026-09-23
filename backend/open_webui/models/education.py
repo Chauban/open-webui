@@ -1529,14 +1529,12 @@ class TeacherAssignmentListItem(BaseModel):
     student_count: int = 0
     submission_count: int = 0
     latest_submission_at: Optional[int] = None
-    risk_summary: Optional[dict] = None
 
 
 class TeacherClassroomListItem(BaseModel):
     classroom: ClassroomModel
     student_count: int = 0
     assignment_count: int = 0
-    risk_summary: Optional[dict] = None
 
 
 class AdminClassroomListItem(BaseModel):
@@ -2505,7 +2503,6 @@ class ClassroomProgressAssignmentItem(BaseModel):
     unsubmitted_count: int = 0
     reviewed_count: int = 0
     pending_review_count: int = 0
-    risk_summary: Optional[dict] = None
 
 
 class ClassroomProgressResponse(BaseModel):
@@ -2516,7 +2513,6 @@ class ClassroomProgressResponse(BaseModel):
     unsubmitted_count: int = 0
     reviewed_count: int = 0
     pending_review_count: int = 0
-    risk_summary: Optional[dict] = None
     assignments: list[ClassroomProgressAssignmentItem] = Field(default_factory=list)
 
 

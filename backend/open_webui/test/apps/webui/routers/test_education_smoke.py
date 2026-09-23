@@ -1335,11 +1335,9 @@ def test_teacher_review_lifecycle_assignment_update_and_classroom_progress(
     assert progress["submitted_count"] == 1
     assert progress["reviewed_count"] == 1
     assert progress["pending_review_count"] == 0
-    assert progress["risk_summary"]["burst_count"] >= 1
-    assert (
-        progress["assignments"][0]["risk_summary"]["suspected_unmarked_import_count"]
-        >= 1
-    )
+    # 风险信号只落在单份提交上,班级/作业层面的加总不再下发。
+    assert "risk_summary" not in progress
+    assert "risk_summary" not in progress["assignments"][0]
 
     export_res = client.get(f"/api/v1/teacher/classrooms/{classroom['id']}/export")
     assert export_res.status_code == 200, export_res.text
@@ -1370,8 +1368,7 @@ def test_teacher_review_lifecycle_assignment_update_and_classroom_progress(
     assert assignments[0]["student_count"] == 2
     assert assignments[0]["submission_count"] == 1
     assert assignments[0]["latest_submission_at"] is not None
-    assert assignments[0]["risk_summary"]["burst_count"] >= 1
-    assert assignments[0]["risk_summary"]["suspected_unmarked_import_count"] >= 1
+    assert "risk_summary" not in assignments[0]
 
 
 def test_student_assignment_and_profile_views(education_client):
@@ -1395,7 +1392,7 @@ def test_student_assignment_and_profile_views(education_client):
     classrooms_res = client.get("/api/v1/teacher/classrooms")
     assert classrooms_res.status_code == 200, classrooms_res.text
     classrooms = classrooms_res.json()
-    assert classrooms[0]["risk_summary"]["burst_count"] >= 1
+    assert "risk_summary" not in classrooms[0]
 
     dashboard_res = client.get(
         f"/api/v1/teacher/assignments/{assignment['id']}/dashboard"

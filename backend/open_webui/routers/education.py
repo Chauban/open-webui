@@ -228,14 +228,6 @@ async def _build_teacher_assignment_list_item(assignment, db: Session):
     latest_submission_at = max(
         (submission.submitted_at for submission in submissions), default=None
     )
-    risk_summary = empty_risk_summary()
-    sessions = Education.get_writing_sessions_by_ids(
-        [submission.writing_session_id for submission in submissions], db=db
-    )
-    analyses = await get_materialized_submission_analyses(submissions, sessions, db)
-    for submission in submissions:
-        analysis = analyses.get(submission.id) or {}
-        accumulate_risk_summary(risk_summary, analysis.get("summary"))
 
     return TeacherAssignmentListItem(
         assignment=assignment,
@@ -243,7 +235,6 @@ async def _build_teacher_assignment_list_item(assignment, db: Session):
         student_count=student_count,
         submission_count=len(submissions),
         latest_submission_at=latest_submission_at,
-        risk_summary=risk_summary,
     )
 
 
@@ -1313,27 +1304,11 @@ async def get_teacher_classrooms(
         student_count = len(
             Education.get_classroom_members(classroom.id, member_role="student", db=db)
         )
-        risk_summary = empty_risk_summary()
-        submissions = [
-            submission
-            for assignment in assignments
-            for submission in Education.get_submissions_by_assignment(
-                assignment.id, db=db
-            )
-        ]
-        sessions = Education.get_writing_sessions_by_ids(
-            [submission.writing_session_id for submission in submissions], db=db
-        )
-        analyses = await get_materialized_submission_analyses(submissions, sessions, db)
-        for submission in submissions:
-            analysis = analyses.get(submission.id) or {}
-            accumulate_risk_summary(risk_summary, analysis.get("summary"))
         items.append(
             TeacherClassroomListItem(
                 classroom=classroom,
                 student_count=student_count,
                 assignment_count=len(assignments),
-                risk_summary=risk_summary,
             )
         )
 
@@ -1433,33 +1408,22 @@ async def get_teacher_overview(
         student_count = len(
             Education.get_classroom_members(classroom.id, member_role="student", db=db)
         )
-        classroom_risk_summary = empty_risk_summary()
         classroom_items.append(
             TeacherClassroomListItem(
                 classroom=classroom,
                 student_count=student_count,
                 assignment_count=len(assignments),
-                risk_summary=classroom_risk_summary,
             )
         )
 
         for assignment in assignments:
             submissions = Education.get_submissions_by_assignment(assignment.id, db=db)
             unsubmitted_count += max(student_count - len(submissions), 0)
-            # 作业维度的风险汇总直接由提交项累加,不再走
-            # _build_teacher_assignment_list_item 把每份提交的分析重算一遍。
-            assignment_risk_summary = empty_risk_summary()
             for submission in submissions:
                 submission_item = await _build_submission_list_item(
                     submission, assignment, db
                 )
                 submission_items.append(submission_item)
-                accumulate_risk_summary(
-                    assignment_risk_summary, submission_item.risk_summary or {}
-                )
-                accumulate_risk_summary(
-                    classroom_risk_summary, submission_item.risk_summary or {}
-                )
                 if submission_item.review_status == "pending":
                     pending_review_count += 1
 
@@ -1473,11 +1437,8 @@ async def get_teacher_overview(
                         (submission.submitted_at for submission in submissions),
                         default=None,
                     ),
-                    risk_summary=assignment_risk_summary,
                 )
             )
-
-        classroom_items[-1].risk_summary = classroom_risk_summary
 
     now_ts = int(time.time())
 
@@ -1836,7 +1797,7 @@ async def get_classroom_progress(
     reviewed_total = 0
     pending_total = 0
 
-    # 提交、批改、写作会话都先一次性取回,避免「作业 × 提交」两层循环里逐条查库。
+    # 提交、批改都先一次性取回,避免「作业 × 提交」两层循环里逐条查库。
     submissions_by_assignment = {
         assignment.id: Education.get_submissions_by_assignment(assignment.id, db=db)
         for assignment in assignments
@@ -1849,10 +1810,6 @@ async def get_classroom_progress(
     reviews = Education.get_submission_reviews_by_submission_ids(
         [submission.id for submission in all_submissions], db=db
     )
-    sessions = Education.get_writing_sessions_by_ids(
-        [submission.writing_session_id for submission in all_submissions], db=db
-    )
-    analyses = await get_materialized_submission_analyses(all_submissions, sessions, db)
 
     for assignment in assignments:
         submissions = submissions_by_assignment[assignment.id]
@@ -1860,15 +1817,12 @@ async def get_classroom_progress(
         unsubmitted_count = max(len(students) - submitted_count, 0)
         reviewed_count = 0
         pending_count = 0
-        risk_summary = empty_risk_summary()
         for submission in submissions:
             review = reviews.get(submission.id)
             if review and review.review_status in {"reviewed", "returned"}:
                 reviewed_count += 1
             else:
                 pending_count += 1
-            analysis = analyses.get(submission.id) or {}
-            accumulate_risk_summary(risk_summary, analysis.get("summary"))
 
         progress_items.append(
             ClassroomProgressAssignmentItem(
@@ -1877,7 +1831,6 @@ async def get_classroom_progress(
                 unsubmitted_count=unsubmitted_count,
                 reviewed_count=reviewed_count,
                 pending_review_count=pending_count,
-                risk_summary=risk_summary,
             )
         )
         submitted_total += submitted_count
@@ -1893,27 +1846,6 @@ async def get_classroom_progress(
         unsubmitted_count=unsubmitted_total,
         reviewed_count=reviewed_total,
         pending_review_count=pending_total,
-        risk_summary={
-            "submission_count": sum(
-                item.risk_summary.get("submission_count", 0)
-                for item in progress_items
-            ),
-            "ai_inserted_chars": sum(
-                item.risk_summary.get("ai_inserted_chars", 0)
-                for item in progress_items
-            ),
-            "ai_pasted_chars": sum(
-                item.risk_summary.get("ai_pasted_chars", 0)
-                for item in progress_items
-            ),
-            "suspected_unmarked_import_count": sum(
-                item.risk_summary.get("suspected_unmarked_import_count", 0)
-                for item in progress_items
-            ),
-            "burst_count": sum(
-                item.risk_summary.get("burst_count", 0) for item in progress_items
-            ),
-        },
         assignments=progress_items,
     )
 

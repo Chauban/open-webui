@@ -9,11 +9,10 @@
 	import { getTeacherAssignments } from '$lib/apis/education';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
-	import EduBadge from '$lib/components/education/EduBadge.svelte';
 	import EduButton from '$lib/components/education/EduButton.svelte';
 	import EduCard from '$lib/components/education/EduCard.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
-	import { EDU_FIELD_CLASS, eduFilterClass } from '$lib/components/education/styles';
+	import { EDU_FIELD_CLASS } from '$lib/components/education/styles';
 	import {
 		formatEpoch,
 		getAssignmentStatusLabel,
@@ -34,9 +33,6 @@
 	let selectedClassroom = 'all';
 	let selectedStatus = 'all';
 	let keyword = '';
-	let onlySuspected = false;
-	let onlyBursts = false;
-	let sortBy = 'latest_activity';
 
 	$: classroomOptions = [
 		{ value: 'all', label: t('All Classrooms') },
@@ -63,19 +59,9 @@
 				? isPastDue(item)
 				: item.assignment.status === selectedStatus ||
 					(selectedStatus === 'needs_review' && item.submission_count > 0));
-		const matchesSuspected = !onlySuspected || (item.risk_summary?.suspected_unmarked_import_count ?? 0) > 0;
-		const matchesBursts = !onlyBursts || (item.risk_summary?.burst_count ?? 0) > 0;
 
-		return matchesClassroom && matchesKeyword && matchesStatus && matchesSuspected && matchesBursts;
-	}).sort((a, b) => {
-		if (sortBy === 'suspected') {
-			return (b.risk_summary?.suspected_unmarked_import_count ?? 0) - (a.risk_summary?.suspected_unmarked_import_count ?? 0);
-		}
-		if (sortBy === 'burst') {
-			return (b.risk_summary?.burst_count ?? 0) - (a.risk_summary?.burst_count ?? 0);
-		}
-		return (b.latest_submission_at ?? 0) - (a.latest_submission_at ?? 0);
-	});
+		return matchesClassroom && matchesKeyword && matchesStatus;
+	}).sort((a, b) => (b.latest_submission_at ?? 0) - (a.latest_submission_at ?? 0));
 
 	const loadData = async () => {
 		loading = true;
@@ -118,7 +104,7 @@
 
 		<TeacherSectionNav />
 
-		<EduCard class="mb-8 grid gap-3 md:grid-cols-4">
+		<EduCard class="mb-8 grid gap-3 md:grid-cols-3">
 			<select class={EDU_FIELD_CLASS} bind:value={selectedClassroom}>
 				{#each classroomOptions as option}
 					<option value={option.value}>{option.label}</option>
@@ -136,26 +122,7 @@
 				class={EDU_FIELD_CLASS}
 				placeholder={$i18n.t('Search assignments')}
 			/>
-			<select class={EDU_FIELD_CLASS} bind:value={sortBy}>
-				<option value="latest_activity">{$i18n.t('Sort by Latest')}</option>
-				<option value="suspected">{$i18n.t('Sort by Suspected Imports')}</option>
-				<option value="burst">{$i18n.t('Sort by Large Bursts')}</option>
-			</select>
 		</EduCard>
-		<div class="mb-8 flex flex-wrap gap-2">
-			<button
-				class={eduFilterClass(onlySuspected, 'rose')}
-				on:click={() => (onlySuspected = !onlySuspected)}
-			>
-				{$i18n.t('Only Suspected Imports')}
-			</button>
-			<button
-				class={eduFilterClass(onlyBursts, 'amber')}
-				on:click={() => (onlyBursts = !onlyBursts)}
-			>
-				{$i18n.t('Only Large Bursts')}
-			</button>
-		</div>
 
 		{#if loadError}
 			<EduStateCard tone="error">{loadError}</EduStateCard>
@@ -180,8 +147,7 @@
 										{$i18n.t('Classroom')}:
 										{item.classroom ? getClassroomDisplayName(item.classroom.name, t) : t('Unknown')}
 									</div>
-									<div>{$i18n.t('Students')}: {item.student_count}</div>
-									<div>{$i18n.t('Submissions')}: {item.submission_count}</div>
+									<div>{$i18n.t('Submitted')}: {item.submission_count}/{item.student_count}</div>
 									<div>
 										{$i18n.t('Status')}:
 										{#if isPastDue(item)}
@@ -202,21 +168,6 @@
 											? formatEpoch(item.latest_submission_at)
 											: t('No submissions yet.')}
 									</div>
-								</div>
-								<div class="mt-3 flex flex-wrap gap-2 text-xs">
-									<EduBadge tone="sky">
-										{$i18n.t('AI pasted')}: {item.risk_summary?.ai_pasted_chars ?? 0}
-									</EduBadge>
-									<EduBadge>
-										{$i18n.t('AI inserted')}: {item.risk_summary?.ai_inserted_chars ?? 0}
-									</EduBadge>
-									<EduBadge tone="rose">
-										{$i18n.t('Suspected Unmarked Imports')}: {item.risk_summary
-											?.suspected_unmarked_import_count ?? 0}
-									</EduBadge>
-									<EduBadge tone="amber">
-										{$i18n.t('Large Bursts')}: {item.risk_summary?.burst_count ?? 0}
-									</EduBadge>
 								</div>
 							</div>
 
