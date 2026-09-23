@@ -91,6 +91,7 @@
 				{profile}
 				{filters}
 				variant="teacher"
+				reviewClassroomId={$page.params.classroomId}
 				on:open={(event) => goto(`/teacher/submissions/${event.detail.submissionId}`)}
 				on:filter={(event) => loadProfile(event.detail)}
 			/>

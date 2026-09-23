@@ -41,6 +41,9 @@ from open_webui.services.education.identity import (
     role_from_group_ids,
     set_education_role,
 )
+from open_webui.services.education.profile_aggregates import (
+    refresh_profile_aggregates_after_scope_change,
+)
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.knowledge import Knowledges
 from open_webui.models.models import Models
@@ -868,9 +871,9 @@ async def get_user_classroom_assignment(
             detail=ERROR_MESSAGES.USER_NOT_FOUND,
         )
 
-    membership = Education.get_classroom_member_by_user_id(user_id, db=db)
+    membership = Education.get_student_classroom_member(user_id, db=db)
     return UserClassroomAssignmentResponse(
-        classroom_id=membership.classroom_id if membership and membership.member_role == "student" else None,
+        classroom_id=membership.classroom_id if membership else None,
         classrooms=await _get_admin_classroom_items(db),
     )
 
@@ -1071,7 +1074,7 @@ async def update_user_by_id(
         if form_data.role == "admin":
             effective_education_role = "admin"
 
-        existing_membership = Education.get_classroom_member_by_user_id(user_id, db=db)
+        existing_membership = Education.get_student_classroom_member(user_id, db=db)
         if form_data.classroom_id is not None:
             form_data.classroom_id = form_data.classroom_id.strip() or None
 
@@ -1103,7 +1106,6 @@ async def update_user_by_id(
         if (
             effective_education_role == "student"
             and existing_membership
-            and existing_membership.member_role == "student"
             and form_data.classroom_id != existing_membership.classroom_id
         ):
             Education.delete_classroom_member(
@@ -1125,6 +1127,16 @@ async def update_user_by_id(
                 "student",
                 db=db,
             )
+
+        # 班级变了就按新范围重新物化画像;原班交过的作业仍计入(画像跟着学生走)。
+        previous_classroom_id = (
+            existing_membership.classroom_id if existing_membership else None
+        )
+        next_classroom_id = (
+            form_data.classroom_id if effective_education_role == "student" else None
+        )
+        if previous_classroom_id != next_classroom_id:
+            refresh_profile_aggregates_after_scope_change([user_id])
 
         if updated_user:
             updated_fields = [field for field in update_data.keys() if field != 'role']

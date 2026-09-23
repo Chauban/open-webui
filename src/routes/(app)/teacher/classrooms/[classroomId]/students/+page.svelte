@@ -252,7 +252,12 @@
 		</div>
 
 		<EduCard class="mb-8">
-			<div class="mb-4 text-sm font-semibold">{$i18n.t('Add Student')}</div>
+			<div class="mb-1 text-sm font-semibold">{$i18n.t('Add Student')}</div>
+			<div class="mb-4 text-xs text-gray-500 dark:text-gray-400">
+				{$i18n.t(
+					'Each student can be in only one classroom. A student already in another classroom must be removed there first; you can transfer students between your own classrooms, and an administrator can transfer across teachers.'
+				)}
+			</div>
 			<div class="flex gap-2">
 				<input
 					bind:value={memberQuery}
@@ -407,7 +412,9 @@
 	<ConfirmDialog
 		bind:show={showRemoveConfirm}
 		title={$i18n.t('Remove Student')}
-		message={$i18n.t('Remove this student from the classroom? Their submissions are kept.')}
+		message={$i18n.t(
+			'Remove this student from the classroom? Their submissions stay with this classroom and remain visible to you; their growth profile moves with them.'
+		)}
 		on:confirm={removeStudent}
 	/>
 
@@ -415,7 +422,7 @@
 		bind:show={showBulkRemoveConfirm}
 		title={$i18n.t('Remove Selected Students')}
 		message={$i18n.t(
-			'Remove {{count}} selected students from the classroom? Their submissions are kept.',
+			'Remove {{count}} selected students from the classroom? Their submissions stay with this classroom and remain visible to you; their growth profiles move with them.',
 			{ count: selectedIds.size }
 		)}
 		on:confirm={bulkRemoveSelected}
@@ -424,9 +431,10 @@
 	<ConfirmDialog
 		bind:show={showTransferConfirm}
 		title={$i18n.t('Transfer Selected Students')}
-		message={$i18n.t('Transfer {{count}} selected students to the chosen classroom?', {
-			count: selectedIds.size
-		})}
+		message={$i18n.t(
+			'Transfer {{count}} selected students to the chosen classroom? Their submissions stay with this classroom and remain visible to you; their growth profiles move with them.',
+			{ count: selectedIds.size }
+		)}
 		on:confirm={transferSelected}
 	/>
 </TeacherPageShell>

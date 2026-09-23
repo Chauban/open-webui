@@ -905,7 +905,7 @@ async def signup_handler(
                 detail='Invalid classroom invite code',
             )
 
-        existing_membership = Education.get_classroom_member_by_user_id(user.id, db=db)
+        existing_membership = Education.get_student_classroom_member(user.id, db=db)
         if existing_membership is not None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

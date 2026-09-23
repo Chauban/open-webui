@@ -217,7 +217,7 @@ def test_admin_can_assign_student_to_classroom():
         assert switch_res.status_code == 200, switch_res.text
 
         with SessionLocal() as session:
-            membership = Education.get_classroom_member_by_user_id(student_id, db=session)
+            membership = Education.get_student_classroom_member(student_id, db=session)
             assert membership is not None
             assert membership.classroom_id == second_classroom.id
 
@@ -235,7 +235,7 @@ def test_admin_can_assign_student_to_classroom():
         assert clear_res.status_code == 200, clear_res.text
 
         with SessionLocal() as session:
-            assert Education.get_classroom_member_by_user_id(student_id, db=session) is None
+            assert Education.get_student_classroom_member(student_id, db=session) is None
 
         promote_res = client.post(
             f"/api/v1/users/{student_id}/update",
@@ -251,13 +251,13 @@ def test_admin_can_assign_student_to_classroom():
         assert promote_res.status_code == 200, promote_res.text
 
         with SessionLocal() as session:
-            assert Education.get_classroom_member_by_user_id(student_id, db=session) is None
+            assert Education.get_student_classroom_member(student_id, db=session) is None
             # 升为教师 = 换权限组:进教师组、离开学生组
             assert _group_ids_of(session, student_id) == {GROUP_ID_BY_ROLE["teacher"]}
 
 
-def test_leaving_the_student_identity_clears_every_classroom():
-    """一个学生可能同时在多个班里,身份一变,所有班籍都必须跟着掉。"""
+def test_leaving_the_student_identity_clears_the_classroom():
+    """学生身份一变,班籍必须跟着掉。"""
     with _harness() as (SessionLocal, client):
         with SessionLocal() as session:
             admin = _seed_user(session, "Admin", "admin@example.com", "admin")
@@ -265,10 +265,8 @@ def test_leaving_the_student_identity_clears_every_classroom():
             student = _seed_user(session, "Student", "student@example.com", "user", "student")
             student_id = student.id
 
-            first_classroom = _seed_classroom(session, "Class A", teacher.id, "CLASSA02")
-            second_classroom = _seed_classroom(session, "Class B", teacher.id, "CLASSB02")
-            _seed_membership(session, first_classroom.id, student_id, "student")
-            _seed_membership(session, second_classroom.id, student_id, "student")
+            classroom = _seed_classroom(session, "Class A", teacher.id, "CLASSA02")
+            _seed_membership(session, classroom.id, student_id, "student")
 
         AdminContext.current_user = admin
 

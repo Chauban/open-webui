@@ -8,6 +8,7 @@ from open_webui.models.education import (
     StudentProfileCompletenessSummary,
     StudentProfileFilteredSummary,
     StudentProfileReflectionQuality,
+    get_db_context,
 )
 from open_webui.services.education.profile import (
     PROFILE_INSIGHT_VERSION,
@@ -233,7 +234,7 @@ def refresh_student_profile_aggregates(
     run_id: Optional[str] = None,
     commit: bool = False,
 ) -> None:
-    assignments = Education.get_assignments_by_student(student_id, db=db)
+    assignments = Education.get_profile_assignments_by_student(student_id, db=db)
     materialize_student_profile_aggregate(
         student_id=student_id,
         assignment_ids=[assignment.id for assignment in assignments],
@@ -265,4 +266,26 @@ def refresh_student_profile_aggregates(
             db=db,
         )
     if commit:
+        db.commit()
+
+
+def refresh_profile_aggregates_after_scope_change(
+    student_ids: list[str], db: Optional[Session] = None
+) -> None:
+    """班级关系或作业范围变化后,重新物化相关学生的画像聚合。
+
+    不带 db 时自行开同步会话(管理员用户接口走的是异步会话)。
+    """
+    with get_db_context(db) as db:
+        active_metric_version = Education.get_active_profile_metric_version(db=db)
+        if active_metric_version is None:
+            return
+        for student_id in dict.fromkeys(student_ids):
+            if student_id:
+                refresh_student_profile_aggregates(
+                    student_id,
+                    active_metric_version,
+                    db,
+                    commit=False,
+                )
         db.commit()

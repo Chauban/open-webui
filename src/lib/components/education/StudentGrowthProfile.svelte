@@ -43,6 +43,9 @@
 	export let profile: StudentProfile | TeacherStudentProfile | null;
 	export let variant: 'teacher' | 'student' = 'teacher';
 	export let filters: StudentProfileFilters = {};
+	// 教师端当前所在班级。画像跟着学生走，会带上换班前在原班交的作业；
+	// 那些提交留在原班、归原班老师批改，这里只展示不给入口。
+	export let reviewClassroomId: string | null = null;
 
 	const i18n = getContext('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
@@ -212,6 +215,19 @@
 		).sort((left, right) => left - right);
 	}
 	$: teacherNotes = profile && 'teacher_notes' in profile ? profile.teacher_notes : [];
+
+	$: classroomByAssignment = Object.fromEntries(
+		(profile?.assignments ?? []).map((item) => [item.assignment.id, item.assignment.classroom_id])
+	);
+	$: assignmentBySubmission = Object.fromEntries(
+		[...(profile?.timeline ?? []), ...(profile?.cross_assignment_timeline ?? [])].map((point) => [
+			point.submission_id,
+			point.assignment_id
+		])
+	);
+	$: canOpenAssignment = (assignmentId: string | undefined) =>
+		reviewClassroomId === null ||
+		(assignmentId !== undefined && classroomByAssignment[assignmentId] === reviewClassroomId);
 
 	// rubric 各维度直接从时间线上取，未评的那次留空，折线自然断开。
 	$: rubricCriteriaByAssignment = Object.fromEntries(
@@ -589,7 +605,7 @@
 											{$i18n.t(INSIGHT_ACTION_TEXT[insight.action_code])}
 										</div>
 									{/if}
-									{#if variant === 'teacher' && insight.submission_id}
+									{#if variant === 'teacher' && insight.submission_id && canOpenAssignment(assignmentBySubmission[insight.submission_id])}
 										<EduButton
 											size="sm"
 											class="mt-2"
@@ -1193,13 +1209,19 @@
 										</div>
 									</div>
 									{#if variant === 'teacher' && item.submission_id}
-										<EduButton
-											variant="primary"
-											class="shrink-0 self-start"
-											on:click={() => dispatch('open', { submissionId: item.submission_id })}
-										>
-											{$i18n.t('Open')}
-										</EduButton>
+										{#if canOpenAssignment(item.assignment.id)}
+											<EduButton
+												variant="primary"
+												class="shrink-0 self-start"
+												on:click={() => dispatch('open', { submissionId: item.submission_id })}
+											>
+												{$i18n.t('Open')}
+											</EduButton>
+										{:else}
+											<span class="shrink-0 self-start text-xs text-gray-500 dark:text-gray-400">
+												{$i18n.t('Submitted in another classroom')}
+											</span>
+										{/if}
 									{/if}
 								</div>
 							</EduTile>

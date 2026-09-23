@@ -434,12 +434,18 @@
 					{#if activeTab === 'assignment'}
 						<div class="mb-8">
 							<EduCard class="mb-6">
-								<div class="mb-3 text-sm font-semibold">{$i18n.t('My Classrooms')}</div>
+								<div class="mb-3 text-sm font-semibold">{$i18n.t('My Classroom')}</div>
 								{#if home?.classrooms?.length}
 									<div class="flex flex-wrap gap-2">
 										{#each home.classrooms as classroom}
 											<EduBadge>{getClassroomDisplayName(classroom.name, t)}</EduBadge>
 										{/each}
+									</div>
+									<!-- 一个学生只能在一个班：已入班就不再给邀请码输入框，换班找老师或管理员。 -->
+									<div class="mt-3 text-xs text-gray-500 dark:text-gray-400">
+										{$i18n.t(
+											'Each student can be in only one classroom. To change classes, ask your teacher or an administrator.'
+										)}
 									</div>
 								{:else}
 									<div class="text-sm text-gray-500 dark:text-gray-400">
@@ -447,17 +453,17 @@
 											"You have not joined a classroom yet. Enter your teacher's invite code to unlock assignments."
 										)}
 									</div>
+									<div class="mt-4 flex flex-col gap-3 md:flex-row">
+										<input
+											bind:value={inviteCode}
+											class="flex-1 {EDU_FIELD_CLASS}"
+											placeholder={$i18n.t('Enter classroom invite code')}
+										/>
+										<EduButton variant="primary" on:click={joinCurrentClassroom} disabled={joining}>
+											{joining ? $i18n.t('Joining...') : $i18n.t('Join Classroom')}
+										</EduButton>
+									</div>
 								{/if}
-								<div class="mt-4 flex flex-col gap-3 md:flex-row">
-									<input
-										bind:value={inviteCode}
-										class="flex-1 {EDU_FIELD_CLASS}"
-										placeholder={$i18n.t('Enter classroom invite code')}
-									/>
-									<EduButton variant="primary" on:click={joinCurrentClassroom} disabled={joining}>
-										{joining ? $i18n.t('Joining...') : $i18n.t('Join Classroom')}
-									</EduButton>
-								</div>
 							</EduCard>
 
 							<div class="mb-4">

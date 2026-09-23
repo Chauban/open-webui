@@ -730,12 +730,41 @@ def test_education_classroom_main_flow(education_client):
     assert second_classroom_res.status_code == 200, second_classroom_res.text
     second_classroom = second_classroom_res.json()["classroom"]
 
+    # 一个学生只能在一个班:已在班里时凭另一个邀请码加入会被拦下。
+    UserContext.current_user = student
+    rejoin_res = client.post(
+        "/api/v1/classrooms/join",
+        json={"invite_code": second_classroom["invite_code"]},
+    )
+    assert rejoin_res.status_code == 409, rejoin_res.text
+
+    # 原班教师移出后,学生才能加入新班。
+    UserContext.current_user = teacher
+    remove_res = client.delete(
+        f"/api/v1/teacher/classrooms/{classroom['id']}/members/{student.id}"
+    )
+    assert remove_res.status_code == 200, remove_res.text
+
     UserContext.current_user = student
     rejoin_res = client.post(
         "/api/v1/classrooms/join",
         json={"invite_code": second_classroom["invite_code"]},
     )
     assert rejoin_res.status_code == 200, rejoin_res.text
+
+    # 提交记录跟着作业留在原班,原班教师照样能看。
+    UserContext.current_user = teacher
+    submissions_after_leave_res = client.get(
+        f"/api/v1/teacher/assignments/{assignment['id']}/submissions"
+    )
+    assert submissions_after_leave_res.status_code == 200
+    assert [
+        item["submission"]["id"] for item in submissions_after_leave_res.json()
+    ] == [submission_payload["submission_id"]]
+    detail_after_leave_res = client.get(
+        f"/api/v1/teacher/submissions/{submission_payload['submission_id']}"
+    )
+    assert detail_after_leave_res.status_code == 200, detail_after_leave_res.text
 
     UserContext.current_user = outsider
     foreign_workspace_res = client.get(
@@ -1505,11 +1534,12 @@ def test_teacher_classroom_listing_and_member_management(education_client):
     )
     assert add_teacher_res.status_code == 400, add_teacher_res.text
 
-    repeat_classroom_link_res = client.post(
+    # 学生已在第一个班,不能再被加进第二个班(换班走移出或调班)。
+    second_classroom_link_res = client.post(
         f"/api/v1/teacher/classrooms/{second_classroom['id']}/members",
         json={"user_id": student.id},
     )
-    assert repeat_classroom_link_res.status_code == 200, repeat_classroom_link_res.text
+    assert second_classroom_link_res.status_code == 409, second_classroom_link_res.text
 
     remove_teacher_res = client.delete(
         f"/api/v1/teacher/classrooms/{first_classroom['id']}/members/{teacher.id}"
@@ -2849,6 +2879,87 @@ def test_transfer_classroom_members_between_classrooms(education_client):
     assert [item["member"]["user_id"] for item in target_members] == [student.id]
 
 
+def test_transfer_keeps_submissions_in_old_class_and_profile_with_student(
+    education_client,
+):
+    client, teacher, _, student, _, _ = education_client
+    flow = _prepare_assignment_flow(client, teacher, student)
+    source = flow["classroom"]
+    assignment = flow["assignment"]
+    submission_id = flow["submission"]["submission_id"]
+
+    UserContext.current_user = teacher
+    target = client.post("/api/v1/classrooms", json={"name": "New Class"}).json()[
+        "classroom"
+    ]
+    transfer = client.post(
+        f"/api/v1/teacher/classrooms/{source['id']}/members/transfer",
+        json={"user_ids": [student.id], "target_classroom_id": target["id"]},
+    )
+    assert transfer.status_code == 200, transfer.text
+    assert transfer.json()["affected_count"] == 1
+
+    # 提交记录跟着作业留在原班,原班教师照样能看。
+    submissions = client.get(
+        f"/api/v1/teacher/assignments/{assignment['id']}/submissions"
+    )
+    assert submissions.status_code == 200, submissions.text
+    assert [item["submission"]["id"] for item in submissions.json()] == [
+        submission_id
+    ]
+
+    # 学生已不在原班,原班的学生画像入口关闭;新班教师看到的画像带着原班的作业。
+    old_profile = client.get(
+        f"/api/v1/teacher/classrooms/{source['id']}/students/{student.id}/profile"
+    )
+    assert old_profile.status_code == 404, old_profile.text
+    new_profile = client.get(
+        f"/api/v1/teacher/classrooms/{target['id']}/students/{student.id}/profile"
+    )
+    assert new_profile.status_code == 200, new_profile.text
+    assert [
+        (item["assignment"]["id"], item["submission_id"])
+        for item in new_profile.json()["assignments"]
+    ] == [(assignment["id"], submission_id)]
+
+    # 学生端:作业列表只剩新班(新班还没有作业),成长画像保留原班的提交。
+    UserContext.current_user = student
+    assert client.get("/api/v1/me/writing/assignments").json() == []
+    student_profile = client.get("/api/v1/me/writing/profile")
+    assert student_profile.status_code == 200, student_profile.text
+    assert [
+        item["submission_id"] for item in student_profile.json()["assignments"]
+    ] == [submission_id]
+
+
+def test_student_in_one_classroom_cannot_be_imported_into_another(education_client):
+    client, teacher, other_teacher, student, _, _ = education_client
+
+    UserContext.current_user = teacher
+    first = client.post("/api/v1/classrooms", json={"name": "First"}).json()[
+        "classroom"
+    ]
+    UserContext.current_user = student
+    joined = client.post(
+        "/api/v1/classrooms/join", json={"invite_code": first["invite_code"]}
+    )
+    assert joined.status_code == 200, joined.text
+
+    UserContext.current_user = other_teacher
+    second = client.post("/api/v1/classrooms", json={"name": "Second"}).json()[
+        "classroom"
+    ]
+    imported = client.post(
+        f"/api/v1/teacher/classrooms/{second['id']}/bulk-import",
+        json={"user_ids": [student.id]},
+    )
+    assert imported.status_code == 200, imported.text
+    assert imported.json()["added_count"] == 0
+    assert imported.json()["failed_users"] == [
+        {"value": student.id, "reason": "Already in another classroom"}
+    ]
+
+
 def test_delete_assignment_guards_and_notification_cleanup(education_client):
     client, teacher, _, student, _, _ = education_client
 
@@ -3735,63 +3846,52 @@ def test_submission_review_events_are_append_only(education_client):
         assert [item.aggregate_revision for item in aggregate_revisions] == [1, 2, 3]
 
 
-def test_multi_class_assignments_growth_goals_and_teacher_notes(education_client):
+def test_student_assignments_growth_goals_and_teacher_notes(education_client):
     client, teacher, _, student, _, session_local = education_client
     UserContext.current_user = teacher
 
-    classrooms = []
-    assignments = []
-    for index in (1, 2):
-        classroom_response = client.post(
-            "/api/v1/classrooms", json={"name": f"Writing Class {index}"}
-        )
-        assert classroom_response.status_code == 200, classroom_response.text
-        classroom = classroom_response.json()["classroom"]
-        classrooms.append(classroom)
-        member_response = client.post(
-            f"/api/v1/teacher/classrooms/{classroom['id']}/members",
-            json={"user_id": student.id, "member_role": "student"},
-        )
-        assert member_response.status_code == 200, member_response.text
-        assignment_response = client.post(
-            "/api/v1/assignments",
-            json={
-                "title": f"Essay {index}",
-                "description": "Multi-class assignment",
-                "classroom_ids": [classroom["id"]],
-                "score_max": 100,
-                "rubric_schema": _rubric_schema(),
-                "due_at": 2100000000,
-            },
-        )
-        assert assignment_response.status_code == 200, assignment_response.text
-        assignments.append(assignment_response.json()[0])
+    classroom_response = client.post(
+        "/api/v1/classrooms", json={"name": "Writing Class 1"}
+    )
+    assert classroom_response.status_code == 200, classroom_response.text
+    classroom = classroom_response.json()["classroom"]
+    member_response = client.post(
+        f"/api/v1/teacher/classrooms/{classroom['id']}/members",
+        json={"user_id": student.id, "member_role": "student"},
+    )
+    assert member_response.status_code == 200, member_response.text
+    assignment_response = client.post(
+        "/api/v1/assignments",
+        json={
+            "title": "Essay 1",
+            "description": "Class assignment",
+            "classroom_ids": [classroom["id"]],
+            "score_max": 100,
+            "rubric_schema": _rubric_schema(),
+            "due_at": 2100000000,
+        },
+    )
+    assert assignment_response.status_code == 200, assignment_response.text
+    assignment = assignment_response.json()[0]
 
     UserContext.current_user = student
     assignment_list = client.get("/api/v1/me/writing/assignments")
     assert assignment_list.status_code == 200, assignment_list.text
-    assignment_memberships = {
+    assert {
         item["assignment"]["id"]: item["membership"]["classroom_id"]
         for item in assignment_list.json()
-    }
-    assert assignment_memberships == {
-        assignments[0]["id"]: classrooms[0]["id"],
-        assignments[1]["id"]: classrooms[1]["id"],
-    }
+    } == {assignment["id"]: classroom["id"]}
 
     home = client.get("/api/v1/me/writing/home")
     assert home.status_code == 200, home.text
-    assert {item["id"] for item in home.json()["classrooms"]} == {
-        classrooms[0]["id"],
-        classrooms[1]["id"],
-    }
+    assert [item["id"] for item in home.json()["classrooms"]] == [classroom["id"]]
 
     goal_response = client.post(
         "/api/v1/me/writing/goals",
         json={
             "goal_text": "Create the outline two days before the next deadline",
-            "classroom_id": classrooms[1]["id"],
-            "assignment_id": assignments[1]["id"],
+            "classroom_id": classroom["id"],
+            "assignment_id": assignment["id"],
             "target_at": 2000000000,
         },
     )
@@ -3806,27 +3906,26 @@ def test_multi_class_assignments_growth_goals_and_teacher_notes(education_client
 
     student_profile = client.get("/api/v1/me/writing/profile")
     assert student_profile.status_code == 200, student_profile.text
-    assert {item["id"] for item in student_profile.json()["classrooms"]} == {
-        classrooms[0]["id"],
-        classrooms[1]["id"],
-    }
+    assert [item["id"] for item in student_profile.json()["classrooms"]] == [
+        classroom["id"]
+    ]
     assert student_profile.json()["growth_goals"][0]["id"] == goal["id"]
     assert "teacher_notes" not in student_profile.json()
 
     UserContext.current_user = teacher
     note_response = client.post(
-        f"/api/v1/teacher/classrooms/{classrooms[0]['id']}/students/{student.id}/profile-notes",
+        f"/api/v1/teacher/classrooms/{classroom['id']}/students/{student.id}/profile-notes",
         json={"content": "Follow up on outline planning next week."},
     )
     assert note_response.status_code == 200, note_response.text
     note = note_response.json()
 
     teacher_profile = client.get(
-        f"/api/v1/teacher/classrooms/{classrooms[0]['id']}/students/{student.id}/profile"
+        f"/api/v1/teacher/classrooms/{classroom['id']}/students/{student.id}/profile"
     )
     assert teacher_profile.status_code == 200, teacher_profile.text
     assert teacher_profile.json()["teacher_notes"][0]["id"] == note["id"]
-    assert teacher_profile.json()["classrooms"][0]["id"] == classrooms[0]["id"]
+    assert teacher_profile.json()["classrooms"][0]["id"] == classroom["id"]
 
     updated_note = client.patch(
         f"/api/v1/teacher/profile-notes/{note['id']}",

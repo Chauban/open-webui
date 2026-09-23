@@ -17,6 +17,7 @@ from sqlalchemy import (
     and_,
     event,
     func,
+    text,
 )
 from sqlalchemy.orm import Session
 
@@ -160,6 +161,14 @@ class ClassroomMember(Base):
     __table_args__ = (
         UniqueConstraint(
             "classroom_id", "user_id", name="classroom_member_classroom_user_idx"
+        ),
+        # 一个学生至多在一个班;教师可带多个班,所以只约束学生行。
+        Index(
+            "classroom_member_single_student_idx",
+            "user_id",
+            unique=True,
+            sqlite_where=text("member_role = 'student'"),
+            postgresql_where=text("member_role = 'student'"),
         ),
     )
 
@@ -2663,14 +2672,17 @@ class EducationTable:
             ).all()
             return [ClassroomMemberModel.model_validate(member) for member in members]
 
-    def get_classroom_member_by_user_id(
+    def get_student_classroom_member(
         self, user_id: str, db: Optional[Session] = None
     ) -> Optional[ClassroomMemberModel]:
+        """学生唯一的班级关系(classroom_member_single_student_idx 保证至多一条)。"""
         with get_db_context(db) as db:
             member = (
                 db.query(ClassroomMember)
-                .filter(ClassroomMember.user_id == user_id)
-                .order_by(ClassroomMember.created_at.asc())
+                .filter(
+                    ClassroomMember.user_id == user_id,
+                    ClassroomMember.member_role == "student",
+                )
                 .first()
             )
             return ClassroomMemberModel.model_validate(member) if member else None
@@ -3062,6 +3074,38 @@ class EducationTable:
                 db.query(Assignment)
                 .filter(
                     Assignment.classroom_id.in_(classroom_ids),
+                )
+                .order_by(Assignment.updated_at.desc(), Assignment.id.asc())
+                .all()
+            )
+            return [
+                AssignmentModel.model_validate(assignment) for assignment in assignments
+            ]
+
+    def get_profile_assignments_by_student(
+        self, student_id: str, db: Optional[Session] = None
+    ) -> list[AssignmentModel]:
+        """成长画像的作业范围:当前班的作业,加上学生交过的全部作业。
+
+        画像跟着学生走——换班或被移出后,原班交过的作业仍计入画像;
+        作业列表、写作权限仍只按当前班(get_assignments_by_student)。
+        """
+        with get_db_context(db) as db:
+            classroom_ids = [
+                member.classroom_id
+                for member in self.get_classroom_members_by_user_id(student_id, db=db)
+                if member.member_role == "student"
+            ]
+            submitted_assignment_ids = (
+                db.query(Submission.assignment_id)
+                .filter(Submission.student_id == student_id)
+                .distinct()
+            )
+            assignments = (
+                db.query(Assignment)
+                .filter(
+                    Assignment.classroom_id.in_(classroom_ids)
+                    | Assignment.id.in_(submitted_assignment_ids)
                 )
                 .order_by(Assignment.updated_at.desc(), Assignment.id.asc())
                 .all()

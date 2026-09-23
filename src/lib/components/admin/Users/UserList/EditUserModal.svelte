@@ -53,6 +53,8 @@
 
 	let userGroups: any[] | null = null;
 	let classroomOptions: any[] = [];
+	// 打开弹窗时学生所在的班；与当前选择不同即表示这次保存会调班。
+	let originalClassroomId = '';
 	let classroomOptionsLoading = false;
 
 	const submitHandler = async () => {
@@ -89,6 +91,7 @@
 	const loadUserClassroomAssignment = async () => {
 		if (!selectedUser?.id) {
 			classroomOptions = [];
+			originalClassroomId = '';
 			_user.classroom_id = '';
 			return;
 		}
@@ -103,7 +106,8 @@
 		if (!res) return;
 
 		classroomOptions = res.classrooms ?? [];
-		_user.classroom_id = res.classroom_id ?? '';
+		originalClassroomId = res.classroom_id ?? '';
+		_user.classroom_id = originalClassroomId;
 	};
 
 	$: if (_user.role === 'admin') {
@@ -223,16 +227,16 @@
 
 									{#if _user.role !== 'admin' && _user.education_role === 'student'}
 										<div class="flex flex-col w-full">
-											<div class=" mb-1 text-xs text-gray-500">Classroom</div>
+											<div class=" mb-1 text-xs text-gray-500">{$i18n.t('Classroom')}</div>
 
 											<div class="flex-1">
 												<select
 													class="w-full text-sm bg-transparent outline-hidden"
 													bind:value={_user.classroom_id}
-													aria-label="Classroom"
+													aria-label={$i18n.t('Classroom')}
 													disabled={classroomOptionsLoading}
 												>
-													<option value="">Unassigned</option>
+													<option value="">{$i18n.t('Unassigned')}</option>
 													{#each classroomOptions as item}
 														<option value={item.classroom.id}>
 															{item.classroom.name}
@@ -241,6 +245,18 @@
 													{/each}
 												</select>
 											</div>
+											<div class="mt-1 text-xs text-gray-500">
+												{$i18n.t(
+													'Each student can be in only one classroom. Changing it transfers the student: past submissions stay with the old classroom, and the growth profile moves with the student.'
+												)}
+											</div>
+											{#if originalClassroomId && _user.classroom_id !== originalClassroomId}
+												<div class="mt-1 text-xs text-amber-600 dark:text-amber-400">
+													{_user.classroom_id
+														? $i18n.t('Saving will transfer this student to the selected classroom.')
+														: $i18n.t('Saving will remove this student from their classroom.')}
+												</div>
+											{/if}
 										</div>
 									{/if}
 

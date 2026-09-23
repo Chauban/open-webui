@@ -127,6 +127,7 @@ from open_webui.services.education.profile_snapshots import (
 from open_webui.services.education.profile import PROFILE_METRIC_VERSION
 from open_webui.services.education.identity import get_education_role
 from open_webui.services.education.profile_aggregates import (
+    refresh_profile_aggregates_after_scope_change,
     refresh_student_profile_aggregates,
 )
 from open_webui.services.education.profile_evidence import (
@@ -355,18 +356,15 @@ def _get_project_mode_from_session(session) -> str:
 def _refresh_profile_aggregates_after_scope_change(
     student_ids: list[str], db: Session
 ) -> None:
-    active_metric_version = Education.get_active_profile_metric_version(db=db)
-    if active_metric_version is None:
-        return
-    for student_id in dict.fromkeys(student_ids):
-        if student_id:
-            refresh_student_profile_aggregates(
-                student_id,
-                active_metric_version,
-                db,
-                commit=False,
-            )
-    db.commit()
+    refresh_profile_aggregates_after_scope_change(student_ids, db)
+
+
+def _get_other_student_classroom(student_id: str, classroom_id: str, db: Session):
+    """学生当前所在的另一个班;一个学生至多在一个班,换班走教师移出或管理员调班。"""
+    membership = Education.get_student_classroom_member(student_id, db=db)
+    if membership is None or membership.classroom_id == classroom_id:
+        return None
+    return Education.get_classroom_by_id(membership.classroom_id, db=db)
 
 
 def _get_classroom_student_ids(classroom_id: str, db: Session) -> list[str]:
@@ -1209,7 +1207,7 @@ async def get_my_classroom(
         membership = Education.get_classroom_member(classroom.id, user.id, db=db)
         return ClassroomResponse(classroom=classroom, membership=membership)
 
-    membership = Education.get_classroom_member_by_user_id(user.id, db=db)
+    membership = Education.get_student_classroom_member(user.id, db=db)
     if membership is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1273,6 +1271,11 @@ async def join_classroom(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Student has already joined this classroom",
+        )
+    if _get_other_student_classroom(user.id, classroom.id, db) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="You are already in a classroom. Ask your teacher or an administrator to change classes.",
         )
 
     membership = Education.ensure_classroom_member(
@@ -1652,6 +1655,11 @@ async def add_classroom_member(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Only users with student identity can be added",
         )
+    if _get_other_student_classroom(member_user.id, classroom.id, db) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This student is already in another classroom. Remove them there first, or ask an administrator to transfer them.",
+        )
 
     member = Education.ensure_classroom_member(
         classroom.id, member_user.id, "student", db=db
@@ -1727,6 +1735,11 @@ async def bulk_import_classroom_members(
         )
         if existing_membership is not None:
             result.skipped_users.append(user_id)
+            continue
+        if _get_other_student_classroom(member_user.id, classroom.id, db) is not None:
+            result.failed_users.append(
+                {"value": user_id, "reason": "Already in another classroom"}
+            )
             continue
 
         Education.ensure_classroom_member(
@@ -2029,7 +2042,8 @@ async def get_student_profile(
         )
 
     student = await Users.get_user_by_id(student_user_id, db=db)
-    assignments = Education.get_assignments_by_classroom(classroom.id, db=db)
+    # 画像跟着学生走:换班前在原班交过的作业同样计入。
+    assignments = Education.get_profile_assignments_by_student(student_user_id, db=db)
     try:
         return await build_student_profile(
             student,
@@ -3884,7 +3898,7 @@ async def get_my_writing_profile(
         )
         if classroom is not None
     ]
-    assignments = Education.get_assignments_by_student(user.id, db=db)[
+    assignments = Education.get_profile_assignments_by_student(user.id, db=db)[
         :MAX_STUDENT_ASSIGNMENTS
     ]
     try:

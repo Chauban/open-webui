@@ -390,3 +390,50 @@ def test_fixed_reflection_converts_to_teacher_defined_questions(tmp_path, monkey
         ]
     finally:
         engine.dispose()
+
+
+def test_single_classroom_per_student_keeps_earliest_membership(tmp_path, monkeypatch):
+    """学生曾能同时在多个班:迁移只留最早加入的班,之后再插第二个班直接被索引拦下。"""
+    from sqlalchemy.exc import IntegrityError
+
+    backend_dir = Path(__file__).resolve().parents[5]
+    database_path = tmp_path / "single-classroom.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    _set_database_url(monkeypatch, database_url)
+    config = _alembic_config(backend_dir)
+
+    command.upgrade(config, "e7b3d5f9a1c4")
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            for member_id, classroom_id, user_id, role, created_at in (
+                ("late", "class-b", "student", "student", 2),
+                ("early", "class-a", "student", "student", 1),
+                ("teacher-a", "class-a", "teacher", "teacher", 1),
+                ("teacher-b", "class-b", "teacher", "teacher", 1),
+            ):
+                connection.exec_driver_sql(
+                    "INSERT INTO classroom_member "
+                    "(id, classroom_id, user_id, member_role, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (member_id, classroom_id, user_id, role, created_at, created_at),
+                )
+
+        command.upgrade(config, "head")
+
+        with engine.connect() as connection:
+            rows = connection.exec_driver_sql(
+                "SELECT id FROM classroom_member ORDER BY id"
+            ).fetchall()
+        # 教师带多个班不受影响
+        assert [row[0] for row in rows] == ["early", "teacher-a", "teacher-b"]
+
+        with pytest.raises(IntegrityError):
+            with engine.begin() as connection:
+                connection.exec_driver_sql(
+                    "INSERT INTO classroom_member "
+                    "(id, classroom_id, user_id, member_role, created_at, updated_at) "
+                    "VALUES ('again', 'class-b', 'student', 'student', 3, 3)"
+                )
+    finally:
+        engine.dispose()

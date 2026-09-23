@@ -5,8 +5,8 @@
 	import { get } from 'svelte/store';
 	import { toast } from 'svelte-sonner';
 
-	import { joinClassroom } from '$lib/apis/education';
-	import { resolveErrorMessage } from '$lib/utils/education';
+	import { getMyClassroom, joinClassroom } from '$lib/apis/education';
+	import { getClassroomDisplayName, resolveErrorMessage } from '$lib/utils/education';
 	import EduButton from '$lib/components/education/EduButton.svelte';
 	import EduCard from '$lib/components/education/EduCard.svelte';
 	import EduDataNotice from '$lib/components/education/EduDataNotice.svelte';
@@ -19,12 +19,21 @@
 
 	let inviteCode = '';
 	let joining = false;
+	// 一个学生只能在一个班：已入班时只提示当前班级，不再给加入入口。
+	let currentClassroomName: string | null = null;
+	let checkingClassroom = true;
 
 	$: educationRole = $user?.education_role ?? null;
 	$: isStudent = educationRole === 'student';
 
-	onMount(() => {
+	onMount(async () => {
 		inviteCode = get(page).url.searchParams.get('code') ?? '';
+		if (get(user)?.education_role === 'student') {
+			// 404 表示还没加入任何班级，正常展示加入表单。
+			const response = await getMyClassroom(localStorage.token).catch(() => null);
+			currentClassroomName = response?.classroom?.name ?? null;
+		}
+		checkingClassroom = false;
 	});
 
 	const join = async () => {
@@ -63,6 +72,18 @@
 				on:click={() => goto(educationRole === 'teacher' ? '/teacher' : '/')}
 			>
 				{$i18n.t('Back')}
+			</EduButton>
+		{:else if checkingClassroom}
+			<div class="mt-6 text-sm text-gray-500 dark:text-gray-400">{$i18n.t('Loading...')}</div>
+		{:else if currentClassroomName !== null}
+			<EduTile tone="amber" class="mt-6 text-amber-700 dark:text-amber-300">
+				{$i18n.t(
+					'You are already in {{name}}. Each student can be in only one classroom. To change classes, ask your teacher or an administrator.',
+					{ name: getClassroomDisplayName(currentClassroomName, t) }
+				)}
+			</EduTile>
+			<EduButton class="mt-6 w-full" on:click={() => goto('/me/writing')}>
+				{$i18n.t('Back to Writing Home')}
 			</EduButton>
 		{:else}
 			<div class="mt-6">
