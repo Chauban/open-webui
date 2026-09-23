@@ -97,6 +97,7 @@
 	"Submitted in another classroom": "",
 	"The archive contains submissions.csv, round_progress.csv and reflections.csv, plus a README stating the metric version and algorithm checksum. Student identity is replaced by a stable one-way pseudonym.": "The archive contains submissions.csv, round_progress.csv and reflections.csv, plus a README stating the metric version and algorithm checksum. Student identity is replaced by a stable one-way pseudonym.",
 	"The questions you are editing will be replaced. This cannot be undone.": "The questions you are editing will be replaced. This cannot be undone.",
+	"The request could not be processed. Please refresh the page and try again.": "",
 	"The start date must not be later than the end date.": "The start date must not be later than the end date.",
 	"These are already the current questions.": "These are already the current questions.",
 	"This is your personal writing space. Teachers cannot see anything in it.": "This is your personal writing space. Teachers cannot see anything in it.",

@@ -145,7 +145,6 @@ else:
 VERSION = PACKAGE_DATA['version']
 
 
-DEPLOYMENT_ID = os.getenv('DEPLOYMENT_ID', '')
 INSTANCE_ID = os.getenv('INSTANCE_ID', str(uuid4()))
 
 ENABLE_DB_MIGRATIONS = os.getenv('ENABLE_DB_MIGRATIONS', 'True').lower() == 'true'
@@ -251,6 +250,19 @@ FRONTEND_BUILD_DIR = Path(os.getenv('FRONTEND_BUILD_DIR', BASE_DIR / 'build')).r
 
 if FROM_INIT_PY:
     FRONTEND_BUILD_DIR = Path(os.getenv('FRONTEND_BUILD_DIR', OPEN_WEBUI_DIR / 'frontend')).resolve()
+
+
+def _frontend_build_version() -> str:
+    try:
+        return json.loads((FRONTEND_BUILD_DIR / '_app' / 'version.json').read_text()).get('version', '')
+    except (OSError, ValueError):
+        return ''
+
+
+# 前端比对 deployment_id 决定是否整页刷新(socket 重连时)。未显式配置时取前端构建版本:
+# 每次部署都会重建前端,部署前就打开的页面在后端重启、socket 重连后自动换上新代码,
+# 不会拿旧前端去调新接口。本地开发没有构建产物,取值为空,不触发刷新。
+DEPLOYMENT_ID = os.getenv('DEPLOYMENT_ID') or _frontend_build_version()
 
 ####################################
 # Database

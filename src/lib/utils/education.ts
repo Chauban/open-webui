@@ -94,6 +94,12 @@ export const formatShortDate = (epoch: number | null | undefined) =>
 export const resolveErrorMessage = (error: unknown, t: Translate) => {
 	const detail = (error as { detail?: unknown } | null)?.detail ?? error;
 	if (typeof detail === 'string') return t(detail);
+	// FastAPI 请求体校验失败(422)给的是一组 {loc, msg, type}，对学生没有可读信息；
+	// 实际多半是页面停在部署前的旧版本，所以直接提示刷新。
+	if (Array.isArray(detail)) {
+		console.error('Request validation failed', detail);
+		return t('The request could not be processed. Please refresh the page and try again.');
+	}
 	if (detail && typeof detail === 'object') {
 		const nested = (detail as { detail?: unknown }).detail;
 		if (typeof nested === 'string') return t(nested);

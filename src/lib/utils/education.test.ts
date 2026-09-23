@@ -50,6 +50,20 @@ describe('backend error details', () => {
 		expect(resolveErrorMessage(error, t)).toBe('作业不存在');
 	});
 
+	test('turns a FastAPI validation error list into a refresh hint', () => {
+		const error = {
+			detail: [
+				{ loc: ['body', 'ai_help_types'], msg: 'Extra inputs are not permitted' },
+				{ loc: ['body', 'reflection'], msg: 'Extra inputs are not permitted' }
+			]
+		};
+		const message = resolveErrorMessage(error, t);
+		expect(message).not.toContain('[object Object]');
+		expect(message).toBe(
+			'The request could not be processed. Please refresh the page and try again.'
+		);
+	});
+
 	test('falls back to the raw error when there is no detail', () => {
 		expect(resolveErrorMessage(new Error('boom'), t)).toBe('Error: boom');
 		expect(resolveErrorMessage('boom', t)).toBe('boom');

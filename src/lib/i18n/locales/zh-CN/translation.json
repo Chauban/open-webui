@@ -97,6 +97,7 @@
 	"Submitted in another classroom": "在其他班级提交",
 	"The archive contains submissions.csv, round_progress.csv and reflections.csv, plus a README stating the metric version and algorithm checksum. Student identity is replaced by a stable one-way pseudonym.": "压缩包内含 submissions.csv、round_progress.csv、reflections.csv，以及写明指标版本与算法校验和的 README。学生身份已替换为稳定且不可逆的假名。",
 	"The questions you are editing will be replaced. This cannot be undone.": "正在编辑的题目会被整体替换，无法撤销。",
+	"The request could not be processed. Please refresh the page and try again.": "请求未能处理，页面可能不是最新版本。请刷新页面后重试。",
 	"The start date must not be later than the end date.": "起始时间不能晚于结束时间。",
 	"These are already the current questions.": "当前题目已经是这一套了。",
 	"This is your personal writing space. Teachers cannot see anything in it.": "这里是你的个人写作区，老师看不到里面的任何内容。",
