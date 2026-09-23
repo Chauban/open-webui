@@ -40,7 +40,7 @@
 	<div>
 		<div class="mb-3">
 			<div class="text-sm font-semibold text-gray-950 dark:text-gray-100">
-				{$i18n.t('Pre-submission Read-through')}
+				{$i18n.t('AI Reader Check Before Submitting')}
 			</div>
 			<div class="mt-0.5 text-xs text-gray-400">
 				{$i18n.t(
