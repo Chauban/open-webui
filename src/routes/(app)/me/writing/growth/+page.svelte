@@ -1,4 +1,6 @@
 <script lang="ts">
+	import type { Writable } from 'svelte/store';
+	import type { i18n as i18nType } from 'i18next';
 	import { getContext, onMount } from 'svelte';
 	import { get } from 'svelte/store';
 	import { goto } from '$app/navigation';
@@ -19,7 +21,7 @@
 
 	// 学生看自己的成长画像。教师端看到的是同一个组件、同一套指标——
 	// 学生看不到自己的成长，这个模块的教育价值就少一半。
-	const i18n = getContext('i18n');
+	const i18n = getContext<Writable<i18nType>>('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
 
 	let profile: StudentProfile | null = null;

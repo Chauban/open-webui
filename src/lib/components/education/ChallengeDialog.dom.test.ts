@@ -10,6 +10,7 @@ import {
 	skipAssignmentChallengeBeforeStart,
 	startAssignmentChallenge
 } from '$lib/apis/education';
+import type { ChallengeSession } from '$lib/apis/education';
 
 vi.mock('$lib/apis/education', () => ({
 	startAssignmentChallenge: vi.fn(),
@@ -21,14 +22,14 @@ vi.mock('$lib/apis/education', () => ({
 afterEach(cleanup);
 beforeEach(() => {
 	vi.clearAllMocks();
-	// @ts-expect-error jsdom 里没有真实登录态，组件只把它当 bearer 透传。
+	// jsdom 里没有真实登录态，组件只把它当 bearer 透传。
 	globalThis.localStorage.token = 'test-token';
 });
 
 const context = new Map([['i18n', readable({ t: (key: string) => key })]]);
 const assignment = { id: 'a-1', title: 'Essay', challenge_rounds: 2 };
 
-const makeSession = (overrides = {}) => ({
+const makeSession = (overrides: Partial<ChallengeSession> = {}): ChallengeSession => ({
 	id: 'cs-1',
 	writing_session_id: 'ws-1',
 	assignment_id: 'a-1',

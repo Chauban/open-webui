@@ -1,4 +1,6 @@
 <script lang="ts">
+	import type { Writable } from 'svelte/store';
+	import type { i18n as i18nType } from 'i18next';
 	import { getContext, onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
@@ -32,7 +34,6 @@
 	} from '$lib/utils/reflection-questions';
 	import { EDU_FIELD_CLASS } from '$lib/components/education/styles';
 	import {
-		formatDateTimeInput,
 		formatEpoch,
 		getAssignmentStatusLabel,
 		getClassroomDisplayName,
@@ -40,7 +41,7 @@
 		toLocalDateTimeInput
 	} from '$lib/utils/education';
 
-	const i18n = getContext('i18n');
+	const i18n = getContext<Writable<i18nType>>('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
 
 	let item = null;
@@ -70,7 +71,6 @@
 		item?.assignment?.status === 'active' &&
 		item?.assignment?.due_at &&
 		item.assignment.due_at * 1000 < Date.now();
-	$: dueAtPreview = formatDateTimeInput(dueAt);
 
 	// datetime-local expects a LOCAL "YYYY-MM-DDTHH:mm" string; toISOString() would shift to UTC.
 
@@ -301,9 +301,6 @@
 							<div>
 								<div class="mb-2 text-sm font-medium">{$i18n.t('Due At')}</div>
 								<EduDateTimeField bind:value={dueAt} required className="w-full {EDU_FIELD_CLASS}" />
-								{#if dueAtPreview}
-									<div class="mt-1.5 text-xs text-gray-400 dark:text-gray-500">{dueAtPreview}</div>
-								{/if}
 							</div>
 							<div>
 								<div class="mb-2 text-sm font-medium">{$i18n.t('Maximum Score')}</div>

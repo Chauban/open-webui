@@ -1,4 +1,6 @@
 <script lang="ts">
+	import type { Writable } from 'svelte/store';
+	import type { i18n as i18nType } from 'i18next';
 	import { getContext, onDestroy, onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
@@ -19,10 +21,15 @@
 	import EduStatCard from '$lib/components/education/EduStatCard.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 
-	const i18n = getContext('i18n');
+	const i18n = getContext<Writable<i18nType>>('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
 
 	let dashboard = null;
+
+	$: rewriteLevels = Object.entries(
+		(dashboard?.distributions?.rewrite_levels ?? {}) as Record<string, number>
+	);
+	$: rewriteTotal = Math.max(1, rewriteLevels.reduce((sum, [, count]) => sum + count, 0));
 	let loadError = '';
 	let refreshing = false;
 	let unsubscribeNotifications;
@@ -249,7 +256,7 @@
 			<EduCard>
 				<div class="mb-4 text-sm font-semibold">{$i18n.t('Rewrite Distribution')}</div>
 				<div class="space-y-3">
-					{#each Object.entries(dashboard.distributions?.rewrite_levels ?? {}) as [level, count]}
+					{#each rewriteLevels as [level, count]}
 						<div>
 							<div class="mb-1 flex items-center justify-between text-sm text-gray-700 dark:text-gray-300">
 								<span>{$i18n.t(rewriteLevelLabels[level] ?? level)}</span>
@@ -258,16 +265,7 @@
 							<div class="h-2 rounded-full bg-gray-100 dark:bg-gray-800">
 								<div
 									class="h-2 rounded-full bg-black dark:bg-gray-100"
-									style={`width: ${Math.max(
-										8,
-										((count as number) / Math.max(
-											1,
-											Object.values(dashboard.distributions?.rewrite_levels ?? {}).reduce(
-												(sum, value) => sum + (value as number),
-												0
-											)
-										)) * 100
-									)}%`}
+									style={`width: ${Math.max(8, (count / rewriteTotal) * 100)}%`}
 								></div>
 							</div>
 						</div>

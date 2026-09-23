@@ -1,4 +1,6 @@
 <script lang="ts">
+	import type { Writable } from 'svelte/store';
+	import type { i18n as i18nType } from 'i18next';
 	import { getContext, onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import { page } from '$app/stores';
@@ -22,7 +24,6 @@
 	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
 	import { buildSubmissionReviewOverview } from '$lib/utils/submission-review';
 	import {
-		formatDateTimeInput,
 		formatEpoch,
 		formatEpochTime,
 		resolveErrorMessage,
@@ -34,7 +35,7 @@
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 	import EduDateTimeField from '$lib/components/education/EduDateTimeField.svelte';
 
-	const i18n = getContext('i18n');
+	const i18n = getContext<Writable<i18nType>>('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
 	const DEFAULT_VISIBLE_VERSIONS = 10;
 	const getReviewTriggerTypeLabel = (value: string) =>
@@ -101,7 +102,6 @@
 	// datetime-local expects a LOCAL "YYYY-MM-DDTHH:mm" string; toISOString() would shift to UTC.
 
 	$: submissionId = $page.params.submissionId;
-	$: resubmitDuePreview = formatDateTimeInput(resubmitDueLocal);
 	$: isHistoricalRound = detail ? !detail.submission.is_current : false;
 
 	$: queueIndex = queueIds.indexOf(submissionId);
@@ -662,9 +662,9 @@
 					<!-- Tab bar -->
 					<div class="shrink-0 flex items-end gap-0.5 border-b border-gray-100 dark:border-gray-800 px-5 pt-4">
 						{#each [
-							{ key: 'review', label: t('Grading') },
-							{ key: 'analysis', label: t('Analysis') },
-							{ key: 'reflection', label: t('Reflection & Versions') }
+							{ key: 'review' as const, label: t('Grading') },
+							{ key: 'analysis' as const, label: t('Analysis') },
+							{ key: 'reflection' as const, label: t('Reflection & Versions') }
 						] as tab}
 							<button
 								class="relative px-4 pb-3 text-sm font-medium transition-colors {activeTab === tab.key
@@ -828,9 +828,6 @@
 										disabled={isHistoricalRound}
 										className="w-full rounded-2xl border border-gray-200 dark:border-gray-800 px-4 py-3 text-sm outline-none focus:border-gray-400 transition-colors disabled:opacity-50"
 									/>
-									{#if resubmitDuePreview}
-										<div class="mt-1.5 text-xs text-gray-400 dark:text-gray-500">{resubmitDuePreview}</div>
-									{/if}
 								</div>
 
 								<!-- Actions + persistent save status -->

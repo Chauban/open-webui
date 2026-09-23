@@ -120,7 +120,6 @@ describe('writing source map', () => {
 	test('restores source runs from saved source-map provenance segments', () => {
 		const runs = provenanceSegmentsToSourceRuns('abcXXdef', [
 			{
-				segment_id: 'source-map-0',
 				source_type: 'ai_inserted',
 				segment_text: 'abc',
 				start_offset: 0,
@@ -129,7 +128,6 @@ describe('writing source map', () => {
 				metadata_json: { provenance_kind: 'source_map' }
 			},
 			{
-				segment_id: 'source-map-1',
 				source_type: 'user_typed',
 				segment_text: 'XX',
 				start_offset: 3,
@@ -138,7 +136,6 @@ describe('writing source map', () => {
 				metadata_json: { provenance_kind: 'source_map' }
 			},
 			{
-				segment_id: 'not-source-map',
 				source_type: 'external_paste',
 				segment_text: 'ignored',
 				start_offset: 0,
@@ -147,7 +144,6 @@ describe('writing source map', () => {
 				metadata_json: null
 			},
 			{
-				segment_id: 'source-map-2',
 				source_type: 'ai_inserted',
 				segment_text: 'def',
 				start_offset: 5,

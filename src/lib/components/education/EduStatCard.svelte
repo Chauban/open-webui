@@ -24,12 +24,10 @@
 		amber: 'text-amber-700 dark:text-amber-300',
 		sky: 'text-sky-700 dark:text-sky-300'
 	};
-
-	// 统计卡的底色跟随语义色，default 用普通白卡。
-	$: cardTone = tone === 'default' ? 'default' : tone;
 </script>
 
-<EduCard tone={cardTone}>
+<!-- 统计卡的底色跟随语义色，default 用普通白卡。 -->
+<EduCard {tone}>
 	<div class="text-xs uppercase tracking-[0.16em] {LABEL_TONES[tone]}">{$i18n.t(label)}</div>
 	<div class="mt-2 text-3xl font-semibold {VALUE_TONES[tone]}">{value}</div>
 	{#if hint}

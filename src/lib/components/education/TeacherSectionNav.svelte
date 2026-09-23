@@ -1,9 +1,11 @@
 <script lang="ts">
+	import type { Writable } from 'svelte/store';
+	import type { i18n as i18nType } from 'i18next';
 	import { getContext } from 'svelte';
 	import { page } from '$app/stores';
 	import { get } from 'svelte/store';
 
-	const i18n = getContext('i18n');
+	const i18n = getContext<Writable<i18nType>>('i18n');
 
 	const links = [
 		{ href: '/teacher', label: 'Overview' },

@@ -1,4 +1,6 @@
 <script lang="ts">
+	import type { Writable } from 'svelte/store';
+	import type { i18n as i18nType } from 'i18next';
 	import { getContext, onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
@@ -27,7 +29,7 @@
 	import { EDU_FIELD_CLASS } from '$lib/components/education/styles';
 	import { getClassroomDisplayName, resolveErrorMessage } from '$lib/utils/education';
 
-	const i18n = getContext('i18n');
+	const i18n = getContext<Writable<i18nType>>('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
 
 	let classroom = null;
@@ -39,7 +41,7 @@
 	let bulkImportResult = null;
 	let loading = true;
 	let loadError = '';
-	let selectedIds = new Set();
+	let selectedIds = new Set<string>();
 	let transferTargetId = '';
 	let pendingRemoveId = '';
 	let searching = false;

@@ -1,4 +1,6 @@
 <script lang="ts">
+	import type { Writable } from 'svelte/store';
+	import type { i18n as i18nType } from 'i18next';
 	import { getContext, onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
@@ -29,13 +31,13 @@
 		normalizeReflectionQuestions
 	} from '$lib/utils/reflection-questions';
 	import { EDU_FIELD_CLASS, eduSegmentClass } from '$lib/components/education/styles';
-	import { formatDateTimeInput, getClassroomDisplayName, resolveErrorMessage } from '$lib/utils/education';
+	import { getClassroomDisplayName, resolveErrorMessage } from '$lib/utils/education';
 
-	const i18n = getContext('i18n');
+	const i18n = getContext<Writable<i18nType>>('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
 
 	let classrooms = [];
-	let selectedClassroomIds = new Set();
+	let selectedClassroomIds = new Set<string>();
 	let title = '';
 	let description = '';
 	let dueAt = '';
@@ -56,7 +58,6 @@
 	let loading = true;
 	let saving = false;
 
-	$: dueAtPreview = formatDateTimeInput(dueAt);
 	let loadError = '';
 
 	const toggleClassroom = (id: string) => {
@@ -286,9 +287,6 @@
 				<div>
 					<div class="mb-2 text-sm font-semibold">{$i18n.t('Due At')}</div>
 					<EduDateTimeField bind:value={dueAt} required className="w-full {EDU_FIELD_CLASS}" />
-					{#if dueAtPreview}
-						<div class="mt-1.5 text-xs text-gray-400 dark:text-gray-500">{dueAtPreview}</div>
-					{/if}
 				</div>
 				<div>
 					<div class="mb-2 text-sm font-semibold">{$i18n.t('Maximum Score')}</div>
