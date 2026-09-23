@@ -134,6 +134,29 @@
 	$: isGraded = review?.review_status === 'reviewed';
 	$: isReadOnly = isAssignment ? isPastDue || isGraded : false;
 	$: canSubmitAssignment = isAssignment && !isPastDue && !isGraded;
+	// 写作构成只在作业定稿后给学生看:写作中实时显示会让学生盯着比例重敲粘贴内容来刷数,
+	// 数据先被毁掉。个人写作区教师看不到,没有刷数动机,照常显示。
+	$: showComposition = !isAssignment || isReadOnly;
+	// 定稿后作业要求、试读清单、留痕告知都只剩回看价值,默认收起,让批改结果排到最前。
+	let showLockedDetails = false;
+	$: lockedDetailsCollapsed = isAssignment && isReadOnly && !showLockedDetails;
+	$: chatReadOnlyHint = !isReadOnly
+		? ''
+		: !currentChatId && !writingSession?.active_chat_id
+			? $i18n.t('No AI conversation for this assignment.')
+			: isGraded
+				? $i18n.t('Graded. The conversation is view-only.')
+				: $i18n.t('Past the deadline. The conversation is view-only.');
+	// 定稿后左栏不能再开新对话,空着没有意义:学生用过 AI 就直接载入那次对话供回看。
+	let lockedChatAutoOpened = false;
+	$: if (loaded && !lockedChatAutoOpened) {
+		lockedChatAutoOpened = true;
+		const activeChatId = writingSession?.active_chat_id;
+		if (isReadOnly && !currentChatId && activeChatId) {
+			lastPersistedActiveChatId = activeChatId;
+			void goto(`${projectBaseUrl}?chat=${activeChatId}`, { replaceState: true });
+		}
+	}
 	const getDefaultPersonalTitle = () => get(i18n).t('Untitled Writing');
 	const normalizePersonalTitle = (value?: string | null) => {
 		const normalized = value?.trim();
@@ -777,6 +800,7 @@
 		onSelectedModelsChange={(ids) => (selectedModelId = ids?.[0] ?? '')}
 		responseInsertLabel={'Insert to Writing'}
 		readOnly={isReadOnly}
+		readOnlyHint={chatReadOnlyHint}
 		disableContextActions={false}
 		allowAssignmentWorkspaceChat={isAssignment}
 		showRightPanel={!$mobile}
@@ -812,7 +836,7 @@
 									{$i18n.t('Track typed text, AI insertions, and in-app AI paste.')}
 								{/if}
 							</div>
-							{#if effectiveDueAt}
+							{#if effectiveDueAt && !isGraded}
 								<div class="mt-1 text-xs {dueColorClass}">
 									{#if !isResubmitDeadline && dueCountdown?.overdue}
 										{$i18n.t('Overdue')}
@@ -839,7 +863,14 @@
 						{/if}
 					</div>
 					<div class="flex flex-wrap items-center justify-end gap-2">
-						{#if isSubmitted}
+						{#if isGraded}
+							<div
+								class="rounded-full bg-emerald-100 px-3 py-1 text-xs text-emerald-700 dark:text-emerald-300"
+							>
+								{$i18n.t('Reviewed')}
+								{review?.score ?? ''}
+							</div>
+						{:else if isSubmitted}
 							<div
 								class="rounded-full bg-emerald-100 px-3 py-1 text-xs text-emerald-700 dark:text-emerald-300"
 							>
@@ -854,11 +885,13 @@
 								{$i18n.t('Submission History')}
 							</button>
 						{/if}
-						<div
-							class="rounded-full bg-stone-100 dark:bg-gray-800 px-3 py-1 text-xs text-gray-600 dark:text-gray-400"
-						>
-							{saveStatusDisplay}
-						</div>
+						{#if !isReadOnly}
+							<div
+								class="rounded-full bg-stone-100 dark:bg-gray-800 px-3 py-1 text-xs text-gray-600 dark:text-gray-400"
+							>
+								{saveStatusDisplay}
+							</div>
+						{/if}
 						{#if canSubmitAssignment}
 							<EduButton
 								variant="primary"
@@ -867,25 +900,47 @@
 									void openSubmitFlow();
 								}}
 							>
-								{$i18n.t('Submit Assignment')}
+								{$i18n.t(isSubmitted ? 'Resubmit Assignment' : 'Submit Assignment')}
 							</EduButton>
 						{/if}
 					</div>
 				</div>
-				{#if isAssignment}
-					<AssignmentBrief {assignment} />
-					<ChallengeChecklist
-						detail={challengeDetail}
-						onDetailChange={onChallengeDetailChange}
-					/>
+				{#if lockedDetailsCollapsed}
+					<button
+						type="button"
+						class="mt-2 text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:underline"
+						on:click={() => (showLockedDetails = true)}
+					>
+						{$i18n.t('Show assignment requirements and read-through notes')}
+					</button>
+				{:else}
+					{#if isAssignment}
+						<AssignmentBrief {assignment} />
+						<ChallengeChecklist
+							detail={challengeDetail}
+							onDetailChange={onChallengeDetailChange}
+							readonly={isReadOnly}
+						/>
+					{/if}
+					<EduDataNotice {scope} class="mt-3" />
+					{#if isAssignment && isReadOnly}
+						<button
+							type="button"
+							class="mt-2 text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:underline"
+							on:click={() => (showLockedDetails = false)}
+						>
+							{$i18n.t('Collapse')}
+						</button>
+					{/if}
 				{/if}
-				<EduDataNotice {scope} class="mt-3" />
 			</div>
 			<div class="min-h-0 flex-1 overflow-y-auto px-5 py-5">
 				{#if isAssignment && review}
 					<ReviewResultCard {review} {assignment} onRevise={null} />
 				{/if}
-				<WritingComposition {sourceRuns} {clarificationAnsweredCount} />
+				{#if showComposition}
+					<WritingComposition {sourceRuns} {clarificationAnsweredCount} />
+				{/if}
 				<RichTextInput
 					bind:editor
 					bind:value={noteJson}
@@ -930,11 +985,13 @@
 			<div
 				class="pointer-events-auto flex items-center gap-2 rounded-full border border-gray-200 dark:border-gray-800 bg-white/95 dark:bg-gray-850/95 px-3 py-2 shadow-lg backdrop-blur"
 			>
-				<div
-					class="rounded-full bg-stone-100 dark:bg-gray-800 px-3 py-1 text-xs text-gray-600 dark:text-gray-400"
-				>
-					{saveStatusDisplay}
-				</div>
+				{#if !isReadOnly}
+					<div
+						class="rounded-full bg-stone-100 dark:bg-gray-800 px-3 py-1 text-xs text-gray-600 dark:text-gray-400"
+					>
+						{saveStatusDisplay}
+					</div>
+				{/if}
 				<EduButton
 					size="sm"
 					on:click={() => {
@@ -952,7 +1009,7 @@
 							void openSubmitFlow();
 						}}
 					>
-						{$i18n.t('Submit Assignment')}
+						{$i18n.t(isSubmitted ? 'Resubmit Assignment' : 'Submit Assignment')}
 					</EduButton>
 				{/if}
 			</div>
@@ -989,20 +1046,42 @@
 							{$i18n.t('Close')}
 						</EduButton>
 					</div>
-					{#if isAssignment}
-						<AssignmentBrief {assignment} />
-						<ChallengeChecklist
-							detail={challengeDetail}
-							onDetailChange={onChallengeDetailChange}
-						/>
+					{#if lockedDetailsCollapsed}
+						<button
+							type="button"
+							class="mt-2 text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:underline"
+							on:click={() => (showLockedDetails = true)}
+						>
+							{$i18n.t('Show assignment requirements and read-through notes')}
+						</button>
+					{:else}
+						{#if isAssignment}
+							<AssignmentBrief {assignment} />
+							<ChallengeChecklist
+								detail={challengeDetail}
+								onDetailChange={onChallengeDetailChange}
+								readonly={isReadOnly}
+							/>
+						{/if}
+						<EduDataNotice {scope} class="mt-3" />
+						{#if isAssignment && isReadOnly}
+							<button
+								type="button"
+								class="mt-2 text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:underline"
+								on:click={() => (showLockedDetails = false)}
+							>
+								{$i18n.t('Collapse')}
+							</button>
+						{/if}
 					{/if}
-					<EduDataNotice {scope} class="mt-3" />
 				</div>
 				<div class="min-h-0 flex-1 overflow-y-auto px-5 py-5">
 					{#if isAssignment && review}
 						<ReviewResultCard {review} {assignment} onRevise={null} />
 					{/if}
-					<WritingComposition {sourceRuns} {clarificationAnsweredCount} />
+					{#if showComposition}
+						<WritingComposition {sourceRuns} {clarificationAnsweredCount} />
+					{/if}
 					<RichTextInput
 						bind:editor
 						bind:value={noteJson}

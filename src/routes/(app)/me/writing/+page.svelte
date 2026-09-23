@@ -71,6 +71,11 @@
 		return formatEpoch(timestamp);
 	};
 
+	const isPastEffectiveDue = (item) =>
+		typeof item.effective_due_at === 'number' &&
+		item.effective_due_at > 0 &&
+		item.effective_due_at <= Date.now() / 1000;
+
 	// Returns due-date display info for a non-returned assignment card, or null when
 	// there is nothing to show (e.g. no effective_due_at).
 	const getDueInfo = (item) => {
@@ -483,7 +488,12 @@
 																{item.score ?? ''}
 															</EduBadge>
 														{:else if item.review_status === 'pending'}
-															<EduBadge soft>{$i18n.t('Awaiting review')}</EduBadge>
+															<!-- 待批改且未过截止时学生仍可改稿重交(覆盖当前轮),标签要说清楚 -->
+															<EduBadge soft>
+																{isPastEffectiveDue(item)
+																	? $i18n.t('Awaiting review')
+																	: $i18n.t('Submitted · editable before deadline')}
+															</EduBadge>
 														{/if}
 													</div>
 													<div class="mt-1 text-sm text-gray-500 dark:text-gray-400">

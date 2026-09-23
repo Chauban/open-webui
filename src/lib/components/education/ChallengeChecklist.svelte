@@ -20,6 +20,8 @@
 
 	export let detail: ChallengeDetail | null = null;
 	export let onDetailChange: (next: ChallengeDetail) => void = () => {};
+	// 作业定稿（已批改或已截止）后清单只供回看，不再允许勾选。
+	export let readonly = false;
 
 	let expanded = true;
 	// 往来记录默认折叠：清单才是拿来改文章的，回看是需要时才展开的东西。
@@ -35,7 +37,7 @@
 	$: plannedRounds = detail?.session?.planned_rounds ?? 0;
 
 	const toggle = async (index: number) => {
-		if (!detail || saving) return;
+		if (!detail || saving || readonly) return;
 		const next = new Set(checked);
 		if (next.has(index)) {
 			next.delete(index);
@@ -79,12 +81,12 @@
 			<ul class="mt-2 space-y-1.5">
 				{#each unresolved as item, index}
 					<li>
-						<label class="flex cursor-pointer items-start gap-2">
+						<label class="flex items-start gap-2 {readonly ? '' : 'cursor-pointer'}">
 							<input
 								type="checkbox"
 								class="mt-0.5 size-3.5 shrink-0 accent-amber-600"
 								checked={checked.has(index)}
-								disabled={saving}
+								disabled={saving || readonly}
 								on:change={() => toggle(index)}
 							/>
 							<span
