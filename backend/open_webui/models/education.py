@@ -1851,8 +1851,6 @@ ProfileCompletenessStatus = Literal["complete", "missing", "pending", "not_appli
 ProfileInsightTone = Literal["positive", "warning", "neutral"]
 ProfileInsightCode = Literal[
     "not_enough_data",
-    "digestion_up",
-    "digestion_low",
     "ai_share_changed",
     "round_improvement",
     "round_revision_thin",
@@ -1864,8 +1862,6 @@ ProfileInsightCode = Literal[
 ]
 ProfileInsightActionCode = Literal[
     "complete_more_submissions",
-    "keep_rewriting_ai_text",
-    "rewrite_one_ai_section",
     "review_ai_use_pattern",
     "reuse_successful_revision",
     "revise_feedback_deeply",
@@ -1885,7 +1881,6 @@ ProfileMetricKey = Literal[
     "end_loaded_ratio",
     "deadline_window_ratio",
     "ai_ratio",
-    "digestion_ratio",
     "prompt_count",
     "reflection_quality",
     "prompt_quality",
@@ -2150,7 +2145,6 @@ class StudentProfileTimelinePoint(StrictProfileModel):
     ai_ratio: Optional[float] = Field(default=None, ge=0, le=1)
     unknown_ratio: Optional[float] = Field(default=None, ge=0, le=1)
     prompt_count: Optional[int] = Field(default=None, ge=0)
-    digestion_ratio: Optional[int] = Field(default=None, ge=0, le=100)
     # 教师批改时给的 1—5 分折算而来;批改之前为空,不给假分。
     reflection_quality: Optional[int] = Field(default=None, ge=0, le=100)
     # 同上;没有 AI 对话的提交不适用,也为空。
@@ -2196,7 +2190,6 @@ class StudentProfileMetricTrend(StrictProfileModel):
 class StudentProfileInsightParams(StrictProfileModel):
     delta: Optional[float] = None
     last: Optional[float] = None
-    digestion_ratio: Optional[int] = None
     ai_ratio: Optional[float] = None
     count: Optional[int] = None
     best_delta: Optional[float] = None

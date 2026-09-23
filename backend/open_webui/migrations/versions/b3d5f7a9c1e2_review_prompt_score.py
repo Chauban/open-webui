@@ -11,7 +11,8 @@ Create Date: 2026-09-23 12:00:00.000000
 
 现在提问质量改由教师批改时给 1—5 分,`submission_review` 与只追加的
 `submission_review_event` 各加一列 `prompt_score`;协作指数只由提问质量与
-反思质量组成,没有 AI 对话的提交只看反思质量。消化度留作参考指标,不再计入。
+反思质量组成,没有 AI 对话的提交只看反思质量。消化度(及批改侧的平均改写率)
+整个下线,不在库里,无需迁移。
 
 只是加可空列,证据快照结构不变,所以不要求清空画像证据表。指标口径变了,
 PROFILE_METRIC_VERSION 升到 2026-09-23.1;升级后用 profile_recompute --activate

@@ -131,7 +131,7 @@
 			</div>
 		</div>
 
-		<div class="mb-6 grid gap-4 md:grid-cols-4">
+		<div class="mb-6 grid gap-4 md:grid-cols-3">
 			<EduStatCard
 				label="Submissions"
 				value={dashboard.summary?.submission_count ?? dashboard.items.length}
@@ -142,10 +142,6 @@
 				value={dashboard.summary?.suspected_unmarked_import_count ?? 0}
 			/>
 			<EduStatCard tone="amber" label="Large Bursts" value={dashboard.summary?.burst_count ?? 0} />
-			<EduStatCard
-				label="Average Rewrite Ratio"
-				value={`${dashboard.summary?.average_rewrite_ratio ?? 0}%`}
-			/>
 		</div>
 
 		{#if dashboard.distributions?.challenge}
@@ -316,9 +312,6 @@
 						</EduBadge>
 						<EduBadge tone="amber">
 							{$i18n.t('Large Bursts')}: {item.risk_summary?.burst_count ?? 0}
-						</EduBadge>
-						<EduBadge>
-							{$i18n.t('Average Rewrite Ratio')}: {item.risk_summary?.average_rewrite_ratio ?? 0}%
 						</EduBadge>
 					</div>
 				</EduCard>

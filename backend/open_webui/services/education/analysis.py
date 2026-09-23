@@ -11,7 +11,7 @@ from open_webui.models.education import Education
 
 # Bump whenever the provenance/highlight analysis logic changes so cached
 # results produced by older logic are recomputed instead of served stale.
-_ANALYSIS_LOGIC_VERSION = "3"
+_ANALYSIS_LOGIC_VERSION = "4"
 
 SOURCE_MAP_TYPES = {
     "ai_inserted",
@@ -820,12 +820,6 @@ def build_submission_analysis(submission, session, versions, provenance_segments
         )
         source_mapped_chars = min(source_mapped_chars + typed_chars, len(final_text))
 
-    imported_segments = analyzed_segments + suspected_segments
-    average_rewrite_ratio = (
-        int(round(sum(segment["rewrite_ratio"] for segment in imported_segments) / len(imported_segments)))
-        if imported_segments
-        else 0
-    )
     clarifications = collect_clarification_exchanges(prompt_timeline)
     process_summary = _build_process_summary(
         operations, prompt_timeline, versions, bursts, clarifications
@@ -899,7 +893,6 @@ def build_submission_analysis(submission, session, versions, provenance_segments
             "source_mapped_chars": source_mapped_chars,
             "source_mapped_ratio": round(source_mapped_chars / max(len(final_text), 1), 4),
             "burst_count": len(bursts),
-            "average_rewrite_ratio": average_rewrite_ratio,
             "prompt_count": process_summary["prompt_sent_count"],
             "version_count": len(versions),
             "process_summary": process_summary,
@@ -964,7 +957,6 @@ def empty_risk_summary() -> dict:
         "ai_pasted_chars": 0,
         "suspected_unmarked_import_count": 0,
         "burst_count": 0,
-        "average_rewrite_ratio": 0,
     }
 
 
@@ -976,19 +968,7 @@ def accumulate_risk_summary(summary: dict, analysis_summary: Optional[dict]) -> 
     summary["ai_pasted_chars"] += analysis_summary.get("ai_pasted_chars", 0)
     summary["suspected_unmarked_import_count"] += analysis_summary.get("suspected_unmarked_import_count", 0)
     summary["burst_count"] += analysis_summary.get("burst_count", 0)
-    summary["average_rewrite_ratio"] += analysis_summary.get("average_rewrite_ratio", 0)
     return summary
-
-
-def finalize_risk_summary(summary: dict) -> dict:
-    submission_count = max(summary.get("submission_count", 0), 0)
-    average_rewrite_ratio = (
-        int(round(summary.get("average_rewrite_ratio", 0) / submission_count)) if submission_count else 0
-    )
-    return {
-        **summary,
-        "average_rewrite_ratio": average_rewrite_ratio,
-    }
 
 
 def _get_chat_history_messages(chat) -> list[dict]:

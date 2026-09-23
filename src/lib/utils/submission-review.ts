@@ -14,7 +14,6 @@ export type SubmissionReviewOverview = {
 	unknownChars: number;
 	suspectedUnmarkedImportCount: number;
 	burstCount: number;
-	averageRewriteRatio: number;
 	promptCount: number;
 	versionCount: number;
 	typedPercent: number;
@@ -61,7 +60,6 @@ export const buildSubmissionReviewOverview = ({
 	const unknownChars = numberFrom(analysisSummary.unknown_chars, stats.unknown_chars);
 	const suspectedUnmarkedImportCount = numberFrom(analysisSummary.suspected_unmarked_import_count);
 	const burstCount = numberFrom(analysisSummary.burst_count);
-	const averageRewriteRatio = numberFrom(analysisSummary.average_rewrite_ratio);
 	const promptCount = numberFrom(analysisSummary.prompt_count, stats.prompt_count);
 	const versionCount = numberFrom(analysisSummary.version_count, stats.version_count);
 	const aiParticipationPercent = percentOf(aiInsertedChars + aiPastedChars, totalChars);
@@ -80,9 +78,6 @@ export const buildSubmissionReviewOverview = ({
 		if (burstCount > 0) {
 			focusReasons.push('Large text bursts present');
 		}
-		if (averageRewriteRatio > 0 && averageRewriteRatio < 25) {
-			focusReasons.push('Low average rewrite ratio');
-		}
 		if (promptCount >= 8) {
 			focusReasons.push('Many prompt interactions');
 		}
@@ -92,11 +87,7 @@ export const buildSubmissionReviewOverview = ({
 
 	if (totalChars <= 0) {
 		focusLabel = 'Insufficient data';
-	} else if (
-		suspectedUnmarkedImportCount > 0 ||
-		aiParticipationPercent >= 60 ||
-		(averageRewriteRatio > 0 && averageRewriteRatio < 20)
-	) {
+	} else if (suspectedUnmarkedImportCount > 0 || aiParticipationPercent >= 60) {
 		focusLabel = 'Needs close review';
 	} else if (focusReasons.length > 0) {
 		focusLabel = 'Worth reviewing';
@@ -111,7 +102,6 @@ export const buildSubmissionReviewOverview = ({
 		unknownChars,
 		suspectedUnmarkedImportCount,
 		burstCount,
-		averageRewriteRatio,
 		promptCount,
 		versionCount,
 		typedPercent: percentOf(typedChars, totalChars),

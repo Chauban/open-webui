@@ -1447,7 +1447,6 @@ def test_student_assignment_and_profile_views(education_client):
     }
     # 来源证据缺失不是「AI 占比为 0」；所有依赖来源追踪的值都必须为空。
     assert point["ai_ratio"] is None
-    assert point["digestion_ratio"] is None
     assert point["collaboration_index"] is None
     # 一次提交看不出趋势,画像要如实说「数据不够」而不是编一条曲线。
     assert profile["trends"] == []
@@ -4188,7 +4187,6 @@ def test_profile_insights_rank_confidence_and_combine_ai_evidence():
             is_current=True,
             submission_id=f"submission-{index}",
             ai_ratio=0.4,
-            digestion_ratio=20,
             reflection_quality=30,
             revision_depth=10,
             normalized_score=70,

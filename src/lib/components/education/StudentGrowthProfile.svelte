@@ -102,16 +102,8 @@
 		(params: StudentProfileInsightParams) => [string, Record<string, unknown>]
 	> = {
 		not_enough_data: () => ['Not enough submissions yet to show a growth trend.', {}],
-		digestion_up: (p) => [
-			'AI-sourced text is being rewritten more than before (+{{delta}}%).',
-			{ delta: Math.round(p.delta ?? 0) }
-		],
-		digestion_low: (p) => [
-			'AI text makes up {{ai}}% of the latest draft but was barely rewritten ({{digestion}}%).',
-			{ ai: Math.round((p.ai_ratio ?? 0) * 100), digestion: Math.round(p.digestion_ratio ?? 0) }
-		],
 		ai_share_changed: (p) => [
-			'AI share of the draft changed by {{delta}} points; this is neutral unless read with digestion and reflection.',
+			'AI share of the draft changed by {{delta}} points; this is neutral unless read with prompt and reflection quality.',
 			{ delta: Math.round((p.delta ?? 0) * 100) }
 		],
 		round_improvement: (p) => [
@@ -135,11 +127,11 @@
 			{ score: p.average_score ?? 0 }
 		],
 		ai_revision_productive: (p) => [
-			'AI use, rewriting, reflection, revision depth, and score evidence point in the same productive direction.',
+			'AI use, reflection, revision depth, and score evidence point in the same productive direction.',
 			{}
 		],
 		ai_use_needs_review: (p) => [
-			'High AI share currently coincides with shallow rewriting, reflection, and revision without score improvement.',
+			'High AI share currently coincides with thin reflection and shallow revision without score improvement.',
 			{}
 		]
 	};
@@ -147,11 +139,8 @@
 	const INSIGHT_TONES = { positive: 'emerald', warning: 'amber', neutral: 'gray' } as const;
 	const INSIGHT_ACTION_TEXT: Record<string, string> = {
 		complete_more_submissions: 'Next: complete at least three submissions before judging a trend.',
-		keep_rewriting_ai_text: 'Next: keep rewriting AI-sourced text in your own reasoning and voice.',
-		rewrite_one_ai_section:
-			'Next: choose one AI-sourced section and rebuild it with your own evidence.',
 		review_ai_use_pattern:
-			'Next: compare AI share with digestion and reflection before drawing a conclusion.',
+			'Next: compare AI share with prompt and reflection quality before drawing a conclusion.',
 		reuse_successful_revision:
 			'Next: reuse the revision method that produced the strongest score improvement.',
 		revise_feedback_deeply:
@@ -1035,7 +1024,7 @@
 			</EduCard>
 		{/if}
 
-		<!-- AI 协作维：AI 占比本身不评好坏，真正有教学意义的是「消化度」。 -->
+		<!-- AI 协作维：AI 占比本身不评好坏，看的是怎么问、怎么反思（教师评定）。 -->
 		{#if activeSection === 'ai'}
 			<EduCard>
 				<div class="mb-1 flex flex-wrap items-center gap-2 text-sm font-semibold">
@@ -1044,11 +1033,11 @@
 				</div>
 				<div class="mb-5 text-xs text-gray-500 dark:text-gray-400">
 					{$i18n.t(
-						'A high AI share is not good or bad by itself. What matters is how much of it was rewritten.'
+						'A high AI share is not good or bad by itself. What matters is how the AI was questioned and reflected on.'
 					)}
 				</div>
 
-				<div class="mb-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+				<div class="mb-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
 					<EduTrendStat
 						label="Collaboration Index"
 						hint="Average of prompt quality and reflection quality, both rated by the teacher. See how it is calculated below."
@@ -1065,15 +1054,6 @@
 						delta={trendOf('ai_ratio')?.delta ?? null}
 						direction={trendOf('ai_ratio')?.direction ?? null}
 						format={(value) => formatRatioPercent(value)}
-					/>
-					<EduTrendStat
-						label="Digestion"
-						hint="How much of the AI-sourced text was rewritten before submitting. For reference only; it does not count toward the collaboration index."
-						value={latest?.digestion_ratio ?? null}
-						delta={trendOf('digestion_ratio')?.delta ?? null}
-						direction={trendOf('digestion_ratio')?.direction ?? null}
-						higherIsBetter="yes"
-						format={(value) => `${Math.round(value)}%`}
 					/>
 					<EduTrendStat
 						label="Reflection Quality"
@@ -1098,17 +1078,14 @@
 				<div class="grid gap-8 lg:grid-cols-2">
 					<div>
 						<div class="mb-2 text-xs font-medium text-gray-500 dark:text-gray-400">
-							{$i18n.t('AI Share vs Digestion')}
+							{$i18n.t('AI Share')}
 						</div>
 						<EduTrendChart
 							{labels}
 							{axisLabels}
 							min={0}
 							max={100}
-							series={[
-								seriesOf('ai_ratio', 'AI Share', 'rose', (value) => value * 100),
-								seriesOf('digestion_ratio', 'Digestion', 'emerald')
-							]}
+							series={[seriesOf('ai_ratio', 'AI Share', 'rose', (value) => value * 100)]}
 							formatValue={(value) => `${Math.round(value)}%`}
 						/>
 					</div>
@@ -1269,7 +1246,7 @@
 						</p>
 						<p>
 							{$i18n.t(
-								'Collaboration Index = average of prompt quality and reflection quality. Submissions with no AI conversation fall back to reflection quality only, so using little AI is neither penalised nor rewarded. Digestion and prompt count are shown for reference and do not count.'
+								'Collaboration Index = average of prompt quality and reflection quality. Submissions with no AI conversation fall back to reflection quality only, so using little AI is neither penalised nor rewarded. Prompt count is shown for reference and does not count.'
 							)}
 						</p>
 						<p>

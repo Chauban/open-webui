@@ -224,7 +224,6 @@
 				<option value="latest">{$i18n.t('Sort by Latest')}</option>
 				<option value="suspected">{$i18n.t('Sort by Suspected Imports')}</option>
 				<option value="burst">{$i18n.t('Sort by Large Bursts')}</option>
-				<option value="rewrite">{$i18n.t('Sort by Rewrite Ratio')}</option>
 			</select>
 		</EduCard>
 		<div class="mb-8 flex flex-wrap gap-2">
@@ -279,9 +278,6 @@
 									</EduBadge>
 									<EduBadge tone="amber">
 										{$i18n.t('Large Bursts')}: {item.risk_summary?.burst_count ?? 0}
-									</EduBadge>
-									<EduBadge>
-										{$i18n.t('Average Rewrite Ratio')}: {item.risk_summary?.average_rewrite_ratio ?? 0}%
 									</EduBadge>
 								</div>
 							</div>

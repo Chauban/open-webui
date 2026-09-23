@@ -59,14 +59,11 @@ export type ProfileMetricKey =
 	| 'end_loaded_ratio'
 	| 'deadline_window_ratio'
 	| 'ai_ratio'
-	| 'digestion_ratio'
 	| 'prompt_count'
 	| 'reflection_quality'
 	| 'prompt_quality';
 export type ProfileInsightCode =
 	| 'not_enough_data'
-	| 'digestion_up'
-	| 'digestion_low'
 	| 'ai_share_changed'
 	| 'round_improvement'
 	| 'round_revision_thin'
@@ -77,8 +74,6 @@ export type ProfileInsightCode =
 	| 'ai_use_needs_review';
 export type ProfileInsightActionCode =
 	| 'complete_more_submissions'
-	| 'keep_rewriting_ai_text'
-	| 'rewrite_one_ai_section'
 	| 'review_ai_use_pattern'
 	| 'reuse_successful_revision'
 	| 'revise_feedback_deeply'
@@ -153,7 +148,6 @@ export type StudentProfileTimelinePoint = {
 	ai_ratio: number | null;
 	unknown_ratio: number | null;
 	prompt_count: number | null;
-	digestion_ratio: number | null;
 	reflection_quality: number | null;
 	// 本轮没有 AI 对话时为 null（不适用）。
 	prompt_quality: number | null;
@@ -180,7 +174,6 @@ export type StudentProfileMetricTrend = {
 export type StudentProfileInsightParams = {
 	delta?: number | null;
 	last?: number | null;
-	digestion_ratio?: number | null;
 	ai_ratio?: number | null;
 	count?: number | null;
 	best_delta?: number | null;

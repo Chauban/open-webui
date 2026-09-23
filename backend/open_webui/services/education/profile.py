@@ -38,8 +38,6 @@ PROFILE_INSIGHT_VERSION = "2026-09-23.1"
 
 _INSIGHT_META = {
     "not_enough_data": ("low", 5, "all"),
-    "digestion_up": ("low", 4, "source"),
-    "digestion_low": ("high", 5, "source"),
     "ai_share_changed": ("low", 3, "source"),
     "round_improvement": ("low", 5, "round"),
     "round_revision_thin": ("high", 5, "round"),
@@ -61,7 +59,6 @@ _PROFILE_TREND_KEYS = (
     "end_loaded_ratio",
     "deadline_window_ratio",
     "ai_ratio",
-    "digestion_ratio",
     "prompt_count",
     "reflection_quality",
     "prompt_quality",
@@ -191,7 +188,7 @@ def _compute_collaboration_index(
 
     只评实际发生过的环节,不评用了多少 AI:没有 AI 对话的提交只看反思质量,
     AI 用得少既不扣分也不加分(用量另由 ai_ratio 呈现)。是否有对话看系统记录,
-    不看学生自己勾的「用了 AI」。消化度只测改写程度、不测理解,不计入。
+    不看学生自己勾的「用了 AI」。
     """
     # 两项都来自教师批改,批改之前留空比先给个假分诚实。
     if reflection_quality is None:
@@ -305,35 +302,6 @@ def _build_profile_insights(
 
     latest = timeline[-1]
 
-    digestion = trends.get("digestion_ratio")
-    if digestion is not None and digestion.direction == "up":
-        candidates.append(
-            StudentProfileInsight(
-                code="digestion_up",
-                tone="positive",
-                params={"delta": digestion.delta, "last": digestion.last},
-                action_code="keep_rewriting_ai_text",
-            )
-        )
-    elif (
-        latest.ai_ratio is not None
-        and latest.digestion_ratio is not None
-        and latest.ai_ratio >= 0.3
-        and latest.digestion_ratio < 20
-    ):
-        candidates.append(
-            StudentProfileInsight(
-                code="digestion_low",
-                tone="warning",
-                params={
-                    "digestion_ratio": latest.digestion_ratio,
-                    "ai_ratio": latest.ai_ratio,
-                },
-                action_code="rewrite_one_ai_section",
-                submission_id=latest.submission_id,
-            )
-        )
-
     ai_ratio = trends.get("ai_ratio")
     if ai_ratio is not None and abs(ai_ratio.delta) >= 0.15:
         candidates.append(
@@ -422,8 +390,6 @@ def _build_profile_insights(
     if (
         latest.ai_ratio is not None
         and latest.ai_ratio >= 0.1
-        and latest.digestion_ratio is not None
-        and latest.digestion_ratio >= 50
         and latest.reflection_quality is not None
         and latest.reflection_quality >= 60
         and latest.revision_depth is not None
@@ -436,7 +402,6 @@ def _build_profile_insights(
                 tone="positive",
                 params={
                     "ai_ratio": latest.ai_ratio,
-                    "digestion_ratio": latest.digestion_ratio,
                     "revision_depth": latest.revision_depth,
                     "reflection_quality": latest.reflection_quality,
                     "normalized_score": latest.normalized_score,
@@ -449,8 +414,6 @@ def _build_profile_insights(
     elif (
         latest.ai_ratio is not None
         and latest.ai_ratio >= 0.3
-        and latest.digestion_ratio is not None
-        and latest.digestion_ratio < 30
         and latest.reflection_quality is not None
         and latest.reflection_quality < 50
         and latest.revision_depth is not None
@@ -463,7 +426,6 @@ def _build_profile_insights(
                 tone="warning",
                 params={
                     "ai_ratio": latest.ai_ratio,
-                    "digestion_ratio": latest.digestion_ratio,
                     "revision_depth": latest.revision_depth,
                     "reflection_quality": latest.reflection_quality,
                     "normalized_score": latest.normalized_score,

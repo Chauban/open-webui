@@ -104,7 +104,6 @@ from open_webui.services.education.analysis import (
     compute_stats_from_highlights,
     empty_risk_summary,
     filter_segments_for_final_text,
-    finalize_risk_summary,
     get_materialized_submission_analysis,
     get_materialized_submission_analyses,
     get_prompt_timeline,
@@ -244,7 +243,7 @@ async def _build_teacher_assignment_list_item(assignment, db: Session):
         student_count=student_count,
         submission_count=len(submissions),
         latest_submission_at=latest_submission_at,
-        risk_summary=finalize_risk_summary(risk_summary),
+        risk_summary=risk_summary,
     )
 
 
@@ -1334,7 +1333,7 @@ async def get_teacher_classrooms(
                 classroom=classroom,
                 student_count=student_count,
                 assignment_count=len(assignments),
-                risk_summary=finalize_risk_summary(risk_summary),
+                risk_summary=risk_summary,
             )
         )
 
@@ -1474,13 +1473,11 @@ async def get_teacher_overview(
                         (submission.submitted_at for submission in submissions),
                         default=None,
                     ),
-                    risk_summary=finalize_risk_summary(assignment_risk_summary),
+                    risk_summary=assignment_risk_summary,
                 )
             )
 
-        classroom_items[-1].risk_summary = finalize_risk_summary(
-            classroom_risk_summary
-        )
+        classroom_items[-1].risk_summary = classroom_risk_summary
 
     now_ts = int(time.time())
 
@@ -1523,8 +1520,6 @@ def _review_sort_key(item: SubmissionListItem, sort: str):
         return summary.get("suspected_unmarked_import_count", 0) or 0
     if sort == "burst":
         return summary.get("burst_count", 0) or 0
-    if sort == "rewrite":
-        return summary.get("average_rewrite_ratio", 0) or 0
     return item.submission.submitted_at
 
 
@@ -1578,7 +1573,7 @@ async def get_teacher_review(
     limit = max(1, min(limit, REVIEW_QUEUE_MAX_LIMIT))
     offset = max(offset, 0)
 
-    if sort not in ("suspected", "burst", "rewrite") and not (
+    if sort not in ("suspected", "burst") and not (
         only_suspected or only_bursts
     ):
         # 排序与筛选都不依赖分析结果:先分页再构建,整个队列只为当前这一页构建分析。
@@ -1882,7 +1877,7 @@ async def get_classroom_progress(
                 unsubmitted_count=unsubmitted_count,
                 reviewed_count=reviewed_count,
                 pending_review_count=pending_count,
-                risk_summary=finalize_risk_summary(risk_summary),
+                risk_summary=risk_summary,
             )
         )
         submitted_total += submitted_count
@@ -1898,34 +1893,27 @@ async def get_classroom_progress(
         unsubmitted_count=unsubmitted_total,
         reviewed_count=reviewed_total,
         pending_review_count=pending_total,
-        risk_summary=finalize_risk_summary(
-            {
-                "submission_count": sum(
-                    item.risk_summary.get("submission_count", 0)
-                    for item in progress_items
-                ),
-                "ai_inserted_chars": sum(
-                    item.risk_summary.get("ai_inserted_chars", 0)
-                    for item in progress_items
-                ),
-                "ai_pasted_chars": sum(
-                    item.risk_summary.get("ai_pasted_chars", 0)
-                    for item in progress_items
-                ),
-                "suspected_unmarked_import_count": sum(
-                    item.risk_summary.get("suspected_unmarked_import_count", 0)
-                    for item in progress_items
-                ),
-                "burst_count": sum(
-                    item.risk_summary.get("burst_count", 0) for item in progress_items
-                ),
-                "average_rewrite_ratio": sum(
-                    item.risk_summary.get("average_rewrite_ratio", 0)
-                    * item.risk_summary.get("submission_count", 0)
-                    for item in progress_items
-                ),
-            }
-        ),
+        risk_summary={
+            "submission_count": sum(
+                item.risk_summary.get("submission_count", 0)
+                for item in progress_items
+            ),
+            "ai_inserted_chars": sum(
+                item.risk_summary.get("ai_inserted_chars", 0)
+                for item in progress_items
+            ),
+            "ai_pasted_chars": sum(
+                item.risk_summary.get("ai_pasted_chars", 0)
+                for item in progress_items
+            ),
+            "suspected_unmarked_import_count": sum(
+                item.risk_summary.get("suspected_unmarked_import_count", 0)
+                for item in progress_items
+            ),
+            "burst_count": sum(
+                item.risk_summary.get("burst_count", 0) for item in progress_items
+            ),
+        },
         assignments=progress_items,
     )
 
@@ -3735,7 +3723,7 @@ async def get_teacher_dashboard(
 
     return DashboardResponse(
         items=items,
-        summary=finalize_risk_summary(summary),
+        summary=summary,
         distributions=distributions,
     )
 
@@ -4079,7 +4067,6 @@ _RESEARCH_SUBMISSION_COLUMNS = (
     "ai_ratio",
     "unknown_ratio",
     "prompt_count",
-    "digestion_ratio",
     "reflection_quality",
     "prompt_quality",
     "collaboration_index",
@@ -4166,14 +4153,14 @@ def _research_readme(
         "* pseudo_id 由账号 id 经服务端密钥 HMAC 得到，稳定但不可逆；导出不含姓名与邮箱。",
         "* 每行都带 metric_version 与 algorithm_checksum。算法改版后同一份证据会算出不同",
         "  结果，跨学期比较前必须先确认这两列一致，否则两批数据不可比。",
-        "* 来源占比（typed_ratio / ai_ratio / unknown_ratio）与 digestion_ratio 由学生浏览器",
+        "* 来源占比（typed_ratio / ai_ratio / unknown_ratio）由学生浏览器",
         "  上报，可能不完整也可以被绕过，只用于讨论写作过程，不作为学术不端判据。",
         "* challenge_* 由服务端快照比对得出，不依赖客户端上报；作业未开启提交前试读时",
         "  全为空，那是「不适用」而不是「表现差」。",
         "* reflection_quality / prompt_quality 由教师批改时给的 1—5 分折算到 0—100，",
         "  未批改为空；这一轮没有 AI 对话的提交 prompt_quality 也为空（不适用）。",
         "* collaboration_index = (prompt_quality + reflection_quality) / 2；没有 AI 对话的",
-        "  提交只看 reflection_quality。digestion_ratio 与 prompt_count 仅作参考，不计入。",
+        "  提交只看 reflection_quality。prompt_count 仅作参考，不计入。",
         "* 空值一律留空，不填 0 —— 0 和「没有数据」在统计上必须分得开。",
         "",
         "文件",
@@ -4273,7 +4260,6 @@ async def export_research_dataset(
                 point.ai_ratio,
                 point.unknown_ratio,
                 point.prompt_count,
-                point.digestion_ratio,
                 point.reflection_quality,
                 point.prompt_quality,
                 point.collaboration_index,

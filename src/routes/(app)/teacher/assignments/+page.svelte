@@ -74,9 +74,6 @@
 		if (sortBy === 'burst') {
 			return (b.risk_summary?.burst_count ?? 0) - (a.risk_summary?.burst_count ?? 0);
 		}
-		if (sortBy === 'rewrite') {
-			return (b.risk_summary?.average_rewrite_ratio ?? 0) - (a.risk_summary?.average_rewrite_ratio ?? 0);
-		}
 		return (b.latest_submission_at ?? 0) - (a.latest_submission_at ?? 0);
 	});
 
@@ -143,7 +140,6 @@
 				<option value="latest_activity">{$i18n.t('Sort by Latest')}</option>
 				<option value="suspected">{$i18n.t('Sort by Suspected Imports')}</option>
 				<option value="burst">{$i18n.t('Sort by Large Bursts')}</option>
-				<option value="rewrite">{$i18n.t('Sort by Rewrite Ratio')}</option>
 			</select>
 		</EduCard>
 		<div class="mb-8 flex flex-wrap gap-2">

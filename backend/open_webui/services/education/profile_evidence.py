@@ -503,9 +503,6 @@ def build_metric_projection(
         if source_complete
         else None
     )
-    digestion_ratio = (
-        int(summary.get("average_rewrite_ratio", 0)) if source_complete else None
-    )
     prompt_count = evidence_prompt_count(facts)
     point = StudentProfileTimelinePoint(
         submission_id=facts.submission_id,
@@ -565,7 +562,6 @@ def build_metric_projection(
             float(summary.get("unknown_ratio", 0)) if source_complete else None
         ),
         prompt_count=prompt_count,
-        digestion_ratio=digestion_ratio,
         reflection_quality=reflection_quality,
         prompt_quality=prompt_quality,
         collaboration_index=_compute_collaboration_index(

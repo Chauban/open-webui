@@ -14,7 +14,6 @@ describe('buildSubmissionReviewOverview', () => {
 				unknown_chars: 0,
 				suspected_unmarked_import_count: 2,
 				burst_count: 3,
-				average_rewrite_ratio: 18,
 				prompt_count: 9,
 				version_count: 14
 			},
@@ -33,7 +32,7 @@ describe('buildSubmissionReviewOverview', () => {
 			'High AI participation',
 			'Unmarked imported segments present',
 			'Large text bursts present',
-			'Low average rewrite ratio'
+			'Many prompt interactions'
 		]);
 	});
 
