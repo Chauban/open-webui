@@ -283,9 +283,6 @@
 							</div>
 
 							<div class="flex flex-wrap gap-2">
-								<EduButton on:click={() => goto(`/teacher/assignments/${item.assignment.id}`)}>
-									{$i18n.t('Assignment')}
-								</EduButton>
 								<EduButton
 									variant="primary"
 									on:click={() => goto(`/teacher/submissions/${item.submission.id}`)}
