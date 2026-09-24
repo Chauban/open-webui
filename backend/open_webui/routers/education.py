@@ -46,6 +46,7 @@ from open_webui.models.education import (
     ClassroomJoinForm,
     ClassroomMemberCreateForm,
     ClassroomMemberDetail,
+    ClassroomRosterItem,
     ClassroomMembersActionForm,
     ClassroomMembersActionResult,
     ClassroomMemberTransferForm,
@@ -96,13 +97,11 @@ from open_webui.models.education import (
 )
 from open_webui.services.education.analysis import (
     NormalizedSegment,
-    accumulate_risk_summary,
     build_source_map_highlights,
     collect_clarification_exchanges,
     count_clarifications,
     compute_stats,
     compute_stats_from_highlights,
-    empty_risk_summary,
     filter_segments_for_final_text,
     get_materialized_submission_analysis,
     get_materialized_submission_analyses,
@@ -212,6 +211,30 @@ async def _build_classroom_member_detail(member, db: Session):
     )
 
 
+def _make_teacher_assignment_list_item(
+    assignment, classroom, student_count: int, submissions, db: Session
+):
+    reviews = Education.get_submission_reviews_by_submission_ids(
+        [submission.id for submission in submissions], db=db
+    )
+    statuses = [
+        reviews[submission.id].review_status if submission.id in reviews else "pending"
+        for submission in submissions
+    ]
+    return TeacherAssignmentListItem(
+        assignment=assignment,
+        classroom=classroom,
+        student_count=student_count,
+        submission_count=len(submissions),
+        pending_review_count=statuses.count("pending"),
+        reviewed_count=statuses.count("reviewed"),
+        returned_count=statuses.count("returned"),
+        latest_submission_at=max(
+            (submission.submitted_at for submission in submissions), default=None
+        ),
+    )
+
+
 async def _build_teacher_assignment_list_item(assignment, db: Session):
     classroom = None
     student_count = 0
@@ -224,17 +247,12 @@ async def _build_teacher_assignment_list_item(assignment, db: Session):
                 )
             )
 
-    submissions = Education.get_submissions_by_assignment(assignment.id, db=db)
-    latest_submission_at = max(
-        (submission.submitted_at for submission in submissions), default=None
-    )
-
-    return TeacherAssignmentListItem(
-        assignment=assignment,
-        classroom=classroom,
-        student_count=student_count,
-        submission_count=len(submissions),
-        latest_submission_at=latest_submission_at,
+    return _make_teacher_assignment_list_item(
+        assignment,
+        classroom,
+        student_count,
+        Education.get_submissions_by_assignment(assignment.id, db=db),
+        db,
     )
 
 
@@ -886,17 +904,12 @@ async def update_assignment(
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
-    next_status = (
-        form_data.status
-        if "status" in form_data.model_fields_set
-        else assignment.status
-    )
     next_due_at = (
         form_data.due_at
         if "due_at" in form_data.model_fields_set
         else assignment.due_at
     )
-    if next_status != "archived" and not _is_valid_due_at(next_due_at):
+    if assignment.status != "archived" and not _is_valid_due_at(next_due_at):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Assignment due time is required",
@@ -1390,6 +1403,11 @@ async def get_teacher_assignment(
     return await _build_teacher_assignment_list_item(assignment, db)
 
 
+OVERVIEW_DUE_SOON_SECONDS = 48 * 60 * 60
+OVERVIEW_FOLLOWUP_LIMIT = 6
+OVERVIEW_RECENT_SUBMISSION_LIMIT = 5
+
+
 @router.get("/teacher/overview", response_model=TeacherOverviewResponse)
 async def get_teacher_overview(
     user=Depends(get_verified_user),
@@ -1397,78 +1415,57 @@ async def get_teacher_overview(
 ):
     await _ensure_teacher_identity(user)
     classrooms = Education.get_classrooms_by_teacher(user.id, db=db)
-    classroom_items = []
-    assignment_items = []
-    submission_items = []
-    unsubmitted_count = 0
+    now_ts = int(time.time())
+    followups = []
+    submission_pairs = []
     pending_review_count = 0
+    returned_count = 0
+    due_soon_count = 0
+    overdue_unsubmitted_count = 0
 
     for classroom in classrooms:
-        assignments = Education.get_assignments_by_classroom(classroom.id, db=db)
         student_count = len(
             Education.get_classroom_members(classroom.id, member_role="student", db=db)
         )
-        classroom_items.append(
-            TeacherClassroomListItem(
-                classroom=classroom,
-                student_count=student_count,
-                assignment_count=len(assignments),
-            )
-        )
-
-        for assignment in assignments:
+        for assignment in Education.get_assignments_by_classroom(classroom.id, db=db):
             submissions = Education.get_submissions_by_assignment(assignment.id, db=db)
-            unsubmitted_count += max(student_count - len(submissions), 0)
-            for submission in submissions:
-                submission_item = await _build_submission_list_item(
-                    submission, assignment, db
-                )
-                submission_items.append(submission_item)
-                if submission_item.review_status == "pending":
-                    pending_review_count += 1
-
-            assignment_items.append(
-                TeacherAssignmentListItem(
-                    assignment=assignment,
-                    classroom=classroom,
-                    student_count=student_count,
-                    submission_count=len(submissions),
-                    latest_submission_at=max(
-                        (submission.submitted_at for submission in submissions),
-                        default=None,
-                    ),
-                )
+            submission_pairs.extend(
+                (submission, assignment) for submission in submissions
             )
+            item = _make_teacher_assignment_list_item(
+                assignment, classroom, student_count, submissions, db
+            )
+            pending_review_count += item.pending_review_count
+            returned_count += item.returned_count
+            if assignment.status != "active":
+                continue
 
-    now_ts = int(time.time())
+            unsubmitted = max(student_count - item.submission_count, 0)
+            due_at = assignment.due_at or 0
+            if due_at >= now_ts:
+                if due_at - now_ts <= OVERVIEW_DUE_SOON_SECONDS:
+                    due_soon_count += 1
+                followups.append(((0, due_at), item))
+            elif unsubmitted or item.pending_review_count:
+                overdue_unsubmitted_count += unsubmitted
+                followups.append(((1, -due_at), item))
 
-    def overview_assignment_order(item: TeacherAssignmentListItem):
-        # 概述页只留一份作业清单:未截止的按截止时间由近到远排在前面(替代原来
-        # 单独的「临近截止」板块),已截止和已归档的按最近活动排在后面。
-        due_at = item.assignment.due_at
-        if due_at is not None and item.assignment.status == "active" and due_at >= now_ts:
-            return (0, due_at)
-        return (
-            1,
-            -max(
-                item.latest_submission_at or 0,
-                item.assignment.updated_at,
-                item.assignment.created_at,
-            ),
-        )
-
-    assignment_items.sort(key=overview_assignment_order)
-    submission_items.sort(key=lambda item: item.submission.submitted_at, reverse=True)
+    followups.sort(key=lambda pair: pair[0])
+    submission_pairs.sort(key=lambda pair: pair[0].submitted_at, reverse=True)
 
     return TeacherOverviewResponse(
-        classroom_count=len(classroom_items),
-        assignment_count=len(assignment_items),
-        submission_count=len(submission_items),
+        classroom_count=len(classrooms),
         pending_review_count=pending_review_count,
-        unsubmitted_count=unsubmitted_count,
-        classrooms=classroom_items[:5],
-        recent_assignments=assignment_items[:5],
-        recent_submissions=submission_items[:5],
+        returned_count=returned_count,
+        due_soon_count=due_soon_count,
+        overdue_unsubmitted_count=overdue_unsubmitted_count,
+        followup_assignments=[item for _, item in followups[:OVERVIEW_FOLLOWUP_LIMIT]],
+        recent_submissions=[
+            await _build_submission_list_item(submission, assignment, db)
+            for submission, assignment in submission_pairs[
+                :OVERVIEW_RECENT_SUBMISSION_LIMIT
+            ]
+        ],
     )
 
 
@@ -1578,7 +1575,7 @@ async def get_teacher_classroom(
 
 @router.get(
     "/teacher/classrooms/{classroom_id}/members",
-    response_model=list[ClassroomMemberDetail],
+    response_model=list[ClassroomRosterItem],
 )
 async def get_classroom_members(
     classroom: ClassroomModel = Depends(require_teacher_classroom),
@@ -1587,7 +1584,51 @@ async def get_classroom_members(
     members = Education.get_classroom_members(
         classroom.id, member_role="student", db=db
     )
-    return [await _build_classroom_member_detail(member, db) for member in members]
+    assignments = Education.get_assignments_by_classroom(classroom.id, db=db)
+    score_max_by_assignment = {
+        assignment.id: assignment.score_max for assignment in assignments
+    }
+    submissions = [
+        submission
+        for assignment in assignments
+        for submission in Education.get_submissions_by_assignment(assignment.id, db=db)
+    ]
+    reviews = Education.get_submission_reviews_by_submission_ids(
+        [submission.id for submission in submissions], db=db
+    )
+    submissions_by_student: dict[str, list] = {}
+    for submission in submissions:
+        submissions_by_student.setdefault(submission.student_id, []).append(submission)
+
+    items = []
+    for member in members:
+        detail = await _build_classroom_member_detail(member, db)
+        own = submissions_by_student.get(member.user_id, [])
+        percents = []
+        pending = 0
+        for submission in own:
+            review = reviews.get(submission.id)
+            if review is None or review.review_status == "pending":
+                pending += 1
+            elif review.review_status == "reviewed" and review.score is not None:
+                score_max = score_max_by_assignment.get(submission.assignment_id)
+                if score_max:
+                    percents.append(review.score * 100 / score_max)
+        items.append(
+            ClassroomRosterItem(
+                **detail.model_dump(),
+                assignment_count=len(assignments),
+                submitted_count=len(own),
+                pending_review_count=pending,
+                average_score_percent=(
+                    round(sum(percents) / len(percents), 1) if percents else None
+                ),
+                latest_submitted_at=max(
+                    (submission.submitted_at for submission in own), default=None
+                ),
+            )
+        )
+    return items
 
 
 @router.post(
@@ -3608,7 +3649,6 @@ async def get_teacher_dashboard(
         "moderately_rewritten": 0,
         "deeply_rewritten": 0,
     }
-    summary = empty_risk_summary()
     # 学生、写作会话、微反思都按批取回,班级规模变大时看板不再是 N+1。
     students = {
         student.id: student
@@ -3626,7 +3666,6 @@ async def get_teacher_dashboard(
     for submission in submissions:
         student = students.get(submission.student_id)
         analysis = analyses.get(submission.id) or {}
-        accumulate_risk_summary(summary, analysis.get("summary"))
         for segment in analysis.get("segments", []):
             rewrite_level = segment.get("rewrite_level")
             if rewrite_level in rewrite_distribution:
@@ -3653,11 +3692,9 @@ async def get_teacher_dashboard(
     if challenge_distribution is not None:
         distributions["challenge"] = challenge_distribution
 
-    return DashboardResponse(
-        items=items,
-        summary=summary,
-        distributions=distributions,
-    )
+    # 风险信号只落在逐份提交上(items[].risk_summary),不做全班加总:
+    # 加总看不出是谁,还会把正常使用 AI 与风险标签并排。
+    return DashboardResponse(items=items, distributions=distributions)
 
 
 @router.get("/me/writing/goals", response_model=list[StudentGrowthGoalModel])

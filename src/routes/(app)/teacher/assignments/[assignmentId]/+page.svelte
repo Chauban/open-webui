@@ -6,76 +6,56 @@
 	import { goto } from '$app/navigation';
 	import { get } from 'svelte/store';
 	import { toast } from 'svelte-sonner';
+	import dayjs from '$lib/dayjs';
+	import relativeTime from 'dayjs/plugin/relativeTime';
 
-	import {
-		archiveAssignment,
-		deleteAssignment,
-		getTeacherAssignment,
-		getTeacherClassrooms,
-		getTeacherReflectionQuestionSets,
-		updateAssignment
-	} from '$lib/apis/education';
-	import type { CoachingStyle, ReflectionQuestion, ReflectionQuestionSet } from '$lib/apis/education';
+	import { getTeacherAssignment } from '$lib/apis/education';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
-	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
-	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
+	import EduActionMenu from '$lib/components/education/EduActionMenu.svelte';
+	import EduBadge from '$lib/components/education/EduBadge.svelte';
 	import EduButton from '$lib/components/education/EduButton.svelte';
 	import EduCard from '$lib/components/education/EduCard.svelte';
 	import EduStatCard from '$lib/components/education/EduStatCard.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
-	import EduDateTimeField from '$lib/components/education/EduDateTimeField.svelte';
-	import RubricCriteriaEditor from '$lib/components/education/RubricCriteriaEditor.svelte';
-	import CoachingStyleSelector from '$lib/components/education/CoachingStyleSelector.svelte';
-	import ChallengeSettings from '$lib/components/education/ChallengeSettings.svelte';
-	import ReflectionQuestionsEditor from '$lib/components/education/ReflectionQuestionsEditor.svelte';
-	import {
-		getReflectionQuestionsError,
-		normalizeReflectionQuestions
-	} from '$lib/utils/reflection-questions';
-	import { EDU_FIELD_CLASS } from '$lib/components/education/styles';
+	import { assignmentTabs } from '$lib/components/education/teacher-nav';
 	import {
 		formatEpoch,
 		getAssignmentStatusLabel,
 		getClassroomDisplayName,
-		resolveErrorMessage,
-		toLocalDateTimeInput
+		resolveErrorMessage
 	} from '$lib/utils/education';
+
+	// 作业首页此前是一整张编辑表单,老师点「打开作业」多半是想看进度。
+	// 现在首页只答「交得怎么样、还要做什么」,编辑挪到「设置」标签。
+
+	dayjs.extend(relativeTime);
 
 	const i18n = getContext<Writable<i18nType>>('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
 
+	const COACHING_TITLES = { socratic: 'Socratic', balanced: 'Balanced', hands_off: 'Hands-off' };
+	const assignmentId = $page.params.assignmentId;
+
 	let item = null;
-	let classrooms = [];
 	let loading = true;
 	let loadError = '';
-	let saving = false;
-	let title = '';
-	let description = '';
-	let classroomId = '';
-	let status = 'active';
-	let dueAt = '';
-	let scoreMax = '';
-	let coachingStyle: CoachingStyle = 'balanced';
-	let challengeEnabled = false;
-	let challengeRounds = 3;
-	let challengeFocusKeys: string[] = [];
-	let reflectionQuestions: ReflectionQuestion[] = [];
-	let reflectionQuestionSets: ReflectionQuestionSet[] = [];
-	let rubricCriteria = [];
-	let showArchiveConfirm = false;
-	let showDeleteConfirm = false;
 
-	const assignmentId = () => $page.params.assignmentId;
-
+	$: assignment = item?.assignment;
 	$: isPastDue =
-		item?.assignment?.status === 'active' &&
-		item?.assignment?.due_at &&
-		item.assignment.due_at * 1000 < Date.now();
-
-	// datetime-local expects a LOCAL "YYYY-MM-DDTHH:mm" string; toISOString() would shift to UTC.
+		assignment?.status === 'active' && assignment?.due_at && assignment.due_at * 1000 < Date.now();
+	$: unsubmittedCount = Math.max((item?.student_count ?? 0) - (item?.submission_count ?? 0), 0);
+	$: base = `/teacher/assignments/${assignmentId}`;
+	$: progressSegments = item
+		? [
+				{ key: 'reviewed', count: item.reviewed_count, className: 'bg-emerald-500' },
+				{ key: 'returned', count: item.returned_count, className: 'bg-sky-400' },
+				{ key: 'pending', count: item.pending_review_count, className: 'bg-amber-400' },
+				{ key: 'unsubmitted', count: unsubmittedCount, className: 'bg-gray-200 dark:bg-gray-700' }
+			]
+		: [];
 
 	const copyWriteLink = async () => {
-		const link = `${window.location.origin}/assignments/${assignmentId()}/write`;
+		const link = `${window.location.origin}/assignments/${assignmentId}/write`;
 		try {
 			await navigator.clipboard.writeText(link);
 			toast.success(t('Write link copied.'));
@@ -84,135 +64,9 @@
 		}
 	};
 
-	const syncForm = () => {
-		if (!item) return;
-		title = item.assignment.title || '';
-		description = item.assignment.description || '';
-		classroomId = item.assignment.classroom_id || '';
-		status = item.assignment.status || 'active';
-		dueAt = item.assignment.due_at ? toLocalDateTimeInput(item.assignment.due_at) : '';
-		scoreMax = String(item.assignment.score_max);
-		coachingStyle = item.assignment.coaching_style;
-		challengeEnabled = item.assignment.challenge_enabled ?? false;
-		challengeRounds = item.assignment.challenge_rounds ?? 3;
-		challengeFocusKeys = [...(item.assignment.challenge_focus_keys ?? [])];
-		reflectionQuestions = (item.assignment.reflection_questions ?? []).map((question) => ({
-			...question,
-			options: [...question.options]
-		}));
-		rubricCriteria = item.assignment.rubric_schema.criteria.map((criterion) => ({
-			key: criterion.key,
-			label: criterion.label,
-			maxScore: String(criterion.max_score)
-		}));
-	};
-
-	const loadData = async () => {
-		const [assignmentItem, teacherClassrooms, questionSets] = await Promise.all([
-			getTeacherAssignment(localStorage.token, assignmentId()),
-			getTeacherClassrooms(localStorage.token),
-			getTeacherReflectionQuestionSets(localStorage.token).catch((error) => {
-				console.error(error);
-				return [];
-			})
-		]);
-		classrooms = teacherClassrooms;
-		reflectionQuestionSets = questionSets;
-		item = assignmentItem;
-		syncForm();
-	};
-
-	const saveAssignment = async () => {
-		if (!title.trim()) {
-			toast.error(t('Assignment title is required.'));
-			return;
-		}
-		if (!classroomId) {
-			toast.error(t('Classroom is required.'));
-			return;
-		}
-		if (!dueAt) {
-			toast.error(t('Assignment due time is required.'));
-			return;
-		}
-		const parsedScoreMax = Number(scoreMax);
-		if (!Number.isInteger(parsedScoreMax) || parsedScoreMax <= 0) {
-			toast.error(t('Maximum score must be a positive whole number.'));
-			return;
-		}
-		const parsedCriteria = rubricCriteria.map((criterion) => ({
-			key: criterion.key.trim(),
-			label: criterion.label.trim(),
-			max_score: Number(criterion.maxScore)
-		}));
-		if (
-			parsedCriteria.some(
-				(criterion) =>
-					!criterion.label || !Number.isInteger(criterion.max_score) || criterion.max_score <= 0
-			)
-		) {
-			toast.error(t('Every rubric criterion needs a name and a positive whole-number maximum.'));
-			return;
-		}
-		if (parsedCriteria.reduce((sum, criterion) => sum + criterion.max_score, 0) !== parsedScoreMax) {
-			toast.error(t('Rubric maximum scores must add up to the assignment maximum.'));
-			return;
-		}
-		const reflectionQuestionsPayload = normalizeReflectionQuestions(reflectionQuestions);
-		const reflectionError = getReflectionQuestionsError(reflectionQuestionsPayload);
-		if (reflectionError) {
-			toast.error(t(reflectionError.key, reflectionError.params));
-			return;
-		}
-
-		saving = true;
-		try {
-			await updateAssignment(localStorage.token, assignmentId(), {
-				title: title.trim(),
-				description: description.trim(),
-				classroom_id: classroomId,
-				status,
-				due_at: Math.floor(new Date(dueAt).getTime() / 1000),
-				score_max: parsedScoreMax,
-				coaching_style: coachingStyle,
-				challenge_enabled: challengeEnabled,
-				challenge_rounds: challengeRounds,
-				challenge_focus_keys: challengeEnabled ? challengeFocusKeys : [],
-				reflection_questions: reflectionQuestionsPayload,
-				rubric_schema: { criteria: parsedCriteria }
-			});
-			await loadData();
-			toast.success(t('Assignment updated.'));
-		} catch (error) {
-			toast.error(resolveErrorMessage(error, t));
-		} finally {
-			saving = false;
-		}
-	};
-
-	const archiveCurrentAssignment = async () => {
-		try {
-			await archiveAssignment(localStorage.token, assignmentId());
-			await loadData();
-			toast.success(t('Assignment archived.'));
-		} catch (error) {
-			toast.error(resolveErrorMessage(error, t));
-		}
-	};
-
-	const deleteCurrentAssignment = async () => {
-		try {
-			await deleteAssignment(localStorage.token, assignmentId());
-			toast.success(t('Assignment deleted.'));
-			goto('/teacher/assignments');
-		} catch (error) {
-			toast.error(resolveErrorMessage(error, t));
-		}
-	};
-
 	onMount(async () => {
 		try {
-			await loadData();
+			item = await getTeacherAssignment(localStorage.token, assignmentId);
 		} catch (error) {
 			loadError = resolveErrorMessage(error, t);
 			toast.error(loadError);
@@ -223,187 +77,146 @@
 </script>
 
 <TeacherPageShell
-	crumbs={[{ label: $i18n.t('Teaching') }, { label: $i18n.t('Assignments'), href: '/teacher/assignments' }]}
-	title={item?.assignment?.title ?? $i18n.t('Assignments')}
+	crumbs={[{ label: $i18n.t('Assignments'), href: '/teacher/assignments' }]}
+	title={assignment?.title ?? ''}
+	tabs={assignmentTabs(assignmentId)}
 >
-	{#if loading}
-		<div class="mx-auto max-w-6xl px-4 py-8 text-sm text-gray-500 dark:text-gray-400">{$i18n.t('Loading assignment...')}</div>
-	{:else if loadError}
-		<div class="mx-auto max-w-3xl px-4 py-16">
+	<svelte:fragment slot="nav-actions">
+		{#if item}
+			<EduButton size="sm" on:click={copyWriteLink}>{$i18n.t('Copy Student Link')}</EduButton>
+			<EduActionMenu
+				items={[
+					{
+						label: 'Duplicate as New Assignment',
+						onClick: () => goto(`/teacher/assignments/new?from=${assignmentId}`)
+					}
+				]}
+			/>
+		{/if}
+	</svelte:fragment>
+
+	<div class="mx-auto max-w-6xl px-4 py-6">
+		{#if loading}
+			<EduStateCard>{$i18n.t('Loading assignment...')}</EduStateCard>
+		{:else if loadError}
 			<EduStateCard tone="error">{loadError}</EduStateCard>
-		</div>
-	{:else}
-		<div class="mx-auto max-w-6xl px-4 py-8">
-			<TeacherSectionNav />
-
-			<div class="mb-6 flex flex-wrap items-end justify-between gap-3">
-				<div class="text-sm text-gray-500 dark:text-gray-400">
-					{item.classroom ? getClassroomDisplayName(item.classroom.name, t) : t('Unknown classroom')}
-				</div>
-				<div class="flex flex-wrap gap-2">
-					<EduButton on:click={() => goto('/teacher/assignments')}>
-						{$i18n.t('Back to Assignments')}
-					</EduButton>
-					<EduButton on:click={copyWriteLink}>
-						{$i18n.t('Copy Student Link')}
-					</EduButton>
-					<EduButton on:click={() => goto(`/teacher/assignments/new?from=${item.assignment.id}`)}>
-						{$i18n.t('Duplicate')}
-					</EduButton>
-				</div>
+		{:else}
+			<div class="mb-5 flex flex-wrap items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+				{#if item.classroom}
+					<a href={`/teacher/classrooms/${item.classroom.id}`} class="hover:underline">
+						{getClassroomDisplayName(item.classroom.name, t)}
+					</a>
+					<span class="text-gray-300 dark:text-gray-600">·</span>
+				{/if}
+				<span title={formatEpoch(assignment.due_at)}>
+					{$i18n.t('Due At')}: {formatEpoch(assignment.due_at)}
+					<span class={isPastDue ? 'text-rose-600 dark:text-rose-400' : 'text-gray-400'}>
+						({dayjs(assignment.due_at * 1000)
+							.locale($i18n.language)
+							.fromNow()})
+					</span>
+				</span>
+				<EduBadge soft tone={assignment.status === 'archived' ? 'gray' : isPastDue ? 'rose' : 'emerald'}>
+					{isPastDue ? $i18n.t('Past Due') : getAssignmentStatusLabel(assignment.status, t)}
+				</EduBadge>
 			</div>
 
-			<div class="mb-8 grid gap-4 md:grid-cols-4">
-				<EduStatCard label="Students" value={item.student_count} />
-				<EduStatCard label="Submissions" value={item.submission_count} />
-				<EduCard>
-					<div class="text-xs uppercase tracking-[0.16em] text-gray-500 dark:text-gray-400">{$i18n.t('Status')}</div>
-					<div class="mt-2 text-sm font-medium {isPastDue ? 'text-rose-600 dark:text-rose-400' : 'text-gray-900 dark:text-gray-100'}">
-						{isPastDue ? $i18n.t('Past Due') : getAssignmentStatusLabel(item.assignment.status, t)}
-					</div>
-				</EduCard>
-				<EduCard>
-					<div class="text-xs uppercase tracking-[0.16em] text-gray-500 dark:text-gray-400">{$i18n.t('Due At')}</div>
-					<div class="mt-2 text-sm font-medium text-gray-900 dark:text-gray-100">
-						{item.assignment.due_at ? formatEpoch(item.assignment.due_at) : t('Not set')}
-					</div>
-				</EduCard>
+			<div class="mb-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+				<EduStatCard
+					label="Submitted"
+					value={`${item.submission_count}/${item.student_count}`}
+					hint="Students who handed in the current round"
+					href={`${base}/submissions?status=all`}
+				/>
+				<EduStatCard
+					label="To Review"
+					value={item.pending_review_count}
+					tone={item.pending_review_count > 0 ? 'amber' : 'default'}
+					href={`${base}/submissions?status=pending`}
+				/>
+				<EduStatCard
+					label="Returned"
+					value={item.returned_count}
+					hint="Waiting for the student to resubmit"
+					href={`${base}/submissions?status=returned`}
+				/>
+				<EduStatCard
+					label="Unsubmitted"
+					value={unsubmittedCount}
+					hint="Remind them or grant an extension"
+					href={`${base}/submissions?status=unsubmitted`}
+				/>
 			</div>
 
-			<div class="mb-8 grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-				<EduCard>
-					<div class="mb-4 text-sm font-semibold">{$i18n.t('Assignment Details')}</div>
-					<div class="grid gap-4">
-						<div>
-							<div class="mb-2 text-sm font-medium">{$i18n.t('Title')}</div>
-							<input bind:value={title} class="w-full {EDU_FIELD_CLASS}" />
-						</div>
-						<div>
-							<div class="mb-2 text-sm font-medium">{$i18n.t('Description')}</div>
-							<textarea bind:value={description} class="min-h-28 w-full {EDU_FIELD_CLASS}"></textarea>
-						</div>
-						<div class="grid gap-4 md:grid-cols-4">
-							<div>
-								<div class="mb-2 text-sm font-medium">{$i18n.t('Classroom')}</div>
-								<select bind:value={classroomId} class="w-full {EDU_FIELD_CLASS}">
-									{#each classrooms as classroom}
-										<option value={classroom.classroom.id}>{getClassroomDisplayName(classroom.classroom.name, t)}</option>
-									{/each}
-								</select>
-							</div>
-							<div>
-								<div class="mb-2 text-sm font-medium">{$i18n.t('Status')}</div>
-								<select bind:value={status} class="w-full {EDU_FIELD_CLASS}">
-									<option value="active">{$i18n.t('Ongoing')}</option>
-									<option value="archived">{$i18n.t('Archived')}</option>
-								</select>
-							</div>
-							<div>
-								<div class="mb-2 text-sm font-medium">{$i18n.t('Due At')}</div>
-								<EduDateTimeField bind:value={dueAt} required className="w-full {EDU_FIELD_CLASS}" />
-							</div>
-							<div>
-								<div class="mb-2 text-sm font-medium">{$i18n.t('Maximum Score')}</div>
-								<input
-									bind:value={scoreMax}
-									type="number"
-									min="1"
-									step="1"
-									disabled={item.submission_count > 0}
-									class="w-full {EDU_FIELD_CLASS} disabled:opacity-60"
-								/>
-								{#if item.submission_count > 0}
-									<div class="mt-1 text-xs text-gray-400">
-										{$i18n.t('Maximum score is locked after the first submission.')}
-									</div>
-								{/if}
-							</div>
-						</div>
-						<CoachingStyleSelector bind:value={coachingStyle} />
-						<RubricCriteriaEditor
-							bind:criteria={rubricCriteria}
-							{scoreMax}
-							disabled={item.submission_count > 0}
-							lockedHint={item.submission_count > 0
-								? $i18n.t('Rubric criteria are locked after the first submission.')
-								: ''}
-						/>
-						<ChallengeSettings
-							criteria={rubricCriteria}
-							bind:enabled={challengeEnabled}
-							bind:rounds={challengeRounds}
-							bind:focusKeys={challengeFocusKeys}
-						/>
-						<ReflectionQuestionsEditor
-							bind:questions={reflectionQuestions}
-							questionSets={reflectionQuestionSets}
-							currentAssignmentId={item.assignment.id}
-							hasSubmissions={item.submission_count > 0}
-						/>
-						<div class="flex flex-wrap justify-between gap-2">
-							<div class="flex flex-wrap gap-2">
-								<EduButton variant="danger" on:click={() => (showArchiveConfirm = true)}>
-									{$i18n.t('Archive')}
-								</EduButton>
-								<EduButton variant="danger" on:click={() => (showDeleteConfirm = true)}>
-									{$i18n.t('Delete')}
-								</EduButton>
-							</div>
-							<EduButton variant="primary" disabled={saving} on:click={saveAssignment}>
-								{saving ? $i18n.t('Saving...') : $i18n.t('Save Changes')}
-							</EduButton>
-						</div>
+			{#if item.student_count > 0}
+				<EduCard class="mb-6">
+					<div class="flex h-2.5 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
+						{#each progressSegments as segment}
+							{#if segment.count > 0}
+								<div
+									class={segment.className}
+									style={`width: ${(segment.count / item.student_count) * 100}%`}
+								></div>
+							{/if}
+						{/each}
+					</div>
+					<div class="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+						<span><span class="mr-1 inline-block size-2 rounded-full bg-emerald-500"></span>{$i18n.t('Reviewed')} {item.reviewed_count}</span>
+						<span><span class="mr-1 inline-block size-2 rounded-full bg-sky-400"></span>{$i18n.t('Returned')} {item.returned_count}</span>
+						<span><span class="mr-1 inline-block size-2 rounded-full bg-amber-400"></span>{$i18n.t('To Review')} {item.pending_review_count}</span>
+						<span><span class="mr-1 inline-block size-2 rounded-full bg-gray-300 dark:bg-gray-600"></span>{$i18n.t('Unsubmitted')} {unsubmittedCount}</span>
 					</div>
 				</EduCard>
+			{/if}
 
-				<div class="grid content-start gap-4 self-start md:grid-cols-1">
-					<EduCard
-						interactive
-						on:click={() => goto(`/teacher/assignments/${item.assignment.id}/submissions`)}
-					>
-						<div class="text-lg font-semibold">{$i18n.t('Submissions')}</div>
-						<div class="mt-2 text-sm text-gray-500 dark:text-gray-400">
-							{$i18n.t('Review each student submission for this assignment.')}
-						</div>
-					</EduCard>
-					<EduCard
-						interactive
-						on:click={() => goto(`/teacher/assignments/${item.assignment.id}/dashboard`)}
-					>
-						<div class="text-lg font-semibold">{$i18n.t('Dashboard')}</div>
-						<div class="mt-2 text-sm text-gray-500 dark:text-gray-400">
-							{$i18n.t('Inspect writing-source analytics and reflection coverage.')}
-						</div>
-					</EduCard>
-					<EduCard
-						interactive
-						on:click={() => goto(`/teacher/classrooms/${item.assignment.classroom_id}`)}
-					>
-						<div class="text-lg font-semibold">{$i18n.t('Open Classroom')}</div>
-						<div class="mt-2 text-sm text-gray-500 dark:text-gray-400">
-							{$i18n.t('Return to the classroom that owns this assignment.')}
-						</div>
-					</EduCard>
+			<EduCard>
+				<div class="mb-4 flex items-center justify-between">
+					<h2 class="text-sm font-semibold">{$i18n.t('Assignment Brief')}</h2>
+					<EduButton variant="link" on:click={() => goto(`${base}/settings`)}>
+						{$i18n.t('Edit settings')}
+					</EduButton>
 				</div>
-			</div>
-		</div>
-	{/if}
-
-	<ConfirmDialog
-		bind:show={showArchiveConfirm}
-		title={$i18n.t('Archive Assignment')}
-		message={$i18n.t(
-			'Archiving is one-way and cannot be undone. Students will no longer see this assignment as active. Continue?'
-		)}
-		on:confirm={archiveCurrentAssignment}
-	/>
-
-	<ConfirmDialog
-		bind:show={showDeleteConfirm}
-		title={$i18n.t('Delete Assignment')}
-		message={$i18n.t(
-			'Only assignments without any student activity can be deleted. This cannot be undone. Continue?'
-		)}
-		on:confirm={deleteCurrentAssignment}
-	/>
+				<div class="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-300">
+					{assignment.description || $i18n.t('No description')}
+				</div>
+				<dl class="mt-5 grid gap-x-6 gap-y-3 border-t border-gray-100 pt-4 text-sm sm:grid-cols-2 dark:border-gray-800">
+					<div>
+						<dt class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Rubric')}</dt>
+						<dd class="mt-0.5">
+							{assignment.rubric_schema.criteria
+								.map((criterion) => `${criterion.label} ${criterion.max_score}`)
+								.join(' · ')}
+							<span class="text-gray-400">/ {assignment.score_max}</span>
+						</dd>
+					</div>
+					<div>
+						<dt class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('AI Coaching Style')}</dt>
+						<dd class="mt-0.5">{$i18n.t(COACHING_TITLES[assignment.coaching_style])}</dd>
+					</div>
+					<div>
+						<dt class="text-xs text-gray-500 dark:text-gray-400">
+							{$i18n.t('AI Reader Check Before Submitting')}
+						</dt>
+						<dd class="mt-0.5">
+							{assignment.challenge_enabled
+								? $i18n.t('AI reader check on · {{count}} rounds', {
+										count: assignment.challenge_rounds
+									})
+								: $i18n.t('AI reader check off')}
+						</dd>
+					</div>
+					<div>
+						<dt class="text-xs text-gray-500 dark:text-gray-400">
+							{$i18n.t('Reflection Before Submitting')}
+						</dt>
+						<dd class="mt-0.5">
+							{$i18n.t('{{count}} reflection questions, plus "Did you use AI?"', {
+								count: assignment.reflection_questions?.length ?? 0
+							})}
+						</dd>
+					</div>
+				</dl>
+			</EduCard>
+		{/if}
+	</div>
 </TeacherPageShell>

@@ -1248,11 +1248,14 @@ def test_teacher_overview_and_assignment_listing(education_client):
     assert overview_res.status_code == 200, overview_res.text
     overview = overview_res.json()
     assert overview["classroom_count"] == 1
-    assert overview["assignment_count"] == 1
-    assert overview["submission_count"] == 1
     assert overview["pending_review_count"] == 1
-    assert overview["unsubmitted_count"] == 0
-    assert overview["recent_assignments"][0]["assignment"]["id"] == assignment["id"]
+    assert overview["returned_count"] == 0
+    assert overview["overdue_unsubmitted_count"] == 0
+    followup = overview["followup_assignments"][0]
+    assert followup["assignment"]["id"] == assignment["id"]
+    assert followup["submission_count"] == 1
+    assert followup["pending_review_count"] == 1
+    assert followup["reviewed_count"] == 0
     assert overview["recent_submissions"][0]["submission"]["id"] == submission_id
     assert overview["recent_submissions"][0]["review_status"] == "pending"
     assert overview["recent_submissions"][0]["risk_summary"]["burst_count"] >= 1
@@ -1293,6 +1296,20 @@ def test_teacher_review_lifecycle_assignment_update_and_classroom_progress(
     review = review_save_res.json()
     assert review["review_status"] == "reviewed"
     assert review["score"] == 92
+
+    roster = client.get(
+        f"/api/v1/teacher/classrooms/{classroom['id']}/members"
+    ).json()
+    roster_row = next(row for row in roster if row["member"]["user_id"] == student.id)
+    assert roster_row["assignment_count"] == 1
+    assert roster_row["submitted_count"] == 1
+    assert roster_row["pending_review_count"] == 0
+    assert roster_row["average_score_percent"] == 92.0
+    assert roster_row["latest_submitted_at"] is not None
+
+    listed = client.get(f"/api/v1/teacher/assignments/{assignment['id']}").json()
+    assert listed["reviewed_count"] == 1
+    assert listed["pending_review_count"] == 0
 
     review_get_res = client.get(f"/api/v1/teacher/submissions/{submission_id}/review")
     assert review_get_res.status_code == 200, review_get_res.text
@@ -1404,7 +1421,7 @@ def test_student_assignment_and_profile_views(education_client):
         ]
         >= 1
     )
-    assert dashboard_res.json()["summary"]["burst_count"] >= 1
+    assert "summary" not in dashboard_res.json()
     assert "rewrite_levels" in dashboard_res.json()["distributions"]
 
     UserContext.current_user = student
@@ -2743,7 +2760,7 @@ def test_submit_rejected_for_archived_assignment(education_client):
     assert submit_res.json()["detail"] == "Assignment is not open for submission"
 
 
-def test_update_assignment_rejects_null_and_unknown_status(education_client):
+def test_update_assignment_rejects_null_and_ignores_status(education_client):
     client, teacher, _, _, _, _ = education_client
 
     UserContext.current_user = teacher
@@ -2761,9 +2778,22 @@ def test_update_assignment_rejects_null_and_unknown_status(education_client):
         },
     ).json()[0]
 
-    for payload in ({"title": None}, {"classroom_id": None}, {"status": "deleted"}):
+    for payload in ({"title": None}, {"classroom_id": None}):
         res = client.patch(f"/api/v1/assignments/{assignment['id']}", json=payload)
         assert res.status_code == 400, f"{payload} -> {res.status_code} {res.text}"
+
+    # 编辑接口不管状态:归档只走 /archive,归档后也不能经 PATCH 改回进行中
+    res = client.patch(
+        f"/api/v1/assignments/{assignment['id']}", json={"status": "archived"}
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["status"] == "active"
+    client.post(f"/api/v1/assignments/{assignment['id']}/archive")
+    res = client.patch(
+        f"/api/v1/assignments/{assignment['id']}", json={"status": "active"}
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["status"] == "archived"
 
     # description 允许清空
     res = client.patch(

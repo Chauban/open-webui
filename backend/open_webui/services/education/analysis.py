@@ -950,27 +950,6 @@ async def get_materialized_submission_analyses(submissions: list, sessions: dict
     return analyses
 
 
-def empty_risk_summary() -> dict:
-    return {
-        "submission_count": 0,
-        "ai_inserted_chars": 0,
-        "ai_pasted_chars": 0,
-        "suspected_unmarked_import_count": 0,
-        "burst_count": 0,
-    }
-
-
-def accumulate_risk_summary(summary: dict, analysis_summary: Optional[dict]) -> dict:
-    if not analysis_summary:
-        return summary
-    summary["submission_count"] += 1
-    summary["ai_inserted_chars"] += analysis_summary.get("ai_inserted_chars", 0)
-    summary["ai_pasted_chars"] += analysis_summary.get("ai_pasted_chars", 0)
-    summary["suspected_unmarked_import_count"] += analysis_summary.get("suspected_unmarked_import_count", 0)
-    summary["burst_count"] += analysis_summary.get("burst_count", 0)
-    return summary
-
-
 def _get_chat_history_messages(chat) -> list[dict]:
     if chat is None:
         return []

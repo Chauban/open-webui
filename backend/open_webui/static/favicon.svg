@@ -1,9 +1,0 @@
-<svg width="512" height="512" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="RightWrite">
-  <defs>
-    <linearGradient id="rwInk" x1="22" y1="74" x2="84" y2="20" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#15314E"/>
-      <stop offset="1" stop-color="#37608F"/>
-    </linearGradient>
-  </defs>
-  <path d="M20 50 C25 58 31 65 37 72 L34 78 L41 73 C55 57 69 40 84 21 L73 27 C62 39 52 50 44 59 C38 56 28 53 22 51 Z" fill="url(#rwInk)"/>
-</svg>

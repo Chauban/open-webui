@@ -6,37 +6,64 @@
 	import { goto } from '$app/navigation';
 	import { get } from 'svelte/store';
 	import { toast } from 'svelte-sonner';
+	import dayjs from '$lib/dayjs';
+	import relativeTime from 'dayjs/plugin/relativeTime';
 
 	import {
 		exportClassroomProgress,
-		getClassroomMembers,
 		getClassroomProgress,
 		getTeacherClassroomAssignments,
 		regenerateClassroomInviteCode
 	} from '$lib/apis/education';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
-	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
+	import EduActionMenu from '$lib/components/education/EduActionMenu.svelte';
+	import EduBadge from '$lib/components/education/EduBadge.svelte';
 	import EduButton from '$lib/components/education/EduButton.svelte';
 	import EduCard from '$lib/components/education/EduCard.svelte';
-	import EduEmpty from '$lib/components/education/EduEmpty.svelte';
 	import EduStatCard from '$lib/components/education/EduStatCard.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
-	import EduTile from '$lib/components/education/EduTile.svelte';
-	import { getClassroomDisplayName, resolveErrorMessage } from '$lib/utils/education';
+	import { classroomTabs } from '$lib/components/education/teacher-nav';
+	import {
+		formatEpoch,
+		getAssignmentStatusLabel,
+		getClassroomDisplayName,
+		resolveErrorMessage
+	} from '$lib/utils/education';
+
+	// 班级首页:此前 8 个统计数 + 3 张跳转卡 + 「作业进度」「最近作业」两份
+	// 同一批作业的列表(前者还点不动)。现在是 4 个能点进去的数 + 一张作业表。
+	// 邀请码只在建班初期是主角:还没学生时放大讲清楚,有学生后收成一行。
+
+	dayjs.extend(relativeTime);
 
 	const i18n = getContext<Writable<i18nType>>('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
 
+	const classroomId = $page.params.classroomId;
+
 	let classroom = null;
+	let studentCount = 0;
 	let assignments = [];
-	let members = [];
-	let progress = null;
 	let loading = true;
 	let loadError = '';
 	let showRegenerateConfirm = false;
 
-	const classroomId = () => $page.params.classroomId;
+	$: pendingCount = assignments.reduce((sum, item) => sum + item.pending_review_count, 0);
+	$: returnedCount = assignments.reduce((sum, item) => sum + item.returned_count, 0);
+	$: sortedAssignments = [...assignments].sort((a, b) => {
+		const rank = (item) =>
+			item.assignment.status !== 'active' ? 2 : item.assignment.due_at * 1000 >= Date.now() ? 0 : 1;
+		return (
+			rank(a) - rank(b) ||
+			(rank(a) === 0
+				? a.assignment.due_at - b.assignment.due_at
+				: b.assignment.due_at - a.assignment.due_at)
+		);
+	});
+
+	const isPastDue = (item) =>
+		item.assignment.status === 'active' && item.assignment.due_at * 1000 < Date.now();
 
 	const copyText = async (text: string, successMessage: string) => {
 		try {
@@ -56,7 +83,7 @@
 
 	const regenerateCode = async () => {
 		try {
-			const response = await regenerateClassroomInviteCode(localStorage.token, classroomId());
+			const response = await regenerateClassroomInviteCode(localStorage.token, classroomId);
 			classroom = response.classroom;
 			toast.success(t('Invite code regenerated.'));
 		} catch (error) {
@@ -66,7 +93,7 @@
 
 	const downloadProgress = async () => {
 		try {
-			const csv = await exportClassroomProgress(localStorage.token, classroomId());
+			const csv = await exportClassroomProgress(localStorage.token, classroomId);
 			const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
 			const url = URL.createObjectURL(blob);
 			const link = document.createElement('a');
@@ -79,21 +106,15 @@
 		}
 	};
 
-	const loadData = async () => {
-		[members, assignments, progress] = await Promise.all([
-			getClassroomMembers(localStorage.token, classroomId()),
-			getTeacherClassroomAssignments(localStorage.token, classroomId()),
-			getClassroomProgress(localStorage.token, classroomId())
-		]);
-		classroom = progress?.classroom ?? null;
-		if (!classroom) {
-			throw new Error('Classroom not found');
-		}
-	};
-
 	onMount(async () => {
 		try {
-			await loadData();
+			const [progress, assignmentList] = await Promise.all([
+				getClassroomProgress(localStorage.token, classroomId),
+				getTeacherClassroomAssignments(localStorage.token, classroomId)
+			]);
+			classroom = progress.classroom;
+			studentCount = progress.student_count;
+			assignments = assignmentList ?? [];
 		} catch (error) {
 			loadError = resolveErrorMessage(error, t);
 			toast.error(loadError);
@@ -104,137 +125,171 @@
 </script>
 
 <TeacherPageShell
-	crumbs={[{ label: $i18n.t('Teaching') }, { label: $i18n.t('Classrooms'), href: '/teacher/classrooms' }]}
-	title={classroom ? getClassroomDisplayName(classroom.name, t) : $i18n.t('Classrooms')}
+	crumbs={[{ label: $i18n.t('Classrooms'), href: '/teacher/classrooms' }]}
+	title={classroom ? getClassroomDisplayName(classroom.name, t) : ''}
+	tabs={classroomTabs(classroomId)}
 >
-	{#if loading}
-		<div class="mx-auto max-w-6xl px-4 py-8 text-sm text-gray-500 dark:text-gray-400">{$i18n.t('Loading classroom...')}</div>
-	{:else if loadError}
-		<div class="mx-auto max-w-3xl px-4 py-16">
+	<svelte:fragment slot="nav-actions">
+		{#if classroom}
+			<EduButton
+				variant="primary"
+				size="sm"
+				on:click={() => goto(`/teacher/assignments/new?classroomId=${classroomId}`)}
+			>
+				{$i18n.t('Create Assignment')}
+			</EduButton>
+			<EduActionMenu
+				items={[
+					{ label: 'Export Progress (CSV)', onClick: downloadProgress },
+					{
+						label: 'Regenerate Invite Code',
+						danger: true,
+						onClick: () => (showRegenerateConfirm = true)
+					}
+				]}
+			/>
+		{/if}
+	</svelte:fragment>
+
+	<div class="mx-auto max-w-6xl px-4 py-6">
+		{#if loading}
+			<EduStateCard>{$i18n.t('Loading classroom...')}</EduStateCard>
+		{:else if loadError}
 			<EduStateCard tone="error">{loadError}</EduStateCard>
-		</div>
-	{:else}
-		<div class="mx-auto max-w-6xl px-4 py-8">
-			<TeacherSectionNav />
-
-		<div class="mb-6 flex flex-wrap items-center justify-end gap-3">
-			<div class="flex flex-wrap gap-2">
-				<EduButton on:click={() => goto('/teacher/classrooms')}>
-					{$i18n.t('Back to Classrooms')}
-				</EduButton>
-				<EduButton on:click={() => (showRegenerateConfirm = true)}>
-					{$i18n.t('Regenerate Code')}
-				</EduButton>
-				<EduButton on:click={downloadProgress}>{$i18n.t('Export')}</EduButton>
-			</div>
-		</div>
-
-		<div class="mb-8 grid gap-4 md:grid-cols-4">
-			<EduCard class="md:col-span-2">
-				<div class="text-xs uppercase tracking-[0.16em] text-gray-500 dark:text-gray-400">{$i18n.t('Invite Code')}</div>
-				<div class="mt-2 flex flex-wrap items-center gap-3">
-					<div class="font-mono text-3xl font-semibold">{classroom.invite_code}</div>
-					<div class="flex gap-2">
+		{:else}
+			{#if studentCount === 0}
+				<EduCard tone="sky" class="mb-6">
+					<div class="text-sm font-semibold">{$i18n.t('Invite your students')}</div>
+					<div class="mt-1 text-sm text-gray-600 dark:text-gray-300">
+						{$i18n.t(
+							'Students enter this code when they sign up or on the join page. You can also add them yourself under Students.'
+						)}
+					</div>
+					<div class="mt-4 flex flex-wrap items-center gap-3">
+						<div class="font-mono text-3xl font-semibold">{classroom.invite_code}</div>
 						<EduButton size="sm" on:click={copyInviteCode}>{$i18n.t('Copy Code')}</EduButton>
 						<EduButton size="sm" on:click={copyInviteLink}>{$i18n.t('Copy Invite Link')}</EduButton>
 					</div>
-				</div>
-			</EduCard>
-			<EduStatCard label="Students" value={members.length} />
-			<EduStatCard label="Assignments" value={assignments.length} />
-		</div>
-
-		<div class="mb-8 grid gap-4 md:grid-cols-4">
-			<EduStatCard label="Submitted" value={progress?.submitted_count ?? 0} />
-			<EduStatCard label="Unsubmitted" value={progress?.unsubmitted_count ?? 0} />
-			<EduStatCard label="Reviewed" value={progress?.reviewed_count ?? 0} />
-			<EduStatCard label="To Review" value={progress?.pending_review_count ?? 0} />
-		</div>
-
-		<div class="mb-8 grid gap-4 lg:grid-cols-3">
-			<EduCard interactive on:click={() => goto(`/teacher/classrooms/${classroom.id}/students`)}>
-				<div class="text-lg font-semibold">{$i18n.t('Manage Students')}</div>
-				<div class="mt-2 text-sm text-gray-500 dark:text-gray-400">
-					{$i18n.t('Search for students, add them to this classroom, or remove them from the roster.')}
-				</div>
-			</EduCard>
-			<EduCard interactive on:click={() => goto(`/teacher/classrooms/${classroom.id}/assignments`)}>
-				<div class="text-lg font-semibold">{$i18n.t('Classroom Assignments')}</div>
-				<div class="mt-2 text-sm text-gray-500 dark:text-gray-400">
-					{$i18n.t('Review only the assignments that belong to this classroom.')}
-				</div>
-			</EduCard>
-			<EduCard
-				interactive
-				on:click={() => goto(`/teacher/assignments/new?classroomId=${classroom.id}`)}
-			>
-				<div class="text-lg font-semibold">{$i18n.t('Create Assignment')}</div>
-				<div class="mt-2 text-sm text-gray-500 dark:text-gray-400">
-					{$i18n.t('Start a new writing task for this classroom.')}
-				</div>
-			</EduCard>
-		</div>
-
-		<EduCard class="mb-8">
-			<div class="mb-4 text-sm font-semibold">{$i18n.t('Assignment Progress')}</div>
-			{#if !progress?.assignments?.length}
-				<EduEmpty>{$i18n.t('No assignments yet.')}</EduEmpty>
+				</EduCard>
 			{:else}
-				<div class="space-y-3">
-					{#each progress.assignments as item}
-						<EduTile>
-							<div class="font-medium text-gray-900 dark:text-gray-100">{item.assignment.title}</div>
-							<div class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500 dark:text-gray-400">
-								<div>{$i18n.t('Submitted')}: {item.submitted_count}</div>
-								<div>{$i18n.t('Unsubmitted')}: {item.unsubmitted_count}</div>
-								<div>{$i18n.t('Reviewed')}: {item.reviewed_count}</div>
-								<div>{$i18n.t('To Review')}: {item.pending_review_count}</div>
-							</div>
-						</EduTile>
-					{/each}
+				<div class="mb-5 flex flex-wrap items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+					<span class="text-gray-500 dark:text-gray-400">{$i18n.t('Invite Code')}</span>
+					<button
+						type="button"
+						class="rounded-lg px-1.5 py-0.5 font-mono font-semibold transition hover:bg-gray-100 dark:hover:bg-gray-800"
+						title={$i18n.t('Copy Code')}
+						on:click={copyInviteCode}
+					>
+						{classroom.invite_code}
+					</button>
+					<EduButton variant="link" on:click={copyInviteLink}>{$i18n.t('Copy Invite Link')}</EduButton>
 				</div>
 			{/if}
-		</EduCard>
 
-		<EduCard>
-			<div class="mb-4 flex items-center justify-between">
-				<div class="text-sm font-semibold">{$i18n.t('Recent Assignments')}</div>
-				<EduButton
-					variant="link"
-					on:click={() => goto(`/teacher/classrooms/${classroom.id}/assignments`)}
-				>
-					{$i18n.t('View all')}
-				</EduButton>
+			<div class="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+				<EduStatCard label="Students" value={studentCount} href={`/teacher/classrooms/${classroomId}/students`} />
+				<EduStatCard label="Assignments" value={assignments.length} href={`/teacher/assignments?classroom=${classroomId}`} />
+				<EduStatCard
+					label="To Review"
+					value={pendingCount}
+					tone={pendingCount > 0 ? 'amber' : 'default'}
+					href={`/teacher/review?status=pending&classroom=${classroomId}`}
+				/>
+				<EduStatCard
+					label="Returned"
+					value={returnedCount}
+					hint="Waiting for the student to resubmit"
+					href={`/teacher/review?status=returned&classroom=${classroomId}`}
+				/>
 			</div>
-			{#if assignments.length === 0}
-				<EduEmpty>{$i18n.t('No assignments yet.')}</EduEmpty>
-			{:else}
-				<div class="space-y-3">
-					{#each assignments.slice(0, 5) as item}
-						<EduTile class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-							<div>
-								<div class="font-medium text-gray-900 dark:text-gray-100">{item.assignment.title}</div>
-								<div class="mt-1 text-gray-500 dark:text-gray-400">
-									{item.assignment.description || $i18n.t('No description')}
-								</div>
-							</div>
-							<div class="flex flex-wrap gap-2">
-								<EduButton on:click={() => goto(`/teacher/assignments/${item.assignment.id}`)}>
-									{$i18n.t('Open')}
-								</EduButton>
-								<EduButton
-									on:click={() => goto(`/teacher/assignments/${item.assignment.id}/submissions`)}
-								>
-									{$i18n.t('Submissions')}
-								</EduButton>
-							</div>
-						</EduTile>
-					{/each}
+
+			<EduCard padding="none">
+				<div class="flex items-center justify-between border-b border-gray-100 px-4 py-3 dark:border-gray-800">
+					<h2 class="text-sm font-semibold">{$i18n.t('Assignments')}</h2>
 				</div>
-			{/if}
-		</EduCard>
-		</div>
-	{/if}
+				{#if sortedAssignments.length === 0}
+					<div class="px-4 py-6 text-sm text-gray-500 dark:text-gray-400">
+						{$i18n.t('No assignments yet.')}
+					</div>
+				{:else}
+					<div class="overflow-x-auto">
+						<table class="w-full min-w-[40rem] text-sm">
+							<thead class="bg-gray-50 text-left text-xs text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+								<tr>
+									<th class="px-4 py-2.5 font-medium">{$i18n.t('Assignment')}</th>
+									<th class="px-4 py-2.5 font-medium">{$i18n.t('Due At')}</th>
+									<th class="px-4 py-2.5 text-right font-medium">{$i18n.t('Submitted')}</th>
+									<th class="px-4 py-2.5 text-right font-medium">{$i18n.t('To Review')}</th>
+									<th class="px-4 py-2.5 text-right font-medium">{$i18n.t('Returned')}</th>
+								</tr>
+							</thead>
+							<tbody>
+								{#each sortedAssignments as item (item.assignment.id)}
+									<tr
+										class="cursor-pointer border-t border-gray-100 transition hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-800/60"
+										on:click={() => goto(`/teacher/assignments/${item.assignment.id}`)}
+									>
+										<td class="px-4 py-3">
+											<a
+												href={`/teacher/assignments/${item.assignment.id}`}
+												class="font-medium text-gray-900 hover:underline dark:text-gray-100"
+												on:click|stopPropagation
+											>
+												{item.assignment.title}
+											</a>
+											{#if item.assignment.status === 'archived'}
+												<EduBadge soft class="ml-1.5">{getAssignmentStatusLabel('archived', t)}</EduBadge>
+											{/if}
+										</td>
+										<td class="whitespace-nowrap px-4 py-3" title={formatEpoch(item.assignment.due_at)}>
+											<span class={isPastDue(item) ? 'text-rose-600 dark:text-rose-400' : ''}>
+												{formatEpoch(item.assignment.due_at)}
+											</span>
+											<span class="ml-1 text-xs text-gray-400">
+												{dayjs(item.assignment.due_at * 1000)
+													.locale($i18n.language)
+													.fromNow()}
+											</span>
+										</td>
+										<td class="px-4 py-3 text-right tabular-nums">
+											<a
+												href={`/teacher/assignments/${item.assignment.id}/submissions?status=unsubmitted`}
+												class="hover:underline"
+												title={$i18n.t('Unsubmitted')}
+												on:click|stopPropagation
+											>
+												{item.submission_count}/{item.student_count}
+											</a>
+										</td>
+										<td class="px-4 py-3 text-right tabular-nums">
+											{#if item.pending_review_count > 0}
+												<a
+													href={`/teacher/assignments/${item.assignment.id}/submissions?status=pending`}
+													class="font-semibold text-amber-600 hover:underline dark:text-amber-400"
+													on:click|stopPropagation
+												>
+													{item.pending_review_count}
+												</a>
+											{:else}
+												<span class="text-gray-300 dark:text-gray-600">0</span>
+											{/if}
+										</td>
+										<td class="px-4 py-3 text-right tabular-nums">
+											{#if item.returned_count > 0}
+												{item.returned_count}
+											{:else}
+												<span class="text-gray-300 dark:text-gray-600">0</span>
+											{/if}
+										</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					</div>
+				{/if}
+			</EduCard>
+		{/if}
+	</div>
 
 	<ConfirmDialog
 		bind:show={showRegenerateConfirm}

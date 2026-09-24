@@ -21,7 +21,6 @@
 	import SourceHighlightedText from '$lib/components/education/SourceHighlightedText.svelte';
 	import EduEvidenceDisclaimer from '$lib/components/education/EduEvidenceDisclaimer.svelte';
 	import ChallengeRounds from '$lib/components/education/ChallengeRounds.svelte';
-	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
 	import { buildSubmissionReviewOverview } from '$lib/utils/submission-review';
 	import {
 		formatEpoch,
@@ -113,6 +112,7 @@
 	let expandedTimelineIds: Set<number> = new Set();
 	let resubmitDueLocal = '';
 	let challengeFollowup = false;
+	let returnMode = false;
 	let diffData: any = null;
 	let diffLoading = false;
 	let loadSeq = 0;
@@ -188,6 +188,13 @@
 			: analysisSummary,
 		stats: detail?.submission?.stats_json ?? {}
 	});
+	$: sourceSegments = [
+		{ label: 'Typed', chars: reviewOverview.typedChars, percent: reviewOverview.typedPercent, bar: 'bg-emerald-300', swatch: 'bg-emerald-300' },
+		{ label: 'AI inserted', chars: reviewOverview.aiInsertedChars, percent: reviewOverview.aiInsertedPercent, bar: 'bg-amber-300', swatch: 'bg-amber-300' },
+		{ label: 'AI pasted', chars: reviewOverview.aiPastedChars, percent: reviewOverview.aiPastedPercent, bar: 'bg-sky-300', swatch: 'bg-sky-300' },
+		{ label: 'External paste / suspected import', chars: reviewOverview.externalPasteChars, percent: reviewOverview.externalPastePercent, bar: 'bg-rose-300', swatch: 'bg-rose-300' },
+		{ label: 'Unknown source', chars: reviewOverview.unknownChars, percent: reviewOverview.unknownPercent, bar: 'bg-gray-300', swatch: 'bg-gray-300' }
+	];
 	$: filteredPromptTimeline = (detail?.prompt_timeline ?? []).filter((item) => {
 		if (item.role === 'user') return showUserTimeline;
 		if (item.role === 'assistant') return showAssistantTimeline;
@@ -259,6 +266,7 @@
 		returnedComment = review?.returned_comment || '';
 		resubmitDueLocal = review?.resubmit_due_at ? toLocalDateTimeInput(review.resubmit_due_at) : '';
 		challengeFollowup = review?.challenge_followup ?? false;
+		returnMode = review?.review_status === 'returned';
 	};
 
 	const saveReview = async (effectiveStatus: string) => {
@@ -491,144 +499,115 @@
 
 <TeacherPageShell
 	crumbs={[
-		{ label: $i18n.t('Teaching') },
-		{ label: $i18n.t('Review'), href: '/teacher/review' }
+		{ label: $i18n.t('Review'), href: '/teacher/review' },
+		...(detail
+			? [
+					{
+						label: detail.assignment.title,
+						href: `/teacher/assignments/${detail.assignment.id}/submissions`
+					}
+				]
+			: [])
 	]}
-	title={detail?.student_name ?? $i18n.t('Submission Review')}
+	title={detail?.student_name ?? ''}
 >
+	<svelte:fragment slot="nav-actions">
+		{#if loaded && detail}
+			<EduButton
+				size="sm"
+				disabled={!prevPendingId}
+				on:click={() => prevPendingId && goto(`/teacher/submissions/${prevPendingId}`)}
+			>
+				&larr; {$i18n.t('Previous pending')}
+			</EduButton>
+			<EduButton
+				size="sm"
+				disabled={!nextPendingId}
+				on:click={() => nextPendingId && goto(`/teacher/submissions/${nextPendingId}`)}
+			>
+				{$i18n.t('Next pending')} &rarr;
+			</EduButton>
+		{/if}
+	</svelte:fragment>
+
 	{#if loaded && detail}
 		<!-- h-full + overflow-hidden prevents the shell's overflow-y-auto from activating -->
 		<div class="flex h-full flex-col overflow-hidden">
 
-			<!-- ── Compact fixed header ── -->
-			<div class="shrink-0 border-b border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-850 px-6 py-3 space-y-3">
-				<TeacherSectionNav />
-
-				<div class="flex flex-wrap items-center justify-between gap-2">
-					<button
-						class="inline-flex items-center gap-1 text-sm text-gray-500 dark:text-gray-400 transition-colors hover:text-gray-800 dark:hover:text-gray-200"
-						on:click={() => goto('/teacher/review')}
+			<!--
+				固定头部此前叠了五层(分区导航、返回与上下份、标题与关注点、7 格来源统计、免责声明),
+				笔记本屏上原文区被压得很矮。导航交给顶栏;7 格统计收成一条来源比例条,
+				同时充当原文高亮的图例。
+			-->
+			<div class="shrink-0 space-y-2 border-b border-gray-100 bg-white px-6 py-3 dark:border-gray-800 dark:bg-gray-850">
+				<div class="flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
+					<span
+						class="rounded-full px-2.5 py-0.5 {reviewStatus === 'reviewed'
+							? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+							: reviewStatus === 'returned'
+								? 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300'
+								: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'}"
 					>
-						&larr; {$i18n.t('Back to review queue')}
-					</button>
-					<div class="flex items-center gap-1.5">
-						<EduButton
-							size="sm"
-							disabled={!prevPendingId}
-							on:click={() => prevPendingId && goto(`/teacher/submissions/${prevPendingId}`)}
-						>
-							&larr; {$i18n.t('Previous pending')}
-						</EduButton>
-						<EduButton
-							size="sm"
-							disabled={!nextPendingId}
-							on:click={() => nextPendingId && goto(`/teacher/submissions/${nextPendingId}`)}
-						>
-							{$i18n.t('Next pending')} &rarr;
-						</EduButton>
-					</div>
-				</div>
-
-				<!-- Title row + 过程关注点 -->
-				<div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-					<div>
-						<div class="text-xs uppercase tracking-[0.2em] text-gray-400">
-							{$i18n.t('Submission Review')}
-						</div>
-						<div class="mt-0.5 text-xl font-semibold text-gray-950 dark:text-gray-100">{detail.assignment.title}</div>
-						<div class="mt-1.5 flex flex-wrap gap-1.5 text-xs text-gray-600 dark:text-gray-400">
-							<span class="rounded-full bg-gray-100 dark:bg-gray-800 px-3 py-1">{detail.student_name}</span>
-							<span class="rounded-full bg-gray-100 dark:bg-gray-800 px-3 py-1">
-								{$i18n.t('Submitted At')}: {formatEpoch(detail.submission.submitted_at)}
-							</span>
-							<span
-								class="rounded-full px-3 py-1 {reviewStatus === 'reviewed'
-									? 'bg-emerald-100 text-emerald-700 dark:text-emerald-300'
-									: reviewStatus === 'returned'
-										? 'bg-amber-100 text-amber-700 dark:text-amber-300'
-										: 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'}"
+						{$i18n.t(
+							reviewStatusOptions.find((o) => o.value === reviewStatus)?.label ?? 'Pending Review'
+						)}
+					</span>
+					<span>{$i18n.t('Submitted At')}: {formatEpoch(detail.submission.submitted_at)}</span>
+					{#if detail?.rounds?.length > 1}
+						<span class="text-gray-300 dark:text-gray-600">|</span>
+						{#each detail.rounds as round}
+							<a
+								href={`/teacher/submissions/${round.submission_id}`}
+								class="rounded-lg border px-2 py-0.5 {round.submission_id === detail.submission.id
+									? 'border-gray-900 bg-gray-900 text-white dark:border-gray-100 dark:bg-gray-100 dark:text-gray-900'
+									: 'border-gray-200 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800'}"
 							>
-								{$i18n.t(
-									reviewStatusOptions.find((o) => o.value === reviewStatus)?.label ??
-										'Pending Review'
-								)}
-							</span>
-						</div>
-						{#if detail?.rounds?.length > 1}
-							<div class="mt-2 flex flex-wrap gap-1.5 items-center">
-								{#each detail.rounds as round}
-									<a
-										href={`/teacher/submissions/${round.submission_id}`}
-										class="px-2.5 py-1 rounded-lg text-sm border
-											{round.submission_id === detail.submission.id
-											? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
-											: 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'}"
-									>
-										{$i18n.t('Round {{round}}', { round: round.round_no })}
-										{#if !round.is_current}<span class="opacity-60"> · {$i18n.t('History')}</span>{/if}
-									</a>
-								{/each}
-							</div>
-						{/if}
-					</div>
-					<div class="shrink-0 rounded-2xl border border-cyan-100 bg-cyan-50 px-4 py-3 lg:min-w-60">
-						<div class="text-[10px] uppercase tracking-[0.14em] text-cyan-600" title={$i18n.t('A heuristic pointer for where to look first, not a conclusion.')}>{$i18n.t('Process Focus')}</div>
-						<div class="mt-0.5 text-base font-semibold text-cyan-950">{$i18n.t(reviewOverview.focusLabel)}</div>
-						<div class="mt-1.5 flex flex-wrap gap-1.5">
-							{#each reviewOverview.focusReasons as reason}
-								<span class="rounded-full bg-white dark:bg-gray-850 px-2.5 py-0.5 text-xs text-cyan-800">{$i18n.t(reason)}</span>
-							{/each}
-						</div>
-					</div>
+								{$i18n.t('Round {{round}}', { round: round.round_no })}{#if !round.is_current}<span
+										class="opacity-60"> · {$i18n.t('History')}</span
+									>{/if}
+							</a>
+						{/each}
+					{/if}
+					<span
+						class="ml-auto inline-flex items-center gap-1.5 rounded-full border border-cyan-100 bg-cyan-50 px-2.5 py-0.5 text-cyan-800 dark:border-cyan-900 dark:bg-cyan-950/40 dark:text-cyan-200"
+						title={[
+							$i18n.t('A heuristic pointer for where to look first, not a conclusion.'),
+							...reviewOverview.focusReasons.map((reason) => $i18n.t(reason))
+						].join('\n')}
+					>
+						<span class="opacity-70">{$i18n.t('Process Focus')}</span>
+						<span class="font-semibold">{$i18n.t(reviewOverview.focusLabel)}</span>
+					</span>
 				</div>
 
-				<!-- Stats row -->
-				<div class="grid grid-cols-2 gap-2 md:grid-cols-7">
-					<div class="rounded-xl bg-gray-50 dark:bg-gray-800 px-3 py-2">
-						<div class="text-[10px] uppercase tracking-[0.1em] text-gray-400">{$i18n.t('Total characters')}</div>
-						<div class="mt-0.5 text-base font-semibold text-gray-950 dark:text-gray-100">{reviewOverview.totalChars}</div>
+				<div>
+					<div class="flex h-2.5 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
+						{#each sourceSegments as segment}
+							{#if segment.chars > 0}
+								<div
+									class={segment.bar}
+									style={`width: ${segment.percent}%`}
+									title={`${$i18n.t(segment.label)} ${segment.chars} (${segment.percent}%)`}
+								></div>
+							{/if}
+						{/each}
 					</div>
-					<div class="rounded-xl bg-emerald-50 px-3 py-2">
-						<div class="text-[10px] uppercase tracking-[0.1em] text-emerald-500">{$i18n.t('Typed')}</div>
-						<div class="mt-0.5 text-base font-semibold text-emerald-950">
-							{reviewOverview.typedChars}
-							<span class="text-xs font-medium text-emerald-500">({reviewOverview.typedPercent}%)</span>
-						</div>
+					<div class="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-600 dark:text-gray-400">
+						{#each sourceSegments as segment}
+							<span class="inline-flex items-center gap-1.5">
+								<span class="inline-block size-2.5 rounded {segment.swatch}"></span>
+								{$i18n.t(segment.label)}
+								<span class="tabular-nums text-gray-900 dark:text-gray-100">{segment.chars}</span>
+								<span class="tabular-nums text-gray-400">({segment.percent}%)</span>
+							</span>
+						{/each}
+						<span class="text-gray-400">
+							{$i18n.t('Total characters')} {reviewOverview.totalChars} · {$i18n.t('Prompts')}
+							{reviewOverview.promptCount} · {$i18n.t('Versions')} {reviewOverview.versionCount}
+						</span>
 					</div>
-					<div class="rounded-xl bg-amber-50 px-3 py-2">
-						<div class="text-[10px] uppercase tracking-[0.1em] text-amber-500">{$i18n.t('AI inserted')}</div>
-						<div class="mt-0.5 text-base font-semibold text-amber-950">
-							{reviewOverview.aiInsertedChars}
-							<span class="text-xs font-medium text-amber-500">({reviewOverview.aiInsertedPercent}%)</span>
-						</div>
-					</div>
-					<div class="rounded-xl bg-sky-50 px-3 py-2">
-						<div class="text-[10px] uppercase tracking-[0.1em] text-sky-500">{$i18n.t('AI pasted')}</div>
-						<div class="mt-0.5 text-base font-semibold text-sky-950">
-							{reviewOverview.aiPastedChars}
-							<span class="text-xs font-medium text-sky-500">({reviewOverview.aiPastedPercent}%)</span>
-						</div>
-					</div>
-					<div class="rounded-xl bg-rose-50 px-3 py-2">
-						<div class="text-[10px] uppercase tracking-[0.1em] text-rose-500">{$i18n.t('External paste')}</div>
-						<div class="mt-0.5 text-base font-semibold text-rose-950">
-							{reviewOverview.externalPasteChars}
-							<span class="text-xs font-medium text-rose-500">({reviewOverview.externalPastePercent}%)</span>
-						</div>
-					</div>
-					<div class="rounded-xl bg-gray-50 dark:bg-gray-800 px-3 py-2">
-						<div class="text-[10px] uppercase tracking-[0.1em] text-gray-400">{$i18n.t('Unknown source')}</div>
-						<div class="mt-0.5 text-base font-semibold text-gray-700 dark:text-gray-300">
-							{reviewOverview.unknownChars}
-							<span class="text-xs font-medium text-gray-400">({reviewOverview.unknownPercent}%)</span>
-						</div>
-					</div>
-					<div class="rounded-xl bg-indigo-50 px-3 py-2">
-						<div class="text-[10px] uppercase tracking-[0.1em] text-indigo-500">{$i18n.t('Prompts')} / {$i18n.t('Versions')}</div>
-						<div class="mt-0.5 text-base font-semibold text-indigo-950">{reviewOverview.promptCount} / {reviewOverview.versionCount}</div>
-					</div>
+					<EduEvidenceDisclaimer class="mt-1" />
 				</div>
-				<EduEvidenceDisclaimer class="mt-2" />
 			</div>
 
 			<!-- ── Main two-column body ── -->
@@ -645,30 +624,6 @@
 								{$i18n.t('Highlight sources')}
 							</label>
 						</div>
-						{#if highlight}
-							<div class="mt-3 flex flex-wrap gap-2 text-xs">
-								<EduBadge tone="amber" class="inline-flex items-center gap-1.5">
-									<span class="inline-block h-2.5 w-2.5 rounded bg-amber-300"></span>
-									{$i18n.t('AI inserted')}
-								</EduBadge>
-								<EduBadge tone="sky" class="inline-flex items-center gap-1.5">
-									<span class="inline-block h-2.5 w-2.5 rounded bg-sky-300"></span>
-									{$i18n.t('AI pasted')}
-								</EduBadge>
-								<EduBadge tone="emerald" class="inline-flex items-center gap-1.5">
-									<span class="inline-block h-2.5 w-2.5 rounded bg-emerald-300"></span>
-									{$i18n.t('Typed')}
-								</EduBadge>
-								<EduBadge tone="rose" class="inline-flex items-center gap-1.5">
-									<span class="inline-block h-2.5 w-2.5 rounded bg-rose-300"></span>
-									{$i18n.t('External paste / suspected import')}
-								</EduBadge>
-								<EduBadge class="inline-flex items-center gap-1.5">
-									<span class="inline-block h-2.5 w-2.5 rounded bg-gray-300"></span>
-									{$i18n.t('Unknown source')}
-								</EduBadge>
-							</div>
-						{/if}
 					</div>
 					<!-- Article body (scrollable) -->
 					<div class="flex-1 overflow-y-auto px-6 py-5">
@@ -839,10 +794,11 @@
 
 								<!-- Overall comment -->
 								<div>
-									<label class="mb-1.5 block text-xs font-medium uppercase tracking-[0.12em] text-gray-400">
+									<label for="review-overall-comment" class="mb-1.5 block text-xs font-medium uppercase tracking-[0.12em] text-gray-400">
 										{$i18n.t('Overall Comment')}
 									</label>
 									<textarea
+										id="review-overall-comment"
 										bind:value={overallComment}
 										disabled={isHistoricalRound}
 										class="min-h-24 w-full resize-none rounded-2xl border border-gray-200 dark:border-gray-800 px-4 py-3 text-sm outline-none focus:border-gray-400 transition-colors disabled:opacity-50"
@@ -850,87 +806,117 @@
 									></textarea>
 								</div>
 
-								<!-- Returned comment -->
-								<div>
-									<label class="mb-1.5 block text-xs font-medium uppercase tracking-[0.12em] text-gray-400">
-										{$i18n.t('Returned Comment')}
-									</label>
-									<textarea
-										bind:value={returnedComment}
-										disabled={isHistoricalRound}
-										class="min-h-20 w-full resize-none rounded-2xl border border-gray-200 dark:border-gray-800 px-4 py-3 text-sm outline-none focus:border-gray-400 transition-colors disabled:opacity-50"
-										placeholder={$i18n.t('Returned Comment')}
-									></textarea>
-								</div>
-
 								<!--
-									让质疑读者就这条意见追问。退回意见此前写完就没下文了，学生看不看、
-									改不改全凭自觉；勾上之后，下一轮提交前的质疑会围绕这条展开。
-									作业没启用质疑时不显示 —— 不在这里替教师悄悄打开那个环节。
+									操作分主次:「完成并下一份」是批改的主路径;「保存」停在本份;
+									「存草稿」不改状态。退回是另一条路,点开才出现退回意见和重交截止,
+									此前这两栏无论退不退回都常驻,占掉半屏。
 								-->
-								{#if detail?.assignment?.challenge_enabled}
-									<label
-										class="flex cursor-pointer items-start gap-2 rounded-2xl bg-gray-50 px-4 py-3 dark:bg-gray-800"
-									>
-										<input
-											type="checkbox"
-											class="mt-0.5 size-3.5 shrink-0 accent-black dark:accent-gray-100"
-											bind:checked={challengeFollowup}
-											disabled={isHistoricalRound}
-										/>
-										<span class="text-xs leading-relaxed text-gray-700 dark:text-gray-200">
-											{$i18n.t('Have the reader follow up on this comment next round')}
-										</span>
-									</label>
-								{/if}
-
-								<!-- Resubmit due at (required when returning for revision) -->
-								<div>
-									<label class="mb-1.5 block text-xs font-medium uppercase tracking-[0.12em] text-gray-400">
-										{$i18n.t('Resubmit before')}
-									</label>
-									<EduDateTimeField
-										bind:value={resubmitDueLocal}
-										disabled={isHistoricalRound}
-										className="w-full rounded-2xl border border-gray-200 dark:border-gray-800 px-4 py-3 text-sm outline-none focus:border-gray-400 transition-colors disabled:opacity-50"
-									/>
-								</div>
-
-								<!-- Actions + persistent save status -->
-								<div class="flex flex-wrap items-center justify-between gap-3">
-									<div class="flex flex-wrap gap-2">
+								<div class="space-y-3 border-t border-gray-100 pt-4 dark:border-gray-800">
+									<div class="flex flex-wrap items-center gap-2">
 										<EduButton
+											variant="primary"
+											disabled={saving || isHistoricalRound}
+											on:click={saveReviewAndNext}
+										>
+											{saving
+												? $i18n.t('Saving...')
+												: nextPendingId && nextPendingId !== submissionId
+													? $i18n.t('Mark Reviewed & Next')
+													: $i18n.t('Mark Reviewed')}
+										</EduButton>
+										{#if nextPendingId && nextPendingId !== submissionId}
+											<EduButton
+												disabled={saving || isHistoricalRound}
+												on:click={() => saveReview('reviewed')}
+											>
+												{$i18n.t('Mark Reviewed & Stay')}
+											</EduButton>
+										{/if}
+										<EduButton
+											variant="link"
 											disabled={saving || isHistoricalRound}
 											on:click={() => saveReview('pending')}
 										>
 											{$i18n.t('Save Draft')}
 										</EduButton>
-										<EduButton
-											variant="primary"
-											disabled={saving || isHistoricalRound}
-											on:click={() => saveReview('reviewed')}
-										>
-											{saving ? $i18n.t('Saving...') : $i18n.t('Save Review')}
-										</EduButton>
-										<EduButton
-											disabled={saving || isHistoricalRound}
-											on:click={() => saveReview('returned')}
+										{#if lastSavedStr}
+											<span class="ml-auto text-xs text-gray-400">
+												{$i18n.t('Last saved at {{time}}', { time: lastSavedStr })}
+											</span>
+										{/if}
+									</div>
+
+									<div class="rounded-2xl border border-amber-200 dark:border-amber-900/60">
+										<button
+											type="button"
+											class="flex w-full items-center justify-between px-4 py-2.5 text-left text-sm font-medium text-amber-800 dark:text-amber-300"
+											aria-expanded={returnMode}
+											disabled={isHistoricalRound}
+											on:click={() => (returnMode = !returnMode)}
 										>
 											{$i18n.t('Return for Revision')}
-										</EduButton>
-										<button
-											class="rounded-full bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-700 disabled:opacity-60 transition-colors"
-											disabled={saving || isHistoricalRound}
-											on:click={saveReviewAndNext}
-										>
-											{$i18n.t('Save & Next')}
+											<span aria-hidden="true" class="text-xs">{returnMode ? '▲' : '▼'}</span>
 										</button>
+										{#if returnMode}
+											<div class="space-y-4 border-t border-amber-100 px-4 pb-4 pt-3 dark:border-amber-900/60">
+												<div>
+													<label for="review-returned-comment" class="mb-1.5 block text-xs font-medium uppercase tracking-[0.12em] text-gray-400">
+														{$i18n.t('Returned Comment')}
+													</label>
+													<textarea
+										id="review-returned-comment"
+														bind:value={returnedComment}
+														disabled={isHistoricalRound}
+														class="min-h-20 w-full resize-none rounded-2xl border border-gray-200 dark:border-gray-800 px-4 py-3 text-sm outline-none focus:border-gray-400 transition-colors disabled:opacity-50"
+														placeholder={$i18n.t('Returned Comment')}
+													></textarea>
+												</div>
+
+												<!--
+													让质疑读者就这条意见追问。退回意见此前写完就没下文了，学生看不看、
+													改不改全凭自觉；勾上之后，下一轮提交前的质疑会围绕这条展开。
+													作业没启用质疑时不显示 —— 不在这里替教师悄悄打开那个环节。
+												-->
+												{#if detail?.assignment?.challenge_enabled}
+													<label
+														class="flex cursor-pointer items-start gap-2 rounded-2xl bg-gray-50 px-4 py-3 dark:bg-gray-800"
+													>
+														<input
+															type="checkbox"
+															class="mt-0.5 size-3.5 shrink-0 accent-black dark:accent-gray-100"
+															bind:checked={challengeFollowup}
+															disabled={isHistoricalRound}
+														/>
+														<span class="text-xs leading-relaxed text-gray-700 dark:text-gray-200">
+															{$i18n.t('Have the reader follow up on this comment next round')}
+														</span>
+													</label>
+												{/if}
+
+												<!-- Resubmit due at (required when returning for revision) -->
+												<div>
+													<div class="mb-1.5 block text-xs font-medium uppercase tracking-[0.12em] text-gray-400">
+														{$i18n.t('Resubmit before')}
+													</div>
+													<EduDateTimeField
+														bind:value={resubmitDueLocal}
+														disabled={isHistoricalRound}
+														className="w-full rounded-2xl border border-gray-200 dark:border-gray-800 px-4 py-3 text-sm outline-none focus:border-gray-400 transition-colors disabled:opacity-50"
+													/>
+												</div>
+
+												<div class="flex justify-end">
+													<button
+														class="rounded-full bg-amber-600 px-4 py-2 text-sm text-white transition-colors hover:bg-amber-700 disabled:opacity-60"
+														disabled={saving || isHistoricalRound}
+														on:click={() => saveReview('returned')}
+													>
+														{$i18n.t('Return to Student')}
+													</button>
+												</div>
+											</div>
+										{/if}
 									</div>
-									{#if lastSavedStr}
-										<div class="text-xs text-gray-400">
-											{$i18n.t('Last saved at {{time}}', { time: lastSavedStr })}
-										</div>
-									{/if}
 								</div>
 							</div>
 

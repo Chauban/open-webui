@@ -122,6 +122,8 @@ export const getTeacherReview = async (
 		classroom_id?: string;
 		assignment_id?: string;
 		sort?: string;
+		only_suspected?: boolean;
+		only_bursts?: boolean;
 		limit?: number;
 		offset?: number;
 	} = {}
@@ -495,13 +497,6 @@ export const submitAssignment = async (
 
 export const getMyAssignmentSubmissions = async (token: string, assignmentId: string) => {
 	return fetch(`${WEBUI_API_BASE_URL}/assignments/${assignmentId}/me/submissions`, {
-		method: 'GET',
-		headers: withAuth(token)
-	}).then(handleJson);
-};
-
-export const getTeacherSubmissions = async (token: string, assignmentId: string) => {
-	return fetch(`${WEBUI_API_BASE_URL}/teacher/assignments/${assignmentId}/submissions`, {
 		method: 'GET',
 		headers: withAuth(token)
 	}).then(handleJson);

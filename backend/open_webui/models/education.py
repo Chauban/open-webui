@@ -41,7 +41,6 @@ def get_db_context(db: Optional[Session] = None):
             yield owned_db
 
 
-ASSIGNMENT_STATUSES = ("active", "archived")
 # 作业的 AI 辅导风格；每档对应一段管理员可改写的提示词（config 的 education.coaching_prompts）。
 CoachingStyle = Literal["socratic", "balanced", "hands_off"]
 COACHING_STYLES = ("socratic", "balanced", "hands_off")
@@ -1400,7 +1399,8 @@ class AssignmentUpdateForm(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     classroom_id: Optional[str] = None
-    status: Optional[str] = None
+    # 不含 status:归档是单向的,只走 POST /archive(带确认);
+    # 编辑接口能改状态就等于给了一条绕过确认、还能撤销归档的后门。
     due_at: Optional[int] = None
     score_max: Optional[int] = Field(default=None, gt=0, le=10000)
     coaching_style: Optional[CoachingStyle] = None
@@ -1518,6 +1518,15 @@ class ClassroomMemberDetail(BaseModel):
     education_role: Optional[str] = None
 
 
+class ClassroomRosterItem(ClassroomMemberDetail):
+    # 只统计本班作业的当前轮提交;学生换班后,原班的提交留在原班。
+    assignment_count: int = 0
+    submitted_count: int = 0
+    pending_review_count: int = 0
+    average_score_percent: Optional[float] = None
+    latest_submitted_at: Optional[int] = None
+
+
 class ClassroomResponse(BaseModel):
     classroom: ClassroomModel
     membership: Optional[ClassroomMemberModel] = None
@@ -1528,6 +1537,10 @@ class TeacherAssignmentListItem(BaseModel):
     classroom: Optional[ClassroomModel] = None
     student_count: int = 0
     submission_count: int = 0
+    # 按当前轮提交的批改状态计;三者之和等于 submission_count。
+    pending_review_count: int = 0
+    reviewed_count: int = 0
+    returned_count: int = 0
     latest_submission_at: Optional[int] = None
 
 
@@ -1822,19 +1835,19 @@ class DashboardItem(BaseModel):
 
 class DashboardResponse(BaseModel):
     items: list[DashboardItem]
-    summary: Optional[dict] = None
     distributions: Optional[dict] = None
 
 
 class TeacherOverviewResponse(BaseModel):
-    classroom_count: int
-    assignment_count: int
-    submission_count: int
+    # 概述页是待办,不是资产清单:每个数都对应一个能直接去处理的列表。
+    classroom_count: int = 0
     pending_review_count: int = 0
-    unsubmitted_count: int = 0
-    classrooms: list[TeacherClassroomListItem]
-    # 概述页只保留三份清单：提交（含批改状态与风险）、作业（含截止与进度）、班级。
-    recent_assignments: list[TeacherAssignmentListItem]
+    returned_count: int = 0
+    due_soon_count: int = 0
+    overdue_unsubmitted_count: int = 0
+    # 进行中且需要跟进的作业:即将截止的在前(按截止由近到远),
+    # 其后是已截止但仍有人未交或有待批改的。
+    followup_assignments: list[TeacherAssignmentListItem]
     recent_submissions: list[SubmissionListItem]
 
 
@@ -2783,13 +2796,6 @@ class EducationTable:
                 if not classroom_id:
                     raise ValueError("classroom_id is required")
                 assignment.classroom_id = classroom_id
-            if "status" in form_data.model_fields_set:
-                if form_data.status not in ASSIGNMENT_STATUSES:
-                    raise ValueError("Invalid assignment status")
-                assignment.status = form_data.status
-                assignment.archived_at = (
-                    int(time.time()) if form_data.status == "archived" else None
-                )
             if "due_at" in form_data.model_fields_set:
                 if form_data.due_at is None or form_data.due_at <= 0:
                     raise ValueError("Assignment due time is required")

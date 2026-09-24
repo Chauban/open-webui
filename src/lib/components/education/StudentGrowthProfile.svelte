@@ -408,70 +408,82 @@
 	<EduEmpty>{$i18n.t('No profile data yet.')}</EduEmpty>
 {:else}
 	<div class="space-y-8">
-		<EduCard tone="muted">
-			<div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-				<label class="text-xs text-gray-600 dark:text-gray-300">
-					<span class="mb-1 block">{$i18n.t('Start date')}</span>
-					<input
-						class="w-full rounded-lg border border-gray-200 bg-transparent px-3 py-2 dark:border-gray-700"
-						type="date"
-						bind:value={startDate}
-					/>
-				</label>
-				<label class="text-xs text-gray-600 dark:text-gray-300">
-					<span class="mb-1 block">{$i18n.t('End date')}</span>
-					<input
-						class="w-full rounded-lg border border-gray-200 bg-transparent px-3 py-2 dark:border-gray-700"
-						type="date"
-						bind:value={endDate}
-					/>
-				</label>
-				<label class="text-xs text-gray-600 dark:text-gray-300">
-					<span class="mb-1 block">{$i18n.t('Assignment')}</span>
-					<select
-						class="w-full rounded-lg border border-gray-200 bg-transparent px-3 py-2 dark:border-gray-700"
-						bind:value={assignmentFilter}
-					>
-						<option value="">{$i18n.t('All Assignments')}</option>
-						{#each assignmentOptions as item}
-							<option value={item.assignment.id}>{item.assignment.title}</option>
-						{/each}
-					</select>
-				</label>
-				<label class="text-xs text-gray-600 dark:text-gray-300">
-					<span class="mb-1 block">{$i18n.t('Round')}</span>
-					<select
-						class="w-full rounded-lg border border-gray-200 bg-transparent px-3 py-2 dark:border-gray-700"
-						bind:value={roundFilter}
-					>
-						<option value="">{$i18n.t('All rounds')}</option>
-						{#each roundOptions as round}
-							<option value={round}>{$i18n.t('Round {{round}}', { round })}</option>
-						{/each}
-					</select>
-				</label>
-				<label class="text-xs text-gray-600 dark:text-gray-300">
-					<span class="mb-1 block">{$i18n.t('Metric version')}</span>
-					<select
-						class="w-full rounded-lg border border-gray-200 bg-transparent px-3 py-2 dark:border-gray-700"
-						bind:value={metricVersionFilter}
-					>
-						{#each profile.available_metric_versions as version}
-							<option value={version}
-								>{version} · {$i18n.t(
-									version === profile.active_metric_version ? 'Current' : 'Historical'
-								)}</option
-							>
-						{/each}
-					</select>
-				</label>
-				<div class="flex items-end gap-2">
-					<EduButton variant="primary" on:click={applyFilters}>{$i18n.t('Apply')}</EduButton>
-					<EduButton on:click={clearFilters}>{$i18n.t('Clear')}</EduButton>
-				</div>
-			</div>
-			{#if profile.timeline_pagination.total > profile.timeline_pagination.limit}
-				<div class="mt-3 flex flex-wrap items-center justify-end gap-2 text-xs text-gray-500">
+		<div class="space-y-3">
+		<nav
+			class="flex gap-1 overflow-x-auto border-b border-gray-200 pb-px dark:border-gray-800"
+			aria-label={$i18n.t('Growth profile sections')}
+		>
+			{#each sections as section}
+				<button
+					type="button"
+					class="shrink-0 rounded-t-lg px-3 py-2 text-sm font-medium transition {activeSection ===
+					section.key
+						? 'bg-gray-100 text-gray-900 dark:bg-gray-800 dark:text-white'
+						: 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'}"
+					aria-pressed={activeSection === section.key}
+					on:click={() => (activeSection = section.key)}
+				>
+					{$i18n.t(section.label)}
+				</button>
+			{/each}
+		</nav>
+		<!--
+			筛选放在分区标签下面、就近作用于内容;改了就生效,不再要点「应用」。
+			指标版本对大多数人只有一个,只有真出现多个版本时才露出来。
+		-->
+		<div class="flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+			<label class="flex items-center gap-1.5">
+				<span>{$i18n.t('Start date')}</span>
+				<input class="rounded-full border border-gray-200 bg-transparent px-3 py-1.5 text-xs dark:border-gray-700" type="date" bind:value={startDate} on:change={applyFilters} />
+			</label>
+			<label class="flex items-center gap-1.5">
+				<span>{$i18n.t('End date')}</span>
+				<input class="rounded-full border border-gray-200 bg-transparent px-3 py-1.5 text-xs dark:border-gray-700" type="date" bind:value={endDate} on:change={applyFilters} />
+			</label>
+			<select
+				class="rounded-full border border-gray-200 bg-transparent px-3 py-1.5 text-xs dark:border-gray-700 max-w-56"
+				aria-label={$i18n.t('Assignment')}
+				bind:value={assignmentFilter}
+				on:change={applyFilters}
+			>
+				<option value="">{$i18n.t('All Assignments')}</option>
+				{#each assignmentOptions as item}
+					<option value={item.assignment.id}>{item.assignment.title}</option>
+				{/each}
+			</select>
+			<select
+				class="rounded-full border border-gray-200 bg-transparent px-3 py-1.5 text-xs dark:border-gray-700"
+				aria-label={$i18n.t('Round')}
+				bind:value={roundFilter}
+				on:change={applyFilters}
+			>
+				<option value="">{$i18n.t('All rounds')}</option>
+				{#each roundOptions as round}
+					<option value={round}>{$i18n.t('Round {{round}}', { round })}</option>
+				{/each}
+			</select>
+			{#if profile.available_metric_versions.length > 1}
+				<select
+					class="rounded-full border border-gray-200 bg-transparent px-3 py-1.5 text-xs dark:border-gray-700"
+					aria-label={$i18n.t('Metric version')}
+					bind:value={metricVersionFilter}
+					on:change={applyFilters}
+				>
+					{#each profile.available_metric_versions as version}
+						<option value={version}
+							>{version} · {$i18n.t(
+								version === profile.active_metric_version ? 'Current' : 'Historical'
+							)}</option
+						>
+					{/each}
+				</select>
+			{/if}
+			{#if startDate || endDate || assignmentFilter || roundFilter || metricVersionFilter}
+				<EduButton variant="link" on:click={clearFilters}>{$i18n.t('Clear')}</EduButton>
+			{/if}
+		</div>
+		{#if profile.timeline_pagination.total > profile.timeline_pagination.limit}
+				<div class="flex flex-wrap items-center justify-end gap-2 text-xs text-gray-500">
 					<span>
 						{profile.timeline_pagination.offset + 1}–{Math.min(
 							profile.timeline_pagination.offset + profile.timeline_pagination.limit,
@@ -497,26 +509,7 @@
 					</EduButton>
 				</div>
 			{/if}
-		</EduCard>
-
-		<nav
-			class="flex gap-1 overflow-x-auto border-b border-gray-200 pb-px dark:border-gray-800"
-			aria-label={$i18n.t('Growth profile sections')}
-		>
-			{#each sections as section}
-				<button
-					type="button"
-					class="shrink-0 rounded-t-lg px-3 py-2 text-sm font-medium transition {activeSection ===
-					section.key
-						? 'bg-gray-100 text-gray-900 dark:bg-gray-800 dark:text-white'
-						: 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'}"
-					aria-pressed={activeSection === section.key}
-					on:click={() => (activeSection = section.key)}
-				>
-					{$i18n.t(section.label)}
-				</button>
-			{/each}
-		</nav>
+		</div>
 
 		{#if activeSection === 'overview'}
 			{#if profile.filters_applied}

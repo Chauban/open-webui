@@ -10,8 +10,7 @@
 	import { getStudentProfile } from '$lib/apis/education';
 	import type { StudentProfileFilters, TeacherStudentProfile } from '$lib/apis/education';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
-	import TeacherSectionNav from '$lib/components/education/TeacherSectionNav.svelte';
-	import EduButton from '$lib/components/education/EduButton.svelte';
+	import { classroomTabs } from '$lib/components/education/teacher-nav';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 	import StudentGrowthProfile from '$lib/components/education/StudentGrowthProfile.svelte';
 	import { getClassroomDisplayName, resolveErrorMessage } from '$lib/utils/education';
@@ -53,42 +52,24 @@
 
 <TeacherPageShell
 	crumbs={[
-		{ label: $i18n.t('Teaching') },
 		{ label: $i18n.t('Classrooms'), href: '/teacher/classrooms' },
 		{
 			label: getClassroomDisplayName(profile?.classrooms?.[0]?.name, t),
 			href: `/teacher/classrooms/${$page.params.classroomId}`
-		},
-		{
-			label: $i18n.t('Students'),
-			href: `/teacher/classrooms/${$page.params.classroomId}/students`
 		}
 	]}
-	title={profile?.student_name ?? $i18n.t('Students')}
+	title={profile?.student_name ?? ''}
+	tabs={classroomTabs($page.params.classroomId)}
 >
-	{#if loading}
-		<div class="mx-auto max-w-6xl px-4 py-8 text-sm text-gray-500 dark:text-gray-400">
-			{$i18n.t('Loading student profile...')}
-		</div>
-	{:else if loadError}
-		<div class="mx-auto max-w-3xl px-4 py-16">
+	<div class="mx-auto max-w-6xl px-4 py-6">
+		{#if loading}
+			<EduStateCard>{$i18n.t('Loading student profile...')}</EduStateCard>
+		{:else if loadError}
 			<EduStateCard tone="error">{loadError}</EduStateCard>
-		</div>
-	{:else}
-		<div class="mx-auto max-w-6xl px-4 py-8">
-			<TeacherSectionNav />
-
-			<div class="mb-6 flex flex-wrap items-end justify-between gap-3">
-				<div class="text-sm text-gray-500 dark:text-gray-400">
-					{profile.student_email ?? ''}
-				</div>
-				<EduButton
-					on:click={() => goto(`/teacher/classrooms/${$page.params.classroomId}/students`)}
-				>
-					{$i18n.t('Back to Students')}
-				</EduButton>
-			</div>
-
+		{:else}
+			{#if profile.student_email}
+				<div class="mb-4 text-sm text-gray-500 dark:text-gray-400">{profile.student_email}</div>
+			{/if}
 			<StudentGrowthProfile
 				{profile}
 				{filters}
@@ -97,6 +78,6 @@
 				on:open={(event) => goto(`/teacher/submissions/${event.detail.submissionId}`)}
 				on:filter={(event) => loadProfile(event.detail)}
 			/>
-		</div>
-	{/if}
+		{/if}
+	</div>
 </TeacherPageShell>
