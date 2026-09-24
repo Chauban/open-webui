@@ -189,7 +189,6 @@ type OpenAIConfigForm = {
 	url: string;
 };
 
-type OllamaConfigForm = OpenAIConfigForm;
 
 type AzureOpenAIConfigForm = {
 	key: string;
@@ -199,7 +198,6 @@ type AzureOpenAIConfigForm = {
 
 type EmbeddingModelUpdateForm = {
 	openai_config?: OpenAIConfigForm;
-	ollama_config?: OllamaConfigForm;
 	azure_openai_config?: AzureOpenAIConfigForm;
 	RAG_EMBEDDING_ENGINE: string;
 	RAG_EMBEDDING_MODEL: string;

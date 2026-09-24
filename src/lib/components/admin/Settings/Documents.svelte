@@ -59,8 +59,6 @@
 	let AzureOpenAIKey = '';
 	let AzureOpenAIVersion = '';
 
-	let OllamaUrl = '';
-	let OllamaKey = '';
 
 	let querySettings = {
 		template: '',
@@ -87,15 +85,6 @@
 			);
 			return;
 		}
-		if (RAG_EMBEDDING_ENGINE === 'ollama' && RAG_EMBEDDING_MODEL === '') {
-			toast.error(
-				$i18n.t(
-					'Model filesystem path detected. Model shortname is required for update, cannot continue.'
-				)
-			);
-			return;
-		}
-
 		if (RAG_EMBEDDING_ENGINE === 'openai' && RAG_EMBEDDING_MODEL === '') {
 			toast.error(
 				$i18n.t(
@@ -130,12 +119,7 @@
 			RAG_EMBEDDING_CONCURRENT_REQUESTS: RAG_EMBEDDING_CONCURRENT_REQUESTS
 		};
 
-		if (RAG_EMBEDDING_ENGINE === 'ollama') {
-			payload.ollama_config = {
-				key: OllamaKey,
-				url: OllamaUrl
-			};
-		} else if (RAG_EMBEDDING_ENGINE === 'openai') {
+		if (RAG_EMBEDDING_ENGINE === 'openai') {
 			payload.openai_config = {
 				key: OpenAIKey,
 				url: OpenAIUrl
@@ -309,9 +293,6 @@
 
 			OpenAIKey = embeddingConfig.openai_config.key ?? '';
 			OpenAIUrl = embeddingConfig.openai_config.url ?? '';
-
-			OllamaKey = embeddingConfig.ollama_config.key ?? '';
-			OllamaUrl = embeddingConfig.ollama_config.url ?? '';
 
 			AzureOpenAIKey = embeddingConfig.azure_openai_config.key ?? '';
 			AzureOpenAIUrl = embeddingConfig.azure_openai_config.url ?? '';
@@ -1001,9 +982,7 @@
 							bind:value={RAG_EMBEDDING_ENGINE}
 							placeholder={$i18n.t('Select an embedding model engine')}
 							on:change={(e) => {
-								if (e.target.value === 'ollama') {
-									RAG_EMBEDDING_MODEL = '';
-								} else if (e.target.value === 'openai') {
+								if (e.target.value === 'openai') {
 									RAG_EMBEDDING_MODEL = 'text-embedding-3-small';
 								} else if (e.target.value === 'azure_openai') {
 									RAG_EMBEDDING_MODEL = 'text-embedding-3-small';
@@ -1013,7 +992,6 @@
 							}}
 						>
 							<option value="">{$i18n.t('Default (SentenceTransformers)')}</option>
-							<option value="ollama">{$i18n.t('Ollama')}</option>
 							<option value="openai">{$i18n.t('OpenAI')}</option>
 							<option value="azure_openai">{$i18n.t('Azure OpenAI')}</option>
 						</SettingsSelect>
@@ -1040,31 +1018,6 @@
 									variant="settings"
 									placeholder={$i18n.t('API Key')}
 									bind:value={OpenAIKey}
-									required={false}
-								/>
-							</AdminSettingField>
-						</div>
-					{:else if RAG_EMBEDDING_ENGINE === 'ollama'}
-						<div class="grid grid-cols-1 gap-x-3 gap-y-2.5 sm:grid-cols-2">
-							<AdminSettingField
-								label={$i18n.t('API Base URL')}
-								description={$i18n.t('Ollama endpoint used for embeddings.')}
-							>
-								<input
-									class={inputClass}
-									placeholder={$i18n.t('API Base URL')}
-									bind:value={OllamaUrl}
-									required
-								/>
-							</AdminSettingField>
-							<AdminSettingField
-								label={$i18n.t('API Key')}
-								description={$i18n.t('Optional API key for Ollama requests.')}
-							>
-								<SensitiveInput
-									variant="settings"
-									placeholder={$i18n.t('API Key')}
-									bind:value={OllamaKey}
 									required={false}
 								/>
 							</AdminSettingField>
@@ -1115,13 +1068,10 @@
 						<div class="flex w-full gap-2">
 							<input
 								class={inputClass}
-								placeholder={RAG_EMBEDDING_ENGINE === 'ollama'
-									? $i18n.t('Set embedding model')
-									: $i18n.t('Set embedding model (e.g. {{model}})', {
-											model: RAG_EMBEDDING_MODEL.slice(-40)
-										})}
+								placeholder={$i18n.t('Set embedding model (e.g. {{model}})', {
+									model: RAG_EMBEDDING_MODEL.slice(-40)
+								})}
 								bind:value={RAG_EMBEDDING_MODEL}
-								required={RAG_EMBEDDING_ENGINE === 'ollama'}
 							/>
 
 							{#if RAG_EMBEDDING_ENGINE === ''}
@@ -1175,7 +1125,7 @@
 						/>
 					</AdminSettingRow>
 
-					{#if RAG_EMBEDDING_ENGINE === 'ollama' || RAG_EMBEDDING_ENGINE === 'openai' || RAG_EMBEDDING_ENGINE === 'azure_openai'}
+					{#if RAG_EMBEDDING_ENGINE === 'openai' || RAG_EMBEDDING_ENGINE === 'azure_openai'}
 						<AdminSettingRow
 							label={$i18n.t('Async Embedding Processing')}
 							description={$i18n.t('Run embedding tasks concurrently to speed up processing.')}

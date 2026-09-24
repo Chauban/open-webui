@@ -102,7 +102,6 @@ from open_webui.retrieval.web.utils import get_ssrf_safe_session, validate_url
 from open_webui.retrieval.web.main import SearchResult
 from open_webui.retrieval.web.microsoft_web_iq import search_microsoft_web_iq
 from open_webui.retrieval.web.mojeek import search_mojeek
-from open_webui.retrieval.web.ollama import search_ollama_cloud
 from open_webui.retrieval.web.perplexity import search_perplexity
 from open_webui.retrieval.web.perplexity_search import search_perplexity_search
 from open_webui.retrieval.web.searchapi import search_searchapi
@@ -336,7 +335,6 @@ RETRIEVAL_CONFIG_KEYS = {
     'MISTRAL_OCR_API_KEY': 'rag.mistral_ocr_api_key',
     'MISTRAL_OCR_USE_BASE64': 'rag.mistral_ocr_use_base64',
     'MOJEEK_SEARCH_API_KEY': 'web.search.mojeek_search_api_key',
-    'OLLAMA_CLOUD_WEB_SEARCH_API_KEY': 'web.search.ollama_cloud_api_key',
     'PADDLEOCR_VL_BASE_URL': 'rag.paddleocr_vl_base_url',
     'PADDLEOCR_VL_TOKEN': 'rag.paddleocr_vl_token',
     'PDF_EXTRACT_IMAGES': 'rag.pdf_extract_images',
@@ -359,8 +357,6 @@ RETRIEVAL_CONFIG_KEYS = {
     'RAG_EXTERNAL_RERANKER_TIMEOUT': 'rag.external_reranker_timeout',
     'RAG_EXTERNAL_RERANKER_URL': 'rag.external_reranker_url',
     'RAG_FULL_CONTEXT': 'rag.full_context',
-    'RAG_OLLAMA_API_KEY': 'rag.ollama.api_key',
-    'RAG_OLLAMA_BASE_URL': 'rag.ollama.base_url',
     'RAG_OPENAI_API_BASE_URL': 'rag.openai.api_base_url',
     'RAG_OPENAI_API_KEY': 'rag.openai.api_key',
     'RAG_RERANKING_BATCH_SIZE': 'rag.reranking_batch_size',
@@ -478,10 +474,6 @@ async def get_embedding_config(request: Request, user=Depends(get_admin_user)):
             'url': config.RAG_OPENAI_API_BASE_URL,
             'key': config.RAG_OPENAI_API_KEY,
         },
-        'ollama_config': {
-            'url': config.RAG_OLLAMA_BASE_URL,
-            'key': config.RAG_OLLAMA_API_KEY,
-        },
         'azure_openai_config': {
             'url': config.RAG_AZURE_OPENAI_BASE_URL,
             'key': config.RAG_AZURE_OPENAI_API_KEY,
@@ -491,11 +483,6 @@ async def get_embedding_config(request: Request, user=Depends(get_admin_user)):
 
 
 class OpenAIConfigForm(BaseModel):
-    url: str | None = None
-    key: str | None = None
-
-
-class OllamaConfigForm(BaseModel):
     url: str | None = None
     key: str | None = None
 
@@ -548,10 +535,6 @@ async def update_embedding_config(request: Request, form_data: EmbeddingModelUpd
             config.RAG_OPENAI_API_BASE_URL = form_data.openai_config.url or ''
             config.RAG_OPENAI_API_KEY = form_data.openai_config.key or ''
 
-        if config.RAG_EMBEDDING_ENGINE == 'ollama' and form_data.ollama_config is not None:
-            config.RAG_OLLAMA_BASE_URL = form_data.ollama_config.url or ''
-            config.RAG_OLLAMA_API_KEY = form_data.ollama_config.key or ''
-
         if config.RAG_EMBEDDING_ENGINE == 'azure_openai' and form_data.azure_openai_config is not None:
             config.RAG_AZURE_OPENAI_BASE_URL = form_data.azure_openai_config.url or ''
             config.RAG_AZURE_OPENAI_API_KEY = form_data.azure_openai_config.key or ''
@@ -569,20 +552,12 @@ async def update_embedding_config(request: Request, form_data: EmbeddingModelUpd
             (
                 config.RAG_OPENAI_API_BASE_URL
                 if config.RAG_EMBEDDING_ENGINE == 'openai'
-                else (
-                    config.RAG_OLLAMA_BASE_URL
-                    if config.RAG_EMBEDDING_ENGINE == 'ollama'
-                    else config.RAG_AZURE_OPENAI_BASE_URL
-                )
+                else config.RAG_AZURE_OPENAI_BASE_URL
             ),
             (
                 config.RAG_OPENAI_API_KEY
                 if config.RAG_EMBEDDING_ENGINE == 'openai'
-                else (
-                    config.RAG_OLLAMA_API_KEY
-                    if config.RAG_EMBEDDING_ENGINE == 'ollama'
-                    else config.RAG_AZURE_OPENAI_API_KEY
-                )
+                else config.RAG_AZURE_OPENAI_API_KEY
             ),
             config.RAG_EMBEDDING_BATCH_SIZE,
             azure_api_version=(
@@ -603,10 +578,6 @@ async def update_embedding_config(request: Request, form_data: EmbeddingModelUpd
             'openai_config': {
                 'url': config.RAG_OPENAI_API_BASE_URL,
                 'key': config.RAG_OPENAI_API_KEY,
-            },
-            'ollama_config': {
-                'url': config.RAG_OLLAMA_BASE_URL,
-                'key': config.RAG_OLLAMA_API_KEY,
             },
             'azure_openai_config': {
                 'url': config.RAG_AZURE_OPENAI_BASE_URL,
@@ -715,7 +686,6 @@ async def get_rag_config(request: Request, user=Depends(get_admin_user)):
             'WEB_SEARCH_DOMAIN_FILTER_LIST': config.WEB_SEARCH_DOMAIN_FILTER_LIST,
             'BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL': config.BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL,
             'BYPASS_WEB_SEARCH_WEB_LOADER': config.BYPASS_WEB_SEARCH_WEB_LOADER,
-            'OLLAMA_CLOUD_WEB_SEARCH_API_KEY': config.OLLAMA_CLOUD_WEB_SEARCH_API_KEY,
             'SEARXNG_QUERY_URL': config.SEARXNG_QUERY_URL,
             'SEARXNG_LANGUAGE': config.SEARXNG_LANGUAGE,
             'OPENSERP_BASE_URL': config.OPENSERP_BASE_URL,
@@ -1272,7 +1242,6 @@ async def update_rag_config(request: Request, form_data: ConfigForm, user=Depend
         config.WEB_SEARCH_DOMAIN_FILTER_LIST = form_data.web.WEB_SEARCH_DOMAIN_FILTER_LIST
         config.BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL = form_data.web.BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL
         config.BYPASS_WEB_SEARCH_WEB_LOADER = form_data.web.BYPASS_WEB_SEARCH_WEB_LOADER
-        config.OLLAMA_CLOUD_WEB_SEARCH_API_KEY = form_data.web.OLLAMA_CLOUD_WEB_SEARCH_API_KEY
         config.SEARXNG_QUERY_URL = form_data.web.SEARXNG_QUERY_URL
         config.SEARXNG_LANGUAGE = form_data.web.SEARXNG_LANGUAGE
         config.OPENSERP_BASE_URL = form_data.web.OPENSERP_BASE_URL
@@ -1426,7 +1395,6 @@ async def update_rag_config(request: Request, form_data: ConfigForm, user=Depend
             'WEB_SEARCH_DOMAIN_FILTER_LIST': config.WEB_SEARCH_DOMAIN_FILTER_LIST,
             'BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL': config.BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL,
             'BYPASS_WEB_SEARCH_WEB_LOADER': config.BYPASS_WEB_SEARCH_WEB_LOADER,
-            'OLLAMA_CLOUD_WEB_SEARCH_API_KEY': config.OLLAMA_CLOUD_WEB_SEARCH_API_KEY,
             'SEARXNG_QUERY_URL': config.SEARXNG_QUERY_URL,
             'SEARXNG_LANGUAGE': config.SEARXNG_LANGUAGE,
             'OPENSERP_BASE_URL': config.OPENSERP_BASE_URL,
@@ -1781,20 +1749,12 @@ def save_docs_to_vector_db(
             (
                 config.RAG_OPENAI_API_BASE_URL
                 if config.RAG_EMBEDDING_ENGINE == 'openai'
-                else (
-                    config.RAG_OLLAMA_BASE_URL
-                    if config.RAG_EMBEDDING_ENGINE == 'ollama'
-                    else config.RAG_AZURE_OPENAI_BASE_URL
-                )
+                else config.RAG_AZURE_OPENAI_BASE_URL
             ),
             (
                 config.RAG_OPENAI_API_KEY
                 if config.RAG_EMBEDDING_ENGINE == 'openai'
-                else (
-                    config.RAG_OLLAMA_API_KEY
-                    if config.RAG_EMBEDDING_ENGINE == 'ollama'
-                    else config.RAG_AZURE_OPENAI_API_KEY
-                )
+                else config.RAG_AZURE_OPENAI_API_KEY
             ),
             config.RAG_EMBEDDING_BATCH_SIZE,
             azure_api_version=(
@@ -2447,16 +2407,7 @@ async def search_web(request: Request, engine: str, query: str, user=None) -> li
 
     # TODO: add playwright to search the web
     config = await get_retrieval_config()
-    if engine == 'ollama_cloud':
-        return await asyncio.to_thread(
-            search_ollama_cloud,
-            'https://ollama.com',
-            config.OLLAMA_CLOUD_WEB_SEARCH_API_KEY,
-            query,
-            config.WEB_SEARCH_RESULT_COUNT,
-            config.WEB_SEARCH_DOMAIN_FILTER_LIST,
-        )
-    elif engine == 'perplexity_search':
+    if engine == 'perplexity_search':
         if config.PERPLEXITY_API_KEY:
             return await asyncio.to_thread(
                 search_perplexity_search,
