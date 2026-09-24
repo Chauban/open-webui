@@ -19,15 +19,6 @@ const REVIEW_STATUS_KEYS: Record<string, string> = {
 export const getReviewStatusLabel = (value: string, t: Translate) =>
 	REVIEW_STATUS_KEYS[value] ? t(REVIEW_STATUS_KEYS[value]) : value;
 
-const ASSIGNMENT_STATUS_KEYS: Record<string, string> = {
-	active: 'Ongoing',
-	archived: 'Archived'
-};
-
-/** Assignment.status 的展示文案（「已截止」由 due_at 派生，不在这里）。 */
-export const getAssignmentStatusLabel = (value: string, t: Translate) =>
-	ASSIGNMENT_STATUS_KEYS[value] ? t(ASSIGNMENT_STATUS_KEYS[value]) : value;
-
 // 以下是写作留痕的枚举值（后端原样存的英文 key）到教师可读文案的映射。
 // 批改页和看板都要显示这些值，绝不能把 ai_pasted 之类的原始 key 直接露给老师。
 

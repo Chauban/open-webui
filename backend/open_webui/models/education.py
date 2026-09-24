@@ -84,9 +84,6 @@ class SubmissionAlreadyReviewedError(Exception):
 class Assignment(Base):
     __tablename__ = "assignment"
     __table_args__ = (
-        CheckConstraint(
-            "status IN ('active', 'archived')", name="assignment_status_check"
-        ),
         CheckConstraint("score_max > 0", name="assignment_score_max_check"),
         CheckConstraint(
             "coaching_style IN ('socratic', 'balanced', 'hands_off')",
@@ -102,7 +99,6 @@ class Assignment(Base):
     description = Column(Text, nullable=True)
     teacher_id = Column(Text, nullable=False)
     classroom_id = Column(Text, nullable=True)
-    status = Column(Text, nullable=False, default="active")
     due_at = Column(BigInteger, nullable=True)
     score_max = Column(Integer, nullable=False)
     coaching_style = Column(Text, nullable=False, default="balanced")
@@ -111,7 +107,6 @@ class Assignment(Base):
     challenge_focus_keys = Column(JSONField, nullable=False, default=list)
     reflection_questions = Column(JSONField, nullable=False, default=list)
     rubric_schema = Column(JSONField, nullable=False)
-    archived_at = Column(BigInteger, nullable=True)
     created_at = Column(BigInteger, nullable=False)
     updated_at = Column(BigInteger, nullable=False)
 
@@ -1020,7 +1015,6 @@ class AssignmentModel(BaseModel):
     description: Optional[str] = None
     teacher_id: str
     classroom_id: Optional[str] = None
-    status: str
     due_at: Optional[int] = None
     score_max: int
     coaching_style: CoachingStyle
@@ -1029,7 +1023,6 @@ class AssignmentModel(BaseModel):
     challenge_focus_keys: list[str] = Field(default_factory=list)
     reflection_questions: list[ReflectionQuestion] = Field(default_factory=list)
     rubric_schema: RubricSchema
-    archived_at: Optional[int] = None
     created_at: int
     updated_at: int
 
@@ -1399,8 +1392,6 @@ class AssignmentUpdateForm(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     classroom_id: Optional[str] = None
-    # 不含 status:归档是单向的,只走 POST /archive(带确认);
-    # 编辑接口能改状态就等于给了一条绕过确认、还能撤销归档的后门。
     due_at: Optional[int] = None
     score_max: Optional[int] = Field(default=None, gt=0, le=10000)
     coaching_style: Optional[CoachingStyle] = None
@@ -2843,21 +2834,6 @@ class EducationTable:
             db.refresh(assignment)
             return AssignmentModel.model_validate(assignment)
 
-    def archive_assignment(
-        self, assignment_id: str, db: Optional[Session] = None
-    ) -> Optional[AssignmentModel]:
-        with get_db_context(db) as db:
-            assignment = db.get(Assignment, assignment_id)
-            if assignment is None:
-                return None
-
-            assignment.status = "archived"
-            assignment.archived_at = int(time.time())
-            assignment.updated_at = assignment.archived_at
-            db.commit()
-            db.refresh(assignment)
-            return AssignmentModel.model_validate(assignment)
-
     def insert_assignment(
         self,
         teacher_id: str,
@@ -2881,7 +2857,6 @@ class EducationTable:
                 description=form_data.description,
                 teacher_id=teacher_id,
                 classroom_id=classroom_id,
-                status="active",
                 due_at=form_data.due_at,
                 score_max=form_data.score_max,
                 coaching_style=form_data.coaching_style,
@@ -2892,7 +2867,6 @@ class EducationTable:
                     question.model_dump() for question in form_data.reflection_questions
                 ],
                 rubric_schema=form_data.rubric_schema.model_dump(),
-                archived_at=None,
                 created_at=now,
                 updated_at=now,
             )

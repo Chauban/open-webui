@@ -1318,7 +1318,6 @@ def test_teacher_review_lifecycle_assignment_update_and_classroom_progress(
         json={
             "title": "Argument Essay Final",
             "description": "Updated description.",
-            "status": "active",
             "due_at": 2000000000,
         },
     )
@@ -1326,13 +1325,6 @@ def test_teacher_review_lifecycle_assignment_update_and_classroom_progress(
     updated_assignment = assignment_update_res.json()
     assert updated_assignment["title"] == "Argument Essay Final"
     assert updated_assignment["due_at"] == 2000000000
-
-    archive_assignment_res = client.post(
-        f"/api/v1/assignments/{assignment['id']}/archive"
-    )
-    assert archive_assignment_res.status_code == 200, archive_assignment_res.text
-    assert archive_assignment_res.json()["status"] == "archived"
-    assert archive_assignment_res.json()["archived_at"] is not None
 
     progress_res = client.get(f"/api/v1/teacher/classrooms/{classroom['id']}/progress")
     assert progress_res.status_code == 200, progress_res.text
@@ -2731,26 +2723,7 @@ def test_submit_requires_current_classroom_membership(education_client):
     assert submit_res.status_code == 403, submit_res.text
 
 
-def test_submit_rejected_for_archived_assignment(education_client):
-    client, teacher, _, student, _, _ = education_client
-    assignment, session_id, _ = _setup_submitted_assignment(
-        client, teacher, student, "Archived Guard"
-    )
-
-    UserContext.current_user = teacher
-    archive_res = client.post(f"/api/v1/assignments/{assignment['id']}/archive")
-    assert archive_res.status_code == 200, archive_res.text
-
-    UserContext.current_user = student
-    submit_res = client.post(
-        f"/api/v1/assignments/{assignment['id']}/submit",
-        json=_submit_body(session_id, "draft submitted after the assignment archived"),
-    )
-    assert submit_res.status_code == 400, submit_res.text
-    assert submit_res.json()["detail"] == "Assignment is not open for submission"
-
-
-def test_update_assignment_rejects_null_and_ignores_status(education_client):
+def test_update_assignment_rejects_null(education_client):
     client, teacher, _, _, _, _ = education_client
 
     UserContext.current_user = teacher
@@ -2771,19 +2744,6 @@ def test_update_assignment_rejects_null_and_ignores_status(education_client):
     for payload in ({"title": None}, {"classroom_id": None}):
         res = client.patch(f"/api/v1/assignments/{assignment['id']}", json=payload)
         assert res.status_code == 400, f"{payload} -> {res.status_code} {res.text}"
-
-    # 编辑接口不管状态:归档只走 /archive,归档后也不能经 PATCH 改回进行中
-    res = client.patch(
-        f"/api/v1/assignments/{assignment['id']}", json={"status": "archived"}
-    )
-    assert res.status_code == 200, res.text
-    assert res.json()["status"] == "active"
-    client.post(f"/api/v1/assignments/{assignment['id']}/archive")
-    res = client.patch(
-        f"/api/v1/assignments/{assignment['id']}", json={"status": "active"}
-    )
-    assert res.status_code == 200, res.text
-    assert res.json()["status"] == "archived"
 
     # description 允许清空
     res = client.patch(

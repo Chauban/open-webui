@@ -312,13 +312,6 @@ export const updateAssignment = async (
 	}).then(handleJson);
 };
 
-export const archiveAssignment = async (token: string, assignmentId: string) => {
-	return fetch(`${WEBUI_API_BASE_URL}/assignments/${assignmentId}/archive`, {
-		method: 'POST',
-		headers: withAuth(token)
-	}).then(handleJson);
-};
-
 export const getAssignmentWorkspace = async (token: string, assignmentId: string) => {
 	return fetch(`${WEBUI_API_BASE_URL}/assignments/${assignmentId}/workspace`, {
 		method: 'GET',

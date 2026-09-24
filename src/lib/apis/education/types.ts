@@ -108,8 +108,6 @@ export type ProfileAssignment = {
 	rubric_schema: { criteria: RubricCriterion[] };
 	teacher_id: string;
 	classroom_id: string | null;
-	status: 'active' | 'archived';
-	archived_at: number | null;
 	created_at: number;
 	updated_at: number;
 };

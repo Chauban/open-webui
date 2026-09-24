@@ -909,7 +909,7 @@ async def update_assignment(
         if "due_at" in form_data.model_fields_set
         else assignment.due_at
     )
-    if assignment.status != "archived" and not _is_valid_due_at(next_due_at):
+    if not _is_valid_due_at(next_due_at):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Assignment due time is required",
@@ -1001,20 +1001,6 @@ async def update_assignment(
     return updated_assignment
 
 
-@router.post("/assignments/{assignment_id}/archive", response_model=AssignmentModel)
-async def archive_assignment(
-    assignment: AssignmentModel = Depends(require_teacher_assignment),
-    db: Session = Depends(get_session),
-):
-    archived_assignment = Education.archive_assignment(assignment.id, db=db)
-    if archived_assignment is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Assignment not found",
-        )
-    return archived_assignment
-
-
 @router.delete("/assignments/{assignment_id}")
 async def delete_assignment(
     assignment: AssignmentModel = Depends(require_teacher_assignment),
@@ -1023,12 +1009,12 @@ async def delete_assignment(
     if Education.get_submissions_by_assignment(assignment.id, db=db):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Assignments with submissions cannot be deleted; archive instead",
+            detail="Assignments with submissions cannot be deleted",
         )
     if Education.get_writing_sessions_by_assignment(assignment.id, db=db):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Assignments with student writing activity cannot be deleted; archive instead",
+            detail="Assignments with student writing activity cannot be deleted",
         )
     affected_student_ids = (
         _get_classroom_student_ids(assignment.classroom_id, db)
@@ -1437,8 +1423,6 @@ async def get_teacher_overview(
             )
             pending_review_count += item.pending_review_count
             returned_count += item.returned_count
-            if assignment.status != "active":
-                continue
 
             unsubmitted = max(student_count - item.submission_count, 0)
             due_at = assignment.due_at or 0
@@ -2833,12 +2817,6 @@ async def submit_assignment(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only students can submit assignments",
         )
-    if assignment.status != "active":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Assignment is not open for submission",
-        )
-
     session = _get_workspace_session_or_404(form_data.writing_session_id, db)
     if session.scope != "assignment":
         raise HTTPException(

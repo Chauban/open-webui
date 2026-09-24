@@ -8,7 +8,6 @@
 	import { toast } from 'svelte-sonner';
 
 	import {
-		archiveAssignment,
 		deleteAssignment,
 		getTeacherAssignment,
 		getTeacherClassrooms,
@@ -39,10 +38,8 @@
 	let loading = true;
 	let loadError = '';
 	let saving = false;
-	let showArchiveConfirm = false;
 	let showDeleteConfirm = false;
 
-	$: archived = item?.assignment?.status === 'archived';
 	$: hasSubmissions = (item?.submission_count ?? 0) > 0;
 
 	const syncDraft = () => {
@@ -109,16 +106,6 @@
 		}
 	};
 
-	const archive = async () => {
-		try {
-			await archiveAssignment(localStorage.token, assignmentId);
-			await loadData();
-			toast.success(t('Assignment archived.'));
-		} catch (error) {
-			toast.error(resolveErrorMessage(error, t));
-		}
-	};
-
 	const remove = async () => {
 		try {
 			await deleteAssignment(localStorage.token, assignmentId);
@@ -152,12 +139,6 @@
 		{:else if loadError}
 			<EduStateCard tone="error">{loadError}</EduStateCard>
 		{:else if draft}
-			{#if archived}
-				<EduCard tone="amber" class="mb-5 text-sm">
-					{$i18n.t('This assignment is archived. Students can no longer submit to it.')}
-				</EduCard>
-			{/if}
-
 			<AssignmentForm
 				bind:draft
 				bind:classroomId
@@ -179,48 +160,22 @@
 						<h2 class="text-base font-semibold text-red-700 dark:text-red-400">
 							{$i18n.t('Danger Zone')}
 						</h2>
-						<div class="mt-4 divide-y divide-gray-100 dark:divide-gray-800">
-							{#if !archived}
-								<div class="flex flex-wrap items-center justify-between gap-3 pb-4">
-									<div>
-										<div class="text-sm font-medium">{$i18n.t('Archive Assignment')}</div>
-										<div class="text-xs text-gray-500 dark:text-gray-400">
-											{$i18n.t(
-												'Stops new submissions. Existing submissions and reviews stay. This cannot be undone.'
-											)}
-										</div>
-									</div>
-									<EduButton variant="danger" on:click={() => (showArchiveConfirm = true)}>
-										{$i18n.t('Archive')}
-									</EduButton>
+						<div class="mt-4 flex flex-wrap items-center justify-between gap-3">
+							<div>
+								<div class="text-sm font-medium">{$i18n.t('Delete Assignment')}</div>
+								<div class="text-xs text-gray-500 dark:text-gray-400">
+									{$i18n.t('Only assignments without any student activity can be deleted.')}
 								</div>
-							{/if}
-							<div class="flex flex-wrap items-center justify-between gap-3 {archived ? '' : 'pt-4'}">
-								<div>
-									<div class="text-sm font-medium">{$i18n.t('Delete Assignment')}</div>
-									<div class="text-xs text-gray-500 dark:text-gray-400">
-										{$i18n.t('Only assignments without any student activity can be deleted.')}
-									</div>
-								</div>
-								<EduButton variant="danger" on:click={() => (showDeleteConfirm = true)}>
-									{$i18n.t('Delete')}
-								</EduButton>
 							</div>
+							<EduButton variant="danger" on:click={() => (showDeleteConfirm = true)}>
+								{$i18n.t('Delete')}
+							</EduButton>
 						</div>
 					</EduCard>
 				</svelte:fragment>
 			</AssignmentForm>
 		{/if}
 	</div>
-
-	<ConfirmDialog
-		bind:show={showArchiveConfirm}
-		title={$i18n.t('Archive Assignment')}
-		message={$i18n.t(
-			'Archiving is one-way and cannot be undone. Students will no longer see this assignment as active. Continue?'
-		)}
-		on:confirm={archive}
-	/>
 
 	<ConfirmDialog
 		bind:show={showDeleteConfirm}

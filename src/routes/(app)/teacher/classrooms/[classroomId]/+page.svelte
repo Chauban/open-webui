@@ -26,7 +26,6 @@
 	import { classroomTabs } from '$lib/components/education/teacher-nav';
 	import {
 		formatEpoch,
-		getAssignmentStatusLabel,
 		getClassroomDisplayName,
 		resolveErrorMessage
 	} from '$lib/utils/education';
@@ -51,9 +50,11 @@
 
 	$: pendingCount = assignments.reduce((sum, item) => sum + item.pending_review_count, 0);
 	$: returnedCount = assignments.reduce((sum, item) => sum + item.returned_count, 0);
+	const isPastDue = (item) => item.assignment.due_at * 1000 < Date.now();
+
+	// 没截止的按截止由近到远在前,已截止的按截止由近到远在后。
 	$: sortedAssignments = [...assignments].sort((a, b) => {
-		const rank = (item) =>
-			item.assignment.status !== 'active' ? 2 : item.assignment.due_at * 1000 >= Date.now() ? 0 : 1;
+		const rank = (item) => (isPastDue(item) ? 1 : 0);
 		return (
 			rank(a) - rank(b) ||
 			(rank(a) === 0
@@ -61,9 +62,6 @@
 				: b.assignment.due_at - a.assignment.due_at)
 		);
 	});
-
-	const isPastDue = (item) =>
-		item.assignment.status === 'active' && item.assignment.due_at * 1000 < Date.now();
 
 	const copyText = async (text: string, successMessage: string) => {
 		try {
@@ -237,9 +235,6 @@
 											>
 												{item.assignment.title}
 											</a>
-											{#if item.assignment.status === 'archived'}
-												<EduBadge soft class="ml-1.5">{getAssignmentStatusLabel('archived', t)}</EduBadge>
-											{/if}
 										</td>
 										<td class="whitespace-nowrap px-4 py-3" title={formatEpoch(item.assignment.due_at)}>
 											<span class={isPastDue(item) ? 'text-rose-600 dark:text-rose-400' : ''}>

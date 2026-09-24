@@ -5,7 +5,7 @@
 export type TeacherNavLink = { label: string; href: string };
 
 export const TEACHER_SECTIONS: TeacherNavLink[] = [
-	{ label: 'Overview', href: '/teacher' },
+	{ label: 'Teaching Overview', href: '/teacher' },
 	{ label: 'Classrooms', href: '/teacher/classrooms' },
 	{ label: 'Assignments', href: '/teacher/assignments' },
 	{ label: 'Review', href: '/teacher/review' }

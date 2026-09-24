@@ -20,7 +20,6 @@
 	import { assignmentTabs } from '$lib/components/education/teacher-nav';
 	import {
 		formatEpoch,
-		getAssignmentStatusLabel,
 		getClassroomDisplayName,
 		resolveErrorMessage
 	} from '$lib/utils/education';
@@ -41,8 +40,7 @@
 	let loadError = '';
 
 	$: assignment = item?.assignment;
-	$: isPastDue =
-		assignment?.status === 'active' && assignment?.due_at && assignment.due_at * 1000 < Date.now();
+	$: isPastDue = (assignment?.due_at ?? 0) * 1000 < Date.now();
 	$: unsubmittedCount = Math.max((item?.student_count ?? 0) - (item?.submission_count ?? 0), 0);
 	$: base = `/teacher/assignments/${assignmentId}`;
 	$: progressSegments = item
@@ -116,8 +114,8 @@
 							.fromNow()})
 					</span>
 				</span>
-				<EduBadge soft tone={assignment.status === 'archived' ? 'gray' : isPastDue ? 'rose' : 'emerald'}>
-					{isPastDue ? $i18n.t('Past Due') : getAssignmentStatusLabel(assignment.status, t)}
+				<EduBadge soft tone={isPastDue ? 'rose' : 'emerald'}>
+					{isPastDue ? $i18n.t('Past Due') : $i18n.t('Ongoing')}
 				</EduBadge>
 			</div>
 

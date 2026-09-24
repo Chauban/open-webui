@@ -18,7 +18,6 @@
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 	import {
 		formatEpoch,
-		getAssignmentStatusLabel,
 		getClassroomDisplayName,
 		resolveErrorMessage
 	} from '$lib/utils/education';
@@ -39,20 +38,16 @@
 	let loading = true;
 	let loadError = '';
 	let selectedClassroom = $page.url.searchParams.get('classroom') || 'all';
-	let selectedStatus = 'active';
+	let selectedStatus = 'all';
 	let sortBy = 'due';
 	let keyword = '';
 
-	const isPastDue = (item) =>
-		item.assignment.status === 'active' &&
-		item.assignment.due_at &&
-		item.assignment.due_at * 1000 < Date.now();
+	const isPastDue = (item) => (item.assignment.due_at ?? 0) * 1000 < Date.now();
 
-	// 默认顺序:还没截止的按截止由近到远在前,已截止/已归档的按截止由近到远在后。
+	// 默认顺序:还没截止的按截止由近到远在前,已截止的按截止由近到远在后。
 	const dueOrder = (item) => {
 		const due = item.assignment.due_at ?? 0;
-		const upcoming = item.assignment.status === 'active' && due * 1000 >= Date.now();
-		return upcoming ? [0, due] : [1, -due];
+		return isPastDue(item) ? [1, -due] : [0, due];
 	};
 
 	$: filteredAssignments = assignments
@@ -66,9 +61,8 @@
 				(item.assignment.description ?? '').toLowerCase().includes(normalizedKeyword);
 			const matchesStatus =
 				selectedStatus === 'all' ||
-				(selectedStatus === 'active' && item.assignment.status === 'active') ||
+				(selectedStatus === 'active' && !isPastDue(item)) ||
 				(selectedStatus === 'past_due' && isPastDue(item)) ||
-				(selectedStatus === 'archived' && item.assignment.status === 'archived') ||
 				(selectedStatus === 'needs_review' && item.pending_review_count > 0);
 			return matchesClassroom && matchesKeyword && matchesStatus;
 		})
@@ -140,11 +134,10 @@
 				{/each}
 			</select>
 			<select class={FIELD} aria-label={$i18n.t('Status')} bind:value={selectedStatus}>
-				<option value="active">{$i18n.t('Ongoing')}</option>
-				<option value="needs_review">{$i18n.t('Has submissions to review')}</option>
-				<option value="past_due">{$i18n.t('Past Due')}</option>
-				<option value="archived">{$i18n.t('Archived')}</option>
 				<option value="all">{$i18n.t('All')}</option>
+				<option value="active">{$i18n.t('Ongoing')}</option>
+				<option value="past_due">{$i18n.t('Past Due')}</option>
+				<option value="needs_review">{$i18n.t('Has submissions to review')}</option>
 			</select>
 			<select class={FIELD} aria-label={$i18n.t('Sort')} bind:value={sortBy}>
 				<option value="due">{$i18n.t('Sort by Due Time')}</option>
@@ -195,9 +188,6 @@
 										>
 											{item.assignment.title}
 										</a>
-										{#if item.assignment.status === 'archived'}
-											<EduBadge soft class="ml-1.5">{getAssignmentStatusLabel('archived', t)}</EduBadge>
-										{/if}
 										<div class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
 											{item.classroom ? getClassroomDisplayName(item.classroom.name, t) : t('Unknown')}
 										</div>
