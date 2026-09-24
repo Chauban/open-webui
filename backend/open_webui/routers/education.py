@@ -3165,22 +3165,6 @@ async def get_my_assignment_submissions(
 
 
 @router.get(
-    "/teacher/assignments/{assignment_id}/submissions",
-    response_model=list[SubmissionListItem],
-)
-async def get_assignment_submissions(
-    assignment: AssignmentModel = Depends(require_teacher_assignment),
-    db: Session = Depends(get_session),
-):
-    submissions = Education.get_submissions_by_assignment(assignment.id, db=db)
-
-    return [
-        await _build_submission_list_item(submission, assignment, db)
-        for submission in submissions
-    ]
-
-
-@router.get(
     "/teacher/submissions/{submission_id}", response_model=SubmissionDetailResponse
 )
 async def get_submission_detail(

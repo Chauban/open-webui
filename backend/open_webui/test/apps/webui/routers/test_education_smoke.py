@@ -685,10 +685,10 @@ def test_education_classroom_main_flow(education_client):
     assert teacher_workspace_res.status_code == 403, teacher_workspace_res.text
 
     submissions_res = client.get(
-        f"/api/v1/teacher/assignments/{assignment['id']}/submissions"
+        "/api/v1/teacher/review", params={"assignment_id": assignment["id"]}
     )
     assert submissions_res.status_code == 200, submissions_res.text
-    submissions = submissions_res.json()
+    submissions = submissions_res.json()["items"]
     assert len(submissions) == 1
     assert submissions[0]["submission"]["id"] == submission_payload["submission_id"]
     assert submissions[0]["student_name"] == "Student One"
@@ -769,11 +769,11 @@ def test_education_classroom_main_flow(education_client):
     # 提交记录跟着作业留在原班,原班教师照样能看。
     UserContext.current_user = teacher
     submissions_after_leave_res = client.get(
-        f"/api/v1/teacher/assignments/{assignment['id']}/submissions"
+        "/api/v1/teacher/review", params={"assignment_id": assignment["id"]}
     )
     assert submissions_after_leave_res.status_code == 200
     assert [
-        item["submission"]["id"] for item in submissions_after_leave_res.json()
+        item["submission"]["id"] for item in submissions_after_leave_res.json()["items"]
     ] == [submission_payload["submission_id"]]
     detail_after_leave_res = client.get(
         f"/api/v1/teacher/submissions/{submission_payload['submission_id']}"
@@ -946,10 +946,10 @@ def test_student_resubmission_overwrites_previous_submission(education_client):
 
     UserContext.current_user = teacher
     submissions_res = client.get(
-        f"/api/v1/teacher/assignments/{assignment['id']}/submissions"
+        "/api/v1/teacher/review", params={"assignment_id": assignment["id"]}
     )
     assert submissions_res.status_code == 200, submissions_res.text
-    submissions = submissions_res.json()
+    submissions = submissions_res.json()["items"]
     assert len(submissions) == 1
     assert submissions[0]["submission"]["id"] == first_submission_id
     assert (
@@ -1181,11 +1181,6 @@ def test_education_teacher_review_access_control(education_client):
     submission_id = flow["submission"]["submission_id"]
 
     UserContext.current_user = other_teacher
-    foreign_submissions_res = client.get(
-        f"/api/v1/teacher/assignments/{assignment['id']}/submissions"
-    )
-    assert foreign_submissions_res.status_code == 403, foreign_submissions_res.text
-
     foreign_dashboard_res = client.get(
         f"/api/v1/teacher/assignments/{assignment['id']}/dashboard"
     )
@@ -1195,11 +1190,6 @@ def test_education_teacher_review_access_control(education_client):
     assert foreign_detail_res.status_code == 403, foreign_detail_res.text
 
     UserContext.current_user = outsider
-    outsider_submissions_res = client.get(
-        f"/api/v1/teacher/assignments/{assignment['id']}/submissions"
-    )
-    assert outsider_submissions_res.status_code == 403, outsider_submissions_res.text
-
 
 def test_assignment_requires_due_time_on_create_and_update(education_client):
     client, teacher, _, student, _, _ = education_client
@@ -2312,8 +2302,8 @@ def test_resubmit_before_review_overwrites_same_round(education_client):
 
     UserContext.current_user = teacher
     submissions = client.get(
-        f"/api/v1/teacher/assignments/{assignment['id']}/submissions"
-    ).json()
+        "/api/v1/teacher/review", params={"assignment_id": assignment["id"]}
+    ).json()["items"]
     assert len(submissions) == 1
     assert submissions[0]["submission"]["round_no"] == 1
 
@@ -2377,8 +2367,8 @@ def test_returned_submission_opens_new_round_and_keeps_history(education_client)
 
     UserContext.current_user = teacher
     submissions = client.get(
-        f"/api/v1/teacher/assignments/{assignment['id']}/submissions"
-    ).json()
+        "/api/v1/teacher/review", params={"assignment_id": assignment["id"]}
+    ).json()["items"]
     assert len(submissions) == 1  # 列表只显示当前轮
     assert submissions[0]["submission"]["id"] == new_submission_id
     assert submissions[0]["submission"]["round_no"] == 2
@@ -2443,8 +2433,8 @@ def test_reviewed_submission_cannot_be_resubmitted(education_client):
     # 分数与轮次都没被动过
     UserContext.current_user = teacher
     submissions = client.get(
-        f"/api/v1/teacher/assignments/{assignment['id']}/submissions"
-    ).json()
+        "/api/v1/teacher/review", params={"assignment_id": assignment["id"]}
+    ).json()["items"]
     assert len(submissions) == 1
     assert submissions[0]["submission"]["id"] == submission_id
     assert submissions[0]["submission"]["round_no"] == 1
@@ -2941,10 +2931,10 @@ def test_transfer_keeps_submissions_in_old_class_and_profile_with_student(
 
     # 提交记录跟着作业留在原班,原班教师照样能看。
     submissions = client.get(
-        f"/api/v1/teacher/assignments/{assignment['id']}/submissions"
+        "/api/v1/teacher/review", params={"assignment_id": assignment["id"]}
     )
     assert submissions.status_code == 200, submissions.text
-    assert [item["submission"]["id"] for item in submissions.json()] == [
+    assert [item["submission"]["id"] for item in submissions.json()["items"]] == [
         submission_id
     ]
 
