@@ -6,6 +6,13 @@ import { describe, expect, test } from 'vitest';
 
 import EduTrendChart from './EduTrendChart.svelte';
 
+// 图宽跟随容器(bind:clientWidth),Svelte 用 ResizeObserver 实现;jsdom 没有,补个空桩。
+globalThis.ResizeObserver ??= class {
+	observe() {}
+	unobserve() {}
+	disconnect() {}
+} as unknown as typeof ResizeObserver;
+
 const context = new Map([
 	[
 		'i18n',
