@@ -832,7 +832,7 @@
 						value={latest?.total_chars ?? null}
 						delta={trendOf('total_chars')?.delta ?? null}
 						direction={trendOf('total_chars')?.direction ?? null}
-						format={(value) => `${Math.round(value)}`}
+						format={(value) => `${Math.round(value)} ${$i18n.t('chars')}`}
 					/>
 				</div>
 
@@ -858,7 +858,7 @@
 							{labels}
 							{axisLabels}
 							series={[seriesOf('total_chars', 'Draft Length', 'sky')]}
-							formatValue={(value) => `${Math.round(value)}`}
+							formatValue={(value) => `${Math.round(value)} ${$i18n.t('chars')}`}
 						/>
 					</div>
 				</div>
@@ -867,6 +867,11 @@
 					<div class="mt-8">
 						<div class="mb-2 text-xs font-medium text-gray-500 dark:text-gray-400">
 							{$i18n.t('Rubric')}
+						</div>
+						<div class="mb-3 text-xs text-gray-500 dark:text-gray-400">
+							{$i18n.t(
+								'Each line is one rubric dimension, scored against its own maximum. The line breaks where an assignment does not use that dimension.'
+							)}
 						</div>
 						<EduTrendChart
 							{labels}

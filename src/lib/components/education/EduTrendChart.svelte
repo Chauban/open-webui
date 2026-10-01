@@ -56,7 +56,10 @@
 		gray: 'text-gray-400 dark:text-gray-500'
 	};
 
-	const VIEW_WIDTH = 640;
+	// 画布宽度跟随容器实际宽度，而不是固定 viewBox 再整体拉伸：
+	// 否则通栏的图会把刻度和日期字号一起放大，和半栏的图对不齐。
+	let containerWidth = 0;
+	$: VIEW_WIDTH = Math.max(containerWidth || 640, 320);
 	const VIEW_HEIGHT = 200;
 	const PADDING = { top: 12, right: 12, bottom: 26, left: 44 };
 
@@ -72,10 +75,10 @@
 	$: scaleLow = min ?? lowerBound - span * 0.1;
 	$: scaleHigh = max ?? upperBound + span * 0.1;
 
-	const plotWidth = VIEW_WIDTH - PADDING.left - PADDING.right;
+	$: plotWidth = VIEW_WIDTH - PADDING.left - PADDING.right;
 	const plotHeight = VIEW_HEIGHT - PADDING.top - PADDING.bottom;
 
-	const toX = (index: number, count: number) =>
+	$: toX = (index: number, count: number) =>
 		count <= 1 ? PADDING.left + plotWidth / 2 : PADDING.left + (index / (count - 1)) * plotWidth;
 	const toY = (value: number, low: number, high: number) =>
 		PADDING.top + plotHeight - ((value - low) / (high - low || 1)) * plotHeight;
@@ -88,10 +91,11 @@
 		{$i18n.t('At least two submissions are needed to show a trend.')}
 	</div>
 {:else}
-	<div class="overflow-x-auto">
+	<div class="overflow-x-auto" bind:clientWidth={containerWidth}>
 		<svg
 			viewBox="0 0 {VIEW_WIDTH} {VIEW_HEIGHT}"
-			class="h-auto w-full min-w-[320px]"
+			class="block w-full min-w-[320px]"
+			style="height: {VIEW_HEIGHT}px"
 			role="group"
 			aria-label={series.map((item) => item.label).join(', ')}
 		>

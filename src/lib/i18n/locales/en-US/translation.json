@@ -2799,6 +2799,7 @@
 	"Round": "Round",
 	"Round {{round}}": "Round {{round}}",
 	"Rubric": "",
+	"Each line is one rubric dimension, scored against its own maximum. The line breaks where an assignment does not use that dimension.": "",
 	"Rubric Criteria": "Rubric Criteria",
 	"Rubric criteria are locked after the first submission.": "Rubric criteria are locked after the first submission.",
 	"Rubric maximum scores add up to the assignment maximum.": "Rubric maximum scores add up to the assignment maximum.",

@@ -2755,6 +2755,7 @@
 	"Roles Claim": "角色声明",
 	"Round {{round}}": "第 {{round}} 轮",
 	"Rubric": "评分维度",
+	"Each line is one rubric dimension, scored against its own maximum. The line breaks where an assignment does not use that dimension.": "每条线是一个评分维度，按该维度的满分换算为得分率；某次作业没有这个维度时，线会在那里断开。",
 	"Rubric maximum scores must add up to assignment maximum score": "各评分维度满分之和必须等于作业满分",
 	"Rubric scores must include every configured criterion exactly once": "维度评分必须覆盖每个已配置维度，且不能重复",
 	"Run": "运行",
