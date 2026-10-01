@@ -60,12 +60,12 @@
 				{
 					key: 'balanced',
 					title: 'Balanced',
-					hint: 'Clarify intent first, then coach with outlines, examples and demonstrated edits.'
+					hint: 'Coach with outlines, examples and demonstrated edits.'
 				},
 				{
 					key: 'hands_off',
 					title: 'Hands-off',
-					hint: 'Help as asked, with one round of clarification before writing.'
+					hint: 'Help as asked, including rewriting on request.'
 				}
 			]
 		}

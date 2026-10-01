@@ -19,12 +19,12 @@
 		{
 			key: 'balanced',
 			title: 'Balanced',
-			hint: 'The AI clarifies intent first, then coaches with outlines, examples and demonstrated edits.'
+			hint: 'The AI coaches with outlines, examples and demonstrated edits.'
 		},
 		{
 			key: 'hands_off',
 			title: 'Hands-off',
-			hint: 'The AI helps as asked, with one round of clarification so the student does not write off-topic.'
+			hint: 'The AI helps as asked and rewrites on request, explaining its reasoning.'
 		}
 	];
 
