@@ -423,6 +423,17 @@ export const submitDraftBaseline = async (token: string, sessionId: string, text
 	}).then(handleJson);
 };
 
+// 只解析不保存:返回文件里的正文,学生核对后仍走 submitDraftBaseline。
+export const extractDraftBaselineFile = async (token: string, sessionId: string, file: File) => {
+	const body = new FormData();
+	body.append('file', file);
+	return fetch(`${WEBUI_API_BASE_URL}/writing-sessions/${sessionId}/draft-baseline/extract`, {
+		method: 'POST',
+		headers: { Accept: 'application/json', authorization: `Bearer ${token}` },
+		body
+	}).then(handleJson) as Promise<{ text: string }>;
+};
+
 export const createEditorOperations = async (
 	token: string,
 	sessionId: string,

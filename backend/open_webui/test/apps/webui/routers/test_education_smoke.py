@@ -6331,3 +6331,74 @@ def test_draft_diff_compares_whole_sentences():
     assert [block["op"] for block in blocks] == ["equal", "replace", "equal"]
     assert blocks[1]["old_text"] == "第二句是旧的说法。"
     assert blocks[1]["new_text"] == "第二句换成了完全不同的新说法！"
+
+
+def _docx_bytes(paragraphs):
+    from docx import Document
+
+    document = Document()
+    for text in paragraphs:
+        document.add_paragraph(text)
+    document.sections[0].header.paragraphs[0].text = "页眉不是正文"
+    buffer = io.BytesIO()
+    document.save(buffer)
+    return buffer.getvalue()
+
+
+def test_draft_file_is_parsed_into_text_without_freezing_baseline(education_client):
+    client, teacher, _, student, _, SessionLocal = education_client
+    assignment, session_id = _setup_revise_draft_assignment(client, teacher, student)
+    url = f"/api/v1/writing-sessions/{session_id}/draft-baseline/extract"
+    docx_type = (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+
+    res = client.post(
+        url,
+        files={
+            "file": (
+                "初稿.docx",
+                _docx_bytes(["　　第一段开头。", "", "第二段\n软回车之后。"]),
+                docx_type,
+            )
+        },
+    )
+    assert res.status_code == 200, res.text
+    assert res.json() == {"text": "第一段开头。\n第二段\n软回车之后。"}
+
+    # 记事本存的 GBK 中文 txt
+    res = client.post(
+        url, files={"file": ("初稿.txt", "中文初稿。\r\n\r\n第二段。".encode("gbk"))}
+    )
+    assert res.json() == {"text": "中文初稿。\n第二段。"}
+
+    for name, data, detail in [
+        ("初稿.doc", b"\xd0\xcf\x11\xe0", "Old .doc files are not supported"),
+        ("初稿.pdf", b"%PDF-1.7", "Only .docx, .txt and .md files are supported"),
+        ("初稿.docx", b"not a zip", "Could not read this file"),
+        ("初稿.docx", _docx_bytes(["", "  "]), "No text found in this file"),
+    ]:
+        res = client.post(url, files={"file": (name, data)})
+        assert res.status_code == 400, res.text
+        assert res.json()["detail"].startswith(detail)
+
+    # 只解析不冻结;交过初稿后再上传文件也被拒绝
+    with SessionLocal() as db:
+        session = Education.get_writing_session_by_id(session_id, db=db)
+        assert session.draft_baseline_at is None
+    client.post(
+        f"/api/v1/writing-sessions/{session_id}/draft-baseline",
+        json={"text": _DRAFT_TEXT},
+    )
+    res = client.post(url, files={"file": ("初稿.txt", "x".encode())})
+    assert res.status_code == 409, res.text
+
+
+def test_draft_file_upload_only_for_revise_draft_assignments(education_client):
+    client, teacher, _, student, _, _ = education_client
+    _, session_id, _ = _setup_submitted_assignment(client, teacher, student)
+    res = client.post(
+        f"/api/v1/writing-sessions/{session_id}/draft-baseline/extract",
+        files={"file": ("初稿.txt", "x".encode())},
+    )
+    assert res.status_code == 400, res.text

@@ -7,6 +7,9 @@
 """
 
 import html
+import io
+import os
+import zipfile
 
 from open_webui.models.education import Education
 from open_webui.models.notes import Notes
@@ -31,6 +34,61 @@ def normalize_draft_paragraphs(text: str) -> list[str]:
     """
 
     return [line.strip() for line in (text or "").splitlines() if line.strip()]
+
+
+# 初稿文件上限。几千字的论文 docx 通常不到 100KB,大的多半是嵌了图片。
+DRAFT_FILE_MAX_BYTES = 10 * 1024 * 1024
+
+
+class DraftFileError(ValueError):
+    """文件读不出初稿正文;消息是给学生看的 i18n 键。"""
+
+
+def extract_draft_text(filename: str, data: bytes) -> str:
+    """从学生上传的初稿文件里取出纯文本,一段一行。
+
+    只解析不存档:文件内容不落盘、不进文件库,学生核对后照常走「确认初稿」。
+    只收 .docx 和纯文本。旧版 .doc 是二进制格式,让学生另存为 .docx;
+    PDF 不收,中文 PDF 抽出来每个视觉行都断成一段,学生得逐段拼回去。
+    """
+
+    if len(data) > DRAFT_FILE_MAX_BYTES:
+        raise DraftFileError("The file is too large")
+    suffix = os.path.splitext(filename or "")[1].lower()
+    if suffix == ".docx":
+        text = _extract_docx_text(data)
+    elif suffix in (".txt", ".md"):
+        text = _decode_plain_text(data)
+    elif suffix == ".doc":
+        raise DraftFileError("Old .doc files are not supported, save it as .docx")
+    else:
+        raise DraftFileError("Only .docx, .txt and .md files are supported")
+    text = "\n".join(normalize_draft_paragraphs(text))
+    if not text:
+        raise DraftFileError("No text found in this file")
+    return text
+
+
+def _extract_docx_text(data: bytes) -> str:
+    from docx import Document
+
+    try:
+        document = Document(io.BytesIO(data))
+    except (zipfile.BadZipFile, KeyError, ValueError) as err:
+        raise DraftFileError("Could not read this file") from err
+    # 只取正文段落:页眉页脚、文本框、表格不是论文正文。
+    # 段内软回车(Shift+Enter)python-docx 给的是 \n,随后按行切段。
+    return "\n".join(paragraph.text for paragraph in document.paragraphs)
+
+
+def _decode_plain_text(data: bytes) -> str:
+    # Windows 记事本存的中文 txt 常是 GBK。
+    for encoding in ("utf-8-sig", "gb18030"):
+        try:
+            return data.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    raise DraftFileError("Could not read this file")
 
 
 def build_draft_note_content(paragraphs: list[str]) -> dict:

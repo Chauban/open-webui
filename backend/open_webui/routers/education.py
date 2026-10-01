@@ -11,7 +11,16 @@ import zipfile
 from datetime import datetime
 from typing import NamedTuple, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+    status,
+)
 from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
@@ -128,7 +137,10 @@ from open_webui.services.education.profile_snapshots import (
 from open_webui.services.education.profile import PROFILE_METRIC_VERSION
 from open_webui.services.education.identity import get_education_role
 from open_webui.services.education.writing_context import (
+    DRAFT_FILE_MAX_BYTES,
+    DraftFileError,
     build_draft_note_content,
+    extract_draft_text,
     is_draft_baseline_missing,
     normalize_draft_paragraphs,
 )
@@ -2557,15 +2569,8 @@ async def create_provenance_segments(
     )
 
 
-@router.post(
-    "/writing-sessions/{session_id}/draft-baseline", response_model=WritingSessionModel
-)
-async def submit_draft_baseline(
-    form_data: DraftBaselineForm,
-    session: WritingSessionModel = Depends(require_owned_writing_session),
-    db: Session = Depends(get_session),
-):
-    """修订初稿作业:冻结课外写好的初稿为修改起点,同时成为编辑器的初始正文。"""
+def _ensure_draft_baseline_open(session: WritingSessionModel, db: Session) -> None:
+    """修订初稿作业、初稿还没交、作业没截止,才能交初稿(或解析初稿文件)。"""
     if session.scope != "assignment":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid writing scope"
@@ -2587,6 +2592,40 @@ async def submit_draft_baseline(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Assignment due time has passed",
         )
+
+
+@router.post("/writing-sessions/{session_id}/draft-baseline/extract")
+async def extract_draft_baseline_file(
+    file: UploadFile = File(...),
+    session: WritingSessionModel = Depends(require_owned_writing_session),
+    db: Session = Depends(get_session),
+):
+    """把学生上传的初稿文件解析成纯文本,填回初稿框让学生核对后再确认。
+
+    只解析不保存:不落盘、不进文件库,也不冻结基线。
+    """
+    _ensure_draft_baseline_open(session, db)
+    # 多读 1 字节,超限时不必把整个大文件读进内存。
+    data = await file.read(DRAFT_FILE_MAX_BYTES + 1)
+    try:
+        text = extract_draft_text(file.filename or "", data)
+    except DraftFileError as err:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(err)
+        ) from err
+    return {"text": text}
+
+
+@router.post(
+    "/writing-sessions/{session_id}/draft-baseline", response_model=WritingSessionModel
+)
+async def submit_draft_baseline(
+    form_data: DraftBaselineForm,
+    session: WritingSessionModel = Depends(require_owned_writing_session),
+    db: Session = Depends(get_session),
+):
+    """修订初稿作业:冻结课外写好的初稿为修改起点,同时成为编辑器的初始正文。"""
+    _ensure_draft_baseline_open(session, db)
 
     paragraphs = normalize_draft_paragraphs(form_data.text)
     if sum(len("".join(line.split())) for line in paragraphs) < DRAFT_BASELINE_MIN_CHARS:
