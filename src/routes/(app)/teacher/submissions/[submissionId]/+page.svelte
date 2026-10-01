@@ -4,6 +4,8 @@
 	import { getContext, onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import TextDiffBlocks from '$lib/components/education/TextDiffBlocks.svelte';
+	import DOMPurify from 'dompurify';
+	import { marked } from 'marked';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { get } from 'svelte/store';
@@ -442,6 +444,10 @@
 			draftDiffLoading = false;
 		}
 	};
+
+	// AI 回复是 Markdown;修订初稿作业里一条诊断动辄上千字,原样显示 ## 和 ** 读起来很吃力。
+	const renderMarkdown = (text: string) =>
+		DOMPurify.sanitize(marked.parse(text ?? '', { async: false }) as string);
 
 	const toggleTimelineItem = (idx: number) => {
 		if (expandedTimelineIds.has(idx)) {
@@ -1175,7 +1181,13 @@
 															</span>
 														{/if}
 													</div>
-													<div class="whitespace-pre-wrap break-words text-gray-800 dark:text-gray-200 {isExpanded ? '' : 'line-clamp-3'}">{item.label}</div>
+													{#if isAI}
+														<div class="prose prose-sm dark:prose-invert max-w-none break-words prose-headings:my-2 prose-headings:text-sm prose-headings:font-semibold text-gray-800 dark:text-gray-200 {isExpanded ? '' : 'max-h-[4.5rem] overflow-hidden'}">
+															{@html renderMarkdown(item.label)}
+														</div>
+													{:else}
+														<div class="whitespace-pre-wrap break-words text-gray-800 dark:text-gray-200 {isExpanded ? '' : 'line-clamp-3'}">{item.label}</div>
+													{/if}
 													{#if item.inserted_length}
 														<div class="mt-1 text-xs text-gray-400">
 														{$i18n.t('+{{count}} chars', { count: item.inserted_length })}

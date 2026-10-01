@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import io
 import json
+import re
 import time
 import uuid
 import zipfile
@@ -3404,14 +3405,27 @@ async def get_submission_draft_diff(
     current_version = Education.get_version_by_id(submission.final_version_id, db=db)
     old_text = session.draft_baseline_text or ""
     new_text = (current_version.note_snapshot_text or "") if current_version else ""
-    matcher = difflib.SequenceMatcher(None, old_text, new_text, autojunk=False)
-    return {
-        "has_baseline": True,
-        "blocks": [
-            {"op": op, "old_text": old_text[i1:i2], "new_text": new_text[j1:j2]}
-            for op, i1, i2, j1, j2 in matcher.get_opcodes()
-        ],
-    }
+    return {"has_baseline": True, "blocks": _sentence_diff_blocks(old_text, new_text)}
+
+
+# 句末标点或换行之后断句;标点留在句子里,各句拼回去就是原文。
+_SENTENCE_RE = re.compile(r"[^。！？；!?;\n]*(?:[。！？；!?;]+|\n)|[^。！？；!?;\n]+")
+
+
+def _sentence_diff_blocks(old_text: str, new_text: str) -> list[dict]:
+    """按句子对比。初稿到终稿常常整段重写,逐字对比会把新旧两版绞成碎片,
+    老师读不出改了什么;按句对比时,删掉的旧句和写进的新句各自完整。"""
+    old_sentences = _SENTENCE_RE.findall(old_text)
+    new_sentences = _SENTENCE_RE.findall(new_text)
+    matcher = difflib.SequenceMatcher(None, old_sentences, new_sentences, autojunk=False)
+    return [
+        {
+            "op": op,
+            "old_text": "".join(old_sentences[i1:i2]),
+            "new_text": "".join(new_sentences[j1:j2]),
+        }
+        for op, i1, i2, j1, j2 in matcher.get_opcodes()
+    ]
 
 
 @router.post("/teacher/submissions/{submission_id}/analysis")

@@ -6276,3 +6276,54 @@ def test_draft_diff_reports_no_baseline_for_from_scratch(education_client):
     res = client.get(f"/api/v1/teacher/submissions/{submission_id}/draft-diff")
     assert res.status_code == 200, res.text
     assert res.json() == {"has_baseline": False, "blocks": []}
+
+
+def test_source_map_runs_starting_at_a_line_break_keep_their_source():
+    # 改过的段落之间，未动的初稿从段落换行处开始。以前清洗文本时 strip 掉换行，
+    # 偏移量随之作废，整段初稿落成「来源未知」。
+    final_text = "第一段改过。\n第二段是初稿原文。"
+    split = final_text.index("\n")
+    segments = [
+        SimpleNamespace(
+            segment_id=f"source-map-{index}",
+            source_type=source_type,
+            segment_text=final_text[start:end],
+            source_message_id=None,
+            start_offset=start,
+            end_offset=end,
+            version_id=None,
+            metadata_json={"provenance_kind": "source_map"},
+        )
+        for index, (source_type, start, end) in enumerate(
+            [("user_typed", 0, split), ("declared_draft", split, len(final_text))]
+        )
+    ]
+    analysis = build_submission_analysis(
+        SimpleNamespace(id="s", final_version_id="v", submitted_at=1),
+        SimpleNamespace(id="ws"),
+        [
+            SimpleNamespace(
+                id="v",
+                version_no=1,
+                trigger_type="submit",
+                note_snapshot_text=final_text,
+                created_at=1,
+            )
+        ],
+        segments,
+        [],
+        [],
+    )
+    summary = analysis["summary"]
+    assert summary["unknown_chars"] == 0
+    assert summary["declared_draft_chars"] == len(final_text) - split
+    assert summary["typed_chars"] == split
+
+
+def test_draft_diff_compares_whole_sentences():
+    old = "第一句没动。第二句是旧的说法。\n第三句也没动。"
+    new = "第一句没动。第二句换成了完全不同的新说法！\n第三句也没动。"
+    blocks = education_router_module._sentence_diff_blocks(old, new)
+    assert [block["op"] for block in blocks] == ["equal", "replace", "equal"]
+    assert blocks[1]["old_text"] == "第二句是旧的说法。"
+    assert blocks[1]["new_text"] == "第二句换成了完全不同的新说法！"

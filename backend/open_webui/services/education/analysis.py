@@ -280,7 +280,12 @@ class NormalizedSegment:
 
     def __init__(self, segment):
         original = segment.segment_text or ""
-        cleaned = _clean_provenance_text(original)
+        # source map 片段就是编辑器里的原文，偏移量已对着终稿逐字核对，不能再清洗:
+        # strip 会把从段落换行处开始的片段改掉，偏移量随之作废，整段落成「来源未知」。
+        is_source_map = (getattr(segment, "metadata_json", None) or {}).get(
+            "provenance_kind"
+        ) == "source_map"
+        cleaned = original if is_source_map else _clean_provenance_text(original)
         self.segment_id = segment.segment_id
         self.segment_text = cleaned
         self.source_type = segment.source_type
