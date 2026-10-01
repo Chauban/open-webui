@@ -561,6 +561,14 @@ export const getSubmissionRoundDiff = async (token: string, submissionId: string
 	}).then(handleJson);
 };
 
+/** 修订初稿作业:初稿 → 本轮终稿的对比块;不是修订初稿作业时 has_baseline 为 false。 */
+export const getSubmissionDraftDiff = async (token: string, submissionId: string) => {
+	return fetch(`${WEBUI_API_BASE_URL}/teacher/submissions/${submissionId}/draft-diff`, {
+		method: 'GET',
+		headers: withAuth(token)
+	}).then(handleJson);
+};
+
 export const getTeacherSubmissionDetail = async (token: string, submissionId: string) => {
 	return fetch(`${WEBUI_API_BASE_URL}/teacher/submissions/${submissionId}`, {
 		method: 'GET',

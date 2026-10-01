@@ -11,7 +11,7 @@ from open_webui.models.education import Education
 
 # Bump whenever the provenance/highlight analysis logic changes so cached
 # results produced by older logic are recomputed instead of served stale.
-_ANALYSIS_LOGIC_VERSION = "4"
+_ANALYSIS_LOGIC_VERSION = "5"
 
 SOURCE_MAP_TYPES = {
     "ai_inserted",
@@ -658,12 +658,24 @@ def _detect_large_bursts(version_diffs: list[dict], final_text: str, operations:
     return bursts
 
 
-def build_submission_analysis(submission, session, versions, provenance_segments, operations, prompt_timeline):
+def build_submission_analysis(
+    submission,
+    session,
+    versions,
+    provenance_segments,
+    operations,
+    prompt_timeline,
+    baseline_text: str = "",
+):
+    """baseline_text 是本轮版本差异的起点:重交轮为上一轮终稿,修订初稿作业第一轮为声明的初稿。
+
+    不给起点的话,第一版会被当成从空白一次写入整篇,初稿和上一轮终稿都会被误报成大段写入。
+    """
     final_text = (versions[-1].note_snapshot_text if versions else "") or ""
     provenance_segments = [NormalizedSegment(segment) for segment in provenance_segments]
     filtered_segments = filter_segments_for_final_text(final_text, provenance_segments)
     source_map_highlights = build_source_map_highlights(final_text, provenance_segments)
-    version_diffs = build_version_diffs(versions)
+    version_diffs = build_version_diffs(versions, baseline_text)
     bursts = _detect_large_bursts(version_diffs, final_text, operations)
 
     operation_by_source: dict[str, object] = {}
@@ -795,6 +807,7 @@ def build_submission_analysis(submission, session, versions, provenance_segments
     ai_pasted_chars = 0
     external_paste_chars = 0
     suspected_chars = 0
+    declared_draft_chars = 0
     unknown_chars = 0
     source_mapped_chars = 0
     for segment in highlight_segments:
@@ -811,6 +824,9 @@ def build_submission_analysis(submission, session, versions, provenance_segments
             suspected_chars += segment_length
         elif segment["source_type"] == "suspected_unmarked_import":
             suspected_chars += segment_length
+        elif segment["source_type"] == "declared_draft":
+            # 已声明的初稿:来源明确,不计入任何风险统计。
+            declared_draft_chars += segment_length
         elif segment["source_type"] == "unknown":
             unknown_chars += segment_length
 
@@ -889,6 +905,8 @@ def build_submission_analysis(submission, session, versions, provenance_segments
                 if source_map_highlights is not None
                 else len(suspected_segments)
             ),
+            "declared_draft_chars": declared_draft_chars,
+            "declared_draft_ratio": round(declared_draft_chars / max(len(final_text), 1), 4),
             "unknown_chars": unknown_chars,
             "unknown_ratio": round(unknown_chars / max(len(final_text), 1), 4),
             "source_mapped_chars": source_mapped_chars,

@@ -3390,6 +3390,30 @@ async def get_submission_round_diff(
     }
 
 
+@router.get("/teacher/submissions/{submission_id}/draft-diff")
+async def get_submission_draft_diff(
+    scope: TeacherSubmissionScope = Depends(require_teacher_submission),
+    db: Session = Depends(get_session),
+):
+    """修订初稿作业:从学生声明的初稿到本轮终稿的完整修改。退回重交后起点仍是最初那份初稿。"""
+    submission = scope.submission
+    session = _get_workspace_session_or_404(submission.writing_session_id, db)
+    if session.draft_baseline_at is None:
+        return {"has_baseline": False, "blocks": []}
+
+    current_version = Education.get_version_by_id(submission.final_version_id, db=db)
+    old_text = session.draft_baseline_text or ""
+    new_text = (current_version.note_snapshot_text or "") if current_version else ""
+    matcher = difflib.SequenceMatcher(None, old_text, new_text, autojunk=False)
+    return {
+        "has_baseline": True,
+        "blocks": [
+            {"op": op, "old_text": old_text[i1:i2], "new_text": new_text[j1:j2]}
+            for op, i1, i2, j1, j2 in matcher.get_opcodes()
+        ],
+    }
+
+
 @router.post("/teacher/submissions/{submission_id}/analysis")
 async def recompute_submission_analysis(
     scope: TeacherSubmissionScope = Depends(require_teacher_submission),

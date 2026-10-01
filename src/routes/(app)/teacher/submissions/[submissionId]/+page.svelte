@@ -3,6 +3,7 @@
 	import type { i18n as i18nType } from 'i18next';
 	import { getContext, onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
+	import TextDiffBlocks from '$lib/components/education/TextDiffBlocks.svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { get } from 'svelte/store';
@@ -10,6 +11,7 @@
 	import {
 		getSubmissionAnalysisSegmentDetail,
 		getSubmissionRoundDiff,
+		getSubmissionDraftDiff,
 		getSubmissionVersions,
 		getTeacherReview,
 		getSubmissionChallenge,
@@ -164,7 +166,7 @@
 		] ?? null;
 	$: segmentCharStats = (() => {
 		if (!analysisHighlights.length) return null;
-		let typed = 0, aiInserted = 0, aiPasted = 0, externalPaste = 0, unknown = 0;
+		let typed = 0, aiInserted = 0, aiPasted = 0, externalPaste = 0, unknown = 0, declaredDraft = 0;
 		for (const seg of analysisHighlights) {
 			const len = (seg.segment_text ?? '').length;
 			if (seg.source_type === 'user_typed') typed += len;
@@ -172,8 +174,9 @@
 			else if (seg.source_type === 'ai_pasted') aiPasted += len;
 			else if (seg.source_type === 'external_paste' || seg.source_type === 'suspected_unmarked_import') externalPaste += len;
 			else if (seg.source_type === 'unknown') unknown += len;
+			else if (seg.source_type === 'declared_draft') declaredDraft += len;
 		}
-		return { typed, aiInserted, aiPasted, externalPaste, unknown };
+		return { typed, aiInserted, aiPasted, externalPaste, unknown, declaredDraft };
 	})();
 	$: reviewOverview = buildSubmissionReviewOverview({
 		analysisSummary: segmentCharStats
@@ -183,7 +186,8 @@
 					ai_inserted_chars: segmentCharStats.aiInserted,
 					ai_pasted_chars: segmentCharStats.aiPasted,
 					external_paste_chars: segmentCharStats.externalPaste,
-					unknown_chars: segmentCharStats.unknown
+					unknown_chars: segmentCharStats.unknown,
+					declared_draft_chars: segmentCharStats.declaredDraft
 				}
 			: analysisSummary,
 		stats: detail?.submission?.stats_json ?? {}
@@ -193,8 +197,13 @@
 		{ label: 'AI inserted', chars: reviewOverview.aiInsertedChars, percent: reviewOverview.aiInsertedPercent, bar: 'bg-amber-300', swatch: 'bg-amber-300' },
 		{ label: 'AI pasted', chars: reviewOverview.aiPastedChars, percent: reviewOverview.aiPastedPercent, bar: 'bg-sky-300', swatch: 'bg-sky-300' },
 		{ label: 'External paste / suspected import', chars: reviewOverview.externalPasteChars, percent: reviewOverview.externalPastePercent, bar: 'bg-rose-300', swatch: 'bg-rose-300' },
-		{ label: 'Unknown source', chars: reviewOverview.unknownChars, percent: reviewOverview.unknownPercent, bar: 'bg-gray-300', swatch: 'bg-gray-300' }
+		{ label: 'Unknown source', chars: reviewOverview.unknownChars, percent: reviewOverview.unknownPercent, bar: 'bg-gray-300', swatch: 'bg-gray-300' },
+		// 修订初稿作业里学生声明的初稿:来源明确，不用风险色；其他作业没有这一行。
+		...(reviewOverview.declaredDraftChars > 0
+			? [{ label: 'Declared first draft', chars: reviewOverview.declaredDraftChars, percent: reviewOverview.declaredDraftPercent, bar: 'bg-violet-300', swatch: 'bg-violet-300' }]
+			: [])
 	];
+	$: isReviseDraft = detail?.assignment?.task_mode === 'revise_draft';
 	$: filteredPromptTimeline = (detail?.prompt_timeline ?? []).filter((item) => {
 		if (item.role === 'user') return showUserTimeline;
 		if (item.role === 'assistant') return showAssistantTimeline;
@@ -411,6 +420,26 @@
 			toast.error(resolveErrorMessage(error, t));
 		} finally {
 			diffLoading = false;
+		}
+	};
+
+	// 初稿 → 终稿:老师要看的是从第一稿到这一轮的完整修改，退回重交后起点仍是最初那份初稿。
+	let draftDiffData = null;
+	let draftDiffLoading = false;
+	let draftDiffSeq = 0;
+	const loadDraftDiff = async () => {
+		if (draftDiffLoading) return;
+		const seq = ++draftDiffSeq;
+		draftDiffLoading = true;
+		try {
+			const response = await getSubmissionDraftDiff(localStorage.token, detail.submission.id);
+			if (seq !== draftDiffSeq) return;
+			draftDiffData = response;
+		} catch (error) {
+			if (seq !== draftDiffSeq) return;
+			toast.error(resolveErrorMessage(error, t));
+		} finally {
+			draftDiffLoading = false;
 		}
 	};
 
@@ -1166,6 +1195,26 @@
 									{/if}
 								</div>
 
+								<!-- First draft → this round's final -->
+								{#if isReviseDraft}
+									<div class="mt-4">
+										<button
+											class="text-sm font-medium underline disabled:opacity-50"
+											disabled={draftDiffLoading}
+											on:click={loadDraftDiff}
+										>
+											{draftDiffLoading ? $i18n.t('Loading...') : $i18n.t('Compare first draft with final')}
+										</button>
+										{#if draftDiffData}
+											{#if draftDiffData.has_baseline}
+												<TextDiffBlocks blocks={draftDiffData.blocks} />
+											{:else}
+												<div class="mt-2 text-sm text-gray-400">{$i18n.t('No first draft was submitted.')}</div>
+											{/if}
+										{/if}
+									</div>
+								{/if}
+
 								<!-- Previous-round diff -->
 								{#if detail?.submission?.round_no > 1}
 									<div class="mt-4">
@@ -1178,14 +1227,7 @@
 										</button>
 										{#if diffData}
 											{#if diffData.has_previous}
-												<div class="mt-2 p-3 rounded-lg border border-gray-200 dark:border-gray-800 text-sm leading-7 whitespace-pre-wrap">
-													{#each diffData.blocks as block}
-														{#if block.op === 'equal'}<span>{block.new_text}</span>
-														{:else if block.op === 'insert'}<span class="bg-emerald-100 dark:bg-emerald-900/50">{block.new_text}</span>
-														{:else if block.op === 'delete'}<span class="bg-rose-100 dark:bg-rose-900/50 line-through">{block.old_text}</span>
-														{:else}<span class="bg-rose-100 dark:bg-rose-900/50 line-through">{block.old_text}</span><span class="bg-emerald-100 dark:bg-emerald-900/50">{block.new_text}</span>{/if}
-													{/each}
-												</div>
+												<TextDiffBlocks blocks={diffData.blocks} />
 											{:else}
 												<div class="mt-2 text-sm text-gray-400">{$i18n.t('No previous round to compare.')}</div>
 											{/if}

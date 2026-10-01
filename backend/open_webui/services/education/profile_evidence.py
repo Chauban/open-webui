@@ -49,7 +49,7 @@ from open_webui.services.education.profile import (
     _slice_round_versions,
 )
 
-PROFILE_EVIDENCE_SCHEMA_VERSION = "2026-09-14.1"
+PROFILE_EVIDENCE_SCHEMA_VERSION = "2026-10-01.1"
 PROFILE_EVIDENCE_COLLECTOR_VERSION = "2026-09-03.1"
 
 
@@ -237,6 +237,7 @@ def capture_profile_evidence(
             if previous_submission is not None
             else None
         ),
+        draft_baseline_text=writing_session.draft_baseline_text,
         assignment=ProfileEvidenceAssignmentContext(
             title=assignment.title,
             description=assignment.description,
@@ -398,6 +399,13 @@ def _evidence_versions(facts: ProfileEvidencePayload) -> list[SimpleNamespace]:
     ]
 
 
+def round_baseline_text(facts) -> str:
+    """本轮过程指标的起点:重交轮是上一轮终稿,修订初稿作业的第一轮是声明的初稿。"""
+    if facts.previous_round is not None:
+        return facts.previous_round.final_content_text
+    return facts.draft_baseline_text or ""
+
+
 def build_analysis_from_evidence(evidence: ProfileEvidenceSnapshotModel) -> dict:
     verify_profile_evidence(evidence)
     facts = evidence.evidence_json
@@ -419,6 +427,7 @@ def build_analysis_from_evidence(evidence: ProfileEvidenceSnapshotModel) -> dict
             for item in facts.editor_operations
         ],
         [item.model_dump() for item in facts.conversation],
+        baseline_text=round_baseline_text(facts),
     )
 
 
@@ -431,10 +440,7 @@ def build_metric_projection(
     versions = _evidence_versions(facts)
     analysis = analysis or build_analysis_from_evidence(evidence)
     summary = analysis["summary"]
-    previous_text = (
-        facts.previous_round.final_content_text if facts.previous_round else ""
-    )
-    version_diffs = build_version_diffs(versions, previous_text)
+    version_diffs = build_version_diffs(versions, round_baseline_text(facts))
     inserted_chars = sum(diff.get("inserted_length", 0) for diff in version_diffs)
     revised_chars = sum(diff.get("deleted_length", 0) for diff in version_diffs)
     version_complete = facts.capture_manifest.version_data.status == "complete"

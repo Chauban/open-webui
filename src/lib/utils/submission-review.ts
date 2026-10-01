@@ -12,6 +12,7 @@ export type SubmissionReviewOverview = {
 	aiPastedChars: number;
 	externalPasteChars: number;
 	unknownChars: number;
+	declaredDraftChars: number;
 	suspectedUnmarkedImportCount: number;
 	burstCount: number;
 	promptCount: number;
@@ -21,6 +22,7 @@ export type SubmissionReviewOverview = {
 	aiPastedPercent: number;
 	externalPastePercent: number;
 	unknownPercent: number;
+	declaredDraftPercent: number;
 	focusLabel: string;
 	focusReasons: string[];
 };
@@ -58,6 +60,7 @@ export const buildSubmissionReviewOverview = ({
 		stats.suspected_unmarked_import_chars
 	);
 	const unknownChars = numberFrom(analysisSummary.unknown_chars, stats.unknown_chars);
+	const declaredDraftChars = numberFrom(analysisSummary.declared_draft_chars);
 	const suspectedUnmarkedImportCount = numberFrom(analysisSummary.suspected_unmarked_import_count);
 	const burstCount = numberFrom(analysisSummary.burst_count);
 	const promptCount = numberFrom(analysisSummary.prompt_count, stats.prompt_count);
@@ -100,6 +103,7 @@ export const buildSubmissionReviewOverview = ({
 		aiPastedChars,
 		externalPasteChars,
 		unknownChars,
+		declaredDraftChars,
 		suspectedUnmarkedImportCount,
 		burstCount,
 		promptCount,
@@ -109,6 +113,7 @@ export const buildSubmissionReviewOverview = ({
 		aiPastedPercent: percentOf(aiPastedChars, totalChars),
 		externalPastePercent: percentOf(externalPasteChars, totalChars),
 		unknownPercent: percentOf(unknownChars, totalChars),
+		declaredDraftPercent: percentOf(declaredDraftChars, totalChars),
 		focusLabel,
 		focusReasons: focusReasons.slice(0, 4)
 	};

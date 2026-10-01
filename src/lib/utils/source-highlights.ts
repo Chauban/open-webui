@@ -70,6 +70,9 @@ const colorClass = (sourceType: string) => {
 		return 'bg-rose-100 text-rose-950 dark:bg-rose-900/60 dark:text-rose-50';
 	if (sourceType === 'unknown')
 		return 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200';
+	// 已声明的初稿来源明确，不用风险色。
+	if (sourceType === 'declared_draft')
+		return 'bg-violet-50 text-violet-950 dark:bg-violet-900/40 dark:text-violet-50';
 	return 'bg-emerald-100 text-emerald-950 dark:bg-emerald-900/60 dark:text-emerald-50';
 };
 

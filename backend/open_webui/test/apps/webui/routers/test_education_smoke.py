@@ -6169,3 +6169,110 @@ def test_writing_chat_context_carries_the_latest_text(education_client):
     context = asyncio.run(build_current_text_context(session))
     assert revised in context
     assert "改过的第二段。" in context
+
+
+def _revise_and_submit(client, assignment, session_id, text, declared_until):
+    """模拟编辑器:存一版,source map 前段仍是已声明初稿、后段是学生自己敲的,然后提交。"""
+    version = client.post(
+        f"/api/v1/writing-sessions/{session_id}/versions",
+        json={"trigger_type": "autosave", "content_json": None, "content_text": text},
+    )
+    assert version.status_code == 200, version.text
+    res = client.post(
+        f"/api/v1/writing-sessions/{session_id}/provenance",
+        json={
+            "version_id": version.json()["id"],
+            "replace_existing": True,
+            "segments": [
+                {
+                    "segment_id": "source-map-0",
+                    "source_type": "declared_draft",
+                    "segment_text": text[:declared_until],
+                    "start_offset": 0,
+                    "end_offset": declared_until,
+                    "metadata_json": {"provenance_kind": "source_map"},
+                },
+                {
+                    "segment_id": "source-map-1",
+                    "source_type": "user_typed",
+                    "segment_text": text[declared_until:],
+                    "start_offset": declared_until,
+                    "end_offset": len(text),
+                    "metadata_json": {"provenance_kind": "source_map"},
+                },
+            ],
+        },
+    )
+    assert res.status_code == 200, res.text
+    res = client.post(
+        f"/api/v1/assignments/{assignment['id']}/submit",
+        json=_submit_body(session_id, text),
+    )
+    assert res.status_code == 200, res.text
+    return res.json()["submission_id"]
+
+
+def _diff_sides(blocks):
+    old = "".join(block["old_text"] for block in blocks if block["op"] != "insert")
+    new = "".join(block["new_text"] for block in blocks if block["op"] != "delete")
+    return old, new
+
+
+def test_revise_draft_analysis_starts_from_the_declared_draft(education_client):
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id = _setup_revise_draft_assignment(client, teacher, student)
+    res = client.post(
+        f"/api/v1/writing-sessions/{session_id}/draft-baseline",
+        json={"text": _DRAFT_TEXT},
+    )
+    assert res.status_code == 200, res.text
+
+    first_final = _DRAFT_MD + "\n补上的一句。"
+    submission_id = _revise_and_submit(
+        client, assignment, session_id, first_final, len(_DRAFT_MD)
+    )
+
+    UserContext.current_user = teacher
+    detail = client.get(f"/api/v1/teacher/submissions/{submission_id}").json()
+    summary = detail["analysis"]["summary"]
+    assert summary["declared_draft_chars"] == len(_DRAFT_MD)
+    assert summary["external_paste_chars"] == 0
+    assert summary["suspected_unmarked_import_count"] == 0
+    # 版本差异从初稿算起:整篇初稿不是一次「大段写入」
+    assert summary["burst_count"] == 0
+    assert [diff["inserted_text"] for diff in detail["analysis"]["version_diffs"]] == [
+        "\n补上的一句。"
+    ]
+
+    draft_diff = client.get(f"/api/v1/teacher/submissions/{submission_id}/draft-diff")
+    assert draft_diff.status_code == 200, draft_diff.text
+    assert draft_diff.json()["has_baseline"] is True
+    assert _diff_sides(draft_diff.json()["blocks"]) == (_DRAFT_MD, first_final)
+
+    # 退回重交:对比的起点仍是最初那份初稿
+    returned = client.post(
+        f"/api/v1/teacher/submissions/{submission_id}/review",
+        json={
+            "review_status": "returned",
+            "returned_comment": "再改改",
+            "resubmit_due_at": 2100000000,
+        },
+    )
+    assert returned.status_code == 200, returned.text
+    UserContext.current_user = student
+    second_final = first_final + "\n第二轮又加的一句。"
+    second_id = _revise_and_submit(
+        client, assignment, session_id, second_final, len(_DRAFT_MD)
+    )
+    UserContext.current_user = teacher
+    draft_diff = client.get(f"/api/v1/teacher/submissions/{second_id}/draft-diff")
+    assert _diff_sides(draft_diff.json()["blocks"]) == (_DRAFT_MD, second_final)
+
+
+def test_draft_diff_reports_no_baseline_for_from_scratch(education_client):
+    client, teacher, _, student, _, _ = education_client
+    _, _, submission_id = _setup_submitted_assignment(client, teacher, student)
+    UserContext.current_user = teacher
+    res = client.get(f"/api/v1/teacher/submissions/{submission_id}/draft-diff")
+    assert res.status_code == 200, res.text
+    assert res.json() == {"has_baseline": False, "blocks": []}

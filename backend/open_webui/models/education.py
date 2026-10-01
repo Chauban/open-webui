@@ -2086,7 +2086,7 @@ class ProfileEvidenceChallenge(StrictProfileModel):
 
 
 class ProfileEvidencePayload(StrictProfileModel):
-    evidence_schema_version: Literal["2026-09-14.1"] = "2026-09-14.1"
+    evidence_schema_version: Literal["2026-10-01.1"] = "2026-10-01.1"
     submission_id: str = Field(min_length=1)
     student_id: str = Field(min_length=1)
     assignment_id: str = Field(min_length=1)
@@ -2096,6 +2096,8 @@ class ProfileEvidencePayload(StrictProfileModel):
     submitted_at: int = Field(ge=0)
     previous_submission_id: Optional[str] = None
     previous_round: Optional[ProfileEvidencePreviousRound] = None
+    # 修订初稿作业学生声明的初稿;第一轮的过程指标从它算起。
+    draft_baseline_text: Optional[str] = None
     assignment: ProfileEvidenceAssignmentContext
     document: ProfileEvidenceDocument
     versions: list[ProfileEvidenceVersionEvent]
