@@ -719,7 +719,7 @@
 
 								<!-- Rubric: pick a score per criterion; the total below is derived -->
 								<div>
-									<div class="mb-1.5 text-xs font-medium uppercase tracking-[0.12em] text-gray-400">
+									<div class="mb-1.5 text-xs font-medium text-gray-400">
 										{$i18n.t('Rubric')}
 									</div>
 									<div class="divide-y divide-gray-100 dark:divide-gray-800 rounded-2xl border border-gray-200 dark:border-gray-800 overflow-hidden">
@@ -750,7 +750,7 @@
 
 								<!-- Total score: sum of the rubric scores above, read-only -->
 								<div>
-									<div class="mb-1.5 text-xs font-medium uppercase tracking-[0.12em] text-gray-400">
+									<div class="mb-1.5 text-xs font-medium text-gray-400">
 										{$i18n.t('Total Score')}
 									</div>
 									<div class="flex items-center justify-between gap-3 rounded-2xl border border-gray-200 dark:border-gray-800 px-4 py-3">
@@ -768,7 +768,7 @@
 
 								<!-- Reflection quality: the only source of this metric; character counts never were one -->
 								<div>
-									<div class="mb-1.5 text-xs font-medium uppercase tracking-[0.12em] text-gray-400">
+									<div class="mb-1.5 text-xs font-medium text-gray-400">
 										{$i18n.t('Reflection Quality')}
 									</div>
 									<div class="rounded-2xl border border-gray-200 dark:border-gray-800 px-4 py-3">
@@ -798,7 +798,7 @@
 								<!-- Prompt quality: replaces counting prompts, which only rewarded asking more -->
 								{#if hasRoundPrompts}
 									<div>
-										<div class="mb-1.5 text-xs font-medium uppercase tracking-[0.12em] text-gray-400">
+										<div class="mb-1.5 text-xs font-medium text-gray-400">
 											{$i18n.t('Prompt Quality')}
 										</div>
 										<div class="rounded-2xl border border-gray-200 dark:border-gray-800 px-4 py-3">
@@ -828,7 +828,7 @@
 
 								<!-- Overall comment -->
 								<div>
-									<label for="review-overall-comment" class="mb-1.5 block text-xs font-medium uppercase tracking-[0.12em] text-gray-400">
+									<label for="review-overall-comment" class="mb-1.5 block text-xs font-medium text-gray-400">
 										{$i18n.t('Overall Comment')}
 									</label>
 									<textarea
@@ -894,7 +894,7 @@
 										{#if returnMode}
 											<div class="space-y-4 border-t border-amber-100 px-4 pb-4 pt-3 dark:border-amber-900/60">
 												<div>
-													<label for="review-returned-comment" class="mb-1.5 block text-xs font-medium uppercase tracking-[0.12em] text-gray-400">
+													<label for="review-returned-comment" class="mb-1.5 block text-xs font-medium text-gray-400">
 														{$i18n.t('Returned Comment')}
 													</label>
 													<textarea
@@ -929,7 +929,7 @@
 
 												<!-- Resubmit due at (required when returning for revision) -->
 												<div>
-													<div class="mb-1.5 block text-xs font-medium uppercase tracking-[0.12em] text-gray-400">
+													<div class="mb-1.5 block text-xs font-medium text-gray-400">
 														{$i18n.t('Resubmit before')}
 													</div>
 													<EduDateTimeField
@@ -1090,7 +1090,7 @@
 											{#each clarifications as exchange}
 												<div class="rounded-2xl bg-gray-50 dark:bg-gray-800 px-4 py-3 text-sm">
 													{#if exchange.created_at}
-														<div class="mb-1.5 text-[10px] uppercase tracking-[0.14em] text-gray-400 tabular-nums">
+														<div class="mb-1.5 text-[10px] text-gray-400 tabular-nums">
 															{formatEpochTime(exchange.created_at)}
 														</div>
 													{/if}
@@ -1170,7 +1170,7 @@
 													: isAI
 														? 'border-purple-400'
 														: 'border-gray-300 dark:border-gray-700'}">
-													<div class="mb-1 flex items-center justify-between gap-2 text-[10px] uppercase tracking-[0.14em]">
+													<div class="mb-1 flex items-center justify-between gap-2 text-[10px]">
 														<span class="font-semibold {isUser ? 'text-blue-500' : isAI ? 'text-purple-500' : 'text-gray-400'}">
 															{item.kind === 'prompt' ? item.meta : (item.meta ?? item.kind)}
 														</span>
@@ -1254,7 +1254,7 @@
 								<!-- Coaching style in force for this round -->
 								{#if roundCoaching}
 									<div class="rounded-2xl bg-gray-50 dark:bg-gray-800 px-4 py-4">
-										<div class="mb-2 text-[11px] uppercase tracking-[0.14em] text-gray-400">
+										<div class="mb-2 text-[11px] text-gray-400">
 											{$i18n.t('AI Coaching Style')}
 										</div>
 										<div class="flex flex-wrap items-center gap-2">
@@ -1283,7 +1283,7 @@
 
 								<!-- AI use: the one fixed question -->
 								<div class="rounded-2xl bg-gray-50 dark:bg-gray-800 px-4 py-4">
-									<div class="mb-2 text-[11px] uppercase tracking-[0.14em] text-gray-400">
+									<div class="mb-2 text-[11px] text-gray-400">
 										{$i18n.t('Did you use AI for this submission?')}
 									</div>
 									<span class="rounded-full border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-3 py-1 text-xs text-gray-700 dark:text-gray-300">

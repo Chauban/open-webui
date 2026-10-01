@@ -130,7 +130,7 @@
 
 					<div class="rounded-2xl bg-stone-50 p-4 dark:bg-gray-900">
 						<div
-							class="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400"
+							class="mb-2 text-[10px] font-semibold text-gray-400"
 						>
 							{$i18n.t('Content Snapshot')}
 						</div>

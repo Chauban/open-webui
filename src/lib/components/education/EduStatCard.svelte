@@ -3,7 +3,7 @@
 	import EduCard from './EduCard.svelte';
 
 	// 看板统计卡：小标题 + 大数字。此前在 4 个页面里逐字重复，
-	// 每处自己拼 uppercase tracking 与配色。
+	// 每处自己拼标签字号与配色。
 	export let label = '';
 	export let value: string | number = 0;
 	// 口径说明：数字本身分不清「份/人次/个」，统计卡下方补一行小字。
@@ -32,7 +32,7 @@
 {#if href}
 	<a {href} class="group block rounded-3xl transition hover:-translate-y-px">
 		<EduCard {tone} class="h-full transition group-hover:border-gray-400 dark:group-hover:border-gray-600">
-			<div class="flex items-center justify-between text-xs uppercase tracking-[0.16em] {LABEL_TONES[tone]}">
+			<div class="flex items-center justify-between text-xs {LABEL_TONES[tone]}">
 				<span>{$i18n.t(label)}</span>
 				<span aria-hidden="true" class="opacity-0 transition group-hover:opacity-100">&rarr;</span>
 			</div>
@@ -44,7 +44,7 @@
 	</a>
 {:else}
 	<EduCard {tone}>
-		<div class="text-xs uppercase tracking-[0.16em] {LABEL_TONES[tone]}">{$i18n.t(label)}</div>
+		<div class="text-xs {LABEL_TONES[tone]}">{$i18n.t(label)}</div>
 		<div class="mt-2 text-3xl font-semibold {VALUE_TONES[tone]}">{value}</div>
 		{#if hint}
 			<div class="mt-1 text-xs text-gray-400 dark:text-gray-500">{$i18n.t(hint)}</div>

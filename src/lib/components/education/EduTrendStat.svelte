@@ -28,7 +28,7 @@
 
 <div class="flex flex-col gap-1">
 	<div
-		class="text-xs uppercase tracking-[0.12em] text-gray-400 dark:text-gray-500"
+		class="text-xs text-gray-400 dark:text-gray-500"
 		title={hint ? $i18n.t(hint) : undefined}
 	>
 		{$i18n.t(label)}

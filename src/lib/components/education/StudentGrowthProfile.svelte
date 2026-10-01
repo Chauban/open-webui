@@ -7,6 +7,7 @@
 
 	import EduBadge from './EduBadge.svelte';
 	import EduButton from './EduButton.svelte';
+	import { EDU_FILTER_FIELD_CLASS } from './styles';
 	import EduCard from './EduCard.svelte';
 	import EduEmpty from './EduEmpty.svelte';
 	import EduStatCard from './EduStatCard.svelte';
@@ -437,7 +438,7 @@
 			<div class="flex items-center gap-1.5">
 				<span>{$i18n.t('Date range')}</span>
 				<input
-					class="rounded-full border border-gray-200 bg-transparent px-3 py-1.5 text-xs dark:border-gray-700"
+					class={EDU_FILTER_FIELD_CLASS}
 					type="date"
 					aria-label={$i18n.t('Start date')}
 					bind:value={startDate}
@@ -445,7 +446,7 @@
 				/>
 				<span class="text-gray-400">–</span>
 				<input
-					class="rounded-full border border-gray-200 bg-transparent px-3 py-1.5 text-xs dark:border-gray-700"
+					class={EDU_FILTER_FIELD_CLASS}
 					type="date"
 					aria-label={$i18n.t('End date')}
 					bind:value={endDate}
@@ -472,7 +473,7 @@
 		{#if showMoreFilters}
 			<div class="flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
 				<select
-					class="rounded-full border border-gray-200 bg-transparent px-3 py-1.5 text-xs dark:border-gray-700 max-w-56"
+					class="max-w-56 {EDU_FILTER_FIELD_CLASS}"
 					aria-label={$i18n.t('Assignment')}
 					bind:value={assignmentFilter}
 					on:change={applyFilters}
@@ -483,7 +484,7 @@
 					{/each}
 				</select>
 				<select
-					class="rounded-full border border-gray-200 bg-transparent px-3 py-1.5 text-xs dark:border-gray-700"
+					class={EDU_FILTER_FIELD_CLASS}
 					aria-label={$i18n.t('Round')}
 					bind:value={roundFilter}
 					on:change={applyFilters}
@@ -496,7 +497,7 @@
 				<!-- 指标版本是给教师/开发核对口径用的,学生端不出现 -->
 				{#if variant === 'teacher' && profile.available_metric_versions.length > 1}
 					<select
-						class="rounded-full border border-gray-200 bg-transparent px-3 py-1.5 text-xs dark:border-gray-700"
+						class={EDU_FILTER_FIELD_CLASS}
 						aria-label={$i18n.t('Metric version')}
 						bind:value={metricVersionFilter}
 						on:change={applyFilters}

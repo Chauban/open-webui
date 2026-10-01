@@ -159,7 +159,7 @@
 				</EduButton>
 			</div>
 		{:else if phase === 'turn' && currentTurn}
-			<div class="text-xs uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
+			<div class="text-xs text-gray-500 dark:text-gray-400">
 				{$i18n.t('Round {{current}} of {{total}}', {
 					current: currentTurn.turn_no,
 					total: plannedRounds

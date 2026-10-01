@@ -222,7 +222,7 @@
 
 	{#if showPreview}
 		<div class="mt-4 rounded-3xl border border-dashed border-gray-300 p-5 dark:border-gray-700">
-			<div class="mb-4 text-xs uppercase tracking-[0.16em] text-gray-400">
+			<div class="mb-4 text-xs text-gray-400">
 				{$i18n.t('What students see')}
 			</div>
 			<ReflectionAnswerForm

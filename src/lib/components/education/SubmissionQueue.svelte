@@ -21,7 +21,7 @@
 	import EduCard from './EduCard.svelte';
 	import EduRiskBadges from './EduRiskBadges.svelte';
 	import EduStateCard from './EduStateCard.svelte';
-	import { eduFilterClass, eduSegmentClass } from './styles';
+	import { EDU_FILTER_FIELD_CLASS, eduFilterClass, eduSegmentClass } from './styles';
 	import {
 		formatEpoch,
 		getClassroomDisplayName,
@@ -214,7 +214,7 @@
 		<div class="flex flex-wrap items-center gap-2 text-sm">
 			{#if !scoped}
 				<select
-					class="rounded-full border border-gray-300 bg-white px-3 py-2 text-sm outline-none dark:border-gray-700 dark:bg-gray-850"
+					class={EDU_FILTER_FIELD_CLASS}
 					aria-label={$i18n.t('Classroom')}
 					bind:value={selectedClassroom}
 					on:change={selectClassroom}
@@ -225,7 +225,7 @@
 					{/each}
 				</select>
 				<select
-					class="max-w-56 rounded-full border border-gray-300 bg-white px-3 py-2 text-sm outline-none dark:border-gray-700 dark:bg-gray-850"
+					class="max-w-56 {EDU_FILTER_FIELD_CLASS}"
 					aria-label={$i18n.t('Assignment')}
 					bind:value={selectedAssignment}
 					on:change={() => reload()}
@@ -237,7 +237,7 @@
 				</select>
 			{/if}
 			<select
-				class="rounded-full border border-gray-300 bg-white px-3 py-2 text-sm outline-none dark:border-gray-700 dark:bg-gray-850"
+				class={EDU_FILTER_FIELD_CLASS}
 				aria-label={$i18n.t('Sort')}
 				bind:value={sortBy}
 				on:change={() => reload()}

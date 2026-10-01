@@ -65,7 +65,7 @@
 			on:click={() => (expanded = !expanded)}
 		>
 			<span
-				class="text-[11px] font-medium uppercase tracking-[0.12em] text-amber-800 dark:text-amber-300"
+				class="text-[11px] font-medium text-amber-800 dark:text-amber-300"
 			>
 				{$i18n.t('From the read-through')}
 			</span>

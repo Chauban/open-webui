@@ -17,6 +17,7 @@
 	import Plus from '$lib/components/icons/Plus.svelte';
 	import EduCard from '$lib/components/education/EduCard.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
+	import { EDU_FILTER_FIELD_CLASS } from '$lib/components/education/styles';
 	import {
 		formatEpoch,
 		getClassroomDisplayName,
@@ -30,9 +31,6 @@
 
 	const i18n = getContext<Writable<i18nType>>('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
-
-	const FIELD =
-		'rounded-full border border-gray-300 bg-white px-3 py-2 text-sm outline-none dark:border-gray-700 dark:bg-gray-850';
 
 	let assignments = [];
 	let classrooms = [];
@@ -128,26 +126,26 @@
 
 	<div class="mx-auto max-w-6xl px-4 py-6">
 		<div class="mb-4 flex flex-wrap items-center gap-2">
-			<select class={FIELD} aria-label={$i18n.t('Classroom')} bind:value={selectedClassroom}>
+			<select class={EDU_FILTER_FIELD_CLASS} aria-label={$i18n.t('Classroom')} bind:value={selectedClassroom}>
 				<option value="all">{$i18n.t('All Classrooms')}</option>
 				{#each classrooms as item}
 					<option value={item.classroom.id}>{getClassroomDisplayName(item.classroom.name, t)}</option>
 				{/each}
 			</select>
-			<select class={FIELD} aria-label={$i18n.t('Status')} bind:value={selectedStatus}>
+			<select class={EDU_FILTER_FIELD_CLASS} aria-label={$i18n.t('Status')} bind:value={selectedStatus}>
 				<option value="all">{$i18n.t('All')}</option>
 				<option value="active">{$i18n.t('Ongoing')}</option>
 				<option value="past_due">{$i18n.t('Past Due')}</option>
 				<option value="needs_review">{$i18n.t('Has submissions to review')}</option>
 			</select>
-			<select class={FIELD} aria-label={$i18n.t('Sort')} bind:value={sortBy}>
+			<select class={EDU_FILTER_FIELD_CLASS} aria-label={$i18n.t('Sort')} bind:value={sortBy}>
 				<option value="due">{$i18n.t('Sort by Due Time')}</option>
 				<option value="pending">{$i18n.t('Sort by To Review')}</option>
 				<option value="latest">{$i18n.t('Sort by Latest Submission')}</option>
 			</select>
 			<input
 				bind:value={keyword}
-				class="{FIELD} min-w-48 flex-1"
+				class="{EDU_FILTER_FIELD_CLASS} min-w-48 flex-1"
 				placeholder={$i18n.t('Search assignments')}
 			/>
 		</div>

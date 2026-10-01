@@ -545,7 +545,7 @@
 						{#if bulkImportResult.failed_users?.length}
 							<EduTile tone="rose">
 								<div
-									class="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-rose-600 dark:text-rose-400"
+									class="mb-2 text-xs font-semibold text-rose-600 dark:text-rose-400"
 								>
 									{$i18n.t('Failed')} ({bulkImportResult.failed_users.length})
 								</div>
@@ -559,7 +559,7 @@
 						{#if bulkImportResult.skipped_users?.length}
 							<EduTile tone="amber">
 								<div
-									class="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-amber-600 dark:text-amber-400"
+									class="mb-2 text-xs font-semibold text-amber-600 dark:text-amber-400"
 								>
 									{$i18n.t('Skipped (already in this classroom)')} ({bulkImportResult.skipped_users.length})
 								</div>

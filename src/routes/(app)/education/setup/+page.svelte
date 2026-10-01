@@ -93,7 +93,7 @@
 {#if !checking}
 	<div class="mx-auto max-w-3xl px-4 py-10">
 		<div class="mb-8">
-			<div class="text-xs uppercase tracking-[0.2em] text-gray-500 dark:text-gray-400">{$i18n.t('Education')}</div>
+			<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Education')}</div>
 			<h1 class="text-3xl font-semibold text-gray-900 dark:text-gray-100">
 				{educationRole === 'teacher'
 					? $i18n.t('Welcome, teacher')

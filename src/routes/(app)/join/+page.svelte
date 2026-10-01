@@ -62,8 +62,7 @@
 
 <div class="flex min-h-full w-full items-center justify-center px-4 py-16">
 	<EduCard padding="lg" class="w-full max-w-md">
-		<div class="text-xs uppercase tracking-[0.2em] text-gray-400">{$i18n.t('Classroom Invite')}</div>
-		<h1 class="mt-1 text-2xl font-semibold">{$i18n.t('Join Classroom')}</h1>
+		<h1 class="text-2xl font-semibold">{$i18n.t('Join Classroom')}</h1>
 
 		{#if !isStudent}
 			<EduTile tone="amber" class="mt-6 text-amber-700 dark:text-amber-300">

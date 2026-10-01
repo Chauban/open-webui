@@ -1019,7 +1019,7 @@
 				>
 					<div class="flex items-start justify-between gap-4">
 						<div class="min-w-0 flex-1">
-							<div class="text-xs uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
+							<div class="text-xs text-gray-500 dark:text-gray-400">
 								{$i18n.t(isAssignment ? 'Assignment Writing' : 'Writing')}
 							</div>
 							<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">
