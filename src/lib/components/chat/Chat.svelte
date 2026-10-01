@@ -4672,6 +4672,7 @@
 									</div>
 								{:else}
 									<Placeholder
+										writingWorkspace={!!projectBaseUrl}
 										{history}
 										bind:selectedModels
 										bind:messageInput

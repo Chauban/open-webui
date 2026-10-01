@@ -185,6 +185,12 @@
 		return normalized;
 	};
 
+	// 写作面板默认约占视口一半;用户拖过之后由 ResizableSidePanel 记住。
+	const defaultPanelWidth =
+		typeof window === 'undefined' ? 600 : Math.max(600, Math.round(window.innerWidth * 0.48));
+	// 面板再宽,正文也只占中间这一栏:一行四十来个汉字,读改都不费劲。
+	const WRITING_COLUMN = 'max-w-[46rem]';
+
 	$: isResubmitDeadline = review?.review_status === 'returned';
 	$: formattedDueAt = formatEpoch(effectiveDueAt);
 	$: dueCountdown =
@@ -762,10 +768,10 @@
 
 {#if loaded}
 	<!--
-		写作面板可拖宽，但两端都要卡死：
-		下限 560 —— 再窄标题行右侧那串（提交徽标 / 提交记录 / 保存状态 / 提交作业）就把标题挤没了；
-		上限 800 —— 编辑器根节点带 min-w-full，会盖掉 prose 自带的 65ch 上限，
-		不封顶的话正文行长跟着面板一起拉长，宽屏上一行五六十个汉字，读改都费劲。
+		写作是主任务,面板默认占约一半宽度(此前固定 600、上限 800,宽屏上只占四分之一,
+		左边聊天区大片空白)。下限 560:再窄标题行右侧的徽标与按钮就把标题挤没了。
+		不设上限,正文行长改由面板内部的居中栏(WRITING_COLUMN)控制 ——
+		编辑器根节点带 min-w-full,会盖掉 prose 自带的 65ch 上限,只能在外面限宽。
 	-->
 	<Chat
 		chatIdProp={currentChatId}
@@ -781,9 +787,9 @@
 		disableContextActions={false}
 		allowAssignmentWorkspaceChat={isAssignment}
 		showRightPanel={!$mobile}
-		rightPanelWidth={600}
+		rightPanelWidth={defaultPanelWidth}
 		rightPanelMinWidth={560}
-		rightPanelMaxWidth={800}
+		rightPanelMaxWidth={null}
 		rightPanelClassName="hidden lg:flex"
 	>
 		<div
@@ -793,26 +799,25 @@
 			<div
 				class="border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-5 py-4"
 			>
+				<div class="mx-auto w-full {WRITING_COLUMN}">
 				<div class="flex items-start justify-between gap-4">
 					<div class="min-w-0 flex-1">
-						<div class="text-xs uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">
-							{$i18n.t(isAssignment ? 'Assignment Writing' : 'Writing')}
-						</div>
 						{#if isAssignment}
-							<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">
+							<div class="text-base font-semibold text-gray-900 dark:text-gray-100">
 								{assignment?.title}
 							</div>
-							<div class="text-xs text-gray-500 dark:text-gray-400">
-								{#if isGraded}
-									{$i18n.t('Graded. Ask your teacher to return it if you need to revise.')}
-								{:else if isPastDue}
-									{$i18n.t('Submitted assignments stay available for review in read-only mode.')}
-								{:else if isSubmitted}
-									{$i18n.t('Submitted. You can revise and resubmit before the deadline.')}
-								{:else}
-									{$i18n.t('Track typed text, AI insertions, and in-app AI paste.')}
-								{/if}
-							</div>
+							<!-- 写作中的说明交给下方的留痕告知,这里只在提交后说明还能做什么 -->
+							{#if isGraded || isPastDue || isSubmitted}
+								<div class="text-xs text-gray-500 dark:text-gray-400">
+									{#if isGraded}
+										{$i18n.t('Graded. Ask your teacher to return it if you need to revise.')}
+									{:else if isPastDue}
+										{$i18n.t('Submitted assignments stay available for review in read-only mode.')}
+									{:else}
+										{$i18n.t('Submitted. You can revise and resubmit before the deadline.')}
+									{/if}
+								</div>
+							{/if}
 							{#if effectiveDueAt && !isGraded}
 								<div class="mt-1 text-xs {dueColorClass}">
 									{#if !isResubmitDeadline && dueCountdown?.overdue}
@@ -899,7 +904,7 @@
 							readonly={isReadOnly}
 						/>
 					{/if}
-					<EduDataNotice {scope} class="mt-3" />
+					<EduDataNotice {scope} collapsible class="mt-3" />
 					{#if isAssignment && isReadOnly}
 						<button
 							type="button"
@@ -910,8 +915,10 @@
 						</button>
 					{/if}
 				{/if}
+				</div>
 			</div>
 			<div class="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+				<div class="mx-auto w-full {WRITING_COLUMN}">
 				{#if isAssignment && review}
 					<ReviewResultCard {review} {assignment} onRevise={null} />
 				{/if}
@@ -957,6 +964,7 @@
 						}}
 					/>
 				{/if}
+				</div>
 			</div>
 		</div>
 	</Chat>
@@ -1044,7 +1052,7 @@
 								readonly={isReadOnly}
 							/>
 						{/if}
-						<EduDataNotice {scope} class="mt-3" />
+						<EduDataNotice {scope} collapsible class="mt-3" />
 						{#if isAssignment && isReadOnly}
 							<button
 								type="button"

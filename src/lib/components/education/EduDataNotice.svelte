@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getContext } from 'svelte';
+	import { getContext, onMount } from 'svelte';
 	import InfoCircle from '$lib/components/icons/InfoCircle.svelte';
 
 	// 给学生看的采集告知。刻意只说「记录了什么、谁能看到」,不含任何阈值、指标名
@@ -9,8 +9,27 @@
 	const i18n = getContext('i18n');
 
 	export let scope: 'classroom' | 'assignment' | 'personal' = 'assignment';
+	// 写作区里每次进来都铺满三行会把正文往下压。可折叠时:第一次完整展示并记下,
+	// 之后只留一行摘要(仍说清「记录 + 谁可见」),点开看全文。告知本身始终在场。
+	export let collapsible = false;
 	let className = '';
 	export { className as class };
+
+	const seenKey = `education:data-notice-seen:${scope}`;
+	let expanded = true;
+
+	onMount(() => {
+		if (!collapsible) return;
+		try {
+			if (localStorage.getItem(seenKey)) {
+				expanded = false;
+			} else {
+				localStorage.setItem(seenKey, '1');
+			}
+		} catch {
+			// 读不到本地存储就一直完整展示
+		}
+	});
 </script>
 
 <div
@@ -19,6 +38,22 @@
 	<div class="mt-0.5 shrink-0">
 		<InfoCircle className="size-3.5" />
 	</div>
+	{#if !expanded}
+		<div>
+			{$i18n.t(
+				scope === 'personal'
+					? 'Your writing process is recorded here. Only you can see it.'
+					: 'Your writing process is recorded here. Your teacher can see it.'
+			)}
+			<button
+				type="button"
+				class="ml-1 font-medium hover:text-gray-700 hover:underline dark:hover:text-gray-300"
+				on:click={() => (expanded = true)}
+			>
+				{$i18n.t('Details')}
+			</button>
+		</div>
+	{:else}
 	<div class="space-y-1">
 		<p>
 			{$i18n.t(
@@ -38,4 +73,5 @@
 			<p>{$i18n.t('Your personal writing space stays private — teachers cannot see it.')}</p>
 		{/if}
 	</div>
+	{/if}
 </div>

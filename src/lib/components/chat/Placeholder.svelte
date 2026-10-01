@@ -57,6 +57,8 @@
 	export let toolApprovalMode = 'full';
 	export let onToolApprovalModeChange: Function = () => {};
 	export let oauthRedirectHandler: Function = () => {};
+	// 教学写作区:标题已在右侧写作面板,这里不再重复;输入提示换成写作场景。
+	export let writingWorkspace = false;
 
 	export let onUpload: Function = (e) => {};
 	export let onUpdate: (data?: { file?: any }) => void = () => {};
@@ -109,7 +111,11 @@
 
 	<div class="w-full text-3xl text-gray-800 dark:text-gray-100 text-center flex items-center gap-4">
 		<div class="w-full flex flex-col justify-center items-center">
-			{#if $selectedFolder}
+			{#if writingWorkspace}
+				<div class="text-xl text-gray-700 dark:text-gray-200">
+					{$i18n.t('Talk through your draft with the AI')}
+				</div>
+			{:else if $selectedFolder}
 				<FolderTitle
 					folder={$selectedFolder}
 					readOnly={folderReadOnly}
@@ -252,7 +258,9 @@
 						{onToolApprovalModeChange}
 						{stopResponse}
 						{createMessagePair}
-						placeholder={$i18n.t('How can I help you today?')}
+						placeholder={writingWorkspace
+							? $i18n.t('Ask about your argument, structure, or sources…')
+							: $i18n.t('How can I help you today?')}
 						{onChange}
 						{onUpload}
 						{onUpdate}
