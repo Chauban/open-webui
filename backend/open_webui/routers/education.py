@@ -119,6 +119,7 @@ from open_webui.services.education.analysis import (
     get_materialized_submission_analyses,
     get_prompt_timeline,
 )
+    is_student_prompt,
 from open_webui.services.education.challenge_insight import (
     build_challenge_distribution,
     build_challenge_insight,
@@ -3085,7 +3086,7 @@ async def submit_assignment(
     )
     prompt_timeline = await get_prompt_timeline(session, db)
     prompt_count = len(
-        [message for message in prompt_timeline if message.get("role") == "user"]
+        [message for message in prompt_timeline if is_student_prompt(message)]
     )
     if source_map_highlights is not None:
         stats = compute_stats_from_highlights(

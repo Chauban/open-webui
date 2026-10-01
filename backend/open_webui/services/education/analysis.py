@@ -212,7 +212,7 @@ def _build_process_summary(
     clarifications: list[dict],
 ) -> dict:
     summary = _empty_process_summary()
-    summary["prompt_sent_count"] = len([item for item in prompt_timeline if item.get("role") == "user"])
+    summary["prompt_sent_count"] = len([item for item in prompt_timeline if is_student_prompt(item)])
     summary["assistant_message_received_count"] = len(
         [item for item in prompt_timeline if item.get("role") == "assistant"]
     )
@@ -995,6 +995,15 @@ def _get_chat_history_messages(chat) -> list[dict]:
     return ordered_messages
 
 
+def _is_auto_started(meta) -> bool:
+    return isinstance(meta, dict) and meta.get("auto_started") is True
+
+
+def is_student_prompt(message: dict) -> bool:
+    """学生自己发给 AI 的消息。平台替学生自动发起的那句(修订初稿的首轮诊断)不算。"""
+    return message.get("role") == "user" and not message.get("auto_started")
+
+
 async def get_prompt_timeline(session, db: Session) -> list[dict]:
     chat_ids: list[str] = []
 
@@ -1019,6 +1028,7 @@ async def get_prompt_timeline(session, db: Session) -> list[dict]:
                         "model_id": message.model_id,
                         "output": message.output,
                         "usage": message.usage,
+                        "auto_started": _is_auto_started(message.meta),
                     }
                     for message in chat_messages
                 ]
@@ -1037,6 +1047,7 @@ async def get_prompt_timeline(session, db: Session) -> list[dict]:
                     "model_id": message.get("model"),
                     "output": message.get("output"),
                     "usage": message.get("usage"),
+                    "auto_started": _is_auto_started(message.get("meta")),
                 }
                 for message in _get_chat_history_messages(chat)
             ]

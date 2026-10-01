@@ -101,6 +101,7 @@
 	"Please answer: {{prompt}}": "请回答：{{prompt}}",
 	"Please describe your \"Other\" answer to: {{prompt}}": "选了「其他」请写一句说明：{{prompt}}",
 	"Please read my first draft against the rubric and point out the main problems.": "请按评分标准读一遍我的初稿，指出主要问题。",
+	"Sent automatically by the platform": "平台自动发起",
 	"Pre-filled with recommended questions. Add, remove, or rewrite them to fit this assignment.": "已预填推荐题目，按这份作业的需要增删、改写即可。",
 	"Pre-filled with the questions from your last assignment \"{{title}}\". Edit them, import another set, or restore defaults.": "已沿用你上一份作业「{{title}}」的反思题。可以直接修改、导入别的作业的题，或恢复默认。",
 	"Preview as student": "以学生视角预览",

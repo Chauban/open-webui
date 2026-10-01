@@ -228,7 +228,10 @@
 			kind: 'prompt',
 			role: item.role,
 			label: typeof item.content === 'string' ? item.content : JSON.stringify(item.content),
-			meta: getTimelineRoleLabel(item.role),
+			// 修订初稿的首轮诊断是平台替学生发的，标出来，别当成学生自己问的。
+			meta: item.auto_started
+				? t('Sent automatically by the platform')
+				: getTimelineRoleLabel(item.role),
 			created_at: item.created_at,
 			inserted_length: null
 		}))

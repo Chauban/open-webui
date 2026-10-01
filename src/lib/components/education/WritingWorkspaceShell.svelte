@@ -141,7 +141,13 @@
 		!writingSession?.draft_baseline_at &&
 		!isReadOnly;
 	$: canSubmitAssignment = isAssignment && !isPastDue && !isGraded && !needsDraftBaseline;
-	// 交完初稿后的第一句由平台预填:先让 AI 按评分标准诊断一遍，学生不用对着空输入框想该问什么。
+	// 交完初稿后的第一句由平台给出:先让 AI 按评分标准诊断一遍，学生不用对着空输入框想该问什么。
+	// 刚确认初稿那一下直接替学生发出去，保证每份对话都从诊断开始；之后再进来(没聊过)只预填。
+	let autoStartDiagnosis = false;
+	const onDraftBaselineSubmitted = async () => {
+		autoStartDiagnosis = true;
+		await load();
+	};
 	$: diagnosisPrompt =
 		isAssignment &&
 		assignment?.task_mode === 'revise_draft' &&
@@ -784,6 +790,7 @@
 		readOnly={isReadOnly || needsDraftBaseline}
 		readOnlyHint={chatReadOnlyHint}
 		prefillPrompt={diagnosisPrompt}
+		autoSendPrefill={autoStartDiagnosis}
 		disableContextActions={false}
 		allowAssignmentWorkspaceChat={isAssignment}
 		showRightPanel={!$mobile}
@@ -926,7 +933,7 @@
 					<WritingComposition {sourceRuns} {clarificationAnsweredCount} />
 				{/if}
 				{#if needsDraftBaseline}
-					<DraftBaselineStep sessionId={writingSession.id} onSubmitted={load} />
+					<DraftBaselineStep sessionId={writingSession.id} onSubmitted={onDraftBaselineSubmitted} />
 				{:else}
 					<RichTextInput
 						bind:editor
@@ -1072,7 +1079,7 @@
 						<WritingComposition {sourceRuns} {clarificationAnsweredCount} />
 					{/if}
 					{#if needsDraftBaseline}
-						<DraftBaselineStep sessionId={writingSession.id} onSubmitted={load} />
+						<DraftBaselineStep sessionId={writingSession.id} onSubmitted={onDraftBaselineSubmitted} />
 					{:else}
 						<RichTextInput
 							bind:editor

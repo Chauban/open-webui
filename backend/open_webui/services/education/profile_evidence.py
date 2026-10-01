@@ -312,6 +312,7 @@ def capture_profile_evidence(
                 model_id=message.get("model_id"),
                 output=message.get("output"),
                 usage=message.get("usage"),
+                auto_started=bool(message.get("auto_started")),
             )
             for index, message in enumerate(round_conversation)
         ],
@@ -377,8 +378,15 @@ def capture_profile_evidence(
 
 
 def evidence_prompt_count(facts: ProfileEvidencePayload) -> int:
-    """这一轮里学生向 AI 发出的消息数。批改时是否必须打提问质量也按它判断。"""
-    return len([item for item in facts.conversation if item.role == "user"])
+    """这一轮里学生向 AI 发出的消息数。批改时是否必须打提问质量也按它判断。
+    平台自动发起的首轮诊断不是学生问的，不计入。"""
+    return len(
+        [
+            item
+            for item in facts.conversation
+            if item.role == "user" and not item.auto_started
+        ]
+    )
 
 
 def _as_namespace(value):

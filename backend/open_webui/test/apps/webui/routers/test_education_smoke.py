@@ -386,7 +386,9 @@ def _seed_user(session, user_id: str, name: str, email: str, education_role: str
     return UserModel.model_validate(user_row)
 
 
-def _prepare_assignment_flow(client, teacher, student, *, ai_prompt=None):
+def _prepare_assignment_flow(
+    client, teacher, student, *, ai_prompt=None, ai_prompt_meta=None
+):
     UserContext.current_user = teacher
     create_classroom_res = client.post(
         "/api/v1/classrooms", json={"name": "Grade 8 Writing Missing Due"}
@@ -489,6 +491,7 @@ def _prepare_assignment_flow(client, teacher, student, *, ai_prompt=None):
                     "role": "user",
                     "content": ai_prompt,
                     "timestamp": int(time.time()),
+                    **({"meta": ai_prompt_meta} if ai_prompt_meta else {}),
                 }
             },
         )
@@ -3106,6 +3109,39 @@ def test_review_requires_prompt_score_only_when_there_is_an_ai_conversation(
         },
     )
     assert returned_res.status_code == 200, returned_res.text
+
+
+def test_auto_started_diagnosis_is_not_a_student_prompt(education_client):
+    # 修订初稿确认后平台替学生发出的首轮诊断:教师能看到并被标注，但不算学生提问，
+    # 只有这一句时不要求(也不接受)提问质量分。
+    client, teacher, _, student, _, _ = education_client
+    flow = _prepare_assignment_flow(
+        client,
+        teacher,
+        student,
+        ai_prompt="Please read my first draft against the rubric.",
+        ai_prompt_meta={"auto_started": True},
+    )
+    submission_id = flow["submission"]["submission_id"]
+
+    UserContext.current_user = teacher
+    detail = client.get(f"/api/v1/teacher/submissions/{submission_id}").json()
+    assert [item["auto_started"] for item in detail["prompt_timeline"]] == [True]
+    assert detail["round_prompt_count"] == 0
+
+    rejected_res = client.post(
+        f"/api/v1/teacher/submissions/{submission_id}/review",
+        json={**_REVIEWED_BODY, "prompt_score": 3},
+    )
+    assert rejected_res.status_code == 400, rejected_res.text
+    review_res = client.post(
+        f"/api/v1/teacher/submissions/{submission_id}/review", json=_REVIEWED_BODY
+    )
+    assert review_res.status_code == 200, review_res.text
+
+    UserContext.current_user = student
+    point = client.get("/api/v1/me/writing/profile").json()["timeline"][0]
+    assert point["prompt_count"] == 0
 
 
 def test_prompt_score_feeds_the_collaboration_index(education_client):

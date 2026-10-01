@@ -164,18 +164,33 @@
 	// 空对话时预填进输入框的开场(修订初稿作业的「按评分标准读一遍我的初稿」)。
 	// 每个取值只预填一次，学生删掉或改写后不会再被塞回来。
 	export let prefillPrompt = '';
+	// 为真时不预填，直接替学生发出去，消息带 meta.auto_started，教师端据此标注、提问数不计它。
+	// 由写作区在学生刚确认初稿那一下置真；刷新页面后不再自动发，只回落到预填。
+	export let autoSendPrefill = false;
 	let appliedPrefillPrompt = '';
+	const waitFor = async (ready: () => boolean) => {
+		for (let i = 0; i < 30 && !ready(); i += 1) {
+			await new Promise((resolve) => setTimeout(resolve, 100));
+		}
+		return ready();
+	};
 	const applyPrefillPrompt = async () => {
 		if (!prefillPrompt || prefillPrompt === appliedPrefillPrompt || !messageInput || prompt) return;
 		if (createMessagesList(history, history.currentId).length > 0) return;
 		const target = prefillPrompt;
 		appliedPrefillPrompt = target;
 		// bind:this 先于输入框里的编辑器挂好，#chat-input 不在时 setText 是空操作，等它出现再写。
-		for (let i = 0; i < 30 && !document.getElementById('chat-input'); i += 1) {
-			await new Promise((resolve) => setTimeout(resolve, 100));
-		}
-		if (!document.getElementById('chat-input') || prompt) {
+		if (!(await waitFor(() => !!document.getElementById('chat-input'))) || prompt) {
 			appliedPrefillPrompt = '';
+			return;
+		}
+		// 模型由文件夹配置异步选上；等不到可用模型就不硬发，退回预填让学生自己点发送。
+		const modelReady = () =>
+			selectedModels.length > 0 &&
+			selectedModels.every((modelId) => $models.some((model) => model.id === modelId));
+		if (autoSendPrefill && (await waitFor(modelReady))) {
+			if (createMessagesList(history, history.currentId).length > 0 || prompt) return;
+			await submitPrompt(target, [], { meta: { auto_started: true } });
 			return;
 		}
 		await messageInput?.setText(target);
@@ -2941,7 +2956,7 @@
 	// Chat functions
 	//////////////////////////
 
-	const submitPrompt = async (inputContent, inputFiles) => {
+	const submitPrompt = async (inputContent, inputFiles, { meta = undefined } = {}) => {
 		const _files = structuredClone(inputFiles);
 
 		chatFiles.push(
@@ -2966,7 +2981,8 @@
 			content: inputContent,
 			files: _files.length > 0 ? _files : undefined,
 			timestamp: Math.floor(Date.now() / 1000), // Unix epoch
-			models: selectedModels
+			models: selectedModels,
+			...(meta ? { meta } : {})
 		};
 
 		// Add message to history and Set currentId to messageId

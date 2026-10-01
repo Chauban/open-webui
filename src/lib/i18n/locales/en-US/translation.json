@@ -101,6 +101,7 @@
 	"Please answer: {{prompt}}": "Please answer: {{prompt}}",
 	"Please describe your \"Other\" answer to: {{prompt}}": "Please describe your \"Other\" answer to: {{prompt}}",
 	"Please read my first draft against the rubric and point out the main problems.": "",
+	"Sent automatically by the platform": "",
 	"Pre-filled with recommended questions. Add, remove, or rewrite them to fit this assignment.": "Pre-filled with recommended questions. Add, remove, or rewrite them to fit this assignment.",
 	"Pre-filled with the questions from your last assignment \"{{title}}\". Edit them, import another set, or restore defaults.": "Pre-filled with the questions from your last assignment \"{{title}}\". Edit them, import another set, or restore defaults.",
 	"Preview as student": "Preview as student",

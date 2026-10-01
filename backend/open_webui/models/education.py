@@ -2011,6 +2011,8 @@ class ProfileEvidenceConversationEvent(StrictProfileModel):
     model_id: Optional[str] = None
     output: Any = None
     usage: Optional[dict[str, Any]] = None
+    # 平台替学生自动发起的消息(修订初稿的首轮诊断),不算学生提问。
+    auto_started: bool = False
 
 
 class ProfileEvidenceReflection(StrictProfileModel):
