@@ -26,7 +26,7 @@
 <button
 	{type}
 	{disabled}
-	class="transition-colors disabled:opacity-60 {VARIANTS[variant]} {padding} {className}"
+	class="inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-60 {VARIANTS[variant]} {padding} {className}"
 	on:click
 >
 	<slot />

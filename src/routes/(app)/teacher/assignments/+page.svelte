@@ -14,6 +14,7 @@
 	import EduActionMenu from '$lib/components/education/EduActionMenu.svelte';
 	import EduBadge from '$lib/components/education/EduBadge.svelte';
 	import EduButton from '$lib/components/education/EduButton.svelte';
+	import Plus from '$lib/components/icons/Plus.svelte';
 	import EduCard from '$lib/components/education/EduCard.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 	import {
@@ -113,7 +114,6 @@
 	<svelte:fragment slot="nav-actions">
 		<EduButton
 			variant="primary"
-			size="sm"
 			on:click={() =>
 				goto(
 					selectedClassroom === 'all'
@@ -121,6 +121,7 @@
 						: `/teacher/assignments/new?classroomId=${selectedClassroom}`
 				)}
 		>
+			<Plus className="size-4" strokeWidth="2.5" />
 			{$i18n.t('New Assignment')}
 		</EduButton>
 	</svelte:fragment>

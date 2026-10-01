@@ -533,6 +533,7 @@
 </script>
 
 <TeacherPageShell
+	width="full"
 	crumbs={[
 		{ label: $i18n.t('Review'), href: '/teacher/review' },
 		...(detail
@@ -549,14 +550,12 @@
 	<svelte:fragment slot="nav-actions">
 		{#if loaded && detail}
 			<EduButton
-				size="sm"
 				disabled={!prevPendingId}
 				on:click={() => prevPendingId && goto(`/teacher/submissions/${prevPendingId}`)}
 			>
 				&larr; {$i18n.t('Previous pending')}
 			</EduButton>
 			<EduButton
-				size="sm"
 				disabled={!nextPendingId}
 				on:click={() => nextPendingId && goto(`/teacher/submissions/${nextPendingId}`)}
 			>

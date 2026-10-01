@@ -171,6 +171,7 @@
 </script>
 
 <TeacherPageShell
+	width="5xl"
 	crumbs={[{ label: $i18n.t('Assignments'), href: '/teacher/assignments' }]}
 	title={$i18n.t('Create Assignment')}
 >

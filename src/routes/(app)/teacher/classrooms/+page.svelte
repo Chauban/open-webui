@@ -11,6 +11,7 @@
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import EduActionMenu from '$lib/components/education/EduActionMenu.svelte';
 	import EduButton from '$lib/components/education/EduButton.svelte';
+	import Plus from '$lib/components/icons/Plus.svelte';
 	import EduCard from '$lib/components/education/EduCard.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 	import { EDU_FIELD_CLASS } from '$lib/components/education/styles';
@@ -96,7 +97,8 @@
 
 <TeacherPageShell title={$i18n.t('Classrooms')}>
 	<svelte:fragment slot="nav-actions">
-		<EduButton variant="primary" size="sm" on:click={() => (showCreate = true)}>
+		<EduButton variant="primary" on:click={() => (showCreate = true)}>
+			<Plus className="size-4" strokeWidth="2.5" />
 			{$i18n.t('Create Classroom')}
 		</EduButton>
 	</svelte:fragment>

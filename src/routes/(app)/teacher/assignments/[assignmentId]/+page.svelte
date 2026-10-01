@@ -81,7 +81,7 @@
 >
 	<svelte:fragment slot="nav-actions">
 		{#if item}
-			<EduButton size="sm" on:click={copyWriteLink}>{$i18n.t('Copy Student Link')}</EduButton>
+			<EduButton on:click={copyWriteLink}>{$i18n.t('Copy Student Link')}</EduButton>
 			<EduActionMenu
 				items={[
 					{

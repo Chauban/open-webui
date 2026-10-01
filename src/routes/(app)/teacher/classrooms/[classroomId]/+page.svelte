@@ -20,6 +20,7 @@
 	import EduActionMenu from '$lib/components/education/EduActionMenu.svelte';
 	import EduBadge from '$lib/components/education/EduBadge.svelte';
 	import EduButton from '$lib/components/education/EduButton.svelte';
+	import Plus from '$lib/components/icons/Plus.svelte';
 	import EduCard from '$lib/components/education/EduCard.svelte';
 	import EduStatCard from '$lib/components/education/EduStatCard.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
@@ -131,9 +132,9 @@
 		{#if classroom}
 			<EduButton
 				variant="primary"
-				size="sm"
-				on:click={() => goto(`/teacher/assignments/new?classroomId=${classroomId}`)}
+					on:click={() => goto(`/teacher/assignments/new?classroomId=${classroomId}`)}
 			>
+				<Plus className="size-4" strokeWidth="2.5" />
 				{$i18n.t('Create Assignment')}
 			</EduButton>
 			<EduActionMenu

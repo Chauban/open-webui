@@ -13,6 +13,7 @@
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import EduBadge from '$lib/components/education/EduBadge.svelte';
 	import EduButton from '$lib/components/education/EduButton.svelte';
+	import Plus from '$lib/components/icons/Plus.svelte';
 	import EduCard from '$lib/components/education/EduCard.svelte';
 	import EduEmpty from '$lib/components/education/EduEmpty.svelte';
 	import EduStatCard from '$lib/components/education/EduStatCard.svelte';
@@ -79,6 +80,16 @@
 </script>
 
 <TeacherPageShell title={$i18n.t('Teaching Overview')}>
+	<!-- 布置作业是总览页最常用的一步;还没有班级时由正文的空态引导先建班 -->
+	<svelte:fragment slot="nav-actions">
+		{#if overview?.classroom_count > 0}
+			<EduButton variant="primary" on:click={() => goto('/teacher/assignments/new')}>
+				<Plus className="size-4" strokeWidth="2.5" />
+				{$i18n.t('New Assignment')}
+			</EduButton>
+		{/if}
+	</svelte:fragment>
+
 	<div class="mx-auto max-w-6xl px-4 py-6">
 		{#if loadError}
 			<EduStateCard tone="error">{loadError}</EduStateCard>

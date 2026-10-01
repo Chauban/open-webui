@@ -134,7 +134,7 @@
 	title={item?.assignment?.title ?? ''}
 	tabs={assignmentTabs(assignmentId)}
 >
-	<div class="mx-auto max-w-5xl px-4 py-6">
+	<div class="mx-auto max-w-6xl px-4 py-6">
 		{#if loading}
 			<EduStateCard>{$i18n.t('Loading assignment...')}</EduStateCard>
 		{:else if loadError}

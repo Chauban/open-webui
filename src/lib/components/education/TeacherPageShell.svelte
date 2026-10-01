@@ -15,6 +15,12 @@
 	export let title = '';
 	// 对象级子标签(作业:概况/提交/分析/设置;班级:概况/学生)。标签名是词条 key,这里翻译。
 	export let tabs: TeacherNavLink[] = [];
+	// 页头内容与正文共用同一条栏宽:此前页头贴满屏幕、正文居中,
+	// 顶栏按钮被甩到屏幕最右上角,和它所操作的列表隔得老远。
+	// 取值要和页面正文容器的 max-w 一致;批改工作台正文铺满,用 full。
+	export let width: '5xl' | '6xl' | 'full' = '6xl';
+
+	const WIDTH_CLASS = { '5xl': 'max-w-5xl', '6xl': 'max-w-6xl', full: 'max-w-none' };
 
 	$: pathname = $page.url.pathname;
 	$: allCrumbs = [{ label: $i18n.t('Teaching'), href: '/teacher' }, ...crumbs];
@@ -29,13 +35,13 @@
 		: ''}"
 >
 	<header
-		class="w-full shrink-0 px-2.5 pt-1.5 drag-region {tabs.length > 0
+		class="w-full shrink-0 drag-region {tabs.length > 0
 			? 'border-b border-gray-100 dark:border-gray-850'
 			: ''}"
 	>
 		<div class="flex items-start">
 			{#if $mobile}
-				<div class="{$showSidebar ? 'md:hidden' : ''} mt-1.5 flex flex-none items-center">
+				<div class="{$showSidebar ? 'md:hidden' : ''} ml-2.5 mt-3 flex flex-none items-center">
 					<Tooltip
 						content={$showSidebar ? $i18n.t('Close Sidebar') : $i18n.t('Open Sidebar')}
 						interactive={true}
@@ -53,11 +59,30 @@
 				</div>
 			{/if}
 
-			<div class="ml-2 min-w-0 flex-1 py-1">
-				<div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+			<div class="min-w-0 flex-1">
+				<div class="mx-auto w-full {WIDTH_CLASS[width]} {width === 'full' ? 'px-6' : 'px-4'} pt-3">
+					<!-- 分区导航是教师端的主入口,做成带底色的分段控件,不能和面包屑一样轻 -->
+					<nav
+						aria-label={$i18n.t('Teaching')}
+						class="flex w-fit max-w-full items-center gap-1 overflow-x-auto rounded-xl border border-gray-200 bg-gray-50 p-1 text-sm font-medium dark:border-gray-800 dark:bg-gray-900"
+					>
+						{#each TEACHER_SECTIONS as section}
+							{@const active = isTeacherSectionActive(section.href, pathname)}
+							<a
+								href={section.href}
+								aria-current={active ? 'page' : undefined}
+								class="shrink-0 rounded-lg px-4 py-1.5 transition {active
+									? 'bg-gray-900 text-white shadow-sm dark:bg-gray-100 dark:text-gray-900'
+									: 'text-gray-700 hover:bg-white hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white'}"
+							>
+								{$i18n.t(section.label)}
+							</a>
+						{/each}
+					</nav>
+
 					<nav
 						aria-label={$i18n.t('Breadcrumb')}
-						class="flex min-w-0 flex-wrap items-center gap-1 text-xs text-gray-500 dark:text-gray-400"
+						class="mt-4 flex min-w-0 flex-wrap items-center gap-1 text-xs text-gray-500 dark:text-gray-400"
 					>
 						{#each allCrumbs as crumb, index}
 							{#if index > 0}
@@ -76,45 +101,31 @@
 						{/each}
 					</nav>
 
-					<nav aria-label={$i18n.t('Teaching')} class="flex shrink-0 items-center gap-0.5 text-xs">
-						{#each TEACHER_SECTIONS as section}
-							{@const active = isTeacherSectionActive(section.href, pathname)}
-							<a
-								href={section.href}
-								aria-current={active ? 'page' : undefined}
-								class="rounded-full px-3 py-1 transition {active
-									? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
-									: 'text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-850 dark:hover:text-gray-100'}"
-							>
-								{$i18n.t(section.label)}
-							</a>
-						{/each}
-					</nav>
-				</div>
-
-				<div class="mt-0.5 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-					<h1 class="min-w-0 truncate text-2xl font-semibold">{title}</h1>
-					<div class="flex shrink-0 flex-wrap items-center gap-2">
-						<slot name="nav-actions" />
+					<!-- 页面主操作(新建班级/新建作业…)放在标题同一行的右端,与正文右边缘对齐 -->
+					<div class="mt-1 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+						<h1 class="min-w-0 truncate text-2xl font-semibold">{title}</h1>
+						<div class="flex shrink-0 flex-wrap items-center gap-2">
+							<slot name="nav-actions" />
+						</div>
 					</div>
-				</div>
 
-				{#if tabs.length > 0}
-					<nav class="-mb-px mt-2 flex gap-1 overflow-x-auto">
-						{#each tabs as tab, index}
-							{@const active = isTabActive(tab, index)}
-							<a
-								href={tab.href}
-								aria-current={active ? 'page' : undefined}
-								class="shrink-0 border-b-2 px-3 pb-2 pt-1 text-sm font-medium transition {active
-									? 'border-gray-900 text-gray-900 dark:border-gray-100 dark:text-gray-100'
-									: 'border-transparent text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'}"
-							>
-								{$i18n.t(tab.label)}
-							</a>
-						{/each}
-					</nav>
-				{/if}
+					{#if tabs.length > 0}
+						<nav class="-mx-3 -mb-px mt-3 flex gap-1 overflow-x-auto">
+							{#each tabs as tab, index}
+								{@const active = isTabActive(tab, index)}
+								<a
+									href={tab.href}
+									aria-current={active ? 'page' : undefined}
+									class="shrink-0 border-b-2 px-3 pb-2 pt-1 text-sm font-medium transition {active
+										? 'border-gray-900 text-gray-900 dark:border-gray-100 dark:text-gray-100'
+										: 'border-transparent text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'}"
+								>
+									{$i18n.t(tab.label)}
+								</a>
+							{/each}
+						</nav>
+					{/if}
+				</div>
 			</div>
 		</div>
 	</header>

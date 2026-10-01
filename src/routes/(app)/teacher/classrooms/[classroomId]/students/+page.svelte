@@ -25,6 +25,7 @@
 	import Modal from '$lib/components/common/Modal.svelte';
 	import EduActionMenu from '$lib/components/education/EduActionMenu.svelte';
 	import EduButton from '$lib/components/education/EduButton.svelte';
+	import Plus from '$lib/components/icons/Plus.svelte';
 	import EduCard from '$lib/components/education/EduCard.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 	import EduTile from '$lib/components/education/EduTile.svelte';
@@ -289,7 +290,8 @@
 >
 	<svelte:fragment slot="nav-actions">
 		{#if classroom}
-			<EduButton variant="primary" size="sm" on:click={() => openAdd('search')}>
+			<EduButton variant="primary" on:click={() => openAdd('search')}>
+				<Plus className="size-4" strokeWidth="2.5" />
 				{$i18n.t('Add Student')}
 			</EduButton>
 		{/if}
