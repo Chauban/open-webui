@@ -272,11 +272,7 @@
 					($user?.role === 'admin' || $user?.permissions?.features?.calendar)
 				);
 			case 'writing':
-				return (
-					$user?.education_role === 'student' ||
-					$user?.education_role === 'teacher' ||
-					$user?.role === 'admin'
-				);
+				return $user?.education_role === 'student' || $user?.role === 'admin';
 			case 'teaching':
 				return $user?.education_role === 'teacher' || $user?.role === 'admin';
 			case 'playground':
@@ -1580,7 +1576,7 @@
 					{/if}
 
 
-				{#if $user?.education_role === 'student' || $user?.education_role === 'teacher' || $user?.role === 'admin'}
+				{#if $user?.education_role === 'student' || $user?.role === 'admin'}
 					<SidebarSection
 						id="sidebar-writing-projects"
 						bind:open={showWriting}

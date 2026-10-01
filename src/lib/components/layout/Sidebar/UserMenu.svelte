@@ -52,7 +52,8 @@
 
 	const dispatch = createEventDispatcher();
 
-	const DEFAULT_PINNED_ITEMS = ['notes', 'workspace'];
+	// 必须与 Sidebar.svelte 的 DEFAULT_PINNED_ITEMS 一致，否则首次切换固定项会把写作/教学入口丢掉
+	const DEFAULT_PINNED_ITEMS = ['notes', 'workspace', 'writing', 'teaching'];
 
 	$: pinnedItems = $settings?.pinnedMenuItems ?? DEFAULT_PINNED_ITEMS;
 
