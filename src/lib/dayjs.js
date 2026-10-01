@@ -103,4 +103,22 @@ import 'dayjs/locale/zh-tw';
 import 'dayjs/locale/et';
 import 'dayjs/locale/en-gb';
 
+import updateLocale from 'dayjs/plugin/updateLocale';
+
+// dayjs 的中文语言包没有 calendar 格式,calendar() 会回落成英文「Today at 3:06 下午」。
+dayjs.extend(updateLocale);
+// 界面语言 zh-CN 实际落到 dayjs 的 zh 包上;zh-cn 未导入时 updateLocale 会直接跳过。
+for (const locale of ['zh', 'zh-cn']) {
+	dayjs.updateLocale(locale, {
+		calendar: {
+			sameDay: '[今天] HH:mm',
+			nextDay: '[明天] HH:mm',
+			nextWeek: 'dddd HH:mm',
+			lastDay: '[昨天] HH:mm',
+			lastWeek: '[上]dddd HH:mm',
+			sameElse: 'YYYY/MM/DD'
+		}
+	});
+}
+
 export default dayjs;
