@@ -822,7 +822,7 @@ async def _build_personal_workspace_item(
         writing_session=session,
         project_id=session.folder_id,
         title=note.title or "Untitled Writing",
-        updated_at=max(session.updated_at, note.updated_at),
+        updated_at=max(session.updated_at, note.updated_at // 1_000_000_000),
         preview_text=preview_text,
     )
 
@@ -841,7 +841,8 @@ async def _build_recent_item(session, db: Session) -> Optional[WritingRecentItem
         if assignment is not None
         else (note.title or "Untitled Writing")
     )
-    updated_at = max(session.updated_at, note.updated_at)
+    # 上游 Notes 的时间戳是纳秒,写作会话是秒;直接取 max 会让前端显示「未知」
+    updated_at = max(session.updated_at, note.updated_at // 1_000_000_000)
     return WritingRecentItem(
         project_mode=_get_project_mode_from_session(session),
         scope=session.scope,

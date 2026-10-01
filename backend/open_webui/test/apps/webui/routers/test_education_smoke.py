@@ -2015,6 +2015,10 @@ def test_writing_home_and_personal_workspace_flow(education_client):
     assert len(teacher_home["personal_items"]) == 1
     assert teacher_home["personal_items"][0]["project_mode"] == "personal_writing"
     assert teacher_home["assignment_items"] == []
+    # 笔记表存纳秒,首页时间统一是秒;混进纳秒前端会显示「未知」
+    now = int(time.time())
+    for item in teacher_home["personal_items"] + teacher_home["recent_items"]:
+        assert abs(item["updated_at"] - now) < 3600, item["updated_at"]
 
     UserContext.current_user = student
     student_home_res = client.get("/api/v1/me/writing/home")
