@@ -437,3 +437,57 @@ def test_single_classroom_per_student_keeps_earliest_membership(tmp_path, monkey
                 )
     finally:
         engine.dispose()
+
+
+def test_task_mode_defaults_and_revise_draft_forbids_challenge(tmp_path, monkeypatch):
+    """作业形式默认从零写作;修订初稿作业在库层面就不能开质疑。"""
+    from sqlalchemy.exc import IntegrityError
+
+    backend_dir = Path(__file__).resolve().parents[5]
+    database_path = tmp_path / "task-mode.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    _set_database_url(monkeypatch, database_url)
+    config = _alembic_config(backend_dir)
+    command.upgrade(config, "head")
+
+    engine = create_engine(database_url)
+    insert_sql = (
+        "INSERT INTO assignment "
+        "(id, title, teacher_id, score_max, coaching_style, challenge_enabled, "
+        "challenge_rounds, challenge_focus_keys, reflection_questions, rubric_schema, "
+        "created_at, updated_at{extra_columns}) "
+        "VALUES (?, 't', 'teacher', 100, 'balanced', ?, 3, '[]', '[]', '{{}}', 1, 1"
+        "{extra_values})"
+    )
+    try:
+        schema = inspect(engine)
+        assert {"draft_baseline_text", "draft_baseline_at"} <= {
+            column["name"] for column in schema.get_columns("writing_session")
+        }
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                insert_sql.format(extra_columns="", extra_values=""), ("legacy", 1)
+            )
+            connection.exec_driver_sql(
+                insert_sql.format(extra_columns=", task_mode", extra_values=", ?"),
+                ("revise", 0, "revise_draft"),
+            )
+        with engine.connect() as connection:
+            rows = dict(
+                connection.exec_driver_sql(
+                    "SELECT id, task_mode FROM assignment"
+                ).fetchall()
+            )
+        assert rows == {"legacy": "from_scratch", "revise": "revise_draft"}
+
+        for values in (("bad-mode", 0, "other"), ("bad-challenge", 1, "revise_draft")):
+            with pytest.raises(IntegrityError):
+                with engine.begin() as connection:
+                    connection.exec_driver_sql(
+                        insert_sql.format(
+                            extra_columns=", task_mode", extra_values=", ?"
+                        ),
+                        values,
+                    )
+    finally:
+        engine.dispose()

@@ -19,6 +19,7 @@ SOURCE_MAP_TYPES = {
     "user_typed",
     "external_paste",
     "suspected_unmarked_import",
+    "declared_draft",
     "unknown",
 }
 

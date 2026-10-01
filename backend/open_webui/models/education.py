@@ -44,6 +44,13 @@ def get_db_context(db: Optional[Session] = None):
 # 作业的 AI 辅导风格；每档对应一段管理员可改写的提示词（config 的 education.coaching_prompts）。
 CoachingStyle = Literal["socratic", "balanced", "hands_off"]
 COACHING_STYLES = ("socratic", "balanced", "hands_off")
+# 作业形式:作业开始时初稿是否已经存在。修订初稿作业里学生先显式提交课外写好的
+# 初稿,冻结为基线,再和 AI 对话修改;结构上没有质疑式读者(对话本身就是诊断与追问)。
+# 每段形式各对应一段管理员可改写的任务说明(config 的 education.task_prompts)。
+TaskMode = Literal["from_scratch", "revise_draft"]
+TASK_MODES = ("from_scratch", "revise_draft")
+# 初稿最短字数(去掉空白后的字符数)。
+DRAFT_BASELINE_MIN_CHARS = 200
 # 提交前质疑环节。辅导档位管的是「AI 帮多少」,质疑管的是「交之前挑多狠、挑哪几个维度」,
 # 两者是两个互不兼任的角色:辅导助手不带质疑口吻,质疑读者不提供辅导。
 ChallengeStatus = Literal["in_progress", "completed", "skipped"]
@@ -62,6 +69,7 @@ WritingSourceType = Literal[
     "user_typed",
     "external_paste",
     "suspected_unmarked_import",
+    "declared_draft",
     "unknown",
 ]
 WritingVersionTrigger = Literal["autosave", "manual", "submit", "submit_preflight"]
@@ -92,6 +100,14 @@ class Assignment(Base):
         CheckConstraint(
             "challenge_rounds IN (2, 3)", name="assignment_challenge_rounds_check"
         ),
+        CheckConstraint(
+            "task_mode IN ('from_scratch', 'revise_draft')",
+            name="assignment_task_mode_check",
+        ),
+        CheckConstraint(
+            "NOT (task_mode = 'revise_draft' AND challenge_enabled)",
+            name="assignment_revise_draft_no_challenge_check",
+        ),
     )
 
     id = Column(Text, primary_key=True, unique=True)
@@ -102,6 +118,7 @@ class Assignment(Base):
     due_at = Column(BigInteger, nullable=True)
     score_max = Column(Integer, nullable=False)
     coaching_style = Column(Text, nullable=False, default="balanced")
+    task_mode = Column(Text, nullable=False, default="from_scratch")
     challenge_enabled = Column(Boolean, nullable=False, default=False)
     challenge_rounds = Column(Integer, nullable=False, default=3)
     challenge_focus_keys = Column(JSONField, nullable=False, default=list)
@@ -195,6 +212,9 @@ class WritingSession(Base):
     active_chat_id = Column(Text, nullable=True)
     status = Column(Text, nullable=False, default="draft")
     submitted_submission_id = Column(Text, nullable=True)
+    # 修订初稿作业的初稿基线,确认后不可改。
+    draft_baseline_text = Column(Text, nullable=True)
+    draft_baseline_at = Column(BigInteger, nullable=True)
     created_at = Column(BigInteger, nullable=False)
     updated_at = Column(BigInteger, nullable=False)
 
@@ -1018,6 +1038,7 @@ class AssignmentModel(BaseModel):
     due_at: Optional[int] = None
     score_max: int
     coaching_style: CoachingStyle
+    task_mode: TaskMode
     challenge_enabled: bool
     challenge_rounds: int
     challenge_focus_keys: list[str] = Field(default_factory=list)
@@ -1220,6 +1241,8 @@ class WritingSessionModel(BaseModel):
     active_chat_id: Optional[str] = None
     status: str
     submitted_submission_id: Optional[str] = None
+    draft_baseline_text: Optional[str] = None
+    draft_baseline_at: Optional[int] = None
     created_at: int
     updated_at: int
 
