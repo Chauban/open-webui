@@ -3186,6 +3186,8 @@ DEFAULT_CONFIG = {
     'ldap.server.attribute_for_groups': LDAP_ATTRIBUTE_FOR_GROUPS,
     'education.coaching_prompts': DEFAULT_EDUCATION_COACHING_PROMPTS,
     'education.task_prompts': DEFAULT_EDUCATION_TASK_PROMPTS,
+    # 新建作业时辅导档位的初始值;各实例按课程定(哈工深是严格档),教师仍可改选。
+    'education.default_coaching_style': 'balanced',
     'education.challenge_prompts': DEFAULT_EDUCATION_CHALLENGE_PROMPTS,
 }
 

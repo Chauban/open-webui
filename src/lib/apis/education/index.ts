@@ -225,6 +225,15 @@ export const getTeacherReflectionQuestionSets = async (
 	}).then(handleJson);
 };
 
+export const getTeacherAssignmentDefaults = async (
+	token: string
+): Promise<{ coaching_style: CoachingStyle }> => {
+	return fetch(`${WEBUI_API_BASE_URL}/teacher/assignment-defaults`, {
+		method: 'GET',
+		headers: withAuth(token)
+	}).then(handleJson);
+};
+
 export const getTeacherAssignment = async (token: string, assignmentId: string) => {
 	return fetch(`${WEBUI_API_BASE_URL}/teacher/assignments/${assignmentId}`, {
 		method: 'GET',

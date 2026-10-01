@@ -3924,6 +3924,8 @@
 	"{{user}}'s Chats": "",
 	"{{webUIName}} Backend Required": "",
 	"AI Coaching Style": "",
+	"Default coaching style for new assignments": "",
+	"Pre-selected when a teacher creates an assignment. Teachers can still change it per assignment.": "",
 	"Socratic": "",
 	"Balanced": "",
 	"Hands-off": "",

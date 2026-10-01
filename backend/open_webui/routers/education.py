@@ -75,6 +75,7 @@ from open_webui.models.education import (
     MySubmissionRoundContent,
     MySubmissionRoundReview,
     PersonalWritingCreateForm,
+    CoachingStyle,
     PersonalWorkspaceListItem,
     ProvenanceCreateForm,
     ReflectionQuestionSetItem,
@@ -118,8 +119,8 @@ from open_webui.services.education.analysis import (
     get_materialized_submission_analysis,
     get_materialized_submission_analyses,
     get_prompt_timeline,
-)
     is_student_prompt,
+)
 from open_webui.services.education.challenge_insight import (
     build_challenge_distribution,
     build_challenge_insight,
@@ -1382,6 +1383,19 @@ async def get_teacher_assignments(
 
 
 _REFLECTION_QUESTION_SET_LIMIT = 10
+
+
+class AssignmentDefaultsResponse(BaseModel):
+    coaching_style: CoachingStyle
+
+
+@router.get("/teacher/assignment-defaults", response_model=AssignmentDefaultsResponse)
+async def get_teacher_assignment_defaults(user=Depends(get_verified_user)):
+    """新建作业表单的初始值。辅导档位由管理员按实例设定，教师仍可改选。"""
+    await _ensure_teacher_identity(user)
+    return {
+        "coaching_style": await Config.get("education.default_coaching_style")
+    }
 
 
 @router.get(

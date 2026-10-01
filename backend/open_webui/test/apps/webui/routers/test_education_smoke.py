@@ -4340,6 +4340,22 @@ def test_blank_coaching_prompt_leaves_assignment_context_only(education_client):
     assert "【辅导方式】" not in system_prompt
 
 
+def test_assignment_defaults_follow_instance_coaching_style(education_client):
+    client, teacher, _, student, _, _ = education_client
+
+    UserContext.current_user = teacher
+    res = client.get("/api/v1/teacher/assignment-defaults")
+    assert res.status_code == 200, res.text
+    assert res.json() == {"coaching_style": "balanced"}
+
+    asyncio.run(Config.upsert({"education.default_coaching_style": "socratic"}))
+    res = client.get("/api/v1/teacher/assignment-defaults")
+    assert res.json() == {"coaching_style": "socratic"}
+
+    UserContext.current_user = student
+    assert client.get("/api/v1/teacher/assignment-defaults").status_code == 403
+
+
 def test_unknown_coaching_style_is_rejected(education_client):
     client, teacher, _, _, _, _ = education_client
 

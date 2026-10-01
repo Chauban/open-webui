@@ -10,6 +10,7 @@
 	import {
 		createAssignment,
 		getTeacherAssignment,
+		getTeacherAssignmentDefaults,
 		getTeacherClassrooms,
 		getTeacherReflectionQuestionSets
 	} from '$lib/apis/education';
@@ -57,14 +58,17 @@
 	onMount(async () => {
 		try {
 			// 以往题组读不出来不该挡住建作业，退回默认题即可。
-			const [teacherClassrooms, questionSets] = await Promise.all([
+			const [teacherClassrooms, questionSets, assignmentDefaults] = await Promise.all([
 				getTeacherClassrooms(localStorage.token),
 				getTeacherReflectionQuestionSets(localStorage.token).catch((error) => {
 					console.error(error);
 					return [];
-				})
+				}),
+				getTeacherAssignmentDefaults(localStorage.token)
 			]);
 			classrooms = teacherClassrooms;
+			// 档位初始值由管理员按实例设定；复制作业时下面会改用源作业的档位。
+			draft.coachingStyle = assignmentDefaults.coaching_style;
 			reflectionQuestionSets = questionSets;
 			// 教师大多一门课一套反思，所以默认沿用最近一份作业的题；第一次出题才给推荐题。
 			if (questionSets.length > 0) {

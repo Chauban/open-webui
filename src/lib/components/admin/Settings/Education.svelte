@@ -71,6 +71,8 @@
 		}
 	];
 
+	const coachingSection = sections.find((section) => section.key === 'coaching')!;
+
 	type Prompts = Record<SectionKey, Record<string, string>>;
 
 	let loading = true;
@@ -81,6 +83,8 @@
 	let prompts: Prompts = { task: {}, coaching: {} };
 	// 存过的值会永久盖过代码里的内置默认，所以带上默认值供「恢复默认」用。
 	let defaults: Prompts = { task: {}, coaching: {} };
+	// 新建作业时辅导档位的初始值，教师仍可改选。
+	let defaultCoachingStyle = 'balanced';
 	let editing: { section: SectionKey; key: string } | null = null;
 	let draft = '';
 
@@ -101,6 +105,7 @@
 			const config = await getEducationConfig(localStorage.token);
 			prompts = read(config, 'configKey');
 			defaults = read(config, 'defaultsKey');
+			defaultCoachingStyle = config.EDUCATION_DEFAULT_COACHING_STYLE;
 		} catch (error) {
 			loadFailed = true;
 			toast.error(`${error}`);
@@ -126,15 +131,16 @@
 		[section]: { ...prompts[section], [key]: value }
 	});
 
-	const persist = async (next: Prompts) => {
+	const persist = async (next: Prompts, nextDefaultCoachingStyle = defaultCoachingStyle) => {
 		saving = true;
 		try {
-			const config = await setEducationConfig(
-				localStorage.token,
-				Object.fromEntries(sections.map((section) => [section.configKey, next[section.key]]))
-			);
+			const config = await setEducationConfig(localStorage.token, {
+				...Object.fromEntries(sections.map((section) => [section.configKey, next[section.key]])),
+				EDUCATION_DEFAULT_COACHING_STYLE: nextDefaultCoachingStyle
+			});
 			prompts = read(config, 'configKey');
 			defaults = read(config, 'defaultsKey');
+			defaultCoachingStyle = config.EDUCATION_DEFAULT_COACHING_STYLE;
 			editing = null;
 			draft = '';
 			toast.success($i18n.t('Settings saved successfully!'));
@@ -171,6 +177,29 @@
 			</div>
 		{:else}
 			<div class="flex flex-col gap-6">
+				<div class="flex items-start justify-between gap-4">
+					<div class="min-w-0">
+						<div class="text-xs font-medium text-gray-700 dark:text-gray-300">
+							{$i18n.t('Default coaching style for new assignments')}
+						</div>
+						<p class="mt-0.5 text-[0.6875rem] text-gray-400 dark:text-gray-600">
+							{$i18n.t(
+								'Pre-selected when a teacher creates an assignment. Teachers can still change it per assignment.'
+							)}
+						</p>
+					</div>
+					<select
+						class="shrink-0 rounded-lg bg-transparent px-2 py-1 text-xs text-gray-700 outline-hidden dark:text-gray-300"
+						value={defaultCoachingStyle}
+						disabled={saving}
+						on:change={(event) => persist(prompts, event.currentTarget.value)}
+					>
+						{#each coachingSection.items as item}
+							<option value={item.key}>{$i18n.t(item.title)}</option>
+						{/each}
+					</select>
+				</div>
+
 				{#each sections as section}
 					<div class="flex flex-col gap-4">
 						<div>

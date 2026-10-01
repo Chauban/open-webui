@@ -3945,6 +3945,8 @@
 	"Delete this private teacher note?": "确定删除这条教师私有备注吗？",
 	"Edited": "已编辑",
 	"AI Coaching Style": "AI 辅导风格",
+	"Default coaching style for new assignments": "新建作业的默认辅导风格",
+	"Pre-selected when a teacher creates an assignment. Teachers can still change it per assignment.": "教师新建作业时预先选中这一档，教师仍可按作业改选。",
 	"Socratic": "严格提问式",
 	"Balanced": "平衡",
 	"Hands-off": "放手",
