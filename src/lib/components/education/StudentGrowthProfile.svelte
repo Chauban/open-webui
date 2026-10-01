@@ -64,6 +64,7 @@
 	let endDate = filters.end_at ? new Date(filters.end_at * 1000).toISOString().slice(0, 10) : '';
 	let assignmentFilter = filters.assignment_id ?? '';
 	let roundFilter = filters.round_no ? `${filters.round_no}` : '';
+	let showMoreFilters = Boolean(assignmentFilter || roundFilter);
 	let metricVersionFilter = filters.metric_version ?? '';
 	let assignmentOptions: StudentProfile['assignments'] = [];
 	let roundOptions: number[] = [];
@@ -431,57 +432,86 @@
 			筛选放在分区标签下面、就近作用于内容;改了就生效,不再要点「应用」。
 			指标版本对大多数人只有一个,只有真出现多个版本时才露出来。
 		-->
+		<!-- 默认只露时间范围;按作业/轮次/指标版本筛是少数情况,收进「更多筛选」 -->
 		<div class="flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
-			<label class="flex items-center gap-1.5">
-				<span>{$i18n.t('Start date')}</span>
-				<input class="rounded-full border border-gray-200 bg-transparent px-3 py-1.5 text-xs dark:border-gray-700" type="date" bind:value={startDate} on:change={applyFilters} />
-			</label>
-			<label class="flex items-center gap-1.5">
-				<span>{$i18n.t('End date')}</span>
-				<input class="rounded-full border border-gray-200 bg-transparent px-3 py-1.5 text-xs dark:border-gray-700" type="date" bind:value={endDate} on:change={applyFilters} />
-			</label>
-			<select
-				class="rounded-full border border-gray-200 bg-transparent px-3 py-1.5 text-xs dark:border-gray-700 max-w-56"
-				aria-label={$i18n.t('Assignment')}
-				bind:value={assignmentFilter}
-				on:change={applyFilters}
-			>
-				<option value="">{$i18n.t('All Assignments')}</option>
-				{#each assignmentOptions as item}
-					<option value={item.assignment.id}>{item.assignment.title}</option>
-				{/each}
-			</select>
-			<select
-				class="rounded-full border border-gray-200 bg-transparent px-3 py-1.5 text-xs dark:border-gray-700"
-				aria-label={$i18n.t('Round')}
-				bind:value={roundFilter}
-				on:change={applyFilters}
-			>
-				<option value="">{$i18n.t('All rounds')}</option>
-				{#each roundOptions as round}
-					<option value={round}>{$i18n.t('Round {{round}}', { round })}</option>
-				{/each}
-			</select>
-			{#if profile.available_metric_versions.length > 1}
-				<select
+			<div class="flex items-center gap-1.5">
+				<span>{$i18n.t('Date range')}</span>
+				<input
 					class="rounded-full border border-gray-200 bg-transparent px-3 py-1.5 text-xs dark:border-gray-700"
-					aria-label={$i18n.t('Metric version')}
-					bind:value={metricVersionFilter}
+					type="date"
+					aria-label={$i18n.t('Start date')}
+					bind:value={startDate}
 					on:change={applyFilters}
-				>
-					{#each profile.available_metric_versions as version}
-						<option value={version}
-							>{version} · {$i18n.t(
-								version === profile.active_metric_version ? 'Current' : 'Historical'
-							)}</option
-						>
-					{/each}
-				</select>
-			{/if}
-			{#if startDate || endDate || assignmentFilter || roundFilter || metricVersionFilter}
+				/>
+				<span class="text-gray-400">–</span>
+				<input
+					class="rounded-full border border-gray-200 bg-transparent px-3 py-1.5 text-xs dark:border-gray-700"
+					type="date"
+					aria-label={$i18n.t('End date')}
+					bind:value={endDate}
+					on:change={applyFilters}
+				/>
+			</div>
+			<button
+				type="button"
+				class="rounded-full px-3 py-1.5 transition hover:bg-gray-100 dark:hover:bg-gray-800 {showMoreFilters ||
+				assignmentFilter ||
+				roundFilter
+					? 'text-gray-900 dark:text-gray-100'
+					: ''}"
+				aria-expanded={showMoreFilters}
+				on:click={() => (showMoreFilters = !showMoreFilters)}
+			>
+				{$i18n.t('More filters')}{#if assignmentFilter || roundFilter} ·
+					{[assignmentFilter, roundFilter].filter(Boolean).length}{/if}
+			</button>
+			{#if startDate || endDate || assignmentFilter || roundFilter || (variant === 'teacher' && metricVersionFilter !== profile.active_metric_version)}
 				<EduButton variant="link" on:click={clearFilters}>{$i18n.t('Clear')}</EduButton>
 			{/if}
 		</div>
+		{#if showMoreFilters}
+			<div class="flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+				<select
+					class="rounded-full border border-gray-200 bg-transparent px-3 py-1.5 text-xs dark:border-gray-700 max-w-56"
+					aria-label={$i18n.t('Assignment')}
+					bind:value={assignmentFilter}
+					on:change={applyFilters}
+				>
+					<option value="">{$i18n.t('All Assignments')}</option>
+					{#each assignmentOptions as item}
+						<option value={item.assignment.id}>{item.assignment.title}</option>
+					{/each}
+				</select>
+				<select
+					class="rounded-full border border-gray-200 bg-transparent px-3 py-1.5 text-xs dark:border-gray-700"
+					aria-label={$i18n.t('Round')}
+					bind:value={roundFilter}
+					on:change={applyFilters}
+				>
+					<option value="">{$i18n.t('All rounds')}</option>
+					{#each roundOptions as round}
+						<option value={round}>{$i18n.t('Round {{round}}', { round })}</option>
+					{/each}
+				</select>
+				<!-- 指标版本是给教师/开发核对口径用的,学生端不出现 -->
+				{#if variant === 'teacher' && profile.available_metric_versions.length > 1}
+					<select
+						class="rounded-full border border-gray-200 bg-transparent px-3 py-1.5 text-xs dark:border-gray-700"
+						aria-label={$i18n.t('Metric version')}
+						bind:value={metricVersionFilter}
+						on:change={applyFilters}
+					>
+						{#each profile.available_metric_versions as version}
+							<option value={version}
+								>{version} · {$i18n.t(
+									version === profile.active_metric_version ? 'Current' : 'Historical'
+								)}</option
+							>
+						{/each}
+					</select>
+				{/if}
+			</div>
+		{/if}
 		{#if profile.timeline_pagination.total > profile.timeline_pagination.limit}
 				<div class="flex flex-wrap items-center justify-end gap-2 text-xs text-gray-500">
 					<span>
@@ -544,7 +574,7 @@
 					/>
 				</div>
 			{/if}
-			{#if profile.excluded_snapshot_count > 0}
+			{#if variant === 'teacher' && profile.excluded_snapshot_count > 0}
 				<div class="mt-2 text-xs text-amber-600 dark:text-amber-400">
 					{$i18n.t('{{count}} data point(s) use another metric version and are excluded.', {
 						count: profile.excluded_snapshot_count
@@ -556,7 +586,9 @@
 				<EduCard>
 					<div class="mb-3 flex flex-wrap items-center justify-between gap-2">
 						<div class="text-sm font-semibold">{$i18n.t('What the data shows')}</div>
-						<span class="text-xs text-gray-500">insight {profile.insight_version}</span>
+						{#if variant === 'teacher'}
+							<span class="text-xs text-gray-500">insight {profile.insight_version}</span>
+						{/if}
 					</div>
 					<ul class="space-y-2">
 						{#each profile.insights as insight}
@@ -572,18 +604,21 @@
 								</EduBadge>
 								<div class="min-w-0 flex-1">
 									<div class="text-gray-700 dark:text-gray-300">{renderInsight(insight)}</div>
-									<div
-										class="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400"
-									>
-										<span>{$i18n.t('Samples')}: {insight.sample_count}</span>
-										<span
-											>{$i18n.t('Data completeness')}: {Math.round(
-												insight.data_completeness * 100
-											)}%</span
+									<!-- 样本数/置信度/优先级是给教师判断这条结论靠不靠谱的,学生看到只会困惑 -->
+									{#if variant === 'teacher'}
+										<div
+											class="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400"
 										>
-										<span>{$i18n.t('Confidence')}: {Math.round(insight.confidence * 100)}%</span>
-										<span>{$i18n.t('Priority')}: {insight.priority_score.toFixed(2)}</span>
-									</div>
+											<span>{$i18n.t('Samples')}: {insight.sample_count}</span>
+											<span
+												>{$i18n.t('Data completeness')}: {Math.round(
+													insight.data_completeness * 100
+												)}%</span
+											>
+											<span>{$i18n.t('Confidence')}: {Math.round(insight.confidence * 100)}%</span>
+											<span>{$i18n.t('Priority')}: {insight.priority_score.toFixed(2)}</span>
+										</div>
+									{/if}
 									{#if insight.action_code && INSIGHT_ACTION_TEXT[insight.action_code]}
 										<div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
 											{$i18n.t(INSIGHT_ACTION_TEXT[insight.action_code])}
@@ -761,46 +796,49 @@
 				</EduCard>
 			{/if}
 
-			<EduCard>
-				<div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-					<div class="text-sm font-semibold">{$i18n.t('Latest data completeness')}</div>
-					<span class="text-xs text-gray-500"
-						>metric {profile.metric_version} · {$i18n.t(
-							profile.metric_version === profile.active_metric_version ? 'Current' : 'Historical'
-						)}{profile.aggregate_materialized && profile.aggregate_revision
-							? ` · aggregate r${profile.aggregate_revision}`
-							: ''}</span
-					>
-				</div>
-				{#if latest}
-					<div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-						{#each completenessItems as item}
-							<div class="rounded-lg border border-gray-200 px-3 py-2 text-xs dark:border-gray-800">
-								<div class="font-medium">{$i18n.t(item.label)}</div>
-								<div
-									class={item.status === 'complete'
-										? 'text-emerald-600 dark:text-emerald-400'
-										: item.status === 'missing'
-											? 'text-amber-600 dark:text-amber-400'
-											: 'text-gray-500 dark:text-gray-400'}
-								>
-									{$i18n.t(
-										item.status === 'complete'
-											? 'Complete'
-											: item.status === 'missing'
-												? 'Data missing'
-												: item.status === 'pending'
-													? 'Pending'
-													: 'Not applicable'
-									)}
-								</div>
-							</div>
-						{/each}
+			<!-- 数据完整度与指标/聚合版本是核对口径用的,只给教师 -->
+			{#if variant === 'teacher'}
+				<EduCard>
+					<div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+						<div class="text-sm font-semibold">{$i18n.t('Latest data completeness')}</div>
+						<span class="text-xs text-gray-500"
+							>metric {profile.metric_version} · {$i18n.t(
+								profile.metric_version === profile.active_metric_version ? 'Current' : 'Historical'
+							)}{profile.aggregate_materialized && profile.aggregate_revision
+								? ` · aggregate r${profile.aggregate_revision}`
+								: ''}</span
+						>
 					</div>
-				{:else}
-					<EduEmpty>{$i18n.t('No profile data yet.')}</EduEmpty>
-				{/if}
-			</EduCard>
+					{#if latest}
+						<div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+							{#each completenessItems as item}
+								<div class="rounded-lg border border-gray-200 px-3 py-2 text-xs dark:border-gray-800">
+									<div class="font-medium">{$i18n.t(item.label)}</div>
+									<div
+										class={item.status === 'complete'
+											? 'text-emerald-600 dark:text-emerald-400'
+											: item.status === 'missing'
+												? 'text-amber-600 dark:text-amber-400'
+												: 'text-gray-500 dark:text-gray-400'}
+									>
+										{$i18n.t(
+											item.status === 'complete'
+												? 'Complete'
+												: item.status === 'missing'
+													? 'Data missing'
+													: item.status === 'pending'
+														? 'Pending'
+														: 'Not applicable'
+										)}
+									</div>
+								</div>
+							{/each}
+						</div>
+					{:else}
+						<EduEmpty>{$i18n.t('No profile data yet.')}</EduEmpty>
+					{/if}
+				</EduCard>
+			{/if}
 		{/if}
 
 		<!-- 产出维：分数没有统一满分，所以只呈现原值与变化，不折算成任何指数。 -->

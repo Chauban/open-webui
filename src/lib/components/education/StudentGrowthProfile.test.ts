@@ -127,9 +127,23 @@ describe('StudentGrowthProfile', () => {
 		expect(body).toContain('Overview');
 		expect(body).toContain('Writing Process');
 		expect(body).toContain('Revision Between Rounds');
+		expect(body).toContain('Add goal');
+		// 置信度、样本数、指标/洞察版本号是给教师核对口径的,学生端不出现
+		expect(body).not.toContain('Samples');
+		expect(body).not.toContain('Confidence');
+		expect(body).not.toContain('Latest data completeness');
+	});
+
+	test('shows evidence metadata and data completeness only in the teacher variant', () => {
+		const { container } = render(StudentGrowthProfile, {
+			context,
+			props: { profile: teacherProfile, variant: 'teacher' }
+		});
+
+		const body = container.innerHTML;
 		expect(body).toContain('Samples');
 		expect(body).toContain('Confidence');
-		expect(body).toContain('Add goal');
+		expect(body).toContain('Latest data completeness');
 	});
 
 	test('shows private coaching notes only in the teacher variant', () => {
