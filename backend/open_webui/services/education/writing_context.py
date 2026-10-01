@@ -40,6 +40,9 @@ def normalize_draft_paragraphs(text: str) -> list[str]:
 DRAFT_FILE_MAX_BYTES = 10 * 1024 * 1024
 
 
+_OLE_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+
+
 class DraftFileError(ValueError):
     """文件读不出初稿正文;消息是给学生看的 i18n 键。"""
 
@@ -48,21 +51,24 @@ def extract_draft_text(filename: str, data: bytes) -> str:
     """从学生上传的初稿文件里取出纯文本,一段一行。
 
     只解析不存档:文件内容不落盘、不进文件库,学生核对后照常走「确认初稿」。
-    只收 .docx 和纯文本。旧版 .doc 是二进制格式,让学生另存为 .docx;
-    PDF 不收,中文 PDF 抽出来每个视觉行都断成一段,学生得逐段拼回去。
+    收 .docx、旧版 .doc 和纯文本。PDF 不收,中文 PDF 抽出来每个视觉行都断成
+    一段,学生得逐段拼回去。
     """
 
     if len(data) > DRAFT_FILE_MAX_BYTES:
         raise DraftFileError("The file is too large")
     suffix = os.path.splitext(filename or "")[1].lower()
-    if suffix == ".docx":
-        text = _extract_docx_text(data)
+    if suffix in (".docx", ".doc"):
+        # 按内容而不是扩展名分派:学生常把 .doc 改名成 .docx(或反过来),
+        # 设了密码的 .docx 也是 OLE 容器。
+        if data.startswith(_OLE_MAGIC):
+            text = _extract_doc_text(data)
+        else:
+            text = _extract_docx_text(data)
     elif suffix in (".txt", ".md"):
         text = _decode_plain_text(data)
-    elif suffix == ".doc":
-        raise DraftFileError("Old .doc files are not supported, save it as .docx")
     else:
-        raise DraftFileError("Only .docx, .txt and .md files are supported")
+        raise DraftFileError("Only .docx, .doc, .txt and .md files are supported")
     text = "\n".join(normalize_draft_paragraphs(text))
     if not text:
         raise DraftFileError("No text found in this file")
@@ -71,14 +77,138 @@ def extract_draft_text(filename: str, data: bytes) -> str:
 
 def _extract_docx_text(data: bytes) -> str:
     from docx import Document
+    from docx.text.paragraph import Paragraph
 
     try:
         document = Document(io.BytesIO(data))
     except (zipfile.BadZipFile, KeyError, ValueError) as err:
         raise DraftFileError("Could not read this file") from err
-    # 只取正文段落:页眉页脚、文本框、表格不是论文正文。
-    # 段内软回车(Shift+Enter)python-docx 给的是 \n,随后按行切段。
-    return "\n".join(paragraph.text for paragraph in document.paragraphs)
+    # 按文档顺序取正文段落和表格(每个单元格一行),与 .doc 的主文档一致;
+    # 页眉页脚、脚注、文本框不取。段内软回车 python-docx 给的是 \n,随后按行切段。
+    lines = []
+    for block in document.iter_inner_content():
+        if isinstance(block, Paragraph):
+            lines.append(block.text)
+            continue
+        seen = set()
+        for row in block.rows:
+            for cell in row.cells:
+                # 合并单元格在 row.cells 里会重复出现
+                if cell._tc in seen:
+                    continue
+                seen.add(cell._tc)
+                lines.append(cell.text)
+    return "\n".join(lines)
+
+
+def _extract_doc_text(data: bytes) -> str:
+    """Word 97-2003 的 .doc:OLE 复合文件里的 WordDocument 流。
+
+    正文不是连续存放的,要按表流里的 piece table 逐段拼回来([MS-DOC] 2.4.1)。
+    只取主文档(前 ccpText 个字符):页眉页脚、脚注、文本框排在它后面,
+    与 .docx 只取正文段落一致。
+    """
+    # olefile 由上游直接依赖 msoffcrypto-tool 带进来。
+    import olefile
+
+    # 不用 olefile.isOleFile:传入的 bytes 短于 1536 字节时它会当成文件路径去打开。
+    if len(data) < olefile.MINIMAL_OLEFILE_SIZE:
+        raise DraftFileError("Could not read this file")
+    try:
+        with olefile.OleFileIO(data) as ole:
+            # 设了打开密码的 .docx/.xlsx 等:加密包装在 OLE 容器里
+            if ole.exists("EncryptedPackage"):
+                raise DraftFileError("This file is password protected")
+            if not ole.exists("WordDocument"):
+                raise DraftFileError("Could not read this file")
+            word = ole.openstream("WordDocument").read()
+            flags = int.from_bytes(word[0x0A:0x0C], "little")
+            if flags & 0x0100:
+                raise DraftFileError("This file is password protected")
+            table_name = "1Table" if flags & 0x0200 else "0Table"
+            if not ole.exists(table_name):
+                raise DraftFileError("Could not read this file")
+            table = ole.openstream(table_name).read()
+        return _doc_main_text(word, table)
+    except DraftFileError:
+        raise
+    except Exception as err:
+        # 截断、损坏的文件在 olefile 和下标运算里抛什么都有,一律当读不出。
+        raise DraftFileError("Could not read this file") from err
+
+
+def _doc_main_text(word: bytes, table: bytes) -> str:
+    def u16(buf, pos):
+        return int.from_bytes(buf[pos : pos + 2], "little")
+
+    def u32(buf, pos):
+        return int.from_bytes(buf[pos : pos + 4], "little")
+
+    if u16(word, 0) != 0xA5EC:
+        raise DraftFileError("Could not read this file")
+    # FIB:32 字节 FibBase,随后 csw 个 u16、cslw 个 u32、cbRgFcLcb 对 (fc, lcb)。
+    pos = 32
+    pos += 2 + u16(word, pos) * 2
+    rg_lw = pos + 2
+    ccp_text = u32(word, rg_lw + 3 * 4)
+    pos += 2 + u16(word, pos) * 4
+    rg_fc_lcb = pos + 2
+    fc_clx = u32(word, rg_fc_lcb + 33 * 8)
+    lcb_clx = u32(word, rg_fc_lcb + 33 * 8 + 4)
+
+    # Clx:若干 Prc(0x01)之后是 Pcdt(0x02),里面是 PlcPcd。
+    pos, end = fc_clx, fc_clx + lcb_clx
+    while pos < end and table[pos] == 0x01:
+        pos += 3 + u16(table, pos + 1)
+    if pos >= end or table[pos] != 0x02:
+        raise DraftFileError("Could not read this file")
+    lcb = u32(table, pos + 1)
+    plc = pos + 5
+    count = (lcb - 4) // 12
+    # 损坏文件的 lcb 可能是天文数字,先核对表流装得下,免得按它分配几亿个元素。
+    if count <= 0 or plc + lcb > len(table):
+        raise DraftFileError("Could not read this file")
+    cps = [u32(table, plc + i * 4) for i in range(count + 1)]
+    pcds = plc + (count + 1) * 4
+
+    chars = []
+    for i in range(count):
+        start, stop = cps[i], min(cps[i + 1], ccp_text)
+        if start >= stop:
+            break
+        fc = u32(table, pcds + i * 8 + 2)
+        length = stop - start
+        if fc & 0x40000000:
+            # 压缩片段:一字节一字符,cp1252;中文都在非压缩的 UTF-16 片段里。
+            offset = (fc & ~0x40000000) // 2
+            chars.append(word[offset : offset + length].decode("cp1252", "replace"))
+        else:
+            chars.append(word[fc : fc + length * 2].decode("utf-16-le", "replace"))
+    return _clean_doc_text("".join(chars))
+
+
+def _clean_doc_text(raw: str) -> str:
+    # 域:\x13 域代码 \x14 域结果 \x15,可嵌套;只留结果(如超链接的显示文字)。
+    out = []
+    fields = []
+    for ch in raw:
+        if ch == "\x13":
+            fields.append("code")
+        elif ch == "\x14":
+            if fields:
+                fields[-1] = "result"
+        elif ch == "\x15":
+            if fields:
+                fields.pop()
+        elif "code" in fields:
+            continue
+        elif ch in "\r\x0b\x0c\x07":
+            # 段落标记、手动换行、分页符、表格单元格/行结束
+            out.append("\n")
+        elif ch == "\t" or ch >= " ":
+            out.append(ch)
+        # 其余控制字符是图片、脚注引用之类的占位符,丢掉
+    return "".join(out)
 
 
 def _decode_plain_text(data: bytes) -> str:

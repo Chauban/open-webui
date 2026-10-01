@@ -6333,12 +6333,23 @@ def test_draft_diff_compares_whole_sentences():
     assert blocks[1]["new_text"] == "第二句换成了完全不同的新说法！"
 
 
-def _docx_bytes(paragraphs):
+_FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def _docx_bytes(paragraphs, table=None):
     from docx import Document
 
     document = Document()
     for text in paragraphs:
         document.add_paragraph(text)
+    if table:
+        grid = document.add_table(rows=len(table), cols=len(table[0]))
+        for row, values in zip(grid.rows, table):
+            for cell, value in zip(row.cells, values):
+                cell.text = value
+        # 合并后的单元格在 python-docx 的 row.cells 里会出现两次
+        grid.cell(0, 0).merge(grid.cell(0, 1))
+        document.add_paragraph("表格之后。")
     document.sections[0].header.paragraphs[0].text = "页眉不是正文"
     buffer = io.BytesIO()
     document.save(buffer)
@@ -6366,6 +6377,39 @@ def test_draft_file_is_parsed_into_text_without_freezing_baseline(education_clie
     assert res.status_code == 200, res.text
     assert res.json() == {"text": "第一段开头。\n第二段\n软回车之后。"}
 
+    # 表格按文档顺序、每个单元格一行
+    res = client.post(
+        url,
+        files={
+            "file": (
+                "初稿.docx",
+                _docx_bytes(["表格之前。"], table=[["甲", ""], ["乙", "丙"]]),
+                docx_type,
+            )
+        },
+    )
+    assert res.json() == {"text": "表格之前。\n甲\n乙\n丙\n表格之后。"}
+
+    # 旧版 .doc:Word 2016 另存为「Word 97-2003 文档」生成的样本,含页眉、脚注、
+    # 超链接、软回车和表格;结果与 Word 把它另存为 .docx 后解析的逐字相同。
+    res = client.post(
+        url,
+        files={"file": ("初稿.doc", (_FIXTURES / "draft_sample.doc").read_bytes())},
+    )
+    assert res.json() == {
+        "text": "城市更新中的社区参与：文献综述（初稿）\n"
+        "近二十年来，城市更新研究逐渐转向社会过程。"
+        "Early studies treat participation as a tool.参见某篇文献。\n"
+        "第二段第一行\n软回车之后。\n表格甲\n表格乙\n"
+        "综上，已有研究对参与效果的评估不足。"
+    }
+
+    # 按内容分派:改错扩展名的文件照样能读
+    res = client.post(
+        url, files={"file": ("初稿.doc", _docx_bytes(["其实是 docx。"]), docx_type)}
+    )
+    assert res.json() == {"text": "其实是 docx。"}
+
     # 记事本存的 GBK 中文 txt
     res = client.post(
         url, files={"file": ("初稿.txt", "中文初稿。\r\n\r\n第二段。".encode("gbk"))}
@@ -6373,8 +6417,13 @@ def test_draft_file_is_parsed_into_text_without_freezing_baseline(education_clie
     assert res.json() == {"text": "中文初稿。\n第二段。"}
 
     for name, data, detail in [
-        ("初稿.doc", b"\xd0\xcf\x11\xe0", "Old .doc files are not supported"),
-        ("初稿.pdf", b"%PDF-1.7", "Only .docx, .txt and .md files are supported"),
+        ("初稿.doc", b"\xd0\xcf\x11\xe0", "Could not read this file"),
+        (
+            "初稿.docx",
+            (_FIXTURES / "draft_password.docx").read_bytes(),
+            "This file is password protected",
+        ),
+        ("初稿.pdf", b"%PDF-1.7", "Only .docx, .doc, .txt and .md files are supported"),
         ("初稿.docx", b"not a zip", "Could not read this file"),
         ("初稿.docx", _docx_bytes(["", "  "]), "No text found in this file"),
     ]:

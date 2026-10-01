@@ -20,7 +20,7 @@
 
 	// 与后端 DRAFT_BASELINE_MIN_CHARS 一致,按去掉空白后的字数算。
 	const MIN_CHARS = 200;
-	const ACCEPTED_FILES = '.docx,.txt,.md';
+	const ACCEPTED_FILES = '.docx,.doc,.txt,.md';
 
 	const i18n = getContext<Writable<i18nType>>('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
@@ -102,7 +102,7 @@
 			{importing ? $i18n.t('Reading file...') : $i18n.t('Import from file')}
 		</EduButton>
 		<span class="text-xs text-gray-500 dark:text-gray-400">
-			{$i18n.t('Supports .docx, .txt and .md. For .doc or PDF, save it as .docx first.')}
+			{$i18n.t('Supports .docx, .doc, .txt and .md. For PDF, copy the text in or save it as .docx.')}
 		</span>
 	</div>
 	<textarea
