@@ -165,11 +165,20 @@
 	// 每个取值只预填一次，学生删掉或改写后不会再被塞回来。
 	export let prefillPrompt = '';
 	let appliedPrefillPrompt = '';
-	const applyPrefillPrompt = () => {
+	const applyPrefillPrompt = async () => {
 		if (!prefillPrompt || prefillPrompt === appliedPrefillPrompt || !messageInput || prompt) return;
 		if (createMessagesList(history, history.currentId).length > 0) return;
-		appliedPrefillPrompt = prefillPrompt;
-		messageInput.setText(prefillPrompt);
+		const target = prefillPrompt;
+		appliedPrefillPrompt = target;
+		// bind:this 先于输入框里的编辑器挂好，#chat-input 不在时 setText 是空操作，等它出现再写。
+		for (let i = 0; i < 30 && !document.getElementById('chat-input'); i += 1) {
+			await new Promise((resolve) => setTimeout(resolve, 100));
+		}
+		if (!document.getElementById('chat-input') || prompt) {
+			appliedPrefillPrompt = '';
+			return;
+		}
+		await messageInput?.setText(target);
 	};
 	$: if (prefillPrompt && messageInput) applyPrefillPrompt();
 
