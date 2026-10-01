@@ -3,18 +3,13 @@
 	import type { i18n as i18nType } from 'i18next';
 	import { getContext, onMount } from 'svelte';
 	import { get } from 'svelte/store';
-	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
-
-	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import SidebarIcon from '$lib/components/icons/Sidebar.svelte';
-	import { mobile, showSidebar } from '$lib/stores';
 
 	import { getMyWritingProfile } from '$lib/apis/education';
 	import type { StudentProfile, StudentProfileFilters } from '$lib/apis/education';
 	import { resolveErrorMessage } from '$lib/utils/education';
 	import LoadingState from '$lib/components/education/LoadingState.svelte';
-	import EduButton from '$lib/components/education/EduButton.svelte';
+	import EduPageShell from '$lib/components/education/EduPageShell.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 	import StudentGrowthProfile from '$lib/components/education/StudentGrowthProfile.svelte';
 	import { createLatestRequestGate } from '$lib/utils/latest-request';
@@ -51,59 +46,19 @@
 </script>
 
 {#if loaded && !loadError}
-	<div
-		class="flex h-screen max-h-[100dvh] w-full max-w-full flex-col transition-width duration-200 ease-in-out {$showSidebar
-			? 'md:max-w-[calc(100%-var(--sidebar-width))]'
-			: ''}"
+	<EduPageShell
+		crumbs={[{ label: $i18n.t('Writing'), href: '/me/writing' }]}
+		title={$i18n.t('My Growth')}
 	>
-		<nav class="w-full px-2.5 pt-1.5 backdrop-blur-xl drag-region">
-			<div class="flex items-center">
-				{#if $mobile}
-					<div
-						class="{$showSidebar ? 'md:hidden' : ''} mt-1.5 flex flex-none items-center self-end"
-					>
-						<Tooltip
-							content={$showSidebar ? $i18n.t('Close Sidebar') : $i18n.t('Open Sidebar')}
-							interactive={true}
-						>
-							<button
-								id="sidebar-toggle-button"
-								class="flex cursor-pointer rounded-lg transition hover:bg-gray-100 dark:hover:bg-gray-850"
-								on:click={() => showSidebar.set(!$showSidebar)}
-							>
-								<div class="self-center p-1.5">
-									<SidebarIcon />
-								</div>
-							</button>
-						</Tooltip>
-					</div>
-				{/if}
-
-				<div class="ml-2 flex w-full items-center justify-between py-1">
-					<div>
-						<div class="text-xs uppercase tracking-[0.2em] text-gray-500 dark:text-gray-400">
-							{$i18n.t('Writing')}
-						</div>
-						<h1 class="text-2xl font-semibold">{$i18n.t('Assignment Writing Growth Profile')}</h1>
-					</div>
-					<EduButton on:click={() => goto('/me/writing')}>
-						{$i18n.t('Back to Writing')}
-					</EduButton>
-				</div>
-			</div>
-		</nav>
-
-		<div class="flex-1 overflow-y-auto">
-			<div class="mx-auto max-w-6xl px-4 py-8">
-				<StudentGrowthProfile
-					{profile}
-					{filters}
-					variant="student"
-					on:filter={(event) => loadProfile(event.detail)}
-				/>
-			</div>
+		<div class="mx-auto max-w-6xl px-4 py-6">
+			<StudentGrowthProfile
+				{profile}
+				{filters}
+				variant="student"
+				on:filter={(event) => loadProfile(event.detail)}
+			/>
 		</div>
-	</div>
+	</EduPageShell>
 {:else if loadError}
 	<div class="mx-auto max-w-3xl px-4 py-16">
 		<EduStateCard tone="error">{loadError}</EduStateCard>

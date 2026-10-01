@@ -31,7 +31,7 @@
 		type AiUsage,
 		type ReflectionAnswerDrafts
 	} from '$lib/utils/reflection-questions';
-	import { formatEpoch, resolveErrorMessage } from '$lib/utils/education';
+	import { formatEpoch, getDueCountdown, resolveErrorMessage } from '$lib/utils/education';
 	import {
 		applySourceMapChange,
 		normalizeSourceRuns,
@@ -185,53 +185,10 @@
 		return normalized;
 	};
 
-	const DAY_SECONDS = 24 * 60 * 60;
-	const HOUR_SECONDS = 60 * 60;
-
-	// Mirrors the amber/gray urgency coloring already used on the /me/writing due-date
-	// badges, with an added rose tier for the last hour before the deadline.
-	const computeDueCountdown = (dueAtSeconds: number, nowMs: number) => {
-		const remainingSeconds = dueAtSeconds - nowMs / 1000;
-
-		if (remainingSeconds <= 0) {
-			return {
-				overdue: true,
-				className: 'text-gray-500 dark:text-gray-400',
-				labelKey: '',
-				params: {}
-			};
-		}
-
-		let className = 'text-gray-500 dark:text-gray-400';
-		if (remainingSeconds < HOUR_SECONDS) {
-			className = 'font-medium text-rose-600 dark:text-rose-400';
-		} else if (remainingSeconds < DAY_SECONDS) {
-			className = 'font-medium text-amber-600 dark:text-amber-400';
-		}
-
-		const totalMinutes = Math.max(1, Math.floor(remainingSeconds / 60));
-		const days = Math.floor(totalMinutes / 1440);
-		const hours = Math.floor((totalMinutes % 1440) / 60);
-		const minutes = totalMinutes % 60;
-
-		if (days >= 1) {
-			return {
-				overdue: false,
-				className,
-				labelKey: 'Due in {{days}}d {{hours}}h',
-				params: { days, hours }
-			};
-		}
-		if (hours >= 1) {
-			return { overdue: false, className, labelKey: 'Due in {{hours}}h', params: { hours } };
-		}
-		return { overdue: false, className, labelKey: 'Due in {{minutes}}m', params: { minutes } };
-	};
-
 	$: isResubmitDeadline = review?.review_status === 'returned';
 	$: formattedDueAt = formatEpoch(effectiveDueAt);
 	$: dueCountdown =
-		isAssignment && effectiveDueAt ? computeDueCountdown(effectiveDueAt, nowTick) : null;
+		isAssignment && effectiveDueAt ? getDueCountdown(effectiveDueAt, nowTick) : null;
 	$: dueLabelKey = isResubmitDeadline ? 'Resubmit before' : 'Due At';
 	$: dueColorClass = isResubmitDeadline
 		? 'font-medium text-rose-600 dark:text-rose-400'

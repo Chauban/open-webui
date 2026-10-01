@@ -3,16 +3,13 @@
 	import type { i18n as i18nType } from 'i18next';
 	import { getContext, onDestroy, onMount } from 'svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import SidebarIcon from '$lib/components/icons/Sidebar.svelte';
 	import { get } from 'svelte/store';
 	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
 	import {
 		educationNotificationSummary,
 		folders,
-		mobile,
 		selectedFolder,
-		showSidebar,
 		user
 	} from '$lib/stores';
 	import { refreshChatList } from '$lib/stores/chatList';
@@ -23,13 +20,21 @@
 		getWritingHome,
 		joinClassroom
 	} from '$lib/apis/education';
-	import { formatEpoch, getClassroomDisplayName, resolveErrorMessage } from '$lib/utils/education';
+	import {
+		formatEpoch,
+		getClassroomDisplayName,
+		getDueCountdown,
+		resolveErrorMessage
+	} from '$lib/utils/education';
 	import LoadingState from '$lib/components/education/LoadingState.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import EduBadge from '$lib/components/education/EduBadge.svelte';
 	import EduButton from '$lib/components/education/EduButton.svelte';
 	import EduCard from '$lib/components/education/EduCard.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
+	import EduPageShell from '$lib/components/education/EduPageShell.svelte';
+	import Plus from '$lib/components/icons/Plus.svelte';
+	import ChevronRight from '$lib/components/icons/ChevronRight.svelte';
 	import { EDU_FIELD_CLASS, eduSegmentClass } from '$lib/components/education/styles';
 
 	const i18n = getContext<Writable<i18nType>>('i18n');
@@ -42,6 +47,7 @@
 	let joining = false;
 	let creatingPersonal = false;
 	let activeTab = 'personal';
+	let showDone = false;
 	let deletingPersonalIds = new Set<string>();
 	let homeLoading = false;
 	let pendingDeleteSessionId = '';
@@ -49,95 +55,36 @@
 	let unsubscribeNotifications;
 	let notificationsInitialized = false;
 
-	const DAY_SECONDS = 24 * 60 * 60;
-
-	const getAssignmentStatusLabel = (status: string) => {
-		if (status === 'submitted') return t('Submitted');
-		if (status === 'draft') return t('In progress');
-		if (status === 'not_started') return t('Not started');
-		return t('Unknown');
-	};
-
-	const formatTimestamp = (timestamp?: number | null) => {
-		if (typeof timestamp !== 'number' || !Number.isFinite(timestamp) || timestamp <= 0) {
-			return t('Unknown');
-		}
-
-		const date = new Date(timestamp * 1000);
-		if (Number.isNaN(date.getTime())) {
-			return t('Unknown');
-		}
-
-		return formatEpoch(timestamp);
-	};
+	const formatTimestamp = (timestamp?: number | null) =>
+		typeof timestamp === 'number' && timestamp > 0 ? formatEpoch(timestamp) : t('Unknown');
 
 	const isPastEffectiveDue = (item) =>
 		typeof item.effective_due_at === 'number' &&
 		item.effective_due_at > 0 &&
 		item.effective_due_at <= Date.now() / 1000;
 
-	// Returns due-date display info for a non-returned assignment card, or null when
-	// there is nothing to show (e.g. no effective_due_at).
-	const getDueInfo = (item) => {
-		if (item.review_status === 'returned') {
-			return null;
-		}
-		if (
-			typeof item.effective_due_at !== 'number' ||
-			!Number.isFinite(item.effective_due_at) ||
-			item.effective_due_at <= 0
-		) {
-			return null;
-		}
+	// 退回的作业要学生动手,和没交的一起算「待完成」;其余已提交的收进下方折叠区。
+	const needsAction = (item) => item.status !== 'submitted' || item.review_status === 'returned';
 
-		const remainingSeconds = item.effective_due_at - Date.now() / 1000;
-		const isUnsubmitted = item.status !== 'submitted';
-
-		if (isUnsubmitted && remainingSeconds <= 0) {
-			return { overdue: true, className: 'text-gray-500 dark:text-gray-400' };
+	// 待完成:截止最近的在前(没有截止的垫底);已提交:最近更新的在前。
+	const groupAssignmentItems = (items) => {
+		const todo = [];
+		const done = [];
+		for (const item of items ?? []) {
+			(needsAction(item) ? todo : done).push(item);
 		}
-
-		if (isUnsubmitted && remainingSeconds < DAY_SECONDS) {
-			return {
-				overdue: false,
-				className: 'font-medium text-amber-600 dark:text-amber-400',
-				text: formatTimestamp(item.effective_due_at)
-			};
-		}
-
-		return {
-			overdue: false,
-			className: 'text-gray-500 dark:text-gray-400',
-			text: formatTimestamp(item.effective_due_at)
-		};
+		todo.sort((a, b) => (a.effective_due_at ?? Infinity) - (b.effective_due_at ?? Infinity));
+		done.sort((a, b) => (b.updated_at ?? 0) - (a.updated_at ?? 0));
+		return { todo, done };
 	};
 
-	// Not-yet-submitted assignments float to the top, ordered by the soonest effective
-	// due date first (items without a due date sort to the end of that group).
-	// Already submitted/graded assignments keep the existing "most recently updated first" order.
-	const sortAssignmentItems = (items) => {
-		const pending = [];
-		const settled = [];
-		for (const item of items ?? []) {
-			if (item.status === 'submitted') {
-				settled.push(item);
-			} else {
-				pending.push(item);
-			}
-		}
-
-		pending.sort((a, b) => {
-			const aDue = typeof a.effective_due_at === 'number' ? a.effective_due_at : null;
-			const bDue = typeof b.effective_due_at === 'number' ? b.effective_due_at : null;
-			if (aDue === null && bDue === null) return 0;
-			if (aDue === null) return 1;
-			if (bDue === null) return -1;
-			return aDue - bDue;
-		});
-
-		settled.sort((a, b) => (b.updated_at ?? 0) - (a.updated_at ?? 0));
-
-		return [...pending, ...settled];
+	// 卡片右侧的按钮按状态说清楚下一步,而不是一律「打开作业」。
+	const getAssignmentAction = (item) => {
+		if (item.review_status === 'returned') return { label: 'Revise and Resubmit', primary: true };
+		if (item.status === 'not_started') return { label: 'Start Writing', primary: true };
+		if (item.status !== 'submitted') return { label: 'Continue Writing', primary: true };
+		if (item.review_status === 'reviewed') return { label: 'View Review', primary: false };
+		return { label: 'View Submission', primary: false };
 	};
 
 	const openRecentItem = async (item) => {
@@ -323,103 +270,60 @@
 		unsubscribeNotifications?.();
 	});
 
-	$: sortedAssignmentItems = sortAssignmentItems(home?.assignment_items ?? []);
+	$: assignmentGroups = groupAssignmentItems(home?.assignment_items ?? []);
+	$: isStudent = ($user?.education_role || home?.role) === 'student';
+	// 首页顶部只留一条「接着写」:最近一份还没交的草稿。已交的不在这里重复出现。
+	$: resumeItem = (home?.recent_items ?? []).find((item) => item.status !== 'submitted') ?? null;
 </script>
 
 {#if loaded && !loadError}
-	<div
-		class="flex h-screen max-h-[100dvh] w-full max-w-full flex-col transition-width duration-200 ease-in-out {$showSidebar
-			? 'md:max-w-[calc(100%-var(--sidebar-width))]'
-			: ''}"
-	>
-		<nav class="w-full px-2.5 pt-1.5 backdrop-blur-xl drag-region">
-			<div class="flex items-center">
-				{#if $mobile}
-					<div
-						class="{$showSidebar ? 'md:hidden' : ''} flex flex-none items-center self-end mt-1.5"
-					>
-						<Tooltip
-							content={$showSidebar ? $i18n.t('Close Sidebar') : $i18n.t('Open Sidebar')}
-							interactive={true}
-						>
-							<button
-								id="sidebar-toggle-button"
-								class="flex cursor-pointer rounded-lg transition hover:bg-gray-100 dark:hover:bg-gray-850"
-								on:click={() => showSidebar.set(!$showSidebar)}
-							>
-								<div class="self-center p-1.5">
-									<SidebarIcon />
-								</div>
-							</button>
-						</Tooltip>
-					</div>
-				{/if}
+	<!--
+		此前首页最上面是 12 张「最近写作」卡片,把待完成作业挤出第一屏,
+		而它们与下面两个列表几乎全部重复。现在顶部只留一条「接着写」,
+		作业分「待完成 / 已提交」两组,已提交的默认折叠。
+	-->
+	<EduPageShell title={$i18n.t('Writing')}>
+		<svelte:fragment slot="nav-actions">
+			<EduButton on:click={() => goto('/me/writing/growth')}>
+				{$i18n.t('My Growth')}
+			</EduButton>
+		</svelte:fragment>
 
-				<div class="ml-2 flex w-full items-center justify-between py-1">
-					<div>
-						<div class="text-xs uppercase tracking-[0.2em] text-gray-500 dark:text-gray-400">
-							{$i18n.t('Writing')}
+		<div class="mx-auto max-w-6xl px-4 py-6">
+			{#if resumeItem}
+				<button
+					class="mb-6 flex w-full items-center gap-4 rounded-2xl border border-gray-200 bg-white px-5 py-4 text-left transition hover:border-gray-300 hover:shadow-sm dark:border-gray-800 dark:bg-gray-850 dark:hover:border-gray-700"
+					on:click={() => openRecentItem(resumeItem)}
+				>
+					<div class="min-w-0 flex-1">
+						<div class="text-xs text-gray-500 dark:text-gray-400">
+							{$i18n.t('Pick up where you left off')} ·
+							{resumeItem.project_mode === 'assignment_writing'
+								? $i18n.t('Assignment Writing')
+								: $i18n.t('Personal Writing')}
 						</div>
-						<h1 class="text-2xl font-semibold">{$i18n.t('Writing')}</h1>
-					</div>
-					<EduButton on:click={() => goto('/me/writing/growth')}>
-						{$i18n.t('Assignment Writing Growth Profile')}
-					</EduButton>
-				</div>
-			</div>
-		</nav>
-
-		<div class="flex-1 overflow-y-auto">
-			<div class="mx-auto max-w-6xl px-4 py-8">
-				<EduCard class="mb-8">
-					<div class="mb-4 flex items-center justify-between gap-4">
-						<div>
-							<div class="text-lg font-semibold">{$i18n.t('Continue Recent Writing')}</div>
-							<div class="text-sm text-gray-500 dark:text-gray-400">
-								{$i18n.t('Jump back into your latest draft.')}
-							</div>
+						<div class="mt-0.5 truncate text-base font-semibold text-gray-900 dark:text-gray-100">
+							{resumeItem.title}
 						</div>
 					</div>
+					<div class="shrink-0 text-xs text-gray-500 dark:text-gray-400">
+						{formatTimestamp(resumeItem.updated_at)}
+					</div>
+					<ChevronRight className="size-4 shrink-0 text-gray-400" />
+				</button>
+			{/if}
 
-					{#if (home?.recent_items ?? []).length === 0}
-						<div
-							class="rounded-2xl border border-dashed border-gray-200 dark:border-gray-800 bg-stone-50 dark:bg-gray-900 p-5 text-sm text-gray-500 dark:text-gray-400"
-						>
-							{$i18n.t('No recent writing yet.')}
-						</div>
-					{:else}
-						<div class="grid gap-3 md:grid-cols-2">
-							{#each home.recent_items as item}
-								<button
-									class="rounded-3xl border border-gray-200 dark:border-gray-800 bg-stone-50 dark:bg-gray-900 p-4 text-left transition hover:border-gray-300 dark:hover:border-gray-600 hover:bg-white dark:hover:bg-gray-800"
-									on:click={() => openRecentItem(item)}
-								>
-									<div class="flex items-center justify-between gap-3">
-										<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">
-											{item.title}
-										</div>
-										<EduBadge soft>
-											{item.project_mode === 'assignment_writing'
-												? $i18n.t('Assignment Writing')
-												: $i18n.t('Personal Writing')}
-										</EduBadge>
-									</div>
-									<div class="mt-2 text-xs text-gray-500 dark:text-gray-400">
-										{$i18n.t('Updated')}: {formatTimestamp(item.updated_at)}
-									</div>
-								</button>
-							{/each}
-						</div>
-					{/if}
-				</EduCard>
-
-				{#if ($user?.education_role || home?.role) === 'student'}
-					<div class="mb-5 flex gap-2">
+			{#if isStudent}
+				<div class="mb-5 flex flex-wrap items-center justify-between gap-3">
+					<div class="flex gap-2">
 						<button
 							class={eduSegmentClass(activeTab === 'assignment')}
 							on:click={() => (activeTab = 'assignment')}
 						>
 							{$i18n.t('Assignment Writing')}
+							{#if assignmentGroups.todo.length > 0}
+								<span class="ml-1 tabular-nums opacity-70">{assignmentGroups.todo.length}</span>
+							{/if}
 						</button>
 						<button
 							class={eduSegmentClass(activeTab === 'personal')}
@@ -428,175 +332,215 @@
 							{$i18n.t('Personal Writing')}
 						</button>
 					</div>
-
-					{#if activeTab === 'assignment'}
-						<div class="mb-8">
-							<EduCard class="mb-6">
-								<div class="mb-3 text-sm font-semibold">{$i18n.t('My Classroom')}</div>
-								{#if home?.classrooms?.length}
-									<div class="flex flex-wrap gap-2">
-										{#each home.classrooms as classroom}
-											<EduBadge>{getClassroomDisplayName(classroom.name, t)}</EduBadge>
-										{/each}
-									</div>
-									<!-- 一个学生只能在一个班：已入班就不再给邀请码输入框，换班找老师或管理员。 -->
-									<div class="mt-3 text-xs text-gray-500 dark:text-gray-400">
-										{$i18n.t(
-											'Each student can be in only one classroom. To change classes, ask your teacher or an administrator.'
-										)}
-									</div>
-								{:else}
-									<div class="text-sm text-gray-500 dark:text-gray-400">
-										{$i18n.t(
-											"You have not joined a classroom yet. Enter your teacher's invite code to unlock assignments."
-										)}
-									</div>
-									<div class="mt-4 flex flex-col gap-3 md:flex-row">
-										<input
-											bind:value={inviteCode}
-											class="flex-1 {EDU_FIELD_CLASS}"
-											placeholder={$i18n.t('Enter classroom invite code')}
-										/>
-										<EduButton variant="primary" on:click={joinCurrentClassroom} disabled={joining}>
-											{joining ? $i18n.t('Joining...') : $i18n.t('Join Classroom')}
-										</EduButton>
-									</div>
-								{/if}
-							</EduCard>
-
-							<div class="mb-4">
-								<div class="text-lg font-semibold">{$i18n.t('Pending Assignments')}</div>
+					<!-- 入班后班级只是一条身份信息,不再单独占一张卡;换班规则放进悬停提示 -->
+					{#if home?.classrooms?.length}
+						<Tooltip
+							content={$i18n.t(
+								'Each student can be in only one classroom. To change classes, ask your teacher or an administrator.'
+							)}
+						>
+							<div class="text-xs text-gray-500 dark:text-gray-400">
+								{$i18n.t('My Classroom')}:
+								<span class="font-medium text-gray-700 dark:text-gray-300">
+									{getClassroomDisplayName(home.classrooms[0].name, t)}
+								</span>
 							</div>
-
-							{#if sortedAssignmentItems.length === 0}
-								<EduStateCard>{$i18n.t('No assignments available yet.')}</EduStateCard>
-							{:else}
-								<div class="grid gap-4">
-									{#each sortedAssignmentItems as item}
-										<EduCard>
-											<div
-												class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between"
-											>
-												<div>
-													<div class="flex flex-wrap items-center gap-2">
-														<div class="text-lg font-semibold">{item.assignment.title}</div>
-														{#if item.review_status === 'returned'}
-															<EduBadge soft tone="rose">{$i18n.t('Returned')}</EduBadge>
-														{:else if item.review_status === 'reviewed'}
-															<EduBadge soft tone="emerald">
-																{$i18n.t('Reviewed')}
-																{item.score ?? ''}
-															</EduBadge>
-														{:else if item.review_status === 'pending'}
-															<!-- 待批改且未过截止时学生仍可改稿重交(覆盖当前轮),标签要说清楚 -->
-															<EduBadge soft>
-																{isPastEffectiveDue(item)
-																	? $i18n.t('Awaiting review')
-																	: $i18n.t('Submitted · editable before deadline')}
-															</EduBadge>
-														{/if}
-													</div>
-													<div class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-														{item.assignment.description || $i18n.t('No description')}
-													</div>
-													<div
-														class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500 dark:text-gray-400"
-													>
-														<div>{$i18n.t('Status')}: {getAssignmentStatusLabel(item.status)}</div>
-														<div>{$i18n.t('Updated')}: {formatTimestamp(item.updated_at)}</div>
-														{#if item.review_status === 'returned'}
-															<div class="font-medium text-rose-600 dark:text-rose-400">
-																{$i18n.t('Resubmit before')}: {formatTimestamp(
-																	item.effective_due_at
-																)}
-															</div>
-														{:else}
-															{@const dueInfo = getDueInfo(item)}
-															{#if dueInfo?.overdue}
-																<div class={dueInfo.className}>{$i18n.t('Overdue')}</div>
-															{:else if dueInfo}
-																<div class={dueInfo.className}>
-																	{$i18n.t('Due At')}: {dueInfo.text}
-																</div>
-															{/if}
-														{/if}
-													</div>
-												</div>
-
-												<EduButton
-													variant="primary"
-													on:click={() => goto(`/assignments/${item.assignment.id}/write`)}
-												>
-													{$i18n.t('Open Assignment')}
-												</EduButton>
-											</div>
-										</EduCard>
-									{/each}
-								</div>
-							{/if}
-						</div>
+						</Tooltip>
 					{/if}
-				{/if}
+				</div>
 
-				{#if ($user?.education_role || home?.role) !== 'student' || activeTab === 'personal'}
-					<div>
-						<div class="mb-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-							<div class="text-lg font-semibold">{$i18n.t('My Writing')}</div>
-							<EduButton
-								variant="primary"
-								class="w-full md:w-auto"
-								on:click={startPersonalWriting}
-								disabled={creatingPersonal}
+				{#if activeTab === 'assignment'}
+					{#if !home?.classrooms?.length}
+						<EduCard class="mb-6">
+							<div class="text-base font-semibold">{$i18n.t('Join Classroom')}</div>
+							<div class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+								{$i18n.t(
+									"You have not joined a classroom yet. Enter your teacher's invite code to unlock assignments."
+								)}
+							</div>
+							<form
+								class="mt-4 flex flex-col gap-3 md:flex-row"
+								on:submit|preventDefault={joinCurrentClassroom}
 							>
-								{creatingPersonal ? $i18n.t('Creating...') : $i18n.t('New Writing')}
-							</EduButton>
-						</div>
-						<div class="mb-4 text-sm text-gray-500 dark:text-gray-400">
-							{$i18n.t('Your personal drafts live here.')}
-						</div>
+								<input
+									bind:value={inviteCode}
+									class="flex-1 font-mono {EDU_FIELD_CLASS}"
+									placeholder={$i18n.t('Enter classroom invite code')}
+								/>
+								<EduButton variant="primary" type="submit" disabled={joining}>
+									{joining ? $i18n.t('Joining...') : $i18n.t('Join Classroom')}
+								</EduButton>
+							</form>
+						</EduCard>
+					{/if}
 
-						{#if (home?.personal_items ?? []).length === 0}
-							<EduStateCard>{$i18n.t('No personal writing yet.')}</EduStateCard>
+					{#if (home?.assignment_items ?? []).length === 0}
+						{#if home?.classrooms?.length}
+							<EduStateCard>{$i18n.t('No assignments available yet.')}</EduStateCard>
+						{/if}
+					{:else}
+						<h2 class="mb-3 text-base font-semibold">
+							{$i18n.t('Pending Assignments')}
+							<span class="ml-1 text-sm font-normal text-gray-500 tabular-nums dark:text-gray-400">
+								{assignmentGroups.todo.length}
+							</span>
+						</h2>
+						{#if assignmentGroups.todo.length === 0}
+							<EduStateCard>{$i18n.t('All caught up. Nothing is waiting for you.')}</EduStateCard>
 						{:else}
-							<div class="grid gap-4">
-								{#each home.personal_items as item}
-									<EduCard>
-										<div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-											<div class="min-w-0">
-												<div class="truncate text-lg font-semibold">{item.title}</div>
-												<div class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-													{item.preview_text || $i18n.t('No content yet.')}
-												</div>
-												<div class="mt-3 text-xs text-gray-500 dark:text-gray-400">
-													{$i18n.t('Updated')}: {formatTimestamp(item.updated_at)}
-												</div>
-											</div>
-											<div class="flex gap-2">
-												<EduButton
-													on:click={() => requestRemovePersonalWriting(item.writing_session.id)}
-													disabled={deletingPersonalIds.has(item.writing_session.id)}
-												>
-													{deletingPersonalIds.has(item.writing_session.id)
-														? $i18n.t('Deleting...')
-														: $i18n.t('Delete')}
-												</EduButton>
-												<EduButton
-													variant="primary"
-													on:click={() => goto(`/writing/${item.writing_session.id}`)}
-												>
-													{$i18n.t('Continue Writing')}
-												</EduButton>
-											</div>
-										</div>
-									</EduCard>
+							<div class="grid gap-3">
+								{#each assignmentGroups.todo as item (item.assignment.id)}
+									{@render assignmentCard(item)}
 								{/each}
 							</div>
 						{/if}
+
+						{#if assignmentGroups.done.length > 0}
+							<button
+								class="mt-8 mb-3 flex items-center gap-1.5 text-base font-semibold"
+								aria-expanded={showDone}
+								on:click={() => (showDone = !showDone)}
+							>
+								<ChevronRight
+									className="size-4 text-gray-400 transition-transform {showDone
+										? 'rotate-90'
+										: ''}"
+								/>
+								{$i18n.t('Submitted')}
+								<span class="text-sm font-normal text-gray-500 tabular-nums dark:text-gray-400">
+									{assignmentGroups.done.length}
+								</span>
+							</button>
+							{#if showDone}
+								<div class="grid gap-3">
+									{#each assignmentGroups.done as item (item.assignment.id)}
+										{@render assignmentCard(item)}
+									{/each}
+								</div>
+							{/if}
+						{/if}
+					{/if}
+				{/if}
+			{/if}
+
+			{#if !isStudent || activeTab === 'personal'}
+				<div class="mb-3 flex items-center justify-between gap-4">
+					<div>
+						<h2 class="text-base font-semibold">{$i18n.t('My Writing')}</h2>
+						<div class="text-sm text-gray-500 dark:text-gray-400">
+							{$i18n.t('Your personal drafts live here.')}
+						</div>
+					</div>
+					<EduButton variant="primary" on:click={startPersonalWriting} disabled={creatingPersonal}>
+						<Plus className="size-4" strokeWidth="2.5" />
+						{creatingPersonal ? $i18n.t('Creating...') : $i18n.t('New Writing')}
+					</EduButton>
+				</div>
+
+				{#if (home?.personal_items ?? []).length === 0}
+					<EduStateCard>{$i18n.t('No personal writing yet.')}</EduStateCard>
+				{:else}
+					<div class="grid gap-3">
+						{#each home.personal_items as item (item.writing_session.id)}
+							<EduCard>
+								<div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+									<div class="min-w-0">
+										<div class="truncate text-base font-semibold">{item.title}</div>
+										<div class="mt-1 line-clamp-2 text-sm text-gray-500 dark:text-gray-400">
+											{item.preview_text || $i18n.t('No content yet.')}
+										</div>
+										<div class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+											{$i18n.t('Updated')}: {formatTimestamp(item.updated_at)}
+										</div>
+									</div>
+									<div class="flex shrink-0 gap-2">
+										<EduButton
+											on:click={() => requestRemovePersonalWriting(item.writing_session.id)}
+											disabled={deletingPersonalIds.has(item.writing_session.id)}
+										>
+											{deletingPersonalIds.has(item.writing_session.id)
+												? $i18n.t('Deleting...')
+												: $i18n.t('Delete')}
+										</EduButton>
+										<EduButton
+											variant="primary"
+											on:click={() => goto(`/writing/${item.writing_session.id}`)}
+										>
+											{$i18n.t('Continue Writing')}
+										</EduButton>
+									</div>
+								</div>
+							</EduCard>
+						{/each}
 					</div>
 				{/if}
-			</div>
+			{/if}
 		</div>
-	</div>
+	</EduPageShell>
+
+	{#snippet assignmentCard(item)}
+		{@const action = getAssignmentAction(item)}
+		{@const countdown =
+			item.effective_due_at && needsAction(item) ? getDueCountdown(item.effective_due_at) : null}
+		<EduCard>
+			<div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+				<div class="min-w-0">
+					<div class="flex flex-wrap items-center gap-2">
+						<div class="text-base font-semibold">{item.assignment.title}</div>
+						{#if item.review_status === 'returned'}
+							<EduBadge soft tone="rose">{$i18n.t('Returned')}</EduBadge>
+						{:else if item.review_status === 'reviewed'}
+							<EduBadge soft tone="emerald">
+								{$i18n.t('Reviewed')}
+								{item.score ?? ''}
+							</EduBadge>
+						{:else if item.review_status === 'pending'}
+							<!-- 待批改且未过截止时学生仍可改稿重交(覆盖当前轮),标签要说清楚 -->
+							<EduBadge soft>
+								{isPastEffectiveDue(item)
+									? $i18n.t('Awaiting review')
+									: $i18n.t('Submitted · editable before deadline')}
+							</EduBadge>
+						{:else if item.status === 'draft'}
+							<EduBadge soft tone="sky">{$i18n.t('In progress')}</EduBadge>
+						{/if}
+					</div>
+					{#if item.assignment.description}
+						<div class="mt-1 line-clamp-2 text-sm text-gray-500 dark:text-gray-400">
+							{item.assignment.description}
+						</div>
+					{/if}
+					{#if item.effective_due_at}
+						<div class="mt-2 flex flex-wrap gap-x-3 text-xs text-gray-500 dark:text-gray-400">
+							<span class={item.review_status === 'returned'
+								? 'font-medium text-rose-600 dark:text-rose-400'
+								: ''}
+							>
+								{item.review_status === 'returned'
+									? $i18n.t('Resubmit before')
+									: $i18n.t('Due At')}: {formatTimestamp(item.effective_due_at)}
+							</span>
+							{#if countdown}
+								<span class={countdown.className}>
+									{countdown.overdue
+										? $i18n.t('Overdue')
+										: $i18n.t(countdown.labelKey, countdown.params)}
+								</span>
+							{/if}
+						</div>
+					{/if}
+				</div>
+
+				<EduButton
+					class="shrink-0"
+					variant={action.primary ? 'primary' : 'secondary'}
+					on:click={() => goto(`/assignments/${item.assignment.id}/write`)}
+				>
+					{$i18n.t(action.label)}
+				</EduButton>
+			</div>
+		</EduCard>
+	{/snippet}
 {:else if loadError}
 	<div class="mx-auto max-w-3xl px-4 py-16">
 		<EduStateCard tone="error">{loadError}</EduStateCard>

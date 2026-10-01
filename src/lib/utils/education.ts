@@ -121,6 +121,42 @@ export const formatDateTimeInput = (value: string | null | undefined) => {
 };
 
 /** epoch 秒 → 只到日期（目标日期这类不看时分的场景）。 */
+/**
+ * 截止倒计时:写作首页的作业卡片与写作工作区共用。
+ * 最后一天转琥珀色、最后一小时转玫红;已过截止返回 overdue,由调用方决定怎么说。
+ */
+export const getDueCountdown = (dueAtSeconds: number, nowMs: number = Date.now()) => {
+	const remainingSeconds = dueAtSeconds - nowMs / 1000;
+	if (remainingSeconds <= 0) {
+		return {
+			overdue: true,
+			className: 'text-gray-500 dark:text-gray-400',
+			labelKey: '',
+			params: {}
+		};
+	}
+
+	let className = 'text-gray-500 dark:text-gray-400';
+	if (remainingSeconds < 60 * 60) {
+		className = 'font-medium text-rose-600 dark:text-rose-400';
+	} else if (remainingSeconds < 24 * 60 * 60) {
+		className = 'font-medium text-amber-600 dark:text-amber-400';
+	}
+
+	const totalMinutes = Math.max(1, Math.floor(remainingSeconds / 60));
+	const days = Math.floor(totalMinutes / 1440);
+	const hours = Math.floor((totalMinutes % 1440) / 60);
+	const minutes = totalMinutes % 60;
+
+	if (days >= 1) {
+		return { overdue: false, className, labelKey: 'Due in {{days}}d {{hours}}h', params: { days, hours } };
+	}
+	if (hours >= 1) {
+		return { overdue: false, className, labelKey: 'Due in {{hours}}h', params: { hours } };
+	}
+	return { overdue: false, className, labelKey: 'Due in {{minutes}}m', params: { minutes } };
+};
+
 export const formatEpochDate = (epoch: number | null | undefined) =>
 	epoch ? getFormatter({ dateStyle: 'medium' }).format(epoch * 1000) : '';
 
