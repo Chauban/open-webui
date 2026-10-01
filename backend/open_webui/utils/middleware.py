@@ -82,6 +82,7 @@ from open_webui.utils.access_control import has_connection_access, has_permissio
 from open_webui.utils.access_control.files import get_owner_accessible_folder_files
 from open_webui.utils.access_control.folders import has_folder_access
 from open_webui.services.education.writing_context import (
+    build_current_text_context,
     get_folder_writing_session,
     is_draft_baseline_missing,
 )
@@ -2582,6 +2583,15 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                     # Native FC: skip RAG injection, builtin tools
                     # will read folder knowledge from metadata.
                     metadata['folder_knowledge'] = await get_owner_accessible_folder_files(folder)
+
+        # 写作区:每轮把右侧编辑器里此刻的正文追加到系统提示末尾,AI 才看得到学生在改什么。
+        # 不走 apply_system_prompt_to_body,学生正文不该被当成提示词模板解析变量。
+        if writing_session:
+            form_data['messages'] = add_or_update_system_message(
+                await build_current_text_context(writing_session),
+                form_data.get('messages', []),
+                append=True,
+            )
 
     # Model "Knowledge" handling
     user_message = get_last_user_message(form_data['messages'])

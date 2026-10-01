@@ -58,7 +58,10 @@ from open_webui.models.groups import Group, GroupMember
 from open_webui.models.notes import Note
 from open_webui.models.users import User, UserModel
 from open_webui.services.education.identity import GROUP_ID_BY_ROLE
-from open_webui.services.education.writing_context import is_draft_baseline_missing
+from open_webui.services.education.writing_context import (
+    build_current_text_context,
+    is_draft_baseline_missing,
+)
 import open_webui.routers.education as education_router_module
 import open_webui.services.education.analysis as education_analysis_module
 import open_webui.services.education.challenge as education_challenge_module
@@ -6123,3 +6126,46 @@ def test_draft_baseline_only_for_revise_draft_assignments(education_client):
         },
     )
     assert res.status_code == 400, res.text
+
+
+def test_task_prompt_sits_between_assignment_context_and_coaching(education_client):
+    client, teacher, _, student, outsider, _ = education_client
+    assignment, session_id = _setup_revise_draft_assignment(client, teacher, student)
+
+    workspace = client.get(f"/api/v1/assignments/{assignment['id']}/workspace").json()
+    system_prompt = workspace["project"]["data"]["system_prompt"]
+    assert "【任务形式】修订初稿" in system_prompt
+    assert (
+        system_prompt.index("【评分维度】")
+        < system_prompt.index("【任务形式】")
+        < system_prompt.index("【辅导方式】")
+    )
+
+    _, open_workspace = _create_coaching_assignment(client, teacher, outsider)
+    assert "【任务形式】从零写作" in open_workspace()["project"]["data"]["system_prompt"]
+
+
+def test_writing_chat_context_carries_the_latest_text(education_client):
+    client, teacher, _, student, _, SessionLocal = education_client
+    assignment, session_id = _setup_revise_draft_assignment(client, teacher, student)
+    res = client.post(
+        f"/api/v1/writing-sessions/{session_id}/draft-baseline",
+        json={"text": _DRAFT_TEXT},
+    )
+    assert res.status_code == 200, res.text
+
+    with SessionLocal() as db:
+        session = Education.get_writing_session_by_id(session_id, db=db)
+    context = asyncio.run(build_current_text_context(session))
+    assert context.startswith("【学生当前正文】")
+    assert _DRAFT_MD in context
+
+    revised = _DRAFT_MD.replace("初稿第二段。", "改过的第二段。", 1)
+    res = client.post(
+        f"/api/v1/writing-sessions/{session_id}/autosave",
+        json={"content_text": revised},
+    )
+    assert res.status_code == 200, res.text
+    context = asyncio.run(build_current_text_context(session))
+    assert revised in context
+    assert "改过的第二段。" in context

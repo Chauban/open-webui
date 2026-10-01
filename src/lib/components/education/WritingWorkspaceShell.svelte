@@ -141,6 +141,16 @@
 		!writingSession?.draft_baseline_at &&
 		!isReadOnly;
 	$: canSubmitAssignment = isAssignment && !isPastDue && !isGraded && !needsDraftBaseline;
+	// 交完初稿后的第一句由平台预填:先让 AI 按评分标准诊断一遍，学生不用对着空输入框想该问什么。
+	$: diagnosisPrompt =
+		isAssignment &&
+		assignment?.task_mode === 'revise_draft' &&
+		writingSession?.draft_baseline_at &&
+		!isReadOnly &&
+		!currentChatId &&
+		!writingSession?.active_chat_id
+			? $i18n.t('Please read my first draft against the rubric and point out the main problems.')
+			: '';
 	// 写作构成只在作业定稿后给学生看:写作中实时显示会让学生盯着比例重敲粘贴内容来刷数,
 	// 数据先被毁掉。个人写作区教师看不到,没有刷数动机,照常显示。
 	$: showComposition = !isAssignment || isReadOnly;
@@ -810,6 +820,7 @@
 		responseInsertLabel={'Insert to Writing'}
 		readOnly={isReadOnly || needsDraftBaseline}
 		readOnlyHint={chatReadOnlyHint}
+		prefillPrompt={diagnosisPrompt}
 		disableContextActions={false}
 		allowAssignmentWorkspaceChat={isAssignment}
 		showRightPanel={!$mobile}

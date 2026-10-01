@@ -161,6 +161,17 @@
 	export let rightPanelClassName = '';
 	// 写作区的质疑环节要用学生当前选的模型发起服务端生成，Chat 把选择结果报上去。
 	export let onSelectedModelsChange: ((modelIds: string[]) => void) | null = null;
+	// 空对话时预填进输入框的开场(修订初稿作业的「按评分标准读一遍我的初稿」)。
+	// 每个取值只预填一次，学生删掉或改写后不会再被塞回来。
+	export let prefillPrompt = '';
+	let appliedPrefillPrompt = '';
+	const applyPrefillPrompt = () => {
+		if (!prefillPrompt || prefillPrompt === appliedPrefillPrompt || !messageInput || prompt) return;
+		if (createMessagesList(history, history.currentId).length > 0) return;
+		appliedPrefillPrompt = prefillPrompt;
+		messageInput.setText(prefillPrompt);
+	};
+	$: if (prefillPrompt && messageInput) applyPrefillPrompt();
 
 	// The workspace clears chatIdProp to start a fresh conversation in place;
 	// upstream only reacts to a non-empty chatIdProp.
@@ -2269,6 +2280,7 @@
 		);
 
 		await tick();
+		applyPrefillPrompt();
 		messageInput?.focus({ preventScroll: true });
 	};
 

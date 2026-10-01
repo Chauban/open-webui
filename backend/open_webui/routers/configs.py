@@ -7,7 +7,11 @@ from typing import Optional
 import aiohttp
 from fastapi import APIRouter, Depends, HTTPException, Request
 from mcp.shared.auth import OAuthMetadata
-from open_webui.config import BannerModel, DEFAULT_EDUCATION_COACHING_PROMPTS
+from open_webui.config import (
+    BannerModel,
+    DEFAULT_EDUCATION_COACHING_PROMPTS,
+    DEFAULT_EDUCATION_TASK_PROMPTS,
+)
 from open_webui.env import AIOHTTP_CLIENT_SESSION_SSL, AIOHTTP_CLIENT_TIMEOUT
 from open_webui.events import EVENTS, publish_event
 from open_webui.models.config import Config
@@ -68,6 +72,7 @@ MODELS_CONFIG_KEYS = {
 }
 EDUCATION_CONFIG_KEYS = {
     'EDUCATION_COACHING_PROMPTS': 'education.coaching_prompts',
+    'EDUCATION_TASK_PROMPTS': 'education.task_prompts',
     'EDUCATION_CHALLENGE_PROMPTS': 'education.challenge_prompts',
 }
 SUBAGENTS_CONFIG_KEYS = {
@@ -813,19 +818,29 @@ class EducationCoachingPromptsForm(BaseModel):
     hands_off: str
 
 
+class EducationTaskPromptsForm(BaseModel):
+    """按作业形式追加的任务说明；留空的形式不追加任何说明。"""
+
+    from_scratch: str
+    revise_draft: str
+
+
 class EducationConfigForm(BaseModel):
     EDUCATION_COACHING_PROMPTS: EducationCoachingPromptsForm
+    EDUCATION_TASK_PROMPTS: EducationTaskPromptsForm
 
 
 class EducationConfigResponse(EducationConfigForm):
     """保存过的值会永久盖过代码默认值，所以把内置默认一起送出去，面板才能提供「恢复默认」。"""
 
     EDUCATION_COACHING_PROMPT_DEFAULTS: EducationCoachingPromptsForm
+    EDUCATION_TASK_PROMPT_DEFAULTS: EducationTaskPromptsForm
 
 
 async def get_education_config_values() -> dict:
     values = await get_config_values(EDUCATION_CONFIG_KEYS)
     values['EDUCATION_COACHING_PROMPT_DEFAULTS'] = DEFAULT_EDUCATION_COACHING_PROMPTS
+    values['EDUCATION_TASK_PROMPT_DEFAULTS'] = DEFAULT_EDUCATION_TASK_PROMPTS
     return values
 
 

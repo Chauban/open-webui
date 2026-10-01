@@ -330,8 +330,14 @@ async def _get_coaching_prompt(coaching_style: str) -> str:
     return (coaching_prompts.get(coaching_style) or "").strip()
 
 
+async def _get_task_prompt(task_mode: str) -> str:
+    """取该作业形式当前的任务说明；管理员把某个形式清空就返回空串。"""
+    task_prompts = await Config.get("education.task_prompts") or {}
+    return (task_prompts.get(task_mode) or "").strip()
+
+
 async def _build_assignment_system_prompt(assignment) -> str:
-    """把作业信息和辅导风格拼成项目文件夹的系统提示，让写作区里的对话自带作业上下文。"""
+    """把作业信息、任务说明和辅导风格拼成项目文件夹的系统提示，让写作区里的对话自带作业上下文。"""
     lines = [f"【作业】{assignment.title}"]
 
     description = (assignment.description or "").strip()
@@ -345,6 +351,10 @@ async def _build_assignment_system_prompt(assignment) -> str:
     if assignment.due_at:
         due_text = datetime.fromtimestamp(assignment.due_at).strftime("%Y-%m-%d %H:%M")
         lines.append(f"【截止】{due_text}")
+
+    task_prompt = await _get_task_prompt(assignment.task_mode)
+    if task_prompt:
+        lines.append(task_prompt)
 
     coaching_prompt = await _get_coaching_prompt(assignment.coaching_style)
     if coaching_prompt:
@@ -3055,6 +3065,8 @@ async def submit_assignment(
     stats["coaching"] = {
         "style": assignment.coaching_style,
         "prompt": await _get_coaching_prompt(assignment.coaching_style),
+        "task_mode": assignment.task_mode,
+        "task_prompt": await _get_task_prompt(assignment.task_mode),
     }
     # 质疑措辞同理，管理员随时可改，已交的这一轮不能跟着变。
     challenge_round_no = Education.resolve_next_submission_round_no(

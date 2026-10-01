@@ -9,6 +9,7 @@
 import html
 
 from open_webui.models.education import Education
+from open_webui.models.notes import Notes
 
 # 与 routers/education.py 的 PROJECT_MODE_* 取值一致。
 _WRITING_FOLDER_MODES = ("assignment_writing", "personal_writing")
@@ -59,3 +60,21 @@ def get_folder_writing_session(folder, user_id: str):
     if session is None or session.owner_user_id != user_id:
         return None
     return session
+
+
+async def build_current_text_context(session) -> str:
+    """要追加到系统提示末尾的学生当前正文。
+
+    笔记用自己的短会话读取,读完即释放,不把数据库事务带进之后的模型调用。
+    """
+
+    note = await Notes.get_note_by_id(session.note_id)
+    content = ((note.data or {}).get("content") or {}) if note else {}
+    text = (content.get("md") or "").strip()
+    if not text:
+        return "【学生当前正文】右侧编辑器里还没有内容。"
+    return (
+        "【学生当前正文】以下是学生右侧编辑器里此刻的全文，每轮对话都会更新；"
+        "引用原文时以这一版为准。\n"
+        f"<<<\n{text}\n>>>"
+    )

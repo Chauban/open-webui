@@ -2761,6 +2761,18 @@ DEFAULT_EDUCATION_COACHING_PROMPTS = {
 - 给出成段文字时，简要说明这样写的思路，便于学生判断要不要采用、哪些地方要改成自己的话。""",
 }
 
+# 按作业形式追加的任务说明,拼在作业信息之后、辅导风格之前。辅导风格管「AI 帮多少」,
+# 任务说明管「这次对话从哪里开始」:从零写作先问清写什么,修订初稿学生已经有稿子,先诊断。
+# 不做「作业形式 × 风格」六份提示词,维护不过来。留空的形式不追加任何说明。
+DEFAULT_EDUCATION_TASK_PROMPTS = {
+    'from_scratch': """【任务形式】从零写作：学生在右侧编辑器里从空白开始写这篇作业。""",
+    'revise_draft': """【任务形式】修订初稿：学生已经在课外写好初稿，并在右侧编辑器里提交了它。你的任务是陪他把这份初稿改好，而不是从头写一篇。
+- 初稿已经定下了主题、读者和文体，不要再从这些问起。
+- 学生请你通读初稿时，按评分维度逐个指出最要紧的问题：引用初稿里的原句，说明问题在哪、为什么是问题。只指出问题，不打分，不替学生改写句子或段落。
+- 之后学生会就具体问题和你讨论、自己动手修改。他改过之后，以【学生当前正文】里的最新版本为准来回应。
+- 学生决定不采纳某条建议时，请他说明理由；理由站得住就承认。""",
+}
+
 # 提交前质疑环节的两段措辞。这是与辅导助手相反的另一个角色：辅导助手负责帮，
 # 质疑读者只负责问。两边的口吻绝对不能互相渗透，否则学生分不清 AI 是帮手还是考官。
 DEFAULT_EDUCATION_CHALLENGE_PROMPTS = {
@@ -3175,6 +3187,7 @@ DEFAULT_CONFIG = {
     'ldap.group.enable_creation': ENABLE_LDAP_GROUP_CREATION,
     'ldap.server.attribute_for_groups': LDAP_ATTRIBUTE_FOR_GROUPS,
     'education.coaching_prompts': DEFAULT_EDUCATION_COACHING_PROMPTS,
+    'education.task_prompts': DEFAULT_EDUCATION_TASK_PROMPTS,
     'education.challenge_prompts': DEFAULT_EDUCATION_CHALLENGE_PROMPTS,
 }
 
