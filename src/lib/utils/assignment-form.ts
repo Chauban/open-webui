@@ -1,4 +1,4 @@
-import type { CoachingStyle, ReflectionQuestion } from '$lib/apis/education';
+import type { CoachingStyle, ReflectionQuestion, TaskMode } from '$lib/apis/education';
 import {
 	getReflectionQuestionsError,
 	normalizeReflectionQuestions
@@ -14,6 +14,7 @@ export type AssignmentDraft = {
 	dueAt: string;
 	scoreMax: string;
 	coachingStyle: CoachingStyle;
+	taskMode: TaskMode;
 	challengeEnabled: boolean;
 	challengeRounds: number;
 	challengeFocusKeys: string[];
@@ -27,6 +28,7 @@ export type AssignmentPayload = {
 	due_at: number;
 	score_max: number;
 	coaching_style: CoachingStyle;
+	task_mode: TaskMode;
 	challenge_enabled: boolean;
 	challenge_rounds: number;
 	challenge_focus_keys: string[];
@@ -65,6 +67,9 @@ export const buildAssignmentPayload = (
 		return { error: t('Rubric maximum scores must add up to the assignment maximum.') };
 	}
 
+	// 修订初稿作业结构上没有质疑式读者(后端同样拒绝)。
+	const challengeEnabled = draft.taskMode === 'from_scratch' && draft.challengeEnabled;
+
 	const reflectionQuestions = normalizeReflectionQuestions(draft.reflectionQuestions);
 	const reflectionError = getReflectionQuestionsError(reflectionQuestions);
 	if (reflectionError) return { error: t(reflectionError.key, reflectionError.params) };
@@ -76,9 +81,10 @@ export const buildAssignmentPayload = (
 			due_at: Math.floor(new Date(draft.dueAt).getTime() / 1000),
 			score_max: scoreMax,
 			coaching_style: draft.coachingStyle,
-			challenge_enabled: draft.challengeEnabled,
+			task_mode: draft.taskMode,
+			challenge_enabled: challengeEnabled,
 			challenge_rounds: draft.challengeRounds,
-			challenge_focus_keys: draft.challengeEnabled ? draft.challengeFocusKeys : [],
+			challenge_focus_keys: challengeEnabled ? draft.challengeFocusKeys : [],
 			reflection_questions: reflectionQuestions,
 			rubric_schema: { criteria }
 		}

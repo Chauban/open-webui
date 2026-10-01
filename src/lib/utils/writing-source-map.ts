@@ -4,6 +4,7 @@ export type WritingSourceType =
 	| 'user_typed'
 	| 'external_paste'
 	| 'suspected_unmarked_import'
+	| 'declared_draft'
 	| 'unknown';
 
 export type SourceRun = {
@@ -40,6 +41,7 @@ const SOURCE_TYPES = new Set<WritingSourceType>([
 	'user_typed',
 	'external_paste',
 	'suspected_unmarked_import',
+	'declared_draft',
 	'unknown'
 ]);
 

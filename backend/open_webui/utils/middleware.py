@@ -81,6 +81,10 @@ from open_webui.tasks import clear_response_stream, save_response_stream
 from open_webui.utils.access_control import has_connection_access, has_permission
 from open_webui.utils.access_control.files import get_owner_accessible_folder_files
 from open_webui.utils.access_control.folders import has_folder_access
+from open_webui.services.education.writing_context import (
+    get_folder_writing_session,
+    is_draft_baseline_missing,
+)
 from open_webui.utils.ask_user import stage_ask_user_tool_calls
 from open_webui.utils.chat import generate_chat_completion
 from open_webui.utils.chat_id import is_saved_chat_id
@@ -2557,6 +2561,13 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         folder = await Folders.get_folder_by_id(folder_id)
         if folder and user.role != 'admin' and not await has_folder_access(user.id, folder, 'read', db=None):
             folder = None
+
+        writing_session = get_folder_writing_session(folder, user.id) if folder else None
+        if writing_session and is_draft_baseline_missing(writing_session):
+            raise HTTPException(
+                status_code=409,
+                detail='Submit your first draft before chatting with the AI.',
+            )
 
         if folder and folder.data:
             if 'system_prompt' in folder.data:

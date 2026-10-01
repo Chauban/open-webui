@@ -51,6 +51,7 @@
 			dueAt: assignment.due_at ? toLocalDateTimeInput(assignment.due_at) : '',
 			scoreMax: String(assignment.score_max),
 			coachingStyle: assignment.coaching_style,
+			taskMode: assignment.task_mode,
 			challengeEnabled: assignment.challenge_enabled ?? false,
 			challengeRounds: assignment.challenge_rounds ?? 3,
 			challengeFocusKeys: [...(assignment.challenge_focus_keys ?? [])],
@@ -144,6 +145,7 @@
 				bind:classroomId
 				{classrooms}
 				{hasSubmissions}
+				taskModeLocked={item?.task_mode_locked ?? false}
 				{reflectionQuestionSets}
 				currentAssignmentId={assignmentId}
 			>

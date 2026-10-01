@@ -22,6 +22,7 @@
 	import EduButton from '$lib/components/education/EduButton.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 	import ReflectionAnswerForm from '$lib/components/education/ReflectionAnswerForm.svelte';
+	import DraftBaselineStep from '$lib/components/education/DraftBaselineStep.svelte';
 	import { prepareAssistantContentForWriting } from '$lib/utils/writing-content';
 	import { createSerializedSaveRunner } from '$lib/utils/save-coordinator';
 	import {
@@ -133,14 +134,22 @@
 	// 已批改即定稿:只有老师退回(review_status 变回 returned)才重新解锁。
 	$: isGraded = review?.review_status === 'reviewed';
 	$: isReadOnly = isAssignment ? isPastDue || isGraded : false;
-	$: canSubmitAssignment = isAssignment && !isPastDue && !isGraded;
+	// 修订初稿作业:还没交初稿时只显示初稿步骤,编辑器、左侧对话和提交都锁着(后端同样拒绝)。
+	$: needsDraftBaseline =
+		isAssignment &&
+		assignment?.task_mode === 'revise_draft' &&
+		!writingSession?.draft_baseline_at &&
+		!isReadOnly;
+	$: canSubmitAssignment = isAssignment && !isPastDue && !isGraded && !needsDraftBaseline;
 	// 写作构成只在作业定稿后给学生看:写作中实时显示会让学生盯着比例重敲粘贴内容来刷数,
 	// 数据先被毁掉。个人写作区教师看不到,没有刷数动机,照常显示。
 	$: showComposition = !isAssignment || isReadOnly;
 	// 定稿后作业要求、试读清单、留痕告知都只剩回看价值,默认收起,让批改结果排到最前。
 	let showLockedDetails = false;
 	$: lockedDetailsCollapsed = isAssignment && isReadOnly && !showLockedDetails;
-	$: chatReadOnlyHint = !isReadOnly
+	$: chatReadOnlyHint = needsDraftBaseline
+		? $i18n.t('Submit your first draft on the right to unlock the AI chat.')
+		: !isReadOnly
 		? ''
 		: !currentChatId && !writingSession?.active_chat_id
 			? $i18n.t('No AI conversation for this assignment.')
@@ -799,7 +808,7 @@
 		onToolCallCompleted={() => void refreshProcessSummary()}
 		onSelectedModelsChange={(ids) => (selectedModelId = ids?.[0] ?? '')}
 		responseInsertLabel={'Insert to Writing'}
-		readOnly={isReadOnly}
+		readOnly={isReadOnly || needsDraftBaseline}
 		readOnlyHint={chatReadOnlyHint}
 		disableContextActions={false}
 		allowAssignmentWorkspaceChat={isAssignment}
@@ -941,41 +950,45 @@
 				{#if showComposition}
 					<WritingComposition {sourceRuns} {clarificationAnsweredCount} />
 				{/if}
-				<RichTextInput
-					bind:editor
-					bind:value={noteJson}
-					editable={!isReadOnly}
-					json={true}
-					placeholder={$i18n.t(
-						isAssignment ? 'Write the final assignment here.' : 'Start writing...'
-					)}
-					className="input-prose min-h-[70vh]"
-					onChange={handleContentChange}
-					on:paste={async (event) => {
-						const clipboardEvent = event?.detail?.event ?? event;
-						const payload =
-							clipboardEvent?.clipboardData?.getData('application/x-openwebui-ai-snippet+json') ??
-							'';
-						if (!payload) {
-							pendingSource = {
-								sourceType: 'external_paste',
-								sourceMessageId: null,
-								text: ''
-							};
-							return;
-						}
-						try {
-							const meta = JSON.parse(payload);
-							pendingSource = {
-								sourceType: meta.sourceType ?? 'ai_pasted',
-								sourceMessageId: meta.sourceMessageId ?? null,
-								text: meta.text ?? ''
-							};
-						} catch (error) {
-							console.error(error);
-						}
-					}}
-				/>
+				{#if needsDraftBaseline}
+					<DraftBaselineStep sessionId={writingSession.id} onSubmitted={load} />
+				{:else}
+					<RichTextInput
+						bind:editor
+						bind:value={noteJson}
+						editable={!isReadOnly}
+						json={true}
+						placeholder={$i18n.t(
+							isAssignment ? 'Write the final assignment here.' : 'Start writing...'
+						)}
+						className="input-prose min-h-[70vh]"
+						onChange={handleContentChange}
+						on:paste={async (event) => {
+							const clipboardEvent = event?.detail?.event ?? event;
+							const payload =
+								clipboardEvent?.clipboardData?.getData('application/x-openwebui-ai-snippet+json') ??
+								'';
+							if (!payload) {
+								pendingSource = {
+									sourceType: 'external_paste',
+									sourceMessageId: null,
+									text: ''
+								};
+								return;
+							}
+							try {
+								const meta = JSON.parse(payload);
+								pendingSource = {
+									sourceType: meta.sourceType ?? 'ai_pasted',
+									sourceMessageId: meta.sourceMessageId ?? null,
+									text: meta.text ?? ''
+								};
+							} catch (error) {
+								console.error(error);
+							}
+						}}
+					/>
+				{/if}
 			</div>
 		</div>
 	</Chat>
@@ -1082,41 +1095,45 @@
 					{#if showComposition}
 						<WritingComposition {sourceRuns} {clarificationAnsweredCount} />
 					{/if}
-					<RichTextInput
-						bind:editor
-						bind:value={noteJson}
-						editable={!isReadOnly}
-						json={true}
-						placeholder={$i18n.t(
-							isAssignment ? 'Write the final assignment here.' : 'Start writing...'
-						)}
-						className="input-prose min-h-[60vh]"
-						onChange={handleContentChange}
-						on:paste={async (event) => {
-							const clipboardEvent = event?.detail?.event ?? event;
-							const payload =
-								clipboardEvent?.clipboardData?.getData('application/x-openwebui-ai-snippet+json') ??
-								'';
-							if (!payload) {
-								pendingSource = {
-									sourceType: 'external_paste',
-									sourceMessageId: null,
-									text: ''
-								};
-								return;
-							}
-							try {
-								const meta = JSON.parse(payload);
-								pendingSource = {
-									sourceType: meta.sourceType ?? 'ai_pasted',
-									sourceMessageId: meta.sourceMessageId ?? null,
-									text: meta.text ?? ''
-								};
-							} catch (error) {
-								console.error(error);
-							}
-						}}
-					/>
+					{#if needsDraftBaseline}
+						<DraftBaselineStep sessionId={writingSession.id} onSubmitted={load} />
+					{:else}
+						<RichTextInput
+							bind:editor
+							bind:value={noteJson}
+							editable={!isReadOnly}
+							json={true}
+							placeholder={$i18n.t(
+								isAssignment ? 'Write the final assignment here.' : 'Start writing...'
+							)}
+							className="input-prose min-h-[60vh]"
+							onChange={handleContentChange}
+							on:paste={async (event) => {
+								const clipboardEvent = event?.detail?.event ?? event;
+								const payload =
+									clipboardEvent?.clipboardData?.getData('application/x-openwebui-ai-snippet+json') ??
+									'';
+								if (!payload) {
+									pendingSource = {
+										sourceType: 'external_paste',
+										sourceMessageId: null,
+										text: ''
+									};
+									return;
+								}
+								try {
+									const meta = JSON.parse(payload);
+									pendingSource = {
+										sourceType: meta.sourceType ?? 'ai_pasted',
+										sourceMessageId: meta.sourceMessageId ?? null,
+										text: meta.text ?? ''
+									};
+								} catch (error) {
+									console.error(error);
+								}
+							}}
+						/>
+					{/if}
 				</div>
 			</div>
 		</div>

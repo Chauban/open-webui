@@ -35,6 +35,7 @@ export type WritingSourceType =
 	| 'user_typed'
 	| 'external_paste'
 	| 'suspected_unmarked_import'
+	| 'declared_draft'
 	| 'unknown';
 export type WritingVersionTrigger = 'autosave' | 'manual' | 'submit' | 'submit_preflight';
 export type EditorOperationType =

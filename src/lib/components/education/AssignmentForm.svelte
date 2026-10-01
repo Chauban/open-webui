@@ -31,6 +31,8 @@
 	export let reflectionNotice = '';
 	export let currentAssignmentId = '';
 	export let expandAll = false;
+	/** 有学生交了初稿或已有提交后,作业形式锁定(后端同样拒绝)。 */
+	export let taskModeLocked = false;
 
 	const i18n = getContext<Writable<i18nType>>('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
@@ -42,15 +44,35 @@
 		{ id: 'assignment-reflection', label: 'Reflection Before Submitting' }
 	];
 	const COACHING_TITLES = { socratic: 'Socratic', balanced: 'Balanced', hands_off: 'Hands-off' };
+	// 两种形式的差别在于作业开始时初稿是否已经存在。修订初稿作业没有提交前试读:
+	// 左侧对话本身就是按维度诊断与追问,提交前再质疑一次是重复。
+	const TASK_MODES = [
+		{
+			key: 'from_scratch',
+			title: 'Write from scratch',
+			hint: 'Students start from a blank page and write with the AI coach.'
+		},
+		{
+			key: 'revise_draft',
+			title: 'Revise a draft',
+			hint: 'Students first paste the draft they wrote outside class; it is frozen as the starting point, and the AI chat unlocks only after that. There is no pre-submission reader check.'
+		}
+	] as const;
 
 	let aiOpen = expandAll;
 	let reflectionOpen = expandAll;
 
+	$: isReviseDraft = draft.taskMode === 'revise_draft';
+	$: taskModeHint = TASK_MODES.find((mode) => mode.key === draft.taskMode)?.hint ?? '';
 	$: aiSummary = [
 		t(COACHING_TITLES[draft.coachingStyle]),
-		draft.challengeEnabled
-			? t('AI reader check on · {{count}} rounds', { count: draft.challengeRounds })
-			: t('AI reader check off')
+		...(isReviseDraft
+			? []
+			: [
+					draft.challengeEnabled
+						? t('AI reader check on · {{count}} rounds', { count: draft.challengeRounds })
+						: t('AI reader check off')
+				])
 	].join(' · ');
 	$: reflectionSummary = t('{{count}} reflection questions, plus "Did you use AI?"', {
 		count: draft.reflectionQuestions.length
@@ -153,6 +175,28 @@
 					<div class="mb-2 text-sm font-medium">{$i18n.t('Due At')}</div>
 					<EduDateTimeField bind:value={draft.dueAt} required className="w-full {EDU_FIELD_CLASS}" />
 				</div>
+				<div>
+					<div class="mb-2 text-sm font-medium">{$i18n.t('Assignment type')}</div>
+					<div class="flex flex-wrap gap-2">
+						{#each TASK_MODES as mode}
+							<button
+								type="button"
+								class={eduSegmentClass(draft.taskMode === mode.key)}
+								aria-pressed={draft.taskMode === mode.key}
+								disabled={taskModeLocked}
+								on:click={() => (draft.taskMode = mode.key)}
+							>
+								{$i18n.t(mode.title)}
+							</button>
+						{/each}
+					</div>
+					<div class="mt-2 text-xs text-gray-400">{$i18n.t(taskModeHint)}</div>
+					{#if taskModeLocked}
+						<div class="mt-1 text-xs text-gray-400">
+							{$i18n.t('The assignment type is locked once a student has started.')}
+						</div>
+					{/if}
+				</div>
 			</section>
 		</EduCard>
 
@@ -207,12 +251,14 @@
 				</button>
 				<div class="mt-4 grid gap-4" class:hidden={!aiOpen}>
 					<CoachingStyleSelector bind:value={draft.coachingStyle} />
-					<ChallengeSettings
-						criteria={draft.rubricCriteria}
-						bind:enabled={draft.challengeEnabled}
-						bind:rounds={draft.challengeRounds}
-						bind:focusKeys={draft.challengeFocusKeys}
-					/>
+					{#if !isReviseDraft}
+						<ChallengeSettings
+							criteria={draft.rubricCriteria}
+							bind:enabled={draft.challengeEnabled}
+							bind:rounds={draft.challengeRounds}
+							bind:focusKeys={draft.challengeFocusKeys}
+						/>
+					{/if}
 				</div>
 			</section>
 		</EduCard>

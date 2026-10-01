@@ -56,6 +56,8 @@ from open_webui.models.education import (
     ClassroomResponse,
     DashboardItem,
     DashboardResponse,
+    DRAFT_BASELINE_MIN_CHARS,
+    DraftBaselineForm,
     EditorOperationCreateForm,
     Education,
     MyAssignmentSubmissionsResponse,
@@ -124,6 +126,11 @@ from open_webui.services.education.profile_snapshots import (
 )
 from open_webui.services.education.profile import PROFILE_METRIC_VERSION
 from open_webui.services.education.identity import get_education_role
+from open_webui.services.education.writing_context import (
+    build_draft_note_content,
+    is_draft_baseline_missing,
+    normalize_draft_paragraphs,
+)
 from open_webui.services.education.profile_aggregates import (
     refresh_profile_aggregates_after_scope_change,
     refresh_student_profile_aggregates,
@@ -777,6 +784,15 @@ def require_owned_writing_session(
     return session
 
 
+def _ensure_draft_baseline_ready(session, db: Session) -> None:
+    """修订初稿作业先交初稿:没有基线时不能改正文、不能对话、不能提交。"""
+    if is_draft_baseline_missing(session, db=db):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Submit your first draft first",
+        )
+
+
 
 
 
@@ -928,6 +944,19 @@ async def update_assignment(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Scoring configuration cannot change after submissions exist",
+        )
+
+    if (
+        "task_mode" in form_data.model_fields_set
+        and form_data.task_mode != assignment.task_mode
+        and (
+            Education.assignment_has_draft_baseline(assignment.id, db=db)
+            or Education.get_submissions_by_assignment(assignment.id, db=db)
+        )
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Task mode cannot change after students have started",
         )
 
     next_score_max = form_data.score_max or assignment.score_max
@@ -1386,7 +1415,11 @@ async def get_teacher_assignment(
     assignment: AssignmentModel = Depends(require_teacher_assignment),
     db: Session = Depends(get_session),
 ):
-    return await _build_teacher_assignment_list_item(assignment, db)
+    item = await _build_teacher_assignment_list_item(assignment, db)
+    item.task_mode_locked = item.submission_count > 0 or (
+        Education.assignment_has_draft_baseline(assignment.id, db=db)
+    )
+    return item
 
 
 OVERVIEW_DUE_SOON_SECONDS = 48 * 60 * 60
@@ -2445,6 +2478,7 @@ async def autosave_writing_session(
     session: WritingSessionModel = Depends(require_owned_writing_session),
     db: Session = Depends(get_session),
 ):
+    _ensure_draft_baseline_ready(session, db)
     note = await Notes.get_note_by_id(session.note_id, db=db)
     if note is None:
         raise HTTPException(
@@ -2476,6 +2510,7 @@ async def create_writing_version(
     session: WritingSessionModel = Depends(require_owned_writing_session),
     db: Session = Depends(get_session),
 ):
+    _ensure_draft_baseline_ready(session, db)
     version = Education.insert_version(
         session.id,
         form_data.trigger_type,
@@ -2493,6 +2528,14 @@ async def create_provenance_segments(
     session: WritingSessionModel = Depends(require_owned_writing_session),
     db: Session = Depends(get_session),
 ):
+    _ensure_draft_baseline_ready(session, db)
+    if session.draft_baseline_at is None and any(
+        segment.source_type == "declared_draft" for segment in form_data.segments
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only a submitted first draft can be marked as declared",
+        )
     return Education.insert_provenance_segments(
         session.id,
         form_data.segments,
@@ -2502,6 +2545,60 @@ async def create_provenance_segments(
     )
 
 
+@router.post(
+    "/writing-sessions/{session_id}/draft-baseline", response_model=WritingSessionModel
+)
+async def submit_draft_baseline(
+    form_data: DraftBaselineForm,
+    session: WritingSessionModel = Depends(require_owned_writing_session),
+    db: Session = Depends(get_session),
+):
+    """修订初稿作业:冻结课外写好的初稿为修改起点,同时成为编辑器的初始正文。"""
+    if session.scope != "assignment":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid writing scope"
+        )
+    assignment = _get_assignment_or_404(session.assignment_id, db)
+    if assignment.task_mode != "revise_draft":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This assignment does not take a first draft",
+        )
+    if session.draft_baseline_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="First draft has already been submitted",
+        )
+    effective_due_at = _get_effective_due_at(assignment, session.owner_user_id, db)
+    if effective_due_at is not None and effective_due_at <= int(time.time()):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Assignment due time has passed",
+        )
+
+    paragraphs = normalize_draft_paragraphs(form_data.text)
+    if sum(len("".join(line.split())) for line in paragraphs) < DRAFT_BASELINE_MIN_CHARS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="First draft is too short",
+        )
+    content = build_draft_note_content(paragraphs)
+    try:
+        updated = Education.set_draft_baseline(
+            session.id, content["md"], content, db=db
+        )
+    except ValueError as err:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(err)
+        ) from err
+    if updated is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="First draft has already been submitted",
+        )
+    return updated
+
+
 @router.post("/writing-sessions/{session_id}/operations")
 async def create_editor_operations(
     form_data: EditorOperationCreateForm,
@@ -2509,6 +2606,7 @@ async def create_editor_operations(
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
+    _ensure_draft_baseline_ready(session, db)
     return Education.insert_editor_operations(
         session.id,
         user.id,
@@ -2525,6 +2623,7 @@ async def upsert_writing_chat_message(
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
+    _ensure_draft_baseline_ready(session, db)
     active_chat_id = session.active_chat_id or session.chat_id
     if active_chat_id is None:
         prompt_preview = (form_data.message or {}).get("content", "")[
@@ -2827,6 +2926,7 @@ async def submit_assignment(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Mismatched session"
         )
     _ensure_workspace_session_owner(user, session)
+    _ensure_draft_baseline_ready(session, db)
 
     # 反思答案对着作业「此刻」的题目校验;教师中途改题,已交的反思存的是当时的快照。
     try:

@@ -1075,6 +1075,17 @@ def validate_challenge_focus_keys(
     return keys
 
 
+def validate_task_mode_challenge(
+    task_mode: str, challenge_enabled: bool, focus_keys: Optional[list[str]]
+) -> None:
+    """修订初稿作业结构上没有质疑式读者:左侧对话本身就是按维度诊断与追问。"""
+
+    if task_mode != "revise_draft":
+        return
+    if challenge_enabled or any(key.strip() for key in focus_keys or []):
+        raise ValueError("Revise-draft assignments have no pre-submission read-through")
+
+
 class ChallengeClosingItem(BaseModel):
     """一条仍不成立的点。
 
@@ -1382,6 +1393,7 @@ class AssignmentCreateForm(BaseModel):
     due_at: Optional[int] = None
     score_max: int = Field(gt=0, le=10000)
     coaching_style: CoachingStyle = "balanced"
+    task_mode: TaskMode = "from_scratch"
     challenge_enabled: bool = False
     challenge_rounds: int = 3
     challenge_focus_keys: list[str] = Field(default_factory=list)
@@ -1405,6 +1417,9 @@ class AssignmentCreateForm(BaseModel):
     def validate_challenge_config(self):
         if self.challenge_rounds not in CHALLENGE_ROUND_CHOICES:
             raise ValueError("Challenge rounds must be 2 or 3")
+        validate_task_mode_challenge(
+            self.task_mode, self.challenge_enabled, self.challenge_focus_keys
+        )
         self.challenge_focus_keys = validate_challenge_focus_keys(
             self.challenge_focus_keys, self.rubric_schema, self.challenge_enabled
         )
@@ -1418,6 +1433,7 @@ class AssignmentUpdateForm(BaseModel):
     due_at: Optional[int] = None
     score_max: Optional[int] = Field(default=None, gt=0, le=10000)
     coaching_style: Optional[CoachingStyle] = None
+    task_mode: Optional[TaskMode] = None
     challenge_enabled: Optional[bool] = None
     challenge_rounds: Optional[int] = None
     # 焦点 key 要对着「更新后」的 rubric 校验,而 rubric 可能不在本次请求里,
@@ -1556,6 +1572,8 @@ class TeacherAssignmentListItem(BaseModel):
     reviewed_count: int = 0
     returned_count: int = 0
     latest_submission_at: Optional[int] = None
+    # 只在单个作业接口里算:有学生交了初稿或已有提交后,作业形式不能再改。
+    task_mode_locked: bool = False
 
 
 class TeacherClassroomListItem(BaseModel):
@@ -1596,6 +1614,12 @@ class AutosaveForm(BaseModel):
     content_html: Optional[str] = None
     content_text: str = ""
     save_reason: str = "autosave"
+
+
+class DraftBaselineForm(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(max_length=200_000)
 
 
 class VersionCreateForm(BaseModel):
@@ -2844,6 +2868,15 @@ class EducationTable:
                 assignment.challenge_focus_keys = list(
                     form_data.challenge_focus_keys or []
                 )
+            if "task_mode" in form_data.model_fields_set:
+                if form_data.task_mode not in TASK_MODES:
+                    raise ValueError("Invalid assignment task mode")
+                assignment.task_mode = form_data.task_mode
+            validate_task_mode_challenge(
+                assignment.task_mode,
+                bool(assignment.challenge_enabled),
+                list(assignment.challenge_focus_keys or []),
+            )
             # 焦点必须对着「本次更新后」的 rubric 与开关重新校验:任何一边动了都可能
             # 让原来的焦点失效(维度被删、质疑被打开但没选焦点)。
             assignment.challenge_focus_keys = validate_challenge_focus_keys(
@@ -2883,6 +2916,7 @@ class EducationTable:
                 due_at=form_data.due_at,
                 score_max=form_data.score_max,
                 coaching_style=form_data.coaching_style,
+                task_mode=form_data.task_mode,
                 challenge_enabled=form_data.challenge_enabled,
                 challenge_rounds=form_data.challenge_rounds,
                 challenge_focus_keys=list(form_data.challenge_focus_keys),
@@ -3260,6 +3294,89 @@ class EducationTable:
             db.commit()
             db.refresh(session)
             return WritingSessionModel.model_validate(session)
+
+    def set_draft_baseline(
+        self,
+        session_id: str,
+        text: str,
+        note_content: dict,
+        db: Optional[Session] = None,
+    ) -> Optional[WritingSessionModel]:
+        """冻结修订初稿作业的初稿基线,一个会话只能成功一次;已有基线时返回 None。
+
+        基线、笔记正文、整段 `declared_draft` 来源记录在同一事务里落库:只写笔记的话,
+        来源分析会把这段正文当成「未知」。条件更新(基线为空才写)保证并发重复提交
+        只有一次生效。
+        """
+        from open_webui.models.notes import Note, sanitize_note_data
+
+        with get_db_context(db) as db:
+            now = int(time.time())
+            claimed = (
+                db.query(WritingSession)
+                .filter(
+                    WritingSession.id == session_id,
+                    WritingSession.draft_baseline_at.is_(None),
+                )
+                .update(
+                    {
+                        WritingSession.draft_baseline_text: text,
+                        WritingSession.draft_baseline_at: now,
+                        WritingSession.updated_at: now,
+                    },
+                    synchronize_session=False,
+                )
+            )
+            if claimed != 1:
+                db.rollback()
+                return None
+
+            session = db.get(WritingSession, session_id)
+            note = db.get(Note, session.note_id)
+            if note is None:
+                db.rollback()
+                raise ValueError("Writing note is missing")
+            note.data = {
+                **(sanitize_note_data(note.data) or {}),
+                "content": note_content,
+            }
+            note.updated_at = int(time.time_ns())
+
+            db.query(ProvenanceSegment).filter(
+                ProvenanceSegment.writing_session_id == session_id
+            ).delete()
+            db.add(
+                ProvenanceSegment(
+                    id=str(uuid.uuid4()),
+                    writing_session_id=session_id,
+                    version_id=None,
+                    source_type="declared_draft",
+                    source_message_id=None,
+                    segment_id="source-map-0",
+                    segment_text=text,
+                    start_offset=0,
+                    end_offset=len(text),
+                    metadata_json={"provenance_kind": "source_map"},
+                    created_at=now,
+                )
+            )
+            db.commit()
+            db.refresh(session)
+            return WritingSessionModel.model_validate(session)
+
+    def assignment_has_draft_baseline(
+        self, assignment_id: str, db: Optional[Session] = None
+    ) -> bool:
+        with get_db_context(db) as db:
+            return (
+                db.query(WritingSession.id)
+                .filter(
+                    WritingSession.assignment_id == assignment_id,
+                    WritingSession.draft_baseline_at.is_not(None),
+                )
+                .first()
+                is not None
+            )
 
     def touch_writing_session(
         self,

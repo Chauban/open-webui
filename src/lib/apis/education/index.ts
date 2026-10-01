@@ -186,6 +186,8 @@ export const getTeacherClassroomAssignments = async (token: string, classroomId:
 };
 
 export type CoachingStyle = 'socratic' | 'balanced' | 'hands_off';
+/** 作业形式:从零写作 / 修订初稿(学生先交课外写好的初稿,再和 AI 对话修改)。 */
+export type TaskMode = 'from_scratch' | 'revise_draft';
 
 export const createAssignment = async (
 	token: string,
@@ -196,6 +198,7 @@ export const createAssignment = async (
 		due_at: number;
 		score_max: number;
 		coaching_style: CoachingStyle;
+		task_mode?: TaskMode;
 		challenge_enabled?: boolean;
 		challenge_rounds?: number;
 		challenge_focus_keys?: string[];
@@ -296,6 +299,7 @@ export const updateAssignment = async (
 		due_at?: number;
 		score_max?: number;
 		coaching_style?: CoachingStyle;
+		task_mode?: TaskMode;
 		challenge_enabled?: boolean;
 		challenge_rounds?: number;
 		challenge_focus_keys?: string[];
@@ -407,6 +411,15 @@ export const createProvenanceSegments = async (
 		method: 'POST',
 		headers: withAuth(token),
 		body: JSON.stringify(payload)
+	}).then(handleJson);
+};
+
+/** 修订初稿作业:冻结课外写好的初稿为修改起点,成功后返回更新过的写作会话。 */
+export const submitDraftBaseline = async (token: string, sessionId: string, text: string) => {
+	return fetch(`${WEBUI_API_BASE_URL}/writing-sessions/${sessionId}/draft-baseline`, {
+		method: 'POST',
+		headers: withAuth(token),
+		body: JSON.stringify({ text })
 	}).then(handleJson);
 };
 

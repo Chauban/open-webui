@@ -7,6 +7,7 @@ export const getWritingComposition = (runs: SourceRun[]) => {
 		ai_pasted: 0,
 		external_paste: 0,
 		suspected_unmarked_import: 0,
+		declared_draft: 0,
 		unknown: 0
 	};
 	for (const run of runs) {
@@ -18,6 +19,8 @@ export const getWritingComposition = (runs: SourceRun[]) => {
 		{ key: 'ai_inserted', label: 'AI inserted', count: counts.ai_inserted },
 		{ key: 'ai_pasted', label: 'AI pasted', count: counts.ai_pasted },
 		{ key: 'external_paste', label: 'External paste', count: counts.external_paste },
+		// 修订初稿作业里学生声明的初稿;只在有这类正文时出现。
+		{ key: 'declared_draft', label: 'Declared first draft', count: counts.declared_draft },
 		{
 			key: 'unknown',
 			label: 'Source not recorded',

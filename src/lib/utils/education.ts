@@ -28,6 +28,7 @@ const WRITING_SOURCE_KEYS: Record<string, string> = {
 	ai_pasted: 'AI pasted',
 	external_paste: 'External paste',
 	suspected_unmarked_import: 'Suspected Unmarked Import',
+	declared_draft: 'Declared first draft',
 	unknown: 'Unknown'
 };
 

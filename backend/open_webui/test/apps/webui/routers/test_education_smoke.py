@@ -58,6 +58,7 @@ from open_webui.models.groups import Group, GroupMember
 from open_webui.models.notes import Note
 from open_webui.models.users import User, UserModel
 from open_webui.services.education.identity import GROUP_ID_BY_ROLE
+from open_webui.services.education.writing_context import is_draft_baseline_missing
 import open_webui.routers.education as education_router_module
 import open_webui.services.education.analysis as education_analysis_module
 import open_webui.services.education.challenge as education_challenge_module
@@ -5919,3 +5920,206 @@ def test_research_export_is_admin_only_and_pseudonymized(education_client):
             )
         )
     assert text_rows[1]["answer_text"] != ""
+
+
+# --- 修订初稿作业(task_mode=revise_draft) -------------------------------------
+
+_DRAFT_TEXT = "　　" + "初稿第一段," * 30 + "\n\n  " + "初稿第二段。" * 20 + "  \n"
+_DRAFT_MD = ("初稿第一段," * 30) + "\n" + ("初稿第二段。" * 20)
+
+
+def _setup_revise_draft_assignment(client, teacher, student, **overrides):
+    UserContext.current_user = teacher
+    classroom = client.post("/api/v1/classrooms", json={"name": "Revise Class"}).json()[
+        "classroom"
+    ]
+    UserContext.current_user = student
+    client.post(
+        "/api/v1/classrooms/join", json={"invite_code": classroom["invite_code"]}
+    )
+    UserContext.current_user = teacher
+    create_res = client.post(
+        "/api/v1/assignments",
+        json={
+            "title": "Literature Review",
+            "classroom_ids": [classroom["id"]],
+            "due_at": 2000000000,
+            "score_max": 100,
+            "rubric_schema": _rubric_schema(),
+            "task_mode": "revise_draft",
+            **overrides,
+        },
+    )
+    assert create_res.status_code == 200, create_res.text
+    assignment = create_res.json()[0]
+    UserContext.current_user = student
+    workspace = client.get(f"/api/v1/assignments/{assignment['id']}/workspace").json()
+    return assignment, workspace["writing_session"]["id"]
+
+
+def test_revise_draft_assignment_rejects_challenge(education_client):
+    client, teacher, _, student, _, _ = education_client
+    UserContext.current_user = teacher
+    classroom = client.post("/api/v1/classrooms", json={"name": "C"}).json()[
+        "classroom"
+    ]
+    base = {
+        "title": "Review",
+        "classroom_ids": [classroom["id"]],
+        "due_at": 2000000000,
+        "score_max": 100,
+        "rubric_schema": _rubric_schema(),
+        "task_mode": "revise_draft",
+    }
+    focus_key = _rubric_schema()["criteria"][0]["key"]
+    for extra in (
+        {"challenge_enabled": True, "challenge_focus_keys": [focus_key]},
+        {"challenge_focus_keys": [focus_key]},
+    ):
+        res = client.post("/api/v1/assignments", json={**base, **extra})
+        assert res.status_code == 422, res.text
+
+    assignment = client.post("/api/v1/assignments", json=base).json()[0]
+    assert assignment["task_mode"] == "revise_draft"
+    assert assignment["challenge_enabled"] is False
+    res = client.patch(
+        f"/api/v1/assignments/{assignment['id']}",
+        json={"challenge_enabled": True, "challenge_focus_keys": [focus_key]},
+    )
+    assert res.status_code == 400, res.text
+
+    # 从零写作作业照常可开质疑;改成修订初稿时必须一并关掉
+    scratch = client.post(
+        "/api/v1/assignments",
+        json={
+            **base,
+            "task_mode": "from_scratch",
+            "challenge_enabled": True,
+            "challenge_focus_keys": [focus_key],
+        },
+    ).json()[0]
+    assert scratch["task_mode"] == "from_scratch"
+    res = client.patch(
+        f"/api/v1/assignments/{scratch['id']}", json={"task_mode": "revise_draft"}
+    )
+    assert res.status_code == 400, res.text
+    res = client.patch(
+        f"/api/v1/assignments/{scratch['id']}",
+        json={
+            "task_mode": "revise_draft",
+            "challenge_enabled": False,
+            "challenge_focus_keys": [],
+        },
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["task_mode"] == "revise_draft"
+
+
+def test_revise_draft_requires_baseline_before_editing_and_chat(education_client):
+    client, teacher, _, student, _, SessionLocal = education_client
+    assignment, session_id = _setup_revise_draft_assignment(client, teacher, student)
+
+    blocked = [
+        (
+            f"/api/v1/writing-sessions/{session_id}/autosave",
+            {"content_text": "x"},
+        ),
+        (
+            f"/api/v1/writing-sessions/{session_id}/versions",
+            {"trigger_type": "autosave", "content_json": None, "content_text": "x"},
+        ),
+        (
+            f"/api/v1/writing-sessions/{session_id}/chat/messages/m1",
+            {"message": {"id": "m1", "role": "user", "content": "hi"}},
+        ),
+        (
+            f"/api/v1/assignments/{assignment['id']}/submit",
+            _submit_body(session_id, "x"),
+        ),
+    ]
+    for url, body in blocked:
+        res = client.post(url, json=body)
+        assert res.status_code == 409, (url, res.text)
+
+    with SessionLocal() as db:
+        session = Education.get_writing_session_by_id(session_id, db=db)
+        assert is_draft_baseline_missing(session, db=db) is True
+
+    res = client.post(
+        f"/api/v1/writing-sessions/{session_id}/draft-baseline",
+        json={"text": "太短了。"},
+    )
+    assert res.status_code == 400, res.text
+
+    res = client.post(
+        f"/api/v1/writing-sessions/{session_id}/draft-baseline",
+        json={"text": _DRAFT_TEXT},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["draft_baseline_text"] == _DRAFT_MD
+    assert res.json()["draft_baseline_at"]
+
+    res = client.post(
+        f"/api/v1/writing-sessions/{session_id}/draft-baseline",
+        json={"text": _DRAFT_TEXT + "再来一次"},
+    )
+    assert res.status_code == 409, res.text
+
+    workspace = client.get(f"/api/v1/assignments/{assignment['id']}/workspace").json()
+    content = workspace["note"]["data"]["content"]
+    assert content["md"] == _DRAFT_MD
+    assert [block["content"][0]["text"] for block in content["json"]["content"]] == (
+        _DRAFT_MD.split("\n")
+    )
+    assert [
+        (s["source_type"], s["start_offset"], s["end_offset"], s["segment_text"])
+        for s in workspace["source_map"]
+    ] == [("declared_draft", 0, len(_DRAFT_MD), _DRAFT_MD)]
+    assert workspace["source_map"][0]["metadata_json"] == {
+        "provenance_kind": "source_map"
+    }
+    with SessionLocal() as db:
+        session = Education.get_writing_session_by_id(session_id, db=db)
+        assert is_draft_baseline_missing(session, db=db) is False
+
+    for url, body in blocked[:3]:
+        res = client.post(url, json=body)
+        assert res.status_code == 200, (url, res.text)
+    res = client.post(
+        f"/api/v1/assignments/{assignment['id']}/submit",
+        json=_submit_body(session_id, _DRAFT_MD + "\n改过的一句。"),
+    )
+    assert res.status_code == 200, res.text
+
+    # 有学生交了初稿,作业形式就不能再改
+    UserContext.current_user = teacher
+    res = client.patch(
+        f"/api/v1/assignments/{assignment['id']}", json={"task_mode": "from_scratch"}
+    )
+    assert res.status_code == 409, res.text
+
+
+def test_draft_baseline_only_for_revise_draft_assignments(education_client):
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id, _ = _setup_submitted_assignment(client, teacher, student)
+    res = client.post(
+        f"/api/v1/writing-sessions/{session_id}/draft-baseline",
+        json={"text": _DRAFT_TEXT},
+    )
+    assert res.status_code == 400, res.text
+    # 从零写作作业不受初稿门槛影响,也不能自称「已声明初稿」
+    res = client.post(
+        f"/api/v1/writing-sessions/{session_id}/provenance",
+        json={
+            "segments": [
+                {
+                    "segment_id": "fake",
+                    "source_type": "declared_draft",
+                    "segment_text": "abc",
+                    "start_offset": 0,
+                    "end_offset": 3,
+                }
+            ],
+        },
+    )
+    assert res.status_code == 400, res.text

@@ -10,6 +10,7 @@ const draft = (overrides: Partial<AssignmentDraft> = {}): AssignmentDraft => ({
 	dueAt: '2030-01-01T23:59',
 	scoreMax: '10',
 	coachingStyle: 'balanced',
+	taskMode: 'from_scratch',
 	challengeEnabled: false,
 	challengeRounds: 3,
 	challengeFocusKeys: ['criterion_1'],
@@ -35,6 +36,16 @@ describe('buildAssignmentPayload', () => {
 	it('keeps challenge focus when the reader check is on', () => {
 		const { payload } = buildAssignmentPayload(draft({ challengeEnabled: true }), t);
 		expect(payload?.challenge_focus_keys).toEqual(['criterion_1']);
+	});
+
+	it('drops the reader check for revise-draft assignments', () => {
+		const { payload } = buildAssignmentPayload(
+			draft({ taskMode: 'revise_draft', challengeEnabled: true }),
+			t
+		);
+		expect(payload?.task_mode).toBe('revise_draft');
+		expect(payload?.challenge_enabled).toBe(false);
+		expect(payload?.challenge_focus_keys).toEqual([]);
 	});
 
 	it('reports the first problem in form order', () => {

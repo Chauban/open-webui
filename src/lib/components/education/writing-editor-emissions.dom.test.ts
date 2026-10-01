@@ -63,4 +63,28 @@ describe('writing editor change emissions', () => {
 		// 选区/格式变化正文没动，由 docChanged 挡掉。
 		expect(emissions(onChange).every(({ docChanged }) => docChanged === false)).toBe(true);
 	});
+
+	test('reads a server-built draft back as the exact text the server stored', async () => {
+		// 修订初稿作业的初稿由服务端写进笔记(每行一段),同时写一条覆盖 [0, len(md)) 的
+		// declared_draft source map。前端载入后按 noteText 逐字比对 source map,
+		// 编辑器读出来的纯文本必须和服务端存的 md 一字不差,否则整段初稿会落成「来源未记录」。
+		const paragraphs = ['第一段，引用了文献。', '第二段 with  two spaces.', '第三段'];
+		const onChange = vi.fn();
+		const rendered = render(RichTextInput, {
+			props: { value: null, json: true, editable: true, onChange },
+			context
+		});
+		await waitFor(() => expect(onChange).toHaveBeenCalled());
+		await rendered.rerender({
+			value: {
+				type: 'doc',
+				content: paragraphs.map((text) => ({
+					type: 'paragraph',
+					content: [{ type: 'text', text }]
+				}))
+			} as unknown as string
+		});
+		await waitFor(() => expect(emissions(onChange)).toHaveLength(2));
+		expect(emissions(onChange)[1].text).toBe(paragraphs.join('\n'));
+	});
 });
