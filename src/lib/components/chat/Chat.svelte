@@ -176,8 +176,10 @@
 	};
 	const hasMessages = () => createMessagesList(history, history.currentId).length > 0;
 	const applyPrefillPrompt = async () => {
-		if (!prefillPrompt || prefillPrompt === appliedPrefillPrompt || !messageInput || prompt) return;
-		if (hasMessages()) return;
+		if (!prefillPrompt || prefillPrompt === appliedPrefillPrompt || !messageInput) return;
+		// 输入框里的字可能是上游从 sessionStorage 恢复的新对话草稿(全标签页共用一份)。
+		// 预填不覆盖它；自动发送发生在对话刚解锁时，学生不可能已在这里写过，草稿不拦。
+		if (hasMessages() || (prompt && !autoSendPrefill)) return;
 		const target = prefillPrompt;
 		appliedPrefillPrompt = target;
 		// 自动发送不经过输入框，只要模型就绪:模型由文件夹配置异步选上。
@@ -187,7 +189,12 @@
 				selectedModels.length > 0 &&
 				selectedModels.every((modelId) => $models.some((model) => model.id === modelId));
 			if (await waitFor(modelReady, 100)) {
-				if (hasMessages() || prompt) return;
+				if (hasMessages()) return;
+				// 草稿正是这句开场(之前预填留下的)就清掉，免得发完还留在输入框、再被存成草稿。
+				if (prompt.trim() === target) {
+					await messageInput?.setText('');
+					prompt = '';
+				}
 				await submitPrompt(target, [], { meta: { auto_started: true } });
 				return;
 			}
