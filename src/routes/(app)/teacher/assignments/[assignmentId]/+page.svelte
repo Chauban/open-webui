@@ -5,6 +5,7 @@
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { get } from 'svelte/store';
+	import { config } from '$lib/stores';
 	import { toast } from 'svelte-sonner';
 	import dayjs from '$lib/dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
@@ -119,7 +120,11 @@
 				</EduBadge>
 			</div>
 
-			<div class="mb-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+			<div
+				class="mb-4 grid gap-4 sm:grid-cols-2 {$config?.features?.enable_education_return
+					? 'lg:grid-cols-4'
+					: 'lg:grid-cols-3'}"
+			>
 				<EduStatCard
 					label="Submitted"
 					value={`${item.submission_count}/${item.student_count}`}
@@ -132,12 +137,14 @@
 					tone={item.pending_review_count > 0 ? 'amber' : 'default'}
 					href={`${base}/submissions?status=pending`}
 				/>
-				<EduStatCard
-					label="Returned"
-					value={item.returned_count}
-					hint="Waiting for the student to resubmit"
-					href={`${base}/submissions?status=returned`}
-				/>
+				{#if $config?.features?.enable_education_return}
+					<EduStatCard
+						label="Returned"
+						value={item.returned_count}
+						hint="Waiting for the student to resubmit"
+						href={`${base}/submissions?status=returned`}
+					/>
+				{/if}
 				<EduStatCard
 					label="Unsubmitted"
 					value={unsubmittedCount}
@@ -160,7 +167,9 @@
 					</div>
 					<div class="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
 						<span><span class="mr-1 inline-block size-2 rounded-full bg-emerald-500"></span>{$i18n.t('Reviewed')} {item.reviewed_count}</span>
-						<span><span class="mr-1 inline-block size-2 rounded-full bg-sky-400"></span>{$i18n.t('Returned')} {item.returned_count}</span>
+						{#if $config?.features?.enable_education_return}
+							<span><span class="mr-1 inline-block size-2 rounded-full bg-sky-400"></span>{$i18n.t('Returned')} {item.returned_count}</span>
+						{/if}
 						<span><span class="mr-1 inline-block size-2 rounded-full bg-amber-400"></span>{$i18n.t('To Review')} {item.pending_review_count}</span>
 						<span><span class="mr-1 inline-block size-2 rounded-full bg-gray-300 dark:bg-gray-600"></span>{$i18n.t('Unsubmitted')} {unsubmittedCount}</span>
 					</div>

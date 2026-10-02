@@ -3190,6 +3190,8 @@ DEFAULT_CONFIG = {
     'education.default_coaching_style': 'balanced',
     # 新建作业时作业形式的初始值;哈工深学生都带着课外初稿来,设为 revise_draft。
     'education.default_task_mode': 'from_scratch',
+    # 教师能否把作业退回重写。多数课程批完就结束,学生看批改结果即可,所以默认关;要退回的实例由管理员打开。
+    'education.enable_return': False,
     'education.challenge_prompts': DEFAULT_EDUCATION_CHALLENGE_PROMPTS,
 }
 

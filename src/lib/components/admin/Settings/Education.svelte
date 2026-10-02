@@ -4,6 +4,7 @@
 
 	import { getEducationConfig, setEducationConfig } from '$lib/apis/configs';
 	import Spinner from '$lib/components/common/Spinner.svelte';
+	import Switch from '$lib/components/common/Switch.svelte';
 	import Pencil from '$lib/components/icons/Pencil.svelte';
 
 	const i18n = getContext('i18n');
@@ -104,6 +105,8 @@
 		EDUCATION_DEFAULT_TASK_MODE: 'from_scratch',
 		EDUCATION_DEFAULT_COACHING_STYLE: 'balanced'
 	};
+	// 教师能否把作业退回重写;关掉后批改页不出现「退回重写」，后端也拒绝退回。
+	let enableReturn = false;
 	let editing: { section: SectionKey; key: string } | null = null;
 	let draft = '';
 
@@ -125,6 +128,7 @@
 			prompts = read(config, 'configKey');
 			defaults = read(config, 'defaultsKey');
 			assignmentDefaults = readAssignmentDefaults(config);
+			enableReturn = config.EDUCATION_ENABLE_RETURN;
 		} catch (error) {
 			loadFailed = true;
 			toast.error(`${error}`);
@@ -160,11 +164,13 @@
 		try {
 			const config = await setEducationConfig(localStorage.token, {
 				...Object.fromEntries(sections.map((section) => [section.configKey, next[section.key]])),
-				...nextAssignmentDefaults
+				...nextAssignmentDefaults,
+				EDUCATION_ENABLE_RETURN: enableReturn
 			});
 			prompts = read(config, 'configKey');
 			defaults = read(config, 'defaultsKey');
 			assignmentDefaults = readAssignmentDefaults(config);
+			enableReturn = config.EDUCATION_ENABLE_RETURN;
 			editing = null;
 			draft = '';
 			toast.success($i18n.t('Settings saved successfully!'));
@@ -230,6 +236,20 @@
 							</select>
 						</div>
 					{/each}
+
+					<div class="flex items-start justify-between gap-4">
+						<div class="min-w-0">
+							<div class="text-xs font-medium text-gray-700 dark:text-gray-300">
+								{$i18n.t('Allow teachers to return work for revision')}
+							</div>
+							<p class="mt-0.5 text-[0.6875rem] text-gray-400 dark:text-gray-600">
+								{$i18n.t(
+									'When off, grading ends a submission and students see the result. Teachers cannot send it back for another round.'
+								)}
+							</p>
+						</div>
+						<Switch bind:state={enableReturn} on:change={() => persist(prompts)} />
+					</div>
 				</div>
 
 				{#each sections as section}

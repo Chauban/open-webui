@@ -3656,6 +3656,13 @@ async def save_submission_review(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid review status",
         )
+    if form_data.review_status == "returned" and not await Config.get(
+        "education.enable_return"
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Returning submissions for revision is turned off",
+        )
     if form_data.score is not None and form_data.score > assignment.score_max:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

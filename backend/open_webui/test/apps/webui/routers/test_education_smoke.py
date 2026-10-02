@@ -668,6 +668,9 @@ def education_client():
         app.dependency_overrides[get_verified_user] = override_verified_user
         app.dependency_overrides[get_admin_user] = override_admin_user
 
+        # 退回重写默认关;这里的用例大多要走退回重交的闭环,统一打开,关掉时的行为单独测。
+        asyncio.run(Config.upsert({"education.enable_return": True}))
+
         client = TestClient(app)
         try:
             yield client, teacher, other_teacher, student, outsider, SessionLocal
@@ -4152,6 +4155,31 @@ def test_analysis_get_does_not_repair_missing_materialization(education_client):
             .count()
             == 0
         )
+
+
+def test_return_for_revision_is_refused_when_turned_off(education_client):
+    client, teacher, _, student, _, _ = education_client
+    _, _, submission_id = _setup_submitted_assignment(
+        client, teacher, student, "No Return"
+    )
+    asyncio.run(Config.upsert({"education.enable_return": False}))
+
+    UserContext.current_user = teacher
+    returned = client.post(
+        f"/api/v1/teacher/submissions/{submission_id}/review",
+        json={
+            "review_status": "returned",
+            "returned_comment": "Revise",
+            "resubmit_due_at": 2100000000,
+        },
+    )
+    assert returned.status_code == 403, returned.text
+
+    saved = client.post(
+        f"/api/v1/teacher/submissions/{submission_id}/review",
+        json={"review_status": "pending", "overall_comment": "draft"},
+    )
+    assert saved.status_code == 200, saved.text
 
 
 def test_historical_round_analysis_survives_logic_version_bump(

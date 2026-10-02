@@ -15,7 +15,7 @@
 		getTeacherReview,
 		markEducationNotificationsRead
 	} from '$lib/apis/education';
-	import { educationNotificationSummary } from '$lib/stores';
+	import { config, educationNotificationSummary } from '$lib/stores';
 	import EduBadge from './EduBadge.svelte';
 	import EduButton from './EduButton.svelte';
 	import EduCard from './EduCard.svelte';
@@ -195,7 +195,7 @@
 
 <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
 	<div class="flex flex-wrap gap-2">
-		{#each STATUS_TABS as tab}
+		{#each STATUS_TABS.filter((tab) => tab.value !== 'returned' || $config?.features?.enable_education_return) as tab}
 			<button class={eduSegmentClass(status === tab.value)} on:click={() => selectStatus(tab.value)}>
 				{$i18n.t(tab.label)}
 			</button>

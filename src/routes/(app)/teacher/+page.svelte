@@ -9,7 +9,7 @@
 	import relativeTime from 'dayjs/plugin/relativeTime';
 
 	import { getTeacherOverview } from '$lib/apis/education';
-	import { educationNotificationSummary } from '$lib/stores';
+	import { config, educationNotificationSummary } from '$lib/stores';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import EduBadge from '$lib/components/education/EduBadge.svelte';
 	import EduButton from '$lib/components/education/EduButton.svelte';
@@ -106,7 +106,11 @@
 				</EduButton>
 			</EduCard>
 		{:else}
-			<div class="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+			<div
+				class="mb-6 grid gap-4 sm:grid-cols-2 {$config?.features?.enable_education_return
+					? 'lg:grid-cols-4'
+					: 'lg:grid-cols-3'}"
+			>
 				<EduStatCard
 					label="To Review"
 					value={overview.pending_review_count}
@@ -114,12 +118,14 @@
 					hint="Submissions awaiting feedback"
 					href="/teacher/review?status=pending"
 				/>
-				<EduStatCard
-					label="Returned"
-					value={overview.returned_count}
-					hint="Waiting for the student to resubmit"
-					href="/teacher/review?status=returned"
-				/>
+				{#if $config?.features?.enable_education_return}
+					<EduStatCard
+						label="Returned"
+						value={overview.returned_count}
+						hint="Waiting for the student to resubmit"
+						href="/teacher/review?status=returned"
+					/>
+				{/if}
 				<EduStatCard
 					label="Due Within 48 Hours"
 					value={overview.due_soon_count}

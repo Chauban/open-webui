@@ -9,6 +9,7 @@
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { get } from 'svelte/store';
+	import { config } from '$lib/stores';
 
 	import {
 		getSubmissionAnalysisSegmentDetail,
@@ -902,6 +903,8 @@
 										{/if}
 									</div>
 
+									<!-- 退回重写由管理员按实例开关；关着时批完即结束，学生直接看批改结果。 -->
+									{#if $config?.features?.enable_education_return}
 									<div class="rounded-2xl border border-amber-200 dark:border-amber-900/60">
 										<button
 											type="button"
@@ -973,6 +976,7 @@
 											</div>
 										{/if}
 									</div>
+									{/if}
 								</div>
 							</div>
 

@@ -5,6 +5,7 @@
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { get } from 'svelte/store';
+	import { config } from '$lib/stores';
 	import { toast } from 'svelte-sonner';
 	import dayjs from '$lib/dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
@@ -185,7 +186,11 @@
 				</div>
 			{/if}
 
-			<div class="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+			<div
+				class="mb-6 grid gap-4 sm:grid-cols-2 {$config?.features?.enable_education_return
+					? 'lg:grid-cols-4'
+					: 'lg:grid-cols-3'}"
+			>
 				<EduStatCard label="Students" value={studentCount} href={`/teacher/classrooms/${classroomId}/students`} />
 				<EduStatCard label="Assignments" value={assignments.length} href={`/teacher/assignments?classroom=${classroomId}`} />
 				<EduStatCard
@@ -194,12 +199,14 @@
 					tone={pendingCount > 0 ? 'amber' : 'default'}
 					href={`/teacher/review?status=pending&classroom=${classroomId}`}
 				/>
-				<EduStatCard
-					label="Returned"
-					value={returnedCount}
-					hint="Waiting for the student to resubmit"
-					href={`/teacher/review?status=returned&classroom=${classroomId}`}
-				/>
+				{#if $config?.features?.enable_education_return}
+					<EduStatCard
+						label="Returned"
+						value={returnedCount}
+						hint="Waiting for the student to resubmit"
+						href={`/teacher/review?status=returned&classroom=${classroomId}`}
+					/>
+				{/if}
 			</div>
 
 			<EduCard padding="none">
@@ -219,7 +226,9 @@
 									<th class="px-4 py-2.5 font-medium">{$i18n.t('Due At')}</th>
 									<th class="px-4 py-2.5 text-right font-medium">{$i18n.t('Submitted')}</th>
 									<th class="px-4 py-2.5 text-right font-medium">{$i18n.t('To Review')}</th>
-									<th class="px-4 py-2.5 text-right font-medium">{$i18n.t('Returned')}</th>
+									{#if $config?.features?.enable_education_return}
+										<th class="px-4 py-2.5 text-right font-medium">{$i18n.t('Returned')}</th>
+									{/if}
 								</tr>
 							</thead>
 							<tbody>
@@ -270,13 +279,15 @@
 												<span class="text-gray-300 dark:text-gray-600">0</span>
 											{/if}
 										</td>
-										<td class="px-4 py-3 text-right tabular-nums">
-											{#if item.returned_count > 0}
-												{item.returned_count}
-											{:else}
-												<span class="text-gray-300 dark:text-gray-600">0</span>
-											{/if}
-										</td>
+										{#if $config?.features?.enable_education_return}
+											<td class="px-4 py-3 text-right tabular-nums">
+												{#if item.returned_count > 0}
+													{item.returned_count}
+												{:else}
+													<span class="text-gray-300 dark:text-gray-600">0</span>
+												{/if}
+											</td>
+										{/if}
 									</tr>
 								{/each}
 							</tbody>

@@ -2210,6 +2210,7 @@ async def get_app_config(request: Request):
         'ui.pending_user_overlay_title',
         'ui.pending_user_overlay_content',
         'ui.watermark',
+        'education.enable_return',
     )
 
     return {
@@ -2278,6 +2279,7 @@ async def get_app_config(request: Request):
                     'enable_google_drive_integration': config.get('google_drive.enable'),
                     'enable_onedrive_integration': config.get('onedrive.enable'),
                     'enable_memories': config.get('memories.enable'),
+                    'enable_education_return': config.get('education.enable_return'),
                     **(
                         {
                             'enable_onedrive_personal': ENABLE_ONEDRIVE_PERSONAL,
