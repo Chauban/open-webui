@@ -2558,12 +2558,14 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     if not folder_id:
         folder_id = metadata.get('folder_id', None)
 
+    is_assignment_writing = False
     if folder_id and user:
         folder = await Folders.get_folder_by_id(folder_id)
         if folder and user.role != 'admin' and not await has_folder_access(user.id, folder, 'read', db=None):
             folder = None
 
         writing_session = get_folder_writing_session(folder, user.id) if folder else None
+        is_assignment_writing = bool(writing_session) and writing_session.scope == 'assignment'
         if writing_session and is_draft_baseline_missing(writing_session):
             raise HTTPException(
                 status_code=409,
@@ -3030,6 +3032,22 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                         append=True,
                     )
 
+            builtin_model = model
+            if is_assignment_writing:
+                # 作业写作区不给检索历史对话和记忆的工具:反馈只该依据本次作业的正文与对话,
+                # 否则会把学生在别处(含教师不可见的个人写作区)的内容带进作业留痕。
+                meta = model.get('info', {}).get('meta', {})
+                builtin_model = {
+                    **model,
+                    'info': {
+                        **model.get('info', {}),
+                        'meta': {
+                            **meta,
+                            'builtinTools': {**(meta.get('builtinTools') or {}), 'chats': False, 'memory': False},
+                        },
+                    },
+                }
+
             builtin_tools = await get_builtin_tools(
                 request,
                 {
@@ -3038,7 +3056,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                     '__skill_ids__': view_skill_ids,
                 },
                 features,
-                model,
+                builtin_model,
                 is_note_chat=is_note_chat,
             )
             for name, tool_dict in builtin_tools.items():
