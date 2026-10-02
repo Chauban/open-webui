@@ -2810,6 +2810,7 @@
 	"Save and Continue": "保存并继续",
 	"Save failed": "保存失败",
 	"Save failed. Fix the connection before submitting.": "保存失败，请先恢复连接再提交。",
+	"Your latest edits are not saved yet, so the AI is reading the last saved version.": "你最近的修改还没保存上，AI 这一轮看到的是上一次保存的稿子。",
 	"Saved": "已保存",
 	"Saved Memories": "已保存的记忆",
 	"Saving chat logs directly to your browser's storage is no longer supported. Please take a moment to download and delete your chat logs by clicking the button below. Don't worry, you can easily re-import your chat logs to the backend through": "我们不再支持将对话记录直接保存到浏览器的存储空间。请点击下面的按钮下载并删除您的对话记录。别担心，您可以轻松将对话记录重新导入到后台。",

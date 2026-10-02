@@ -423,14 +423,27 @@
 	};
 
 	// 发给 AI 之前把防抖窗口里还没存的正文立即存掉：后端每轮注入的是最近一次保存的正文，
-	// 并按保存时间判断学生在 AI 上次回复之后改没改稿。存失败也照常发，AI 看到的是上一次存成功的稿子。
+	// 并按保存时间判断学生在 AI 上次回复之后改没改稿。
+	// 最多等 5 秒：断网时保存要重试十几秒，不能让发送一直卡着。没存上照常发，
+	// AI 看到的是上一次存成功的稿子，提示学生一声，免得他以为 AI 没看他的修改。
+	const FLUSH_BEFORE_CHAT_TIMEOUT_MS = 5000;
 	const flushDraftBeforeChat = async () => {
 		if (!autoSaveTimer && !saving && unsavedOperations.length === 0) return;
 		if (autoSaveTimer) {
 			clearTimeout(autoSaveTimer);
 			autoSaveTimer = null;
 		}
-		await persistDraft('autosave', { force: true });
+		const saved = await Promise.race([
+			persistDraft('autosave', { force: true }).then(() => !hasUnsavedFailure),
+			new Promise<boolean>((resolve) =>
+				setTimeout(() => resolve(false), FLUSH_BEFORE_CHAT_TIMEOUT_MS)
+			)
+		]);
+		if (!saved) {
+			toast.warning(
+				$i18n.t('Your latest edits are not saved yet, so the AI is reading the last saved version.')
+			);
+		}
 	};
 
 	const saveTitle = async () => {

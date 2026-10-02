@@ -2860,6 +2860,7 @@
 	"Save and Continue": "",
 	"Save failed": "Save failed",
 	"Save failed. Fix the connection before submitting.": "Save failed. Fix the connection before submitting.",
+	"Your latest edits are not saved yet, so the AI is reading the last saved version.": "",
 	"Saved": "",
 	"Saved Memories": "",
 	"Saving chat logs directly to your browser's storage is no longer supported. Please take a moment to download and delete your chat logs by clicking the button below. Don't worry, you can easily re-import your chat logs to the backend through": "",
