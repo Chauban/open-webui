@@ -1,4 +1,5 @@
 {
+	"AI Coaching": "AI 辅导",
 	"AI Coaching & Reader Check": "AI 辅导与试读",
 	"AI Use": "AI 使用",
 	"AI reader check off": "不启用 AI 读者试读",
@@ -132,7 +133,7 @@
 	"Start Writing": "开始写作",
 	"Step 1: Submit your first draft": "第一步：提交初稿",
 	"Students enter this code when they sign up or on the join page. You can also add them yourself under Students.": "学生注册时或在加入页输入这个邀请码即可入班；你也可以在「学生」里直接添加。",
-	"Students first paste the draft they wrote outside class; it is frozen as the starting point, and the AI chat unlocks only after that. There is no pre-submission reader check.": "学生先粘贴课外写好的初稿，确认后冻结为修改的起点，之后才能使用 AI 对话。这类作业没有提交前 AI 读者试读。",
+	"Students first paste or upload the draft they wrote outside class; it is frozen as the starting point, and the AI chat unlocks only after that. There is no pre-submission reader check.": "学生先粘贴或导入课外写好的初稿，确认后冻结为修改的起点，之后才能使用 AI 对话。这类作业没有提交前 AI 读者试读。",
 	"Students join with its invite code; then you can publish assignments to it.": "学生用邀请码入班后，就可以给这个班布置作业了。",
 	"Students start from a blank page and write with the AI coach.": "学生从空白页开始，在 AI 辅导下写作。",
 	"Students start from a blank page.": "学生从空白页开始写。",

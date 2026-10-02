@@ -188,6 +188,14 @@
 				</div>
 				<dl class="mt-5 grid gap-x-6 gap-y-3 border-t border-gray-100 pt-4 text-sm sm:grid-cols-2 dark:border-gray-800">
 					<div>
+						<dt class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Assignment type')}</dt>
+						<dd class="mt-0.5">
+							{assignment.task_mode === 'revise_draft'
+								? $i18n.t('Revise a draft')
+								: $i18n.t('Write from scratch')}
+						</dd>
+					</div>
+					<div>
 						<dt class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Rubric')}</dt>
 						<dd class="mt-0.5">
 							{assignment.rubric_schema.criteria
@@ -200,18 +208,21 @@
 						<dt class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('AI Coaching Style')}</dt>
 						<dd class="mt-0.5">{$i18n.t(COACHING_TITLES[assignment.coaching_style])}</dd>
 					</div>
-					<div>
-						<dt class="text-xs text-gray-500 dark:text-gray-400">
-							{$i18n.t('AI Reader Check Before Submitting')}
-						</dt>
-						<dd class="mt-0.5">
-							{assignment.challenge_enabled
-								? $i18n.t('AI reader check on · {{count}} rounds', {
-										count: assignment.challenge_rounds
-									})
-								: $i18n.t('AI reader check off')}
-						</dd>
-					</div>
+					<!-- 修订初稿作业结构上没有试读，不显示这一行，免得读成「没开」。 -->
+					{#if assignment.task_mode !== 'revise_draft'}
+						<div>
+							<dt class="text-xs text-gray-500 dark:text-gray-400">
+								{$i18n.t('AI Reader Check Before Submitting')}
+							</dt>
+							<dd class="mt-0.5">
+								{assignment.challenge_enabled
+									? $i18n.t('AI reader check on · {{count}} rounds', {
+											count: assignment.challenge_rounds
+										})
+									: $i18n.t('AI reader check off')}
+							</dd>
+						</div>
+					{/if}
 					<div>
 						<dt class="text-xs text-gray-500 dark:text-gray-400">
 							{$i18n.t('Reflection Before Submitting')}

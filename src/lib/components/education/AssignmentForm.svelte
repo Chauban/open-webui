@@ -37,10 +37,13 @@
 	const i18n = getContext<Writable<i18nType>>('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
 
-	const SECTIONS = [
+	// 修订初稿作业没有试读，第 3 节标题里就不提「试读」。
+	$: aiSectionLabel =
+		draft.taskMode === 'revise_draft' ? 'AI Coaching' : 'AI Coaching & Reader Check';
+	$: SECTIONS = [
 		{ id: 'assignment-basics', label: 'Basics' },
 		{ id: 'assignment-scoring', label: 'Scoring' },
-		{ id: 'assignment-ai', label: 'AI Coaching & Reader Check' },
+		{ id: 'assignment-ai', label: aiSectionLabel },
 		{ id: 'assignment-reflection', label: 'Reflection Before Submitting' }
 	];
 	const COACHING_TITLES = { socratic: 'Socratic', balanced: 'Balanced', hands_off: 'Hands-off' };
@@ -55,7 +58,7 @@
 		{
 			key: 'revise_draft',
 			title: 'Revise a draft',
-			hint: 'Students first paste the draft they wrote outside class; it is frozen as the starting point, and the AI chat unlocks only after that. There is no pre-submission reader check.'
+			hint: 'Students first paste or upload the draft they wrote outside class; it is frozen as the starting point, and the AI chat unlocks only after that. There is no pre-submission reader check.'
 		}
 	] as const;
 
@@ -240,7 +243,7 @@
 					on:click={() => (aiOpen = !aiOpen)}
 				>
 					<div>
-						<h2 class="text-base font-semibold">3 · {$i18n.t('AI Coaching & Reader Check')}</h2>
+						<h2 class="text-base font-semibold">3 · {$i18n.t(aiSectionLabel)}</h2>
 						{#if !aiOpen}
 							<div class="mt-1 text-sm text-gray-500 dark:text-gray-400">{aiSummary}</div>
 						{/if}

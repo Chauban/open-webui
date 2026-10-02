@@ -487,6 +487,10 @@
 				<div class="min-w-0">
 					<div class="flex flex-wrap items-center gap-2">
 						<div class="text-base font-semibold">{item.assignment.title}</div>
+						<!-- 修订初稿要先交初稿才能开始，进门前就让学生知道；从零写作是常态，不标。 -->
+						{#if item.assignment.task_mode === 'revise_draft'}
+							<EduBadge soft>{$i18n.t('Revise a draft')}</EduBadge>
+						{/if}
 						{#if item.review_status === 'returned'}
 							<EduBadge soft tone="rose">{$i18n.t('Returned')}</EduBadge>
 						{:else if item.review_status === 'reviewed'}

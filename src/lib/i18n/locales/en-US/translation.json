@@ -1,4 +1,5 @@
 {
+	"AI Coaching": "",
 	"AI Coaching & Reader Check": "AI Coaching & Reader Check",
 	"AI Use": "AI Use",
 	"AI reader check off": "AI reader check off",
@@ -132,7 +133,7 @@
 	"Start Writing": "",
 	"Step 1: Submit your first draft": "",
 	"Students enter this code when they sign up or on the join page. You can also add them yourself under Students.": "Students enter this code when they sign up or on the join page. You can also add them yourself under Students.",
-	"Students first paste the draft they wrote outside class; it is frozen as the starting point, and the AI chat unlocks only after that. There is no pre-submission reader check.": "",
+	"Students first paste or upload the draft they wrote outside class; it is frozen as the starting point, and the AI chat unlocks only after that. There is no pre-submission reader check.": "",
 	"Students join with its invite code; then you can publish assignments to it.": "Students join with its invite code; then you can publish assignments to it.",
 	"Students start from a blank page and write with the AI coach.": "",
 	"Students start from a blank page.": "",
