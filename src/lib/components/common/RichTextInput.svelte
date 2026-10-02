@@ -1330,6 +1330,9 @@
 
 		if (editor) {
 			editor.destroy();
+			// editor 是可绑定的 prop:不清空的话父组件手里留着已销毁的实例,
+			// 组件重新挂载时会把它当初值传回来,getHTML 读不到 schema 直接抛错。
+			editor = null;
 		}
 	});
 
@@ -1338,7 +1341,7 @@
 	}
 
 	const onValueChange = () => {
-		if (!editor) return;
+		if (!editor || editor.isDestroyed) return;
 
 		const jsonValue = editor.getJSON();
 		const htmlValue = editor.getHTML();

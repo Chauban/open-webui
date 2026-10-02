@@ -1386,6 +1386,8 @@
 						await onEmbeddedChatTitle?.($chatId, data);
 					}
 					await refreshChatList(localStorage.token);
+					// 分组里的对话列表是各自加载的,不跟着上面刷新;不刷的话新对话在分组里一直叫「新对话」。
+					await refreshFolderChatLists();
 				} else if (type === 'chat:tags') {
 					chat = await getChatById(localStorage.token, $chatId);
 					allTags.set(await getAllTags(localStorage.token));
@@ -2079,6 +2081,8 @@
 	const initNewChat = async () => {
 		console.log('initNewChat');
 		resetWebSearchConfirmation();
+		// 视图已回到新对话,之前加载过的对话再被点开时要重新加载。
+		loadedChatIdProp = '';
 
 		// Mark the outgoing chat as read before resetting; in-place created chats
 		// keep chatIdProp undefined, so navigateHandler never marks them read.
@@ -3768,8 +3772,27 @@
 					});
 					await chatId.set(res.chat_id);
 					if (!$temporaryChatEnabled && !embedded) {
-						window.history.replaceState(history.state, '', `/c/${res.chat_id}`);
+						const folderId = $selectedFolder?.id;
+						if (projectBaseUrl && folderId) {
+							// 写作区:留在工作区地址上,工作区才知道当前对话(记录活跃对话、侧栏链接都靠它)。
+							// 先记下已加载,免得 chatIdProp 变化触发重新加载、打断正在生成的回复。
+							loadedChatIdProp = res.chat_id;
+							await goto(`${projectBaseUrl}?chat=${res.chat_id}`, {
+								replaceState: true,
+								noScroll: true,
+								keepFocus: true
+							});
+						} else {
+							window.history.replaceState(history.state, '', `/c/${res.chat_id}`);
+						}
 						await refreshChatList(localStorage.token);
+						if (folderId) {
+							// 对话已由后端建好,分组直接重拉列表;写作区额外带上对话,侧栏据此展开该分组。
+							await refreshFolderChatLists(
+								folderId,
+								projectBaseUrl ? { id: res.chat_id, folder_id: folderId } : undefined
+							);
+						}
 
 						// Persist chat-level params (system prompt, advanced
 						// params) that the backend doesn't receive in the

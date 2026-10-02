@@ -367,6 +367,15 @@
 					chats = mergeFolderChats(chats ?? [], [chat]);
 				}
 			},
+			// 写作区用:有新对话时展开分组并从服务端重拉列表(对话此时已由后端建好)。
+			// 不塞本地占位条目:占位的「新对话」标题会在合并时盖掉服务端稍后生成的标题。
+			revealChat: () => {
+				if (open) {
+					return setFolderItems();
+				}
+				open = true;
+				isExpandedUpdateDebounceHandler();
+			},
 			setChatActive: (chatId, active) => {
 				if (chats) {
 					let found = false;

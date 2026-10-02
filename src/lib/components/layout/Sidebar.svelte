@@ -139,6 +139,14 @@
 	let writingProjects = {};
 	let writingProjectRegistry = {};
 
+	// 普通分组和写作分组各有一套 registry;对话状态(生成中、已读、标题)要两边都通知到。
+	const getAllFolderEntries = (): any[] => [
+		...Object.values(folderRegistry),
+		...Object.values(writingProjectRegistry)
+	];
+	const getFolderEntry = (folderId): any =>
+		folderRegistry[folderId] ?? writingProjectRegistry[folderId];
+
 	const getProjectMode = (folder) => {
 		const explicitMode = folder?.meta?.mode;
 		if (explicitMode) {
@@ -518,7 +526,7 @@
 		const result = await refreshChatList(localStorage.token, { refreshPinned: true });
 		if (result.accepted) {
 			await initFolders();
-			await Promise.all(Object.values(folderRegistry).map((folder) => folder?.setFolderItems?.()));
+			await Promise.all(getAllFolderEntries().map((folder) => folder?.setFolderItems?.()));
 			allChatsLoaded = result.allLoaded;
 			chatListReady = true;
 		}
@@ -560,7 +568,7 @@
 
 		if (data?.chat_id && typeof data?.last_read_at === 'number') {
 			setChatReadAt(data.chat_id, data.last_read_at);
-			for (const folder of Object.values(folderRegistry)) {
+			for (const folder of getAllFolderEntries()) {
 				folder?.setChatReadAt?.(data.chat_id, data.last_read_at);
 			}
 		}
@@ -578,7 +586,7 @@
 			applyFolderUnreadCounts(res.folder_unread_counts);
 		}
 		setAllChatsRead();
-		for (const folder of Object.values(folderRegistry)) {
+		for (const folder of getAllFolderEntries()) {
 			folder?.setAllChatsRead?.();
 		}
 	};
@@ -824,6 +832,18 @@
 			}
 
 			if (folderId) {
+				// 写作区分组挂在独立的 writingProjectRegistry 上;新对话要让学生马上在侧栏看到,
+				// 所以写作分组收到新对话时直接展开。刚建的写作分组侧栏可能还没加载,先刷新分组树。
+				if (chat && !folderRegistry[folderId] && !writingProjectRegistry[folderId]) {
+					await initFolders();
+					await tick();
+				}
+				if (writingProjectRegistry[folderId]) {
+					return chat
+						? writingProjectRegistry[folderId].revealChat?.()
+						: writingProjectRegistry[folderId].setFolderItems?.();
+				}
+
 				if (chat) {
 					return folderRegistry[folderId]?.upsertChat?.(chat);
 				}
@@ -831,7 +851,7 @@
 				return folderRegistry[folderId]?.setFolderItems?.();
 			}
 
-			return Promise.all(Object.values(folderRegistry).map((folder) => folder?.setFolderItems?.()));
+			return Promise.all(getAllFolderEntries().map((folder) => folder?.setFolderItems?.()));
 		});
 
 		await tick();
@@ -879,11 +899,11 @@
 			const active = eventData.active ?? false;
 			const found = setChatActive(event.chat_id, active);
 			let foundInFolder = false;
-			for (const folder of Object.values(folderRegistry)) {
+			for (const folder of getAllFolderEntries()) {
 				foundInFolder = folder?.setChatActive?.(event.chat_id, active) || foundInFolder;
 			}
 			if (!foundInFolder && active && eventData.folder_id) {
-				await folderRegistry[eventData.folder_id]?.setFolderItems?.();
+				await getFolderEntry(eventData.folder_id)?.setFolderItems?.();
 			}
 			if (!found && active) {
 				await refreshChatRows();
@@ -897,7 +917,7 @@
 
 			if (typeof eventData.last_read_at === 'number') {
 				setChatReadAt(event.chat_id, eventData.last_read_at);
-				for (const folder of Object.values(folderRegistry)) {
+				for (const folder of getAllFolderEntries()) {
 					folder?.setChatReadAt?.(event.chat_id, eventData.last_read_at);
 				}
 				return;
@@ -905,7 +925,7 @@
 
 			await refreshChatRows();
 			if (eventData.folder_id) {
-				await folderRegistry[eventData.folder_id]?.setFolderItems?.();
+				await getFolderEntry(eventData.folder_id)?.setFolderItems?.();
 			}
 		}
 	};
