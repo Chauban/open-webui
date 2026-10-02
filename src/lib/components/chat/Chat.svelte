@@ -210,6 +210,8 @@
 		await messageInput?.setText(target);
 	};
 	$: if (prefillPrompt && messageInput) applyPrefillPrompt();
+	// 预填撤掉(有了对话或撤回了初稿)再出现时算新的一次:撤回初稿后重交,开场照样自动发出。
+	$: if (!prefillPrompt) appliedPrefillPrompt = '';
 
 	// The workspace clears chatIdProp to start a fresh conversation in place;
 	// upstream only reacts to a non-empty chatIdProp.

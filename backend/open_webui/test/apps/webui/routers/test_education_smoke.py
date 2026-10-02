@@ -6192,6 +6192,60 @@ def test_draft_baseline_only_for_revise_draft_assignments(education_client):
     assert res.status_code == 400, res.text
 
 
+def test_withdrawing_first_draft_clears_draft_process_and_chats(education_client):
+    client, teacher, _, student, _, SessionLocal = education_client
+    assignment, session_id = _setup_revise_draft_assignment(client, teacher, student)
+    url = f"/api/v1/writing-sessions/{session_id}/draft-baseline"
+
+    # 还没交初稿,没有可撤回的
+    assert client.delete(url).status_code == 409
+
+    assert client.post(url, json={"text": _DRAFT_TEXT}).status_code == 200
+    res = client.post(
+        f"/api/v1/writing-sessions/{session_id}/chat/messages/m1",
+        json={"message": {"id": "m1", "role": "user", "content": "诊断一下"}},
+    )
+    assert res.status_code == 200, res.text
+    res = client.post(
+        f"/api/v1/writing-sessions/{session_id}/versions",
+        json={"trigger_type": "autosave", "content_json": None, "content_text": "改"},
+    )
+    assert res.status_code == 200, res.text
+
+    res = client.delete(url)
+    assert res.status_code == 200, res.text
+    assert res.json()["draft_baseline_at"] is None
+    assert res.json()["active_chat_id"] is None
+
+    workspace = client.get(f"/api/v1/assignments/{assignment['id']}/workspace").json()
+    assert workspace["note"]["data"]["content"]["md"] == ""
+    assert workspace["source_map"] == []
+    with SessionLocal() as db:
+        session = Education.get_writing_session_by_id(session_id, db=db)
+        assert is_draft_baseline_missing(session, db=db) is True
+        assert (
+            db.query(Chat).filter(Chat.folder_id == session.folder_id).count() == 0
+        )
+        assert (
+            db.query(WritingVersion)
+            .filter(WritingVersion.writing_session_id == session_id)
+            .count()
+            == 0
+        )
+
+    # 回到交初稿那一步,可以重新交;交过作业之后就不能再撤回
+    assert client.post(url, json={"text": _DRAFT_TEXT}).status_code == 200
+    res = client.post(
+        f"/api/v1/assignments/{assignment['id']}/submit",
+        json=_submit_body(session_id, _DRAFT_MD + "\n改过的一句。"),
+    )
+    assert res.status_code == 200, res.text
+    assert client.delete(url).status_code == 409
+    with SessionLocal() as db:
+        session = Education.get_writing_session_by_id(session_id, db=db)
+        assert session.draft_baseline_text == _DRAFT_MD
+
+
 def test_task_prompt_sits_between_assignment_context_and_coaching(education_client):
     client, teacher, _, student, outsider, _ = education_client
     assignment, session_id = _setup_revise_draft_assignment(client, teacher, student)

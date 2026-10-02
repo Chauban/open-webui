@@ -161,6 +161,7 @@ from open_webui.services.education.profile_evidence import (
 from open_webui.models.notes import Note, NoteForm, Notes, sanitize_note_data
 from open_webui.models.users import Users
 from open_webui.socket.main import emit_to_users
+from open_webui.tasks import stop_item_tasks
 from open_webui.utils.auth import get_admin_user, get_verified_user
 
 router = APIRouter()
@@ -2665,6 +2666,47 @@ async def submit_draft_baseline(
             status_code=status.HTTP_409_CONFLICT,
             detail="First draft has already been submitted",
         )
+    return updated
+
+
+@router.delete(
+    "/writing-sessions/{session_id}/draft-baseline", response_model=WritingSessionModel
+)
+async def reset_draft_baseline(
+    request: Request,
+    session: WritingSessionModel = Depends(require_owned_writing_session),
+    db: Session = Depends(get_session),
+):
+    """撤回初稿重新开始:基线、正文、写作过程和本作业的对话全部删掉,不留痕。
+
+    只在从没提交过、作业没截止时可以;交过一次(含退回重交)基线就锁定。
+    """
+    if session.scope != "assignment":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid writing scope"
+        )
+    assignment = _get_assignment_or_404(session.assignment_id, db)
+    effective_due_at = _get_effective_due_at(assignment, session.owner_user_id, db)
+    if effective_due_at is not None and effective_due_at <= int(time.time()):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Assignment due time has passed",
+        )
+    updated = Education.reset_draft_baseline(session.id, db=db)
+    if updated is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="First draft can no longer be withdrawn",
+        )
+
+    # 基线已提交清空,对话走异步表接口另开连接删;生成中的回复先停掉。
+    for chat in await Chats.get_chats_by_folder_id_and_user_id(
+        session.folder_id, session.owner_user_id, skip=0, limit=None
+    ):
+        await stop_item_tasks(request.app.state.redis, chat.id)
+    await Chats.delete_chats_by_user_id_and_folder_id(
+        session.owner_user_id, session.folder_id
+    )
     return updated
 
 

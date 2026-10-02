@@ -3368,6 +3368,61 @@ class EducationTable:
             db.refresh(session)
             return WritingSessionModel.model_validate(session)
 
+    def reset_draft_baseline(
+        self, session_id: str, db: Optional[Session] = None
+    ) -> Optional[WritingSessionModel]:
+        """撤回初稿重新开始:清掉基线、正文和整段写作过程,回到交初稿那一步。
+
+        只在从没提交过时可以:条件更新里一并查提交表,与并发的提交只有一方生效;
+        有过提交(含退回重交)或本来就没有基线时返回 None。项目文件夹里的对话
+        走异步表接口,由调用方在本事务提交之后删。
+        """
+        from open_webui.models.notes import Note, sanitize_note_data
+
+        with get_db_context(db) as db:
+            submitted = (
+                db.query(Submission.id)
+                .filter(Submission.writing_session_id == session_id)
+                .exists()
+            )
+            claimed = (
+                db.query(WritingSession)
+                .filter(
+                    WritingSession.id == session_id,
+                    WritingSession.draft_baseline_at.is_not(None),
+                    ~submitted,
+                )
+                .update(
+                    {
+                        WritingSession.draft_baseline_text: None,
+                        WritingSession.draft_baseline_at: None,
+                        WritingSession.chat_id: None,
+                        WritingSession.active_chat_id: None,
+                        WritingSession.updated_at: int(time.time()),
+                    },
+                    synchronize_session=False,
+                )
+            )
+            if claimed != 1:
+                db.rollback()
+                return None
+
+            for model in (WritingVersion, ProvenanceSegment, EditorOperation):
+                db.query(model).filter(
+                    model.writing_session_id == session_id
+                ).delete(synchronize_session=False)
+
+            session = db.get(WritingSession, session_id)
+            note = db.get(Note, session.note_id)
+            note.data = {
+                **(sanitize_note_data(note.data) or {}),
+                "content": {"json": None, "html": "", "md": ""},
+            }
+            note.updated_at = int(time.time_ns())
+            db.commit()
+            db.refresh(session)
+            return WritingSessionModel.model_validate(session)
+
     def assignment_has_draft_baseline(
         self, assignment_id: str, db: Optional[Session] = None
     ) -> bool:

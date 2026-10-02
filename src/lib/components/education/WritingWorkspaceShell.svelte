@@ -23,6 +23,9 @@
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 	import ReflectionAnswerForm from '$lib/components/education/ReflectionAnswerForm.svelte';
 	import DraftBaselineStep from '$lib/components/education/DraftBaselineStep.svelte';
+	import EduActionMenu from '$lib/components/education/EduActionMenu.svelte';
+	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
+	import { refreshChatList, refreshFolderChatLists } from '$lib/stores/chatList';
 	import { prepareAssistantContentForWriting } from '$lib/utils/writing-content';
 	import { createSerializedSaveRunner } from '$lib/utils/save-coordinator';
 	import {
@@ -45,6 +48,7 @@
 		createProvenanceSegments,
 		createWritingVersion,
 		getWritingProcessSummary,
+		resetDraftBaseline,
 		setWritingSessionActiveChat,
 		submitAssignment,
 		getCurrentAssignmentChallenge
@@ -147,6 +151,52 @@
 	const onDraftBaselineSubmitted = async () => {
 		autoStartDiagnosis = true;
 		await load();
+	};
+	// 交作业之前可以撤回初稿重来:基线、正文、写作过程和本作业的对话一起删掉。
+	// 交过一次(含退回重交)基线就锁定。
+	$: canWithdrawDraft =
+		isAssignment &&
+		assignment?.task_mode === 'revise_draft' &&
+		!!writingSession?.draft_baseline_at &&
+		!isReadOnly &&
+		!isSubmitted &&
+		!review;
+	let showWithdrawDraftConfirm = false;
+	let withdrawingDraft = false;
+	$: withdrawDraftMenu = [
+		{
+			label: 'Withdraw first draft and start over',
+			danger: true,
+			onClick: () => (showWithdrawDraftConfirm = true)
+		}
+	];
+	const withdrawDraft = async () => {
+		if (withdrawingDraft || !writingSession) return;
+		// 正在存的那一笔落库前删掉会被它写回来,等它存完再撤。
+		if (saving) {
+			toast.info($i18n.t('Saving. Please try again in a moment.'));
+			return;
+		}
+		withdrawingDraft = true;
+		if (autoSaveTimer) clearTimeout(autoSaveTimer);
+		autoSaveTimer = null;
+		unsavedOperations = [];
+		pendingSource = null;
+		try {
+			await resetDraftBaseline(localStorage.token, writingSession.id);
+		} catch (error) {
+			toast.error(resolveErrorMessage(error, t));
+			withdrawingDraft = false;
+			return;
+		}
+		lastPersistedActiveChatId = null;
+		showMobileDraft = false;
+		await goto(projectBaseUrl, { replaceState: true });
+		await load();
+		withdrawingDraft = false;
+		void refreshFolderChatLists(workspaceProject?.id);
+		void refreshChatList(localStorage.token, { refreshPinned: true });
+		toast.success($i18n.t('First draft withdrawn. Submit your first draft again.'));
 	};
 	$: diagnosisPrompt =
 		isAssignment &&
@@ -917,6 +967,9 @@
 								{$i18n.t(isSubmitted ? 'Resubmit Assignment' : 'Submit Assignment')}
 							</EduButton>
 						{/if}
+						{#if canWithdrawDraft}
+							<EduActionMenu items={withdrawDraftMenu} />
+						{/if}
 					</div>
 				</div>
 				{#if lockedDetailsCollapsed}
@@ -1058,6 +1111,9 @@
 								{isAssignment ? assignment?.title : noteTitle}
 							</div>
 						</div>
+						{#if canWithdrawDraft}
+							<EduActionMenu items={withdrawDraftMenu} />
+						{/if}
 						<EduButton
 							size="sm"
 							on:click={() => {
@@ -1149,6 +1205,14 @@
 
 	{#if isAssignment && assignment}
 		<SubmissionHistoryModal bind:show={showSubmissionHistory} {assignment} />
+		<ConfirmDialog
+			bind:show={showWithdrawDraftConfirm}
+			title={$i18n.t('Withdraw first draft and start over')}
+			message={$i18n.t(
+				'Your first draft, every edit since, and all AI conversations in this assignment will be deleted. You will submit your first draft again. This cannot be undone.'
+			)}
+			on:confirm={withdrawDraft}
+		/>
 	{/if}
 
 	{#if isAssignment && showChallenge && assignment}

@@ -432,6 +432,14 @@ export const submitDraftBaseline = async (token: string, sessionId: string, text
 	}).then(handleJson);
 };
 
+/** 撤回初稿重新开始:连同正文、写作过程和本作业的对话一起删掉,仅限从没提交过。 */
+export const resetDraftBaseline = async (token: string, sessionId: string) => {
+	return fetch(`${WEBUI_API_BASE_URL}/writing-sessions/${sessionId}/draft-baseline`, {
+		method: 'DELETE',
+		headers: withAuth(token)
+	}).then(handleJson);
+};
+
 // 只解析不保存:返回文件里的正文,学生核对后仍走 submitDraftBaseline。
 export const extractDraftBaselineFile = async (token: string, sessionId: string, file: File) => {
 	const body = new FormData();
