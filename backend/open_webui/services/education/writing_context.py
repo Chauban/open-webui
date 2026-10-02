@@ -1,7 +1,7 @@
 """写作会话的初稿基线与左侧对话上下文。
 
 修订初稿作业(task_mode=revise_draft)里,学生先显式提交课外写好的初稿,冻结为
-基线后才能编辑正文、和 AI 对话。左侧对话每一轮都带上右侧编辑器里此刻的正文:
+基线后才能编辑正文、和 AI 对话。左侧对话每一轮都带上右侧编辑器最近一次保存的正文:
 文件夹的 system_prompt 是建作业时一次性生成的静态内容,装不下实时正文;
 靠模型自己调 view_note 工具去读,国产模型又调不可靠。
 """
@@ -11,6 +11,7 @@ import io
 import os
 import zipfile
 
+from open_webui.models.chat_messages import ChatMessages
 from open_webui.models.education import Education
 from open_webui.models.notes import Notes
 
@@ -250,9 +251,17 @@ def get_folder_writing_session(folder, user_id: str):
     return session
 
 
-async def build_current_text_context(session) -> str:
-    """要追加到系统提示末尾的学生当前正文。
+async def build_current_text_context(
+    session,
+    chat_id: str | None = None,
+    previous_reply_id: str | None = None,
+    db=None,
+) -> str:
+    """要追加到系统提示末尾的学生当前正文,连同它改没改过的状态。
 
+    正文取的是最近一次保存的版本;学生不一定每轮都改,改没改由这里算好告诉模型,
+    不让它拿自己回复里引用过的句子去猜。previous_reply_id 是本轮之前模型的那条回复
+    (当前提问的父消息),它的时间戳由后端在发起请求时写入,与版本时间同一个时钟。
     笔记用自己的短会话读取,读完即释放,不把数据库事务带进之后的模型调用。
     """
 
@@ -261,10 +270,38 @@ async def build_current_text_context(session) -> str:
     text = (content.get("md") or "").strip()
     if not text:
         return "【学生当前正文】右侧编辑器里还没有内容。"
+
+    paragraphs = normalize_draft_paragraphs(text)
+    status = []
+    baseline = session.draft_baseline_text
+    if baseline is not None:
+        unchanged = paragraphs == normalize_draft_paragraphs(baseline)
+        status.append("与初稿相比：" + ("还没有改动。" if unchanged else "已有改动。"))
+
+    previous_reply = (
+        await ChatMessages.get_message_by_id(f"{chat_id}-{previous_reply_id}")
+        if chat_id and previous_reply_id
+        else None
+    )
+    if previous_reply is not None and previous_reply.role == "assistant":
+        version = Education.get_latest_version_until(
+            session.id, previous_reply.created_at, db=db
+        )
+        # 初稿确认时不存版本;那之前没有版本,模型上次看到的就是初稿(从零写作则是空稿)。
+        seen_text = (
+            version.note_snapshot_text if version else (baseline or "")
+        )
+        unchanged = paragraphs == normalize_draft_paragraphs(seen_text)
+        status.append(
+            "自你上一次回复以来：" + ("没有新的改动。" if unchanged else "有新的改动。")
+        )
+
     return (
-        "【学生当前正文】以下是学生右侧编辑器里此刻的全文，每轮对话都会更新。"
-        "学生会边聊边改稿，所以它可能和你之前回复里引用过的句子不一样："
-        "那是改动前的旧版本，不是你记错了。谈论正文时一律以这一版为准，"
-        "学生说改过了，就对照这一版看他改了什么。\n"
-        f"<<<\n{text}\n>>>"
+        "【学生当前正文】以下是学生右侧编辑器里最近一次保存的全文。"
+        "学生会边聊边改稿，但不一定每轮都改，改没改以下面的状态为准，不要自己推测。"
+        "它和你之前回复里引用过的句子不一样时，那是改动前的旧版本，不是你记错了；"
+        "谈论正文时一律以这一版为准。学生说改好了、状态却显示没有新的改动，"
+        "多半是还没保存，请他等编辑器显示已保存后再发。\n"
+        + "".join(f"{line}\n" for line in status)
+        + f"<<<\n{text}\n>>>"
     )

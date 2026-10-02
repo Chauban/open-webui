@@ -3634,6 +3634,22 @@ class EducationTable:
             )
             return WritingVersionModel.model_validate(version) if version else None
 
+    def get_latest_version_until(
+        self, session_id: str, until: int, db: Optional[Session] = None
+    ) -> Optional[WritingVersionModel]:
+        """某一时刻(秒)之前存下的最后一版。"""
+        with get_db_context(db) as db:
+            version = (
+                db.query(WritingVersion)
+                .filter(
+                    WritingVersion.writing_session_id == session_id,
+                    WritingVersion.created_at <= until,
+                )
+                .order_by(WritingVersion.version_no.desc())
+                .first()
+            )
+            return WritingVersionModel.model_validate(version) if version else None
+
     def insert_provenance_segments(
         self,
         session_id: str,

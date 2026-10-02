@@ -2584,11 +2584,16 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                     # will read folder knowledge from metadata.
                     metadata['folder_knowledge'] = await get_owner_accessible_folder_files(folder)
 
-        # 写作区:每轮把右侧编辑器里此刻的正文追加到系统提示末尾,AI 才看得到学生在改什么。
+        # 写作区:每轮把右侧编辑器最近一次保存的正文追加到系统提示末尾,AI 才看得到学生在改什么。
         # 不走 apply_system_prompt_to_body,学生正文不该被当成提示词模板解析变量。
+        # 当前提问的父消息就是模型上一次的回复,据此判断这之后学生改没改稿。
         if writing_session:
             form_data['messages'] = add_or_update_system_message(
-                await build_current_text_context(writing_session),
+                await build_current_text_context(
+                    writing_session,
+                    chat_id=metadata.get('chat_id'),
+                    previous_reply_id=(metadata.get('user_message') or {}).get('parentId'),
+                ),
                 form_data.get('messages', []),
                 append=True,
             )

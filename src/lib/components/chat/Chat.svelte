@@ -161,6 +161,9 @@
 	export let rightPanelClassName = '';
 	// 写作区的质疑环节要用学生当前选的模型发起服务端生成，Chat 把选择结果报上去。
 	export let onSelectedModelsChange: ((modelIds: string[]) => void) | null = null;
+	// 每次向模型发请求前先跑一下。写作区用它把还在防抖里没存的正文立即存掉，
+	// 后端注入的是最近一次保存的正文，不先存，AI 看到的会是改动前的稿子。
+	export let beforeSend: (() => Promise<void>) | null = null;
 	// 空对话时预填进输入框的开场(修订初稿作业的「按评分标准读一遍我的初稿」)。
 	// 每个取值只预填一次，学生删掉或改写后不会再被塞回来。
 	export let prefillPrompt = '';
@@ -3315,6 +3318,8 @@
 			scrollToBottom();
 		}
 
+		await beforeSend?.();
+
 		let _chatId = JSON.parse(JSON.stringify($chatId));
 		_history = structuredClone(_history);
 
@@ -3959,6 +3964,7 @@
 				.at(0);
 
 			if (model) {
+				await beforeSend?.();
 				await sendMessageSocket(
 					model,
 					createMessagesList(history, responseMessage.id),

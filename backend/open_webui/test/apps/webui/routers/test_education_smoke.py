@@ -6234,6 +6234,73 @@ def test_writing_chat_context_carries_the_latest_text(education_client):
     assert "改过的第二段。" in context
 
 
+def test_writing_chat_context_tells_whether_the_student_revised(education_client):
+    client, teacher, _, student, _, SessionLocal = education_client
+    assignment, session_id = _setup_revise_draft_assignment(client, teacher, student)
+    res = client.post(
+        f"/api/v1/writing-sessions/{session_id}/draft-baseline",
+        json={"text": _DRAFT_TEXT},
+    )
+    assert res.status_code == 200, res.text
+
+    def post_reply(message_id, timestamp):
+        res = client.post(
+            f"/api/v1/writing-sessions/{session_id}/chat/messages/{message_id}",
+            json={
+                "message": {
+                    "id": message_id,
+                    "role": "assistant",
+                    "content": "诊断",
+                    "timestamp": timestamp,
+                }
+            },
+        )
+        assert res.status_code == 200, res.text
+
+    def context_after(reply_id):
+        with SessionLocal() as db:
+            session = Education.get_writing_session_by_id(session_id, db=db)
+            return asyncio.run(
+                build_current_text_context(
+                    session,
+                    chat_id=session.active_chat_id,
+                    previous_reply_id=reply_id,
+                    db=db,
+                )
+            )
+
+    now = int(time.time())
+    # 首轮:还没有 AI 回复,只报与初稿比
+    post_reply("reply-1", now - 100)
+    context = context_after(None)
+    assert "与初稿相比：还没有改动。" in context
+    assert "自你上一次回复以来" not in context
+    # 回复之后学生没动:那之前没有版本,模型看到的就是初稿
+    assert "自你上一次回复以来：没有新的改动。" in context_after("reply-1")
+
+    revised = _DRAFT_MD.replace("初稿第二段。", "改过的第二段。", 1)
+    res = client.post(
+        f"/api/v1/writing-sessions/{session_id}/autosave",
+        json={"content_text": revised},
+    )
+    assert res.status_code == 200, res.text
+    res = client.post(
+        f"/api/v1/writing-sessions/{session_id}/versions",
+        json={"trigger_type": "autosave", "content_json": None, "content_text": revised},
+    )
+    assert res.status_code == 200, res.text
+
+    context = context_after("reply-1")
+    assert "与初稿相比：已有改动。" in context
+    assert "自你上一次回复以来：有新的改动。" in context
+
+    # 下一条回复已经看过这一版,学生之后没再改
+    post_reply("reply-2", now + 100)
+    context = context_after("reply-2")
+    assert "与初稿相比：已有改动。" in context
+    assert "自你上一次回复以来：没有新的改动。" in context
+
+
 def _revise_and_submit(client, assignment, session_id, text, declared_until):
     """模拟编辑器:存一版,source map 前段仍是已声明初稿、后段是学生自己敲的,然后提交。"""
     version = client.post(

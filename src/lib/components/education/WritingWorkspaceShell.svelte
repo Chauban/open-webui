@@ -422,6 +422,17 @@
 		return runPersistDraft(triggerType, options);
 	};
 
+	// 发给 AI 之前把防抖窗口里还没存的正文立即存掉：后端每轮注入的是最近一次保存的正文，
+	// 并按保存时间判断学生在 AI 上次回复之后改没改稿。存失败也照常发，AI 看到的是上一次存成功的稿子。
+	const flushDraftBeforeChat = async () => {
+		if (!autoSaveTimer && !saving && unsavedOperations.length === 0) return;
+		if (autoSaveTimer) {
+			clearTimeout(autoSaveTimer);
+			autoSaveTimer = null;
+		}
+		await persistDraft('autosave', { force: true });
+	};
+
 	const saveTitle = async () => {
 		if (isAssignment || !workspaceNote?.id || titleSaving) return;
 		const nextTitle = noteTitle.trim() || getDefaultPersonalTitle();
@@ -786,6 +797,7 @@
 		responseCopyHandler={copyAssistantContentWithSource}
 		onToolCallCompleted={() => void refreshProcessSummary()}
 		onSelectedModelsChange={(ids) => (selectedModelId = ids?.[0] ?? '')}
+		beforeSend={flushDraftBeforeChat}
 		responseInsertLabel={'Insert to Writing'}
 		readOnly={isReadOnly || needsDraftBaseline}
 		readOnlyHint={chatReadOnlyHint}
