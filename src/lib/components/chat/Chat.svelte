@@ -168,29 +168,33 @@
 	// 由写作区在学生刚确认初稿那一下置真；刷新页面后不再自动发，只回落到预填。
 	export let autoSendPrefill = false;
 	let appliedPrefillPrompt = '';
-	const waitFor = async (ready: () => boolean) => {
-		for (let i = 0; i < 30 && !ready(); i += 1) {
+	const waitFor = async (ready: () => boolean, attempts: number) => {
+		for (let i = 0; i < attempts && !ready(); i += 1) {
 			await new Promise((resolve) => setTimeout(resolve, 100));
 		}
 		return ready();
 	};
+	const hasMessages = () => createMessagesList(history, history.currentId).length > 0;
 	const applyPrefillPrompt = async () => {
 		if (!prefillPrompt || prefillPrompt === appliedPrefillPrompt || !messageInput || prompt) return;
-		if (createMessagesList(history, history.currentId).length > 0) return;
+		if (hasMessages()) return;
 		const target = prefillPrompt;
 		appliedPrefillPrompt = target;
-		// bind:this 先于输入框里的编辑器挂好，#chat-input 不在时 setText 是空操作，等它出现再写。
-		if (!(await waitFor(() => !!document.getElementById('chat-input'))) || prompt) {
-			appliedPrefillPrompt = '';
-			return;
+		// 自动发送不经过输入框，只要模型就绪:模型由文件夹配置异步选上。
+		// 等不到可用模型就不硬发，退回预填让学生自己点发送。
+		if (autoSendPrefill) {
+			const modelReady = () =>
+				selectedModels.length > 0 &&
+				selectedModels.every((modelId) => $models.some((model) => model.id === modelId));
+			if (await waitFor(modelReady, 100)) {
+				if (hasMessages() || prompt) return;
+				await submitPrompt(target, [], { meta: { auto_started: true } });
+				return;
+			}
 		}
-		// 模型由文件夹配置异步选上；等不到可用模型就不硬发，退回预填让学生自己点发送。
-		const modelReady = () =>
-			selectedModels.length > 0 &&
-			selectedModels.every((modelId) => $models.some((model) => model.id === modelId));
-		if (autoSendPrefill && (await waitFor(modelReady))) {
-			if (createMessagesList(history, history.currentId).length > 0 || prompt) return;
-			await submitPrompt(target, [], { meta: { auto_started: true } });
+		// bind:this 先于输入框里的编辑器挂好，#chat-input 不在时 setText 是空操作，等它出现再写。
+		if (!(await waitFor(() => !!document.getElementById('chat-input'), 100)) || prompt) {
+			appliedPrefillPrompt = '';
 			return;
 		}
 		await messageInput?.setText(target);
