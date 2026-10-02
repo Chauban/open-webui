@@ -74,6 +74,7 @@ from open_webui.routers.chats import router as chats_router
 from open_webui.routers.notes import router as notes_router
 from open_webui.services.education.analysis import (
     collect_clarification_exchanges,
+    _build_operation_timeline,
     build_submission_analysis,
     count_clarifications,
     filter_segments_for_final_text,
@@ -146,6 +147,60 @@ def _rubric_schema(score_max=100):
             {"key": "evidence", "label": "Evidence", "max_score": maxima[2]},
         ]
     }
+
+
+def _typing_op(op_id, at, op_type, start, end, inserted=None, deleted=None, source="user_typed"):
+    return SimpleNamespace(
+        id=op_id,
+        op_type=op_type,
+        source_type=source,
+        start_offset=start,
+        end_offset=end,
+        inserted_text=inserted,
+        deleted_text=deleted,
+        occurred_at_ms=at * 1000,
+        created_at=at,
+    )
+
+
+def test_operation_timeline_merges_consecutive_typing_into_runs():
+    operations = [
+        # 连续输入:拼成一句
+        _typing_op("t1", 100, "keyboard_input", 10, 10, inserted="现有"),
+        _typing_op("t2", 101, "keyboard_input", 12, 12, inserted="研究"),
+        # 退格从后往前删「问卷」:删去内容要按原顺序读出来
+        _typing_op("d1", 102, "delete_text", 15, 16, deleted="卷"),
+        _typing_op("d2", 103, "delete_text", 14, 15, deleted="问"),
+        # 学生在 110 秒提问,之后的输入另起一段
+        _typing_op("t3", 120, "replace", 0, 4, inserted="综述", deleted="总之"),
+        # 粘贴单独成行,并把前后的输入隔开
+        _typing_op("p1", 121, "paste_detected", 30, 30, inserted="外部段落", source="external_paste"),
+        _typing_op("t4", 122, "keyboard_input", 40, 40, inserted="补"),
+        # 停笔超过 10 分钟
+        _typing_op("t5", 122 + 601, "keyboard_input", 41, 41, inserted="充"),
+    ]
+    prompt_timeline = [{"role": "user", "content": "看看这句", "created_at": 110}]
+
+    events = _build_operation_timeline(operations, prompt_timeline)
+
+    assert [event["event_type"] for event in events] == [
+        "typing_run",
+        "typing_run",
+        "source_operation",
+        "typing_run",
+        "typing_run",
+    ]
+    first = events[0]
+    assert (first["created_at"], first["ended_at"]) == (100, 103)
+    assert first["operation_count"] == 4
+    assert first["inserted_text"] == "现有研究"
+    assert first["deleted_text"] == "问卷"
+    assert (first["inserted_length"], first["deleted_length"]) == (4, 2)
+    assert events[1]["inserted_text"] == "综述"
+    assert events[1]["deleted_text"] == "总之"
+    assert events[2]["op_type"] == "paste_detected"
+    assert events[3]["inserted_text"] == "补"
+    assert events[4]["created_at"] == 723
 
 
 def test_filter_segments_prioritizes_full_ai_insert_over_short_typed_fragments():
@@ -256,6 +311,7 @@ def test_submission_analysis_separates_source_map_counts_from_process_events():
             batch_id="batch-copy",
             metadata_json={"copy_length": 100},
             created_at=11,
+            occurred_at_ms=11000,
         ),
         SimpleNamespace(
             id="insert-1",
@@ -268,6 +324,7 @@ def test_submission_analysis_separates_source_map_counts_from_process_events():
             batch_id="batch-insert",
             metadata_json=None,
             created_at=12,
+            occurred_at_ms=12000,
         ),
         SimpleNamespace(
             id="paste-1",
@@ -280,6 +337,7 @@ def test_submission_analysis_separates_source_map_counts_from_process_events():
             batch_id="batch-paste",
             metadata_json={"has_source_metadata": False},
             created_at=13,
+            occurred_at_ms=13000,
         ),
         SimpleNamespace(
             id="delete-1",
@@ -292,6 +350,7 @@ def test_submission_analysis_separates_source_map_counts_from_process_events():
             batch_id="batch-delete",
             metadata_json=None,
             created_at=14,
+            occurred_at_ms=14000,
         ),
     ]
 

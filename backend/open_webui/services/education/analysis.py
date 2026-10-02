@@ -11,7 +11,7 @@ from open_webui.models.education import Education
 
 # Bump whenever the provenance/highlight analysis logic changes so cached
 # results produced by older logic are recomputed instead of served stale.
-_ANALYSIS_LOGIC_VERSION = "5"
+_ANALYSIS_LOGIC_VERSION = "6"
 
 SOURCE_MAP_TYPES = {
     "ai_inserted",
@@ -663,6 +663,122 @@ def _detect_large_bursts(version_diffs: list[dict], final_text: str, operations:
     return bursts
 
 
+# 学生手动改稿时编辑器每次输入都记一条操作,输入法每上屏一个词就是一条;
+# 时间线逐条列出会把对话和版本淹没。连续的手动输入/删除/替换合并成一段「修改正文」,
+# 遇到对话消息、粘贴或 AI 插入这类需要单独看的事件,或停笔超过 10 分钟,就另起一段。
+_TYPING_OP_TYPES = {"keyboard_input", "replace", "delete_text"}
+_TYPING_RUN_GAP_SECONDS = 600
+_TYPING_RUN_PREVIEW_CHARS = 400
+
+
+def _operation_seconds(operation) -> int:
+    # 用学生端发生时间,不用服务端入库时间:操作是攒到自动保存或发送前才一起上传的,
+    # 入库时间会和对话消息挤在同一秒,分不清改稿发生在提问之前还是之后。
+    return operation.occurred_at_ms // 1000
+
+
+def _join_run_piece(text: str, piece: str, *, prepend: bool, adjacent: bool) -> str:
+    if not text:
+        return piece
+    if prepend:
+        return piece + text if adjacent else piece + " … " + text
+    return text + piece if adjacent else text + " … " + piece
+
+
+def _build_operation_timeline(operations: list, prompt_timeline: list) -> list[dict]:
+    message_times = sorted(
+        item.get("created_at") or 0
+        for item in prompt_timeline
+        if item.get("role") in ("user", "assistant")
+    )
+    events: list[dict] = []
+    run: Optional[dict] = None
+
+    def close_run():
+        nonlocal run
+        if run is None:
+            return
+        for key in ("inserted_text", "deleted_text"):
+            if len(run[key]) > _TYPING_RUN_PREVIEW_CHARS:
+                run[key] = run[key][:_TYPING_RUN_PREVIEW_CHARS] + "…"
+        run.pop("_last_insert_end", None)
+        run.pop("_last_delete_start", None)
+        run.pop("_last_delete_end", None)
+        events.append(run)
+        run = None
+
+    # operations 由仓储层按 occurred_at_ms 排好序。
+    for operation in operations:
+        if not operation.op_type:
+            continue
+        at = _operation_seconds(operation)
+        inserted = operation.inserted_text or ""
+        deleted = operation.deleted_text or ""
+        is_typing = operation.op_type in _TYPING_OP_TYPES and operation.source_type == "user_typed"
+
+        if run is not None and (
+            not is_typing
+            or at - run["ended_at"] > _TYPING_RUN_GAP_SECONDS
+            or any(run["ended_at"] < t <= at for t in message_times)
+        ):
+            close_run()
+
+        if not is_typing:
+            events.append(
+                {
+                    "event_type": "source_operation",
+                    "created_at": at,
+                    "operation_id": operation.id,
+                    "op_type": operation.op_type,
+                    "source_type": operation.source_type,
+                    "inserted_length": len(inserted.strip()),
+                    "label": f"{operation.source_type}:{operation.op_type}",
+                }
+            )
+            continue
+
+        if run is None:
+            run = {
+                "event_type": "typing_run",
+                "created_at": at,
+                "ended_at": at,
+                "source_type": "user_typed",
+                "operation_count": 0,
+                "inserted_length": 0,
+                "deleted_length": 0,
+                "inserted_text": "",
+                "deleted_text": "",
+                "_last_insert_end": None,
+                "_last_delete_start": None,
+                "_last_delete_end": None,
+            }
+        run["ended_at"] = at
+        run["operation_count"] += 1
+        start = operation.start_offset
+        if deleted:
+            run["deleted_length"] += len(deleted.strip())
+            end = operation.end_offset
+            # 退格是从后往前删:这次删的末尾正好是上次删的开头,要拼在前面才读得通。
+            backspace = start is not None and end is not None and end == run["_last_delete_start"]
+            forward = start is not None and start == run["_last_delete_start"]
+            run["deleted_text"] = _join_run_piece(
+                run["deleted_text"], deleted, prepend=backspace, adjacent=backspace or forward
+            )
+            run["_last_delete_start"] = start
+            run["_last_delete_end"] = end
+        if inserted:
+            run["inserted_length"] += len(inserted.strip())
+            adjacent = start is not None and start == run["_last_insert_end"]
+            run["inserted_text"] = _join_run_piece(
+                run["inserted_text"], inserted, prepend=False, adjacent=adjacent
+            )
+            run["_last_insert_end"] = (start + len(inserted)) if start is not None else None
+
+    close_run()
+    return events
+
+
+
 def build_submission_analysis(
     submission,
     session,
@@ -858,21 +974,7 @@ def build_submission_analysis(
         }
         for version in versions
     ]
-    timeline.extend(
-        [
-            {
-                "event_type": "source_operation",
-                "created_at": operation.created_at,
-                "operation_id": operation.id,
-                "op_type": operation.op_type,
-                "source_type": operation.source_type,
-                "inserted_length": len((operation.inserted_text or "").strip()),
-                "label": f"{operation.source_type}:{operation.op_type}",
-            }
-            for operation in operations
-            if operation.op_type
-        ]
-    )
+    timeline.extend(_build_operation_timeline(operations, prompt_timeline))
     timeline.extend(bursts)
     timeline.append(
         {

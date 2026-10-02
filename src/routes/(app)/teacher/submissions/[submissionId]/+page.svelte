@@ -55,6 +55,25 @@
 				inserted_length: null
 			};
 		}
+		// 连续的手动输入/删除/替换在后端已合并成一段，这里只报增删字数，写了什么、删了什么展开看。
+		if (item.event_type === 'typing_run') {
+			return {
+				meta: t('Edited text'),
+				label: [
+					item.inserted_length ? t('+{{count}} chars', { count: item.inserted_length }) : null,
+					item.deleted_length ? t('−{{count}} chars', { count: item.deleted_length }) : null,
+					t('{{count}} edits', { count: item.operation_count })
+				]
+					.filter(Boolean)
+					.join(' · '),
+				inserted_length: null,
+				run: {
+					ended_at: item.ended_at,
+					inserted_text: item.inserted_text ?? '',
+					deleted_text: item.deleted_text ?? ''
+				}
+			};
+		}
 		if (item.event_type === 'source_operation') {
 			return {
 				meta: getWritingSourceLabel(item.source_type, t),
@@ -1167,7 +1186,9 @@
 												{@const isUser = item.kind === 'prompt' && item.role === 'user'}
 												{@const isAI = item.kind === 'prompt' && item.role === 'assistant'}
 												{@const isExpanded = expandedTimelineIds.has(i)}
-												{@const isLong = (item.label?.length ?? 0) > 200}
+												{@const isLong = item.run
+													? Boolean(item.run.inserted_text || item.run.deleted_text)
+													: (item.label?.length ?? 0) > 200}
 												<div class="rounded-r-2xl rounded-l-none border-l-[3px] bg-gray-50 dark:bg-gray-800 px-4 py-3 text-sm {isUser
 													? 'border-blue-400'
 													: isAI
@@ -1179,7 +1200,7 @@
 														</span>
 														{#if item.created_at}
 															<span class="text-gray-400 tabular-nums">
-																{formatEpochTime(item.created_at)}
+																{formatEpochTime(item.created_at)}{#if item.run && formatEpochTime(item.run.ended_at) !== formatEpochTime(item.created_at)}–{formatEpochTime(item.run.ended_at)}{/if}
 															</span>
 														{/if}
 													</div>
@@ -1187,6 +1208,24 @@
 														<div class="prose prose-sm dark:prose-invert max-w-none break-words prose-headings:my-2 prose-headings:text-sm prose-headings:font-semibold text-gray-800 dark:text-gray-200 {isExpanded ? '' : 'max-h-[4.5rem] overflow-hidden'}">
 															{@html renderMarkdown(item.label)}
 														</div>
+													{:else if item.run}
+														<div class="text-gray-800 dark:text-gray-200">{item.label}</div>
+														{#if isExpanded}
+															<div class="mt-2 space-y-1.5 text-xs">
+																{#if item.run.inserted_text}
+																	<div class="whitespace-pre-wrap break-words">
+																		<span class="text-emerald-600 dark:text-emerald-400">{$i18n.t('Wrote')}</span>
+																		<span class="text-gray-700 dark:text-gray-300">{item.run.inserted_text}</span>
+																	</div>
+																{/if}
+																{#if item.run.deleted_text}
+																	<div class="whitespace-pre-wrap break-words">
+																		<span class="text-rose-600 dark:text-rose-400">{$i18n.t('Removed')}</span>
+																		<span class="text-gray-500 line-through">{item.run.deleted_text}</span>
+																	</div>
+																{/if}
+															</div>
+														{/if}
 													{:else}
 														<div class="whitespace-pre-wrap break-words text-gray-800 dark:text-gray-200 {isExpanded ? '' : 'line-clamp-3'}">{item.label}</div>
 													{/if}
@@ -1200,7 +1239,11 @@
 															class="mt-1.5 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
 															on:click={() => toggleTimelineItem(i)}
 														>
-															{isExpanded ? $i18n.t('Collapse') : $i18n.t('Expand full text')}
+															{isExpanded
+																? $i18n.t('Collapse')
+																: item.run
+																	? $i18n.t('Show what changed')
+																	: $i18n.t('Expand full text')}
 														</button>
 													{/if}
 												</div>

@@ -40,6 +40,7 @@
 	"Each student can be in only one classroom. Changing it transfers the student: past submissions stay with the old classroom, and the growth profile moves with the student.": "每位学生只能在一个班级。更改班级即调班：原班的提交记录留在原班，成长画像随学生转移。",
 	"Each student can be in only one classroom. To change classes, ask your teacher or an administrator.": "每位学生只能加入一个班级。如需换班，请联系老师或管理员。",
 	"Edit settings": "编辑设置",
+	"Edited text": "修改正文",
 	"Empty — this assignment type adds no instructions.": "留空 —— 该作业形式不追加任何说明。",
 	"Export Dataset": "导出数据集",
 	"Export Progress (CSV)": "导出进度（CSV）",
@@ -103,6 +104,7 @@
 	"Please answer: {{prompt}}": "请回答：{{prompt}}",
 	"Please describe your \"Other\" answer to: {{prompt}}": "选了「其他」请写一句说明：{{prompt}}",
 	"Please read my first draft against the rubric and point out the main problems.": "请按评分标准读一遍我的初稿，指出主要问题。",
+	"Removed": "删去",
 	"Sent automatically by the platform": "平台自动发起",
 	"Pre-filled with recommended questions. Add, remove, or rewrite them to fit this assignment.": "已预填推荐题目，按这份作业的需要增删、改写即可。",
 	"Pre-filled with the questions from your last assignment \"{{title}}\". Edit them, import another set, or restore defaults.": "已沿用你上一份作业「{{title}}」的反思题。可以直接修改、导入别的作业的题，或恢复默认。",
@@ -121,6 +123,7 @@
 	"Revise-draft assignments have no pre-submission read-through": "修订初稿作业没有提交前 AI 读者试读",
 	"Scoring": "评分",
 	"Sections": "目录",
+	"Show what changed": "看改了什么",
 	"Sort by Due Time": "按截止时间",
 	"Sort by Latest Submission": "按最近提交",
 	"Sort by To Review": "按待批改数",
@@ -150,9 +153,11 @@
 	"View Submission": "查看提交",
 	"Waiting for the student to resubmit": "等学生修改后重交",
 	"Write from scratch": "从零写作",
+	"Wrote": "写入",
 	"Your writing process is recorded here. Only you can see it.": "这里会记录你的写作过程，只有你自己能看到。",
 	"Your writing process is recorded here. Your teacher can see it.": "这里会记录你的写作过程，老师可以看到。",
 	"{{count}} / {{min}} characters at least": "已有 {{count}} 字，至少 {{min}} 字",
+	"{{count}} edits": "{{count}} 次编辑",
 	"{{count}} missing": "{{count}} 人未交",
 	"{{count}} reflection questions, plus \"Did you use AI?\"": "{{count}} 道反思题，外加固定的「是否使用了 AI」",
 	"{{count}} submissions": "共 {{count}} 份",
@@ -4066,5 +4071,6 @@
 	"Large insertion": "大段新增",
 	"Added a large block of text at once": "一次性新增了一大段文字",
 	"Submitted this round": "提交本轮作业",
-	"Large typed burst without explicit paste/AI source and with high final retention.": "短时间内出现一大段文字，没有粘贴或 AI 来源记录，且在终稿里几乎原样保留。"
+	"Large typed burst without explicit paste/AI source and with high final retention.": "短时间内出现一大段文字，没有粘贴或 AI 来源记录，且在终稿里几乎原样保留。",
+	"−{{count}} chars": "−{{count}} 字"
 }
