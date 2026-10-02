@@ -60,6 +60,7 @@ from open_webui.models.users import User, UserModel
 from open_webui.services.education.identity import GROUP_ID_BY_ROLE
 from open_webui.services.education.writing_context import (
     build_current_text_context,
+    describe_text_changes,
     is_draft_baseline_missing,
 )
 import open_webui.routers.education as education_router_module
@@ -6234,6 +6235,24 @@ def test_writing_chat_context_carries_the_latest_text(education_client):
     assert "改过的第二段。" in context
 
 
+def test_describe_text_changes_pairs_edited_paragraphs():
+    assert describe_text_changes(["甲。"], ["甲。"]) == []
+    assert describe_text_changes(
+        ["第一段原文很长。", "第二段。", "第三段。"],
+        ["第一段原文很长。补一句。", "新的一段。", "第三段。"],
+    ) == [
+        "「……第一段原文很长。」之后加了「补一句。」",
+        "删去了一段「第二段。」",
+        "新增一段「新的一段。」",
+    ]
+    assert describe_text_changes(["他说甲。然后乙很好。最后丙。"], ["他说甲。然后乙非常好，因为丁。最后丙。"]) == [
+        "「……他说甲。」之后把「然后乙很好。」改成了「然后乙非常好，因为丁。」"
+    ]
+    assert describe_text_changes(["甲。", "乙。", "丙。"], ["甲。"]) == [
+        "删去了连续 2 段，从「乙。」到「丙。」"
+    ]
+
+
 def test_writing_chat_context_tells_whether_the_student_revised(education_client):
     client, teacher, _, student, _, SessionLocal = education_client
     assignment, session_id = _setup_revise_draft_assignment(client, teacher, student)
@@ -6292,7 +6311,8 @@ def test_writing_chat_context_tells_whether_the_student_revised(education_client
 
     context = context_after("reply-1")
     assert "与初稿相比：已有改动。" in context
-    assert "自你上一次回复以来：有新的改动。" in context
+    assert "自你上一次回复以来，学生改了这些地方：" in context
+    assert "改过的第二段。" in context.split("<<<")[0]
 
     # 下一条回复已经看过这一版,学生之后没再改
     post_reply("reply-2", now + 100)

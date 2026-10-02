@@ -9,7 +9,9 @@
 import html
 import io
 import os
+import re
 import zipfile
+from difflib import SequenceMatcher
 
 from open_webui.models.chat_messages import ChatMessages
 from open_webui.models.education import Education
@@ -291,17 +293,110 @@ async def build_current_text_context(
         seen_text = (
             version.note_snapshot_text if version else (baseline or "")
         )
-        unchanged = paragraphs == normalize_draft_paragraphs(seen_text)
-        status.append(
-            "自你上一次回复以来：" + ("没有新的改动。" if unchanged else "有新的改动。")
-        )
+        changes = describe_text_changes(normalize_draft_paragraphs(seen_text), paragraphs)
+        if changes:
+            status.append("自你上一次回复以来，学生改了这些地方：")
+            status.extend(f"- {change}" for change in changes)
+        else:
+            status.append("自你上一次回复以来：没有新的改动。")
 
     return (
         "【学生当前正文】以下是学生右侧编辑器里最近一次保存的全文。"
-        "学生会边聊边改稿，但不一定每轮都改，改没改以下面的状态为准，不要自己推测。"
+        "学生会边聊边改稿，但不一定每轮都改；改没改、改了哪里以下面的说明为准，不要自己推测。"
         "它和你之前回复里引用过的句子不一样时，那是改动前的旧版本，不是你记错了；"
-        "谈论正文时一律以这一版为准。学生说改好了、状态却显示没有新的改动，"
-        "多半是还没保存，请他等编辑器显示已保存后再发。\n"
+        "谈论正文时一律以这一版为准。改动和你期待的不一样时，照实说你看到他改了什么。"
+        "只有说明里写着没有新的改动、学生却说改好了，才是还没保存，"
+        "请他等编辑器显示已保存后再发。\n"
         + "".join(f"{line}\n" for line in status)
         + f"<<<\n{text}\n>>>"
     )
+
+
+# 改动说明的篇幅上限:说明只是指路,全文就在下面。
+_CHANGE_LIMIT = 8
+_CHANGE_CLIP = 150
+_CHANGE_CONTEXT = 15
+_SENTENCE_END = re.compile(r"(?<=[。！？；!?;])")
+
+
+def _clip(text: str, limit: int = _CHANGE_CLIP) -> str:
+    return text if len(text) <= limit else text[:limit] + "……"
+
+
+def _similar(old: str, new: str) -> bool:
+    return SequenceMatcher(a=old, b=new, autojunk=False).ratio() >= 0.5
+
+
+def _describe_removed(paragraphs: list[str]) -> list[str]:
+    if len(paragraphs) > 1:
+        return [
+            f"删去了连续 {len(paragraphs)} 段，"
+            f"从「{_clip(paragraphs[0], 40)}」到「{_clip(paragraphs[-1], 40)}」"
+        ]
+    return [f"删去了一段「{_clip(paragraphs[0])}」"] if paragraphs else []
+
+
+def _split_sentences(paragraph: str) -> list[str]:
+    return [part for part in _SENTENCE_END.split(paragraph) if part]
+
+
+def _describe_paragraph_edit(old: str, new: str) -> list[str]:
+    """同一段里改了哪几处,按整句说:逐字比出来的「把『初稿』改成了『改过的』」模型看不懂。
+
+    每处带前一句的末尾一小截定位。
+    """
+    edits = []
+    old_sentences, new_sentences = _split_sentences(old), _split_sentences(new)
+    matcher = SequenceMatcher(a=old_sentences, b=new_sentences, autojunk=False)
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        before = "".join(old_sentences[:i1])[-_CHANGE_CONTEXT:]
+        lead = f"「……{before}」之后" if before else "段首"
+        removed = _clip("".join(old_sentences[i1:i2]))
+        added = _clip("".join(new_sentences[j1:j2]))
+        if tag == "insert":
+            edits.append(f"{lead}加了「{added}」")
+        elif tag == "delete":
+            edits.append(f"{lead}删去了「{removed}」")
+        else:
+            edits.append(f"{lead}把「{removed}」改成了「{added}」")
+    return edits
+
+
+def describe_text_changes(old: list[str], new: list[str]) -> list[str]:
+    """两版正文(已按段规整)之间改了什么,逐条写成给模型看的说明;没改返回空列表。
+
+    模型只看得到当前全文,看不到上一版;只告诉它「有改动」,它得自己猜改了哪里,
+    猜不到学生答应写的内容时会误以为学生没改(2026-10-02 本地实测)。
+    """
+    changes = []
+    matcher = SequenceMatcher(a=old, b=new, autojunk=False)
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        # 一块里段数可能对不上(改了一段又新起一段):相近的段配成「改了」,其余算删去或新增。
+        removed = []
+        i, j = i1, j1
+        while i < i2 or j < j2:
+            if i < i2 and j < j2 and _similar(old[i], new[j]):
+                changes.extend(_describe_removed(removed))
+                removed = []
+                changes.extend(_describe_paragraph_edit(old[i], new[j]))
+                i += 1
+                j += 1
+            elif j < j2 and (
+                i >= i2 or any(_similar(old[i], new[k]) for k in range(j + 1, j2))
+            ):
+                changes.extend(_describe_removed(removed))
+                removed = []
+                changes.append(f"新增一段「{_clip(new[j])}」")
+                j += 1
+            else:
+                removed.append(old[i])
+                i += 1
+        changes.extend(_describe_removed(removed))
+    if len(changes) > _CHANGE_LIMIT:
+        rest = len(changes) - _CHANGE_LIMIT
+        changes = changes[:_CHANGE_LIMIT] + [f"另有 {rest} 处改动，请对照全文"]
+    return changes
