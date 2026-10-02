@@ -1002,8 +1002,8 @@
 				{/if}
 				</div>
 			</div>
-			<div class="min-h-0 flex-1 overflow-y-auto px-5 py-5">
-				<div class="mx-auto w-full {WRITING_COLUMN}">
+			<div class="min-h-0 flex-1 overflow-y-auto px-5 py-5 {needsDraftBaseline ? 'flex flex-col' : ''}">
+				<div class="mx-auto w-full {WRITING_COLUMN} {needsDraftBaseline ? 'flex flex-1 flex-col' : ''}">
 				{#if isAssignment && review}
 					<ReviewResultCard {review} {assignment} onRevise={null} />
 				{/if}
@@ -1152,7 +1152,7 @@
 						{/if}
 					{/if}
 				</div>
-				<div class="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+				<div class="min-h-0 flex-1 overflow-y-auto px-5 py-5 {needsDraftBaseline ? 'flex flex-col' : ''}">
 					{#if isAssignment && review}
 						<ReviewResultCard {review} {assignment} onRevise={null} />
 					{/if}

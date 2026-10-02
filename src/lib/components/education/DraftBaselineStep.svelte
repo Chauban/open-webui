@@ -75,7 +75,8 @@
 	};
 </script>
 
-<section class="grid gap-3">
+<!-- 撑满外层滚动区的高度:正文框吃掉剩余空间,确认按钮落在底部;外层太矮时退回滚动 -->
+<section class="flex min-h-0 flex-1 flex-col gap-3">
 	<div>
 		<h3 class="text-sm font-semibold text-gray-900 dark:text-gray-100">
 			{$i18n.t('Step 1: Submit your first draft')}
@@ -107,7 +108,7 @@
 	</div>
 	<textarea
 		bind:value={text}
-		class="min-h-[50vh] w-full {EDU_FIELD_CLASS} {dragging
+		class="min-h-64 w-full flex-1 resize-none {EDU_FIELD_CLASS} {dragging
 			? 'ring-2 ring-sky-400 dark:ring-sky-500'
 			: ''}"
 		placeholder={$i18n.t('Paste your first draft here, or drop a file in')}
