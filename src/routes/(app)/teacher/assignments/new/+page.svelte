@@ -67,8 +67,9 @@
 				getTeacherAssignmentDefaults(localStorage.token)
 			]);
 			classrooms = teacherClassrooms;
-			// 档位初始值由管理员按实例设定；复制作业时下面会改用源作业的档位。
+			// 档位和作业形式的初始值由管理员按实例设定；复制作业时下面会改用源作业的设置。
 			draft.coachingStyle = assignmentDefaults.coaching_style;
+			draft.taskMode = assignmentDefaults.task_mode;
 			reflectionQuestionSets = questionSets;
 			// 教师大多一门课一套反思，所以默认沿用最近一份作业的题；第一次出题才给推荐题。
 			if (questionSets.length > 0) {
@@ -124,6 +125,8 @@
 			}
 
 			if (presetChallengeFocus) {
+				// 质疑式读者只有从零写作才有；实例默认是修订初稿时也要切回来，焦点才不会被丢掉。
+				draft.taskMode = 'from_scratch';
 				draft.challengeEnabled = true;
 				draft.challengeFocusKeys = [presetChallengeFocus];
 			}

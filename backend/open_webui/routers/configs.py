@@ -15,7 +15,7 @@ from open_webui.config import (
 from open_webui.env import AIOHTTP_CLIENT_SESSION_SSL, AIOHTTP_CLIENT_TIMEOUT
 from open_webui.events import EVENTS, publish_event
 from open_webui.models.config import Config
-from open_webui.models.education import CoachingStyle
+from open_webui.models.education import CoachingStyle, TaskMode
 from open_webui.models.oauth_sessions import OAuthSessions
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.headers import bearer_auth_header, get_custom_headers
@@ -75,6 +75,7 @@ EDUCATION_CONFIG_KEYS = {
     'EDUCATION_COACHING_PROMPTS': 'education.coaching_prompts',
     'EDUCATION_TASK_PROMPTS': 'education.task_prompts',
     'EDUCATION_DEFAULT_COACHING_STYLE': 'education.default_coaching_style',
+    'EDUCATION_DEFAULT_TASK_MODE': 'education.default_task_mode',
     'EDUCATION_CHALLENGE_PROMPTS': 'education.challenge_prompts',
 }
 SUBAGENTS_CONFIG_KEYS = {
@@ -831,6 +832,7 @@ class EducationConfigForm(BaseModel):
     EDUCATION_COACHING_PROMPTS: EducationCoachingPromptsForm
     EDUCATION_TASK_PROMPTS: EducationTaskPromptsForm
     EDUCATION_DEFAULT_COACHING_STYLE: CoachingStyle
+    EDUCATION_DEFAULT_TASK_MODE: TaskMode
 
 
 class EducationConfigResponse(EducationConfigForm):

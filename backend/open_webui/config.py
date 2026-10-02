@@ -3188,6 +3188,8 @@ DEFAULT_CONFIG = {
     'education.task_prompts': DEFAULT_EDUCATION_TASK_PROMPTS,
     # 新建作业时辅导档位的初始值;各实例按课程定(哈工深是严格档),教师仍可改选。
     'education.default_coaching_style': 'balanced',
+    # 新建作业时作业形式的初始值;哈工深学生都带着课外初稿来,设为 revise_draft。
+    'education.default_task_mode': 'from_scratch',
     'education.challenge_prompts': DEFAULT_EDUCATION_CHALLENGE_PROMPTS,
 }
 
