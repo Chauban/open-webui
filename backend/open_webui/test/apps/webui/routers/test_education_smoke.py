@@ -69,7 +69,11 @@ import open_webui.services.education.challenge as education_challenge_module
 import open_webui.services.education.profile as education_profile_module
 import open_webui.services.education.profile_snapshots as profile_snapshots_module
 import open_webui.services.education.profile_recompute as profile_recompute_module
-from open_webui.routers.education import router as education_router
+from open_webui.routers.education import (
+    _build_assignment_system_prompt,
+    router as education_router,
+)
+from open_webui.services.education.revision_items import build_first_read_context
 from open_webui.routers.chats import router as chats_router
 from open_webui.routers.notes import router as notes_router
 from open_webui.services.education.analysis import (
@@ -6501,6 +6505,487 @@ def _revise_and_submit(client, assignment, session_id, text, declared_until):
     )
     assert res.status_code == 200, res.text
     return res.json()["submission_id"]
+
+
+
+@contextmanager
+def _fake_diagnosis(payload):
+    """替换模型调用:第一次通读只经过 challenge.generate_completion 这一个出口。"""
+    calls = []
+
+    async def fake_generate(request, user, model_id, messages):
+        calls.append({"model_id": model_id, "messages": messages})
+        return json.dumps(payload, ensure_ascii=False)
+
+    original = education_challenge_module.generate_completion
+    education_challenge_module.generate_completion = fake_generate
+    try:
+        yield calls
+    finally:
+        education_challenge_module.generate_completion = original
+
+
+_DIAGNOSIS_PAYLOAD = {
+    "items": [
+        {
+            "key": "ideas",
+            "status": "problem",
+            "finding": "第一段反复说同一句话",
+            "quote": "初稿第一段,初稿第一段,",
+        },
+        {
+            "key": "structure",
+            "status": "minor",
+            "finding": "两段之间缺少过渡",
+            "quote": "这句话初稿里根本没有出现过的",
+        },
+        {"key": "evidence", "status": "ok", "finding": "", "quote": "初稿第二段。"},
+        {"key": "nonsense", "status": "problem", "finding": "不存在的维度", "quote": ""},
+    ]
+}
+
+
+def _start_first_read(client, session_id, model_id="test-model"):
+    return client.post(
+        f"/api/v1/writing-sessions/{session_id}/revision-items",
+        json={"model_id": model_id},
+    )
+
+
+def _revise_draft_with_baseline(client, teacher, student, **overrides):
+    assignment, session_id = _setup_revise_draft_assignment(
+        client, teacher, student, **overrides
+    )
+    res = client.post(
+        f"/api/v1/writing-sessions/{session_id}/draft-baseline",
+        json={"text": _DRAFT_TEXT},
+    )
+    assert res.status_code == 200, res.text
+    return assignment, session_id
+
+
+def test_first_read_concludes_on_every_criterion(education_client):
+    client, teacher, _, student, _, _ = education_client
+    _, session_id = _revise_draft_with_baseline(client, teacher, student)
+
+    with _fake_diagnosis(_DIAGNOSIS_PAYLOAD) as calls:
+        res = _start_first_read(client, session_id)
+        assert res.status_code == 200, res.text
+        assert res.json()["status"] == "ready"
+        items = res.json()["items"]
+        # 每个评分维度一条,按作业里的顺序;作业里没有的维度丢掉
+        assert [(item["criterion_key"], item["status"]) for item in items] == [
+            ("ideas", "problem"),
+            ("structure", "minor"),
+            ("evidence", "ok"),
+        ]
+        # 原句对回初稿;对不回去的留空;达标的不留原句、空结论记为空
+        assert items[0]["quoted_span"] == "初稿第一段,初稿第一段,"
+        assert items[1]["quoted_span"] is None
+        assert items[2]["quoted_span"] is None
+        assert items[2]["finding"] is None
+
+        # 用学生选的模型,系统提示里有评分维度和任务说明,初稿在用户消息里
+        assert calls[0]["model_id"] == "test-model"
+        system, user = calls[0]["messages"]
+        assert "ideas：Ideas" in system["content"]
+        assert "【任务说明】" in system["content"]
+        assert "初稿第一段,初稿第一段," in user["content"]
+
+        # 只通读一次:再取不再调模型,也不需要再带模型
+        res = client.post(f"/api/v1/writing-sessions/{session_id}/revision-items")
+        assert res.json() == {"status": "ready", "items": items}
+        assert len(calls) == 1
+
+
+def test_first_read_without_a_model_does_not_start(education_client):
+    client, teacher, _, student, _, _ = education_client
+    _, session_id = _revise_draft_with_baseline(client, teacher, student)
+    with _fake_diagnosis(_DIAGNOSIS_PAYLOAD) as calls:
+        res = client.post(f"/api/v1/writing-sessions/{session_id}/revision-items")
+    assert res.json() == {"status": "failed", "items": []}
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"oops": True},
+        # 缺一个维度:不能让某个维度没有结论
+        {"items": _DIAGNOSIS_PAYLOAD["items"][:2]},
+        # 暂缓只能跟在「要改」后面
+        {
+            "items": [
+                {"key": "ideas", "status": "ok"},
+                {"key": "structure", "status": "deferred"},
+                {"key": "evidence", "status": "deferred"},
+            ]
+        },
+    ],
+)
+def test_incomplete_first_read_fails_and_is_retried(education_client, payload):
+    client, teacher, _, student, _, _ = education_client
+    _, session_id = _revise_draft_with_baseline(client, teacher, student)
+    with _fake_diagnosis(payload) as calls:
+        assert _start_first_read(client, session_id).json() == {
+            "status": "failed",
+            "items": [],
+        }
+    # 当场重试一次,两次都不行才算这次失败;之后再调会重新通读
+    assert len(calls) == 2
+    with _fake_diagnosis(_DIAGNOSIS_PAYLOAD):
+        assert _start_first_read(client, session_id).json()["status"] == "ready"
+
+
+_DEFERRED_PAYLOAD = {
+    "blocking": "ideas",
+    "items": [
+        {"key": "ideas", "status": "problem", "finding": "定位不对", "quote": ""},
+        {"key": "structure", "status": "deferred", "finding": "不该有", "quote": "x"},
+        {"key": "evidence", "status": "ok", "finding": "", "quote": ""},
+    ],
+}
+
+
+def test_deferred_first_read_names_its_blocking_item(education_client):
+    client, teacher, _, student, _, _ = education_client
+    _, session_id = _revise_draft_with_baseline(client, teacher, student)
+    with _fake_diagnosis(_DEFERRED_PAYLOAD):
+        items = _start_first_read(client, session_id).json()["items"]
+    assert [(item["status"], item["is_blocking"]) for item in items] == [
+        ("problem", True),
+        ("deferred", False),
+        ("ok", False),
+    ]
+    assert items[1]["finding"] is None and items[1]["quoted_span"] is None
+
+
+@pytest.mark.parametrize("blocking", [None, "evidence", "nonsense"])
+def test_deferral_without_a_blocking_problem_fails(education_client, blocking):
+    client, teacher, _, student, _, _ = education_client
+    _, session_id = _revise_draft_with_baseline(client, teacher, student)
+    payload = {**_DEFERRED_PAYLOAD, "blocking": blocking}
+    with _fake_diagnosis(payload):
+        assert _start_first_read(client, session_id).json()["status"] == "failed"
+
+
+def test_follow_up_checks_the_blocking_item_then_fills_deferred(education_client):
+    client, teacher, _, student, _, SessionLocal = education_client
+    assignment, session_id = _revise_draft_with_baseline(client, teacher, student)
+    follow_up_url = f"/api/v1/writing-sessions/{session_id}/revision-items/follow-up"
+    with _fake_diagnosis(_DEFERRED_PAYLOAD):
+        _start_first_read(client, session_id)
+
+    # 那一项还没改到位:说清还差在哪,暂缓项不动
+    with _fake_diagnosis(
+        {"resolved": False, "note": "正文还在逐句赏析作品", "items": []}
+    ) as calls:
+        res = client.post(follow_up_url, json={"model_id": "test-model"})
+    assert res.status_code == 200, res.text
+    assert res.json()["status"] == "not_ready"
+    assert res.json()["note"] == "正文还在逐句赏析作品"
+    assert [item["status"] for item in res.json()["items"]] == ["problem", "deferred", "ok"]
+    # 补看看的是学生当前的正文,给模型的只有那一项和暂缓的几项
+    system, user = calls[0]["messages"]
+    assert "【出问题的那一项】Ideas（第一次通读的结论：定位不对）" in system["content"]
+    assert "structure：Structure" in system["content"]
+    assert "evidence：Evidence" not in system["content"]
+    assert "初稿第一段" in user["content"]
+
+    # 改到位了:暂缓项补上结论,那一项记下确认的时间,其余不动
+    with _fake_diagnosis(
+        {
+            "resolved": True,
+            "note": "正文已在介绍研究",
+            "items": [
+                {
+                    "key": "structure",
+                    "status": "problem",
+                    "finding": "两段之间缺过渡",
+                    "quote": "初稿第二段。初稿第二段。",
+                }
+            ],
+        }
+    ):
+        res = client.post(follow_up_url, json={"model_id": "test-model"})
+    assert res.json()["status"] == "ready"
+    items = res.json()["items"]
+    assert [(item["status"], bool(item["follow_up_at"])) for item in items] == [
+        ("problem", True),
+        ("problem", True),
+        ("ok", False),
+    ]
+    assert items[1]["quoted_span"] == "初稿第二段。初稿第二段。"
+
+    # 没有暂缓项了就不能再补看
+    res = client.post(follow_up_url, json={"model_id": "test-model"})
+    assert res.status_code == 400, res.text
+
+    # 对话里附的结论表写明补看
+    with SessionLocal() as db:
+        session = Education.get_writing_session_by_id(session_id, db=db)
+        context = build_first_read_context(session, db=db)
+    assert "- 要改 · Ideas：定位不对（学生改过后补看时已确认改到位）" in context
+    assert "- 补看 · 要改 · Structure：两段之间缺过渡" in context
+    assert "暂缓" not in context.split("\n")[1]
+
+    # 补看出的「要改」提交时同样要交代
+    submit_url = f"/api/v1/assignments/{assignment['id']}/submit"
+    body = {
+        **_submit_body(session_id, _DRAFT_MD),
+        "revision_decisions": [{"item_no": 1, "decision": "revised"}],
+    }
+    res = client.post(submit_url, json=body)
+    assert res.status_code == 400, res.text
+    body["revision_decisions"].append({"item_no": 2, "decision": "revised"})
+    res = client.post(submit_url, json=body)
+    assert res.status_code == 200, res.text
+
+    UserContext.current_user = teacher
+    sheet = client.get(
+        f"/api/v1/teacher/submissions/{res.json()['submission_id']}"
+    ).json()["submission"]["stats_json"]["revision_items"]
+    assert [(item["is_blocking"], bool(item["follow_up_at"])) for item in sheet["items"]] == [
+        (True, True),
+        (False, True),
+        (False, False),
+    ]
+
+
+def test_follow_up_needs_deferred_items(education_client):
+    client, teacher, _, student, _, _ = education_client
+    _, session_id = _revise_draft_with_baseline(client, teacher, student)
+    follow_up_url = f"/api/v1/writing-sessions/{session_id}/revision-items/follow-up"
+    res = client.post(follow_up_url, json={"model_id": "test-model"})
+    assert res.status_code == 400, res.text
+    with _fake_diagnosis(_DIAGNOSIS_PAYLOAD):
+        _start_first_read(client, session_id)
+    res = client.post(follow_up_url, json={"model_id": "test-model"})
+    assert res.status_code == 400, res.text
+
+
+def test_crashed_first_read_releases_the_claim(education_client):
+    client, teacher, _, student, _, _ = education_client
+    _, session_id = _revise_draft_with_baseline(client, teacher, student)
+
+    async def crash(request, user, model_id, messages):
+        raise RuntimeError("Model not found")
+
+    original = education_challenge_module.generate_completion
+    education_challenge_module.generate_completion = crash
+    try:
+        res = _start_first_read(client, session_id)
+    finally:
+        education_challenge_module.generate_completion = original
+    # 不能 500,也不能把占位留着让学生干等
+    assert res.status_code == 200, res.text
+    assert res.json() == {"status": "failed", "items": []}
+    with _fake_diagnosis(_DIAGNOSIS_PAYLOAD):
+        assert _start_first_read(client, session_id).json()["status"] == "ready"
+
+
+def test_problem_items_must_be_answered_and_are_frozen_at_submit(education_client):
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id = _revise_draft_with_baseline(client, teacher, student)
+    items_url = f"/api/v1/writing-sessions/{session_id}/revision-items"
+    with _fake_diagnosis(_DIAGNOSIS_PAYLOAD):
+        assert _start_first_read(client, session_id).json()["status"] == "ready"
+
+    # 只能对要改、可改进的表态;达标的不行
+    assert client.patch(f"{items_url}/2", json={"item_no": 2, "decision": "kept"}).status_code == 200
+    res = client.patch(f"{items_url}/3", json={"item_no": 3, "decision": "revised"})
+    assert res.status_code == 400, res.text
+
+    submit_url = f"/api/v1/assignments/{assignment['id']}/submit"
+    final_text = _DRAFT_MD  # 一个字没改
+    res = client.post(submit_url, json=_submit_body(session_id, final_text))
+    assert res.status_code == 400, res.text
+    assert res.json()["detail"] == "Mark how you handled every item on the revision list"
+
+    body = {
+        **_submit_body(session_id, final_text),
+        "revision_decisions": [{"item_no": 1, "decision": "partly"}],
+    }
+    res = client.post(submit_url, json=body)
+    assert res.status_code == 400, res.text
+    assert res.json()["detail"] == "Explain the items you did not fully revise"
+
+    # 可改进的那条选了「没改」也不用写理由
+    body["revision_decisions"] = [
+        {"item_no": 1, "decision": "partly", "reason": "只删了一半的重复"}
+    ]
+    res = client.post(submit_url, json=body)
+    assert res.status_code == 200, res.text
+
+    UserContext.current_user = teacher
+    detail = client.get(
+        f"/api/v1/teacher/submissions/{res.json()['submission_id']}"
+    ).json()
+    sheet = detail["submission"]["stats_json"]["revision_items"]
+    assert sheet["status"] == "ready"
+    assert [
+        (item["criterion_key"], item["status"], item["decision"], item["reason"])
+        for item in sheet["items"]
+    ] == [
+        ("ideas", "problem", "partly", "只删了一半的重复"),
+        ("structure", "minor", "kept", None),
+        ("evidence", "ok", None, None),
+    ]
+    # 说改了一部分,原句却还在:老师那边要看到这个信号
+    assert sheet["items"][0]["quote_unchanged"] is True
+
+
+def test_missing_first_read_does_not_block_submit(education_client):
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id = _revise_draft_with_baseline(client, teacher, student)
+    res = client.post(
+        f"/api/v1/assignments/{assignment['id']}/submit",
+        json=_submit_body(session_id, _DRAFT_MD),
+    )
+    assert res.status_code == 200, res.text
+    UserContext.current_user = teacher
+    detail = client.get(
+        f"/api/v1/teacher/submissions/{res.json()['submission_id']}"
+    ).json()
+    assert detail["submission"]["stats_json"]["revision_items"] == {
+        "status": "missing",
+        "items": [],
+    }
+
+
+def test_first_read_conclusions_reach_the_chat(education_client):
+    client, teacher, _, student, _, SessionLocal = education_client
+    _, session_id = _revise_draft_with_baseline(client, teacher, student)
+    with SessionLocal() as db:
+        session = Education.get_writing_session_by_id(session_id, db=db)
+        assert build_first_read_context(session, db=db) is None
+
+    with _fake_diagnosis(_DIAGNOSIS_PAYLOAD):
+        _start_first_read(client, session_id)
+    with SessionLocal() as db:
+        session = Education.get_writing_session_by_id(session_id, db=db)
+        context = build_first_read_context(session, db=db)
+    assert context.startswith("【第一次通读结论】")
+    assert "- 要改 · Ideas：第一段反复说同一句话（原句：「初稿第一段,初稿第一段,」）" in context
+    assert "- 可改进 · Structure：两段之间缺少过渡" in context
+    assert "- 达标：Evidence" in context
+
+
+def test_withdrawing_the_draft_clears_the_first_read(education_client):
+    client, teacher, _, student, _, _ = education_client
+    _, session_id = _revise_draft_with_baseline(client, teacher, student)
+    baseline_url = f"/api/v1/writing-sessions/{session_id}/draft-baseline"
+    with _fake_diagnosis(_DIAGNOSIS_PAYLOAD):
+        assert len(_start_first_read(client, session_id).json()["items"]) == 3
+    assert client.delete(baseline_url).status_code == 200
+
+    client.post(baseline_url, json={"text": _DRAFT_TEXT})
+    with _fake_diagnosis(_DIAGNOSIS_PAYLOAD) as calls:
+        res = _start_first_read(client, session_id)
+    # 撤回后结论一起清空,新初稿重新通读
+    assert res.json()["status"] == "ready"
+    assert len(calls) == 1
+
+
+def test_first_read_of_a_withdrawn_draft_is_dropped(education_client):
+    client, teacher, _, student, _, SessionLocal = education_client
+    _, session_id = _revise_draft_with_baseline(client, teacher, student)
+    new_text = "换过的初稿。" * 60
+
+    # 通读还在等模型时,学生撤回初稿、交了另一份
+    async def fake_generate(request, user, model_id, messages):
+        with SessionLocal() as db:
+            Education.reset_draft_baseline(session_id, db=db)
+            Education.set_draft_baseline(session_id, new_text, {"md": new_text}, db=db)
+        return json.dumps(_DIAGNOSIS_PAYLOAD, ensure_ascii=False)
+
+    original = education_challenge_module.generate_completion
+    education_challenge_module.generate_completion = fake_generate
+    try:
+        res = _start_first_read(client, session_id)
+    finally:
+        education_challenge_module.generate_completion = original
+    assert res.status_code == 200, res.text
+    assert res.json()["status"] == "failed"
+    assert res.json()["items"] == []
+
+    # 旧初稿的结论没落库,新初稿照常通读
+    with _fake_diagnosis(_DIAGNOSIS_PAYLOAD) as calls:
+        res = _start_first_read(client, session_id)
+    assert res.json()["status"] == "ready"
+    assert len(calls) == 1
+    assert new_text in calls[0]["messages"][1]["content"]
+
+
+def test_first_read_only_exists_for_revise_draft(education_client):
+    client, teacher, _, student, _, _ = education_client
+    flow = _prepare_assignment_flow(client, teacher, student)
+    session_id = flow["workspace"]["writing_session"]["id"]
+    UserContext.current_user = student
+    res = _start_first_read(client, session_id)
+    assert res.status_code == 400, res.text
+
+
+def test_coaching_styles_switch_drops_the_style_prompt(education_client):
+    client, teacher, _, student, _, SessionLocal = education_client
+    assignment, session_id = _revise_draft_with_baseline(
+        client, teacher, student, coaching_style="socratic"
+    )
+    with SessionLocal() as db:
+        model = Education.get_assignment_by_id(assignment["id"], db=db)
+    socratic = asyncio.run(Config.get("education.coaching_prompts"))["socratic"].strip()
+    task = asyncio.run(Config.get("education.task_prompts"))["revise_draft"].strip()
+    assert socratic in asyncio.run(_build_assignment_system_prompt(model))
+
+    # 关掉后对话不附档位提示词,任务说明照旧;这一轮记为没有档位
+    asyncio.run(Config.upsert({"education.enable_coaching_styles": False}))
+    prompt = asyncio.run(_build_assignment_system_prompt(model))
+    assert socratic not in prompt
+    assert task in prompt
+
+    UserContext.current_user = student
+    res = client.post(
+        f"/api/v1/assignments/{assignment['id']}/submit",
+        json=_submit_body(session_id, _DRAFT_MD),
+    )
+    assert res.status_code == 200, res.text
+    UserContext.current_user = teacher
+    coaching = client.get(
+        f"/api/v1/teacher/submissions/{res.json()['submission_id']}"
+    ).json()["submission"]["stats_json"]["coaching"]
+    assert coaching["style"] is None
+    assert coaching["prompt"] == ""
+    assert coaching["task_prompt"] == task
+
+
+def test_revise_draft_always_records_ai_use(education_client):
+    """修订初稿不问「用了 AI 吗」:首轮通读是平台发起的,客户端报什么都记为用了。"""
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id = _setup_revise_draft_assignment(
+        client, teacher, student, reflection_questions=_reflection_questions()
+    )
+    client.post(
+        f"/api/v1/writing-sessions/{session_id}/draft-baseline",
+        json={"text": _DRAFT_TEXT},
+    )
+    # 报「没用」也按用了校验:只给用了 AI 的学生看的题照样必答、照样收
+    res = client.post(
+        f"/api/v1/assignments/{assignment['id']}/submit",
+        json={
+            **_submit_body(session_id, _DRAFT_MD, _reflection_answers()),
+            "ai_used": False,
+        },
+    )
+    assert res.status_code == 200, res.text
+    UserContext.current_user = teacher
+    detail = client.get(
+        f"/api/v1/teacher/submissions/{res.json()['submission_id']}"
+    ).json()
+    assert detail["micro_reflection"]["ai_used"] is True
+    assert [item["id"] for item in detail["micro_reflection"]["reflection_json"]["items"]] == [
+        "ai_help",
+        "change",
+    ]
 
 
 def _diff_sides(blocks):

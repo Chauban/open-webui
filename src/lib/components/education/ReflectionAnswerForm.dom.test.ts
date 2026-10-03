@@ -76,3 +76,16 @@ test('勾选「其他」才出现说明框，每次作答都通知外层存草�
 
 	expect(onChange).toHaveBeenCalledTimes(3);
 });
+
+test('修订初稿作业不问「是否用了 AI」，按用了 AI 显示题目', () => {
+	render(ReflectionAnswerForm, {
+		props: { questions, askAiUsage: false, aiUsage: 'used' },
+		context
+	});
+
+	expect(screen.queryByText('Did you use AI for this submission?')).toBeNull();
+	expect(screen.queryByText('Used AI')).toBeNull();
+	expect(screen.getByText('AI 帮了你什么？')).toBeTruthy();
+	expect(screen.queryByText('为什么没用 AI？')).toBeNull();
+	expect(screen.queryByText('More questions appear after you answer whether you used AI.')).toBeNull();
+});

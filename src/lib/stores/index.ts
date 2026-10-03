@@ -323,6 +323,7 @@ type Config = {
 		enable_community_sharing: boolean;
 		enable_memories: boolean;
 		enable_education_return?: boolean;
+		enable_education_coaching_styles?: boolean;
 		enable_plugins?: boolean;
 		enable_autocomplete_generation: boolean;
 		enable_direct_connections: boolean;

@@ -26,6 +26,7 @@
 	import SourceHighlightedText from '$lib/components/education/SourceHighlightedText.svelte';
 	import EduEvidenceDisclaimer from '$lib/components/education/EduEvidenceDisclaimer.svelte';
 	import ChallengeRounds from '$lib/components/education/ChallengeRounds.svelte';
+	import RevisionItemsReview from '$lib/components/education/RevisionItemsReview.svelte';
 	import { buildSubmissionReviewOverview } from '$lib/utils/submission-review';
 	import {
 		formatEpoch,
@@ -269,6 +270,23 @@
 	$: criteriaLabels = Object.fromEntries(
 		rubricCriteria.map((criterion) => [criterion.key, criterion.label])
 	);
+	// 修订初稿作业:第一次通读按评分维度逐项下的结论和学生的处理,打分时就排在每一行下面。
+	$: firstReadByKey = Object.fromEntries(
+		(isReviseDraft ? (detail?.submission?.stats_json?.revision_items?.items ?? []) : []).map(
+			(item) => [item.criterion_key, item]
+		)
+	);
+	const FIRST_READ_STATUS_LABELS = {
+		problem: 'Needs changing',
+		minor: 'Could be better',
+		ok: 'Meets the standard',
+		deferred: 'Not looked at yet'
+	};
+	const FIRST_READ_DECISION_LABELS = {
+		revised: 'Changed it',
+		partly: 'Changed part of it',
+		kept: 'Left it as is'
+	};
 	$: rubricFilledCount = rubricCriteria.filter(
 		(criterion) => (rubricScores[criterion.key] ?? '') !== ''
 	).length;
@@ -748,9 +766,28 @@
 									<div class="divide-y divide-gray-100 dark:divide-gray-800 rounded-2xl border border-gray-200 dark:border-gray-800 overflow-hidden">
 										{#each rubricCriteria as criterion}
 											<div class="flex items-center gap-3 px-4 py-3 bg-white dark:bg-gray-850 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
-												<span class="flex-1 text-sm text-gray-700 dark:text-gray-300">
-													{criterion.label} / {criterion.max_score}
-												</span>
+												<div class="flex-1 min-w-0">
+													<div class="text-sm text-gray-700 dark:text-gray-300">
+														{criterion.label} / {criterion.max_score}
+													</div>
+													{#if firstReadByKey[criterion.key]}
+														{@const firstRead = firstReadByKey[criterion.key]}
+														<div class="mt-0.5 text-[11px] text-gray-400">
+															{firstRead.follow_up_at && !firstRead.is_blocking
+																? $i18n.t('Follow-up read')
+																: $i18n.t('First read-through')}: {$i18n.t(
+																FIRST_READ_STATUS_LABELS[firstRead.status]
+															)}{#if firstRead.follow_up_at && firstRead.is_blocking}
+																· {$i18n.t('Fixed, confirmed on follow-up')}{/if}{#if firstRead.decision}
+																· {$i18n.t('Student')}: {$i18n.t(
+																	FIRST_READ_DECISION_LABELS[firstRead.decision]
+																)}{/if}{#if firstRead.decision && firstRead.decision !== 'kept' && firstRead.quote_unchanged}
+																· <span class="text-rose-600 dark:text-rose-400"
+																	>{$i18n.t('Quoted sentence unchanged')}</span
+																>{/if}
+														</div>
+													{/if}
+												</div>
 												<select
 													value={rubricScores[criterion.key] ?? ''}
 													on:change={(event) =>
@@ -1301,8 +1338,16 @@
 						{:else if activeTab === 'reflection'}
 							<div class="space-y-4 p-5">
 
-								<!-- Coaching style in force for this round -->
-								{#if roundCoaching}
+								<!-- 修订初稿作业:第一次通读的逐项结论与学生的处理 -->
+								{#if isReviseDraft}
+									<RevisionItemsReview
+										sheet={detail?.submission?.stats_json?.revision_items ?? null}
+										{criteriaLabels}
+									/>
+								{/if}
+
+								<!-- Coaching style in force for this round (none when the admin turned coaching styles off) -->
+								{#if roundCoaching?.style}
 									<div class="rounded-2xl bg-gray-50 dark:bg-gray-800 px-4 py-4">
 										<div class="mb-2 text-[11px] text-gray-400">
 											{$i18n.t('AI Coaching Style')}
@@ -1331,15 +1376,17 @@
 									</div>
 								{/if}
 
-								<!-- AI use: the one fixed question -->
-								<div class="rounded-2xl bg-gray-50 dark:bg-gray-800 px-4 py-4">
-									<div class="mb-2 text-[11px] text-gray-400">
-										{$i18n.t('Did you use AI for this submission?')}
+								<!-- AI use: the one fixed question. Revise-draft students are not asked (the platform starts the first read-through). -->
+								{#if !isReviseDraft}
+									<div class="rounded-2xl bg-gray-50 dark:bg-gray-800 px-4 py-4">
+										<div class="mb-2 text-[11px] text-gray-400">
+											{$i18n.t('Did you use AI for this submission?')}
+										</div>
+										<span class="rounded-full border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-3 py-1 text-xs text-gray-700 dark:text-gray-300">
+											{detail.micro_reflection.ai_used ? $i18n.t('Used AI') : $i18n.t('Did not use AI')}
+										</span>
 									</div>
-									<span class="rounded-full border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-3 py-1 text-xs text-gray-700 dark:text-gray-300">
-										{detail.micro_reflection.ai_used ? $i18n.t('Used AI') : $i18n.t('Did not use AI')}
-									</span>
-								</div>
+								{/if}
 
 								<!-- Teacher-defined questions, frozen as they were when the student submitted -->
 								{#each detail.micro_reflection.reflection_json.items as item (item.id)}

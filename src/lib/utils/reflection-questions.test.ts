@@ -2,10 +2,12 @@ import { describe, expect, test } from 'vitest';
 
 import type { ReflectionQuestion } from '$lib/apis/education/types';
 import {
+	adaptDefaultReflectionQuestions,
 	buildReflectionAnswers,
 	cloneReflectionQuestions,
 	createReflectionQuestion,
 	getDefaultReflectionQuestions,
+	getRecommendedReflectionQuestions,
 	getReflectionAnswersError,
 	getReflectionQuestionsError,
 	normalizeReflectionQuestions,
@@ -22,10 +24,51 @@ const question = (patch: Partial<ReflectionQuestion>): ReflectionQuestion => ({
 
 describe('teacher reflection questions', () => {
 	test('default set is valid and starts with the AI-help question for AI users', () => {
-		const defaults = getDefaultReflectionQuestions(t);
+		const defaults = getDefaultReflectionQuestions(t, 'from_scratch');
 		expect(defaults.length).toBe(5);
 		expect(defaults[0].show_when).toBe('ai_used');
 		expect(getReflectionQuestionsError(normalizeReflectionQuestions(defaults))).toBeNull();
+	});
+
+	// 修订初稿：改了什么/改在哪/为什么接受或拒绝建议，修改清单和初稿终稿对比里都有了。
+	test('revise-draft defaults skip what the revision list already asks', () => {
+		const defaults = getDefaultReflectionQuestions(t, 'revise_draft');
+		expect(defaults.map((question) => question.prompt)).toEqual([
+			'Did you find the original of every source you cite?',
+			'Besides the revision list, what in this draft are you still not happy with, and why?'
+		]);
+		expect(getReflectionQuestionsError(normalizeReflectionQuestions(defaults))).toBeNull();
+
+		const library = getRecommendedReflectionQuestions(t, 'revise_draft').map(
+			(item) => item.question.prompt
+		);
+		for (const duplicate of [
+			'What did AI help you with?',
+			'What did you change?',
+			'Where did you make this change?',
+			'Why did you make this judgement?',
+			'Which AI suggestion did you not adopt, and why?',
+			'Why did you choose not to use AI?',
+			// 学生多半照抄清单上没改完的那一条
+			'Against the rubric, which part of this draft is weakest now, and why?'
+		]) {
+			expect(library).not.toContain(duplicate);
+		}
+		expect(library).toContain('What will you do next time?');
+	});
+
+	test('switching task mode swaps untouched defaults and keeps edited questions', () => {
+		const scratch = cloneReflectionQuestions(getDefaultReflectionQuestions(t, 'from_scratch'));
+		const swapped = adaptDefaultReflectionQuestions(scratch, t, 'revise_draft');
+		expect(reflectionQuestionsFingerprint(swapped)).toBe(
+			reflectionQuestionsFingerprint(getDefaultReflectionQuestions(t, 'revise_draft'))
+		);
+		expect(
+			reflectionQuestionsFingerprint(adaptDefaultReflectionQuestions(swapped, t, 'from_scratch'))
+		).toBe(reflectionQuestionsFingerprint(getDefaultReflectionQuestions(t, 'from_scratch')));
+
+		const edited = [...scratch.slice(1), question({ prompt: 'Teacher wrote this' })];
+		expect(adaptDefaultReflectionQuestions(edited, t, 'revise_draft')).toBe(edited);
 	});
 
 	test('normalizing drops blank options and fields that do not fit the kind', () => {
@@ -61,7 +104,7 @@ describe('teacher reflection questions', () => {
 	});
 
 	test('fingerprint ignores ids so cloned sets compare equal', () => {
-		const defaults = getDefaultReflectionQuestions(t);
+		const defaults = getDefaultReflectionQuestions(t, 'from_scratch');
 		expect(reflectionQuestionsFingerprint(cloneReflectionQuestions(defaults))).toBe(
 			reflectionQuestionsFingerprint(defaults)
 		);

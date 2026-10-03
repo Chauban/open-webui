@@ -68,6 +68,10 @@ from open_webui.models.education import (
     DashboardResponse,
     DRAFT_BASELINE_MIN_CHARS,
     DraftBaselineForm,
+    RevisionDecisionForm,
+    RevisionFollowUpResponse,
+    RevisionItemsResponse,
+    RevisionItemsStartForm,
     EditorOperationCreateForm,
     Education,
     MyAssignmentSubmissionsResponse,
@@ -138,6 +142,12 @@ from open_webui.services.education.profile_snapshots import (
     build_student_profile,
 )
 from open_webui.services.education.profile import PROFILE_METRIC_VERSION
+from open_webui.services.education.revision_items import (
+    build_revision_snapshot,
+    ensure_follow_up,
+    ensure_revision_items,
+    normalize_revision_decision,
+)
 from open_webui.services.education.identity import get_education_role
 from open_webui.services.education.writing_context import (
     DRAFT_FILE_MAX_BYTES,
@@ -373,9 +383,11 @@ async def _build_assignment_system_prompt(assignment) -> str:
     if task_prompt:
         lines.append(task_prompt)
 
-    coaching_prompt = await _get_coaching_prompt(assignment.coaching_style)
-    if coaching_prompt:
-        lines.append(coaching_prompt)
+    # 管理员关了辅导风格时,怎么辅导全写在任务说明里,不再附档位提示词。
+    if await Config.get("education.enable_coaching_styles"):
+        coaching_prompt = await _get_coaching_prompt(assignment.coaching_style)
+        if coaching_prompt:
+            lines.append(coaching_prompt)
 
     return "\n".join(lines)
 
@@ -2710,6 +2722,118 @@ async def reset_draft_baseline(
     return updated
 
 
+def _get_revise_draft_session(session: WritingSessionModel, db: Session):
+    """第一次通读和修改清单只属于已交初稿的修订初稿作业。"""
+    if session.scope != "assignment":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid writing scope"
+        )
+    assignment = _get_assignment_or_404(session.assignment_id, db)
+    if assignment.task_mode != "revise_draft":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This assignment has no revision list",
+        )
+    _ensure_draft_baseline_ready(session, db)
+    return assignment
+
+
+@router.post(
+    "/writing-sessions/{session_id}/revision-items",
+    response_model=RevisionItemsResponse,
+)
+async def get_or_build_revision_items(
+    request: Request,
+    form_data: Optional[RevisionItemsStartForm] = None,
+    session: WritingSessionModel = Depends(require_owned_writing_session),
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+):
+    """取第一次通读的结论;还没通读就用学生选的模型当场通读(一次要半分钟上下)。
+
+    同步做完再返回:前端在这段时间里锁着对话、显示进度,通读完才发出首轮那句话。
+    生产的反向代理读超时远大于一次通读的耗时。
+    """
+    assignment = _get_revise_draft_session(session, db)
+    status_value, items = await ensure_revision_items(
+        request,
+        user,
+        session,
+        assignment,
+        form_data.model_id if form_data else None,
+        await _get_task_prompt(assignment.task_mode),
+        db,
+    )
+    return {"status": status_value, "items": items}
+
+
+@router.post(
+    "/writing-sessions/{session_id}/revision-items/follow-up",
+    response_model=RevisionFollowUpResponse,
+)
+async def follow_up_revision_items(
+    request: Request,
+    form_data: RevisionItemsStartForm,
+    session: WritingSessionModel = Depends(require_owned_writing_session),
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+):
+    """补看:学生说挡住其余几项的那一项改好了。先确认改到位,再给暂缓的几项补上结论。"""
+    assignment = _get_revise_draft_session(session, db)
+    if session.revision_items_generated_at is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The first read-through has not finished",
+        )
+    if not any(
+        item.status == "deferred"
+        for item in Education.get_revision_items(session.id, db=db)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Nothing is waiting for a follow-up read",
+        )
+    status_value, note, items = await ensure_follow_up(
+        request,
+        user,
+        session,
+        assignment,
+        form_data.model_id,
+        await _get_task_prompt(assignment.task_mode),
+        db,
+    )
+    return {"status": status_value, "note": note, "items": items}
+
+
+@router.patch(
+    "/writing-sessions/{session_id}/revision-items/{item_no}",
+    response_model=RevisionItemsResponse,
+)
+async def update_revision_item(
+    item_no: int,
+    form_data: RevisionDecisionForm,
+    session: WritingSessionModel = Depends(require_owned_writing_session),
+    db: Session = Depends(get_session),
+):
+    _get_revise_draft_session(session, db)
+    if form_data.item_no != item_no:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Mismatched item"
+        )
+    try:
+        decision, reason = normalize_revision_decision(
+            form_data.decision, form_data.reason
+        )
+        items = Education.set_revision_decisions(
+            session.id, [(item_no, decision, reason)], db=db
+        )
+    except ValueError as err:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(err)
+        ) from err
+    return {"status": "ready", "items": items}
+
+
 @router.post("/writing-sessions/{session_id}/operations")
 async def create_editor_operations(
     form_data: EditorOperationCreateForm,
@@ -3013,6 +3137,54 @@ async def get_submission_challenge(
     return detail
 
 
+def _prepare_revision_decisions(
+    session: WritingSessionModel, decisions: list[RevisionDecisionForm], db: Session
+) -> Optional[list[tuple[int, Optional[str], Optional[str]]]]:
+    """提交时修改清单的处理:已存的加上本次请求带来的。
+
+    「要改」的每一项都要有结论,没全改的要写为什么;「可改进」的可填可不填。
+    第一次通读没做成时返回 None、不拦提交——学生控制不了这一步,不能因为它交不了作业。
+    老师那边会看到这一轮没有清单。
+    """
+    if session.revision_items_generated_at is None:
+        return None
+    items = Education.get_revision_items(session.id, db=db)
+    statuses = {item.item_no: item.status for item in items}
+    merged = {
+        item.item_no: (item.decision, item.reason)
+        for item in items
+        if item.status in ("problem", "minor")
+    }
+    for form in decisions:
+        if form.item_no not in merged:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unknown revision item",
+            )
+        try:
+            merged[form.item_no] = normalize_revision_decision(
+                form.decision, form.reason
+            )
+        except ValueError as err:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(err)
+            ) from err
+    for item_no, (decision, reason) in merged.items():
+        if statuses[item_no] != "problem":
+            continue
+        if decision is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Mark how you handled every item on the revision list",
+            )
+        if decision != "revised" and not reason:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Explain the items you did not fully revise",
+            )
+    return [(no, decision, reason) for no, (decision, reason) in sorted(merged.items())]
+
+
 @router.post("/assignments/{assignment_id}/submit")
 async def submit_assignment(
     assignment_id: str,
@@ -3039,17 +3211,26 @@ async def submit_assignment(
     _ensure_workspace_session_owner(user, session)
     _ensure_draft_baseline_ready(session, db)
 
+    # 修订初稿作业不问「用了 AI 吗」:首轮通读是平台替学生发起的,一定用了。
+    # 让学生自报只会多一个和对话记录矛盾的口子,所以这里一律记为用了,不看客户端。
+    ai_used = True if assignment.task_mode == "revise_draft" else form_data.ai_used
+
     # 反思答案对着作业「此刻」的题目校验;教师中途改题,已交的反思存的是当时的快照。
     try:
         reflection_record = build_reflection_record(
             assignment.reflection_questions,
-            form_data.ai_used,
+            ai_used,
             form_data.reflection_answers,
         )
     except ValueError as err:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(err)
         ) from err
+    revision_plan = (
+        _prepare_revision_decisions(session, form_data.revision_decisions, db)
+        if assignment.task_mode == "revise_draft"
+        else None
+    )
 
     # 已批改即定稿,提前拦下,免得白跑一遍保存与分析。
     current_submission = Education.get_current_submission(
@@ -3163,9 +3344,15 @@ async def submit_assignment(
         )
     stats["data_completeness"] = form_data.data_completeness.model_dump()
     # 档位的措辞管理员随时可改，所以把这一轮实际生效的原文一起冻进本轮记录。
+    # 管理员关了辅导风格时这一轮没有档位生效，记为空。
+    coaching_enabled = bool(await Config.get("education.enable_coaching_styles"))
     stats["coaching"] = {
-        "style": assignment.coaching_style,
-        "prompt": await _get_coaching_prompt(assignment.coaching_style),
+        "style": assignment.coaching_style if coaching_enabled else None,
+        "prompt": (
+            await _get_coaching_prompt(assignment.coaching_style)
+            if coaching_enabled
+            else ""
+        ),
         "task_mode": assignment.task_mode,
         "task_prompt": await _get_task_prompt(assignment.task_mode),
     }
@@ -3209,11 +3396,25 @@ async def submit_assignment(
             "turn_prompt": await _get_challenge_prompt("turn"),
             "closing_prompt": await _get_challenge_prompt("closing"),
         }
+    # 修改清单随这一轮冻存:学生之后再改处理方式(退回重交),已交的这一轮不跟着变。
+    if assignment.task_mode == "revise_draft":
+        if revision_plan is None:
+            stats["revision_items"] = {"status": "missing", "items": []}
+        else:
+            stats["revision_items"] = {
+                "status": "ready",
+                "items": build_revision_snapshot(
+                    Education.set_revision_decisions(
+                        session.id, revision_plan, commit=False, db=db
+                    ),
+                    form_data.final_content_text,
+                ),
+            }
     reflection = Education.insert_micro_reflection(
         assignment.id,
         session.owner_user_id,
         session.id,
-        form_data.ai_used,
+        ai_used,
         reflection_record,
         commit=False,
         db=db,

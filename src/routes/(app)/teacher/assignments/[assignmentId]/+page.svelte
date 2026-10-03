@@ -204,10 +204,12 @@
 							<span class="text-gray-400">/ {assignment.score_max}</span>
 						</dd>
 					</div>
-					<div>
-						<dt class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('AI Coaching Style')}</dt>
-						<dd class="mt-0.5">{$i18n.t(COACHING_TITLES[assignment.coaching_style])}</dd>
-					</div>
+					{#if $config?.features?.enable_education_coaching_styles ?? true}
+						<div>
+							<dt class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('AI Coaching Style')}</dt>
+							<dd class="mt-0.5">{$i18n.t(COACHING_TITLES[assignment.coaching_style])}</dd>
+						</div>
+					{/if}
 					<!-- 修订初稿作业结构上没有试读，不显示这一行，免得读成「没开」。 -->
 					{#if assignment.task_mode !== 'revise_draft'}
 						<div>
@@ -228,9 +230,13 @@
 							{$i18n.t('Reflection Before Submitting')}
 						</dt>
 						<dd class="mt-0.5">
-							{$i18n.t('{{count}} reflection questions, plus "Did you use AI?"', {
-								count: assignment.reflection_questions?.length ?? 0
-							})}
+							{assignment.task_mode === 'revise_draft'
+								? $i18n.t('{{count}} reflection questions, plus the revision list', {
+										count: assignment.reflection_questions?.length ?? 0
+									})
+								: $i18n.t('{{count}} reflection questions, plus "Did you use AI?"', {
+										count: assignment.reflection_questions?.length ?? 0
+									})}
 						</dd>
 					</div>
 				</dl>

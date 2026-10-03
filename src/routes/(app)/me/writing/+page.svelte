@@ -48,6 +48,7 @@
 	let creatingPersonal = false;
 	let activeTab = 'personal';
 	let showDone = false;
+	let showMissed = false;
 	let deletingPersonalIds = new Set<string>();
 	let homeLoading = false;
 	let pendingDeleteSessionId = '';
@@ -66,16 +67,23 @@
 	// 退回的作业要学生动手,和没交的一起算「待完成」;其余已提交的收进下方折叠区。
 	const needsAction = (item) => item.status !== 'submitted' || item.review_status === 'returned';
 
-	// 待完成:截止最近的在前(没有截止的垫底);已提交:最近更新的在前。
+	// 待完成:还能交的,截止最近的在前(没有截止的垫底);
+	// 已截止未交:过了截止交不了了,只剩回看,收进折叠区,截止最近的在前——
+	// 混在待完成里会排在最前头,把真正要做的作业挤到下面去;
+	// 已提交:最近更新的在前。
 	const groupAssignmentItems = (items) => {
 		const todo = [];
+		const missed = [];
 		const done = [];
 		for (const item of items ?? []) {
-			(needsAction(item) ? todo : done).push(item);
+			if (!needsAction(item)) done.push(item);
+			else if (isPastEffectiveDue(item)) missed.push(item);
+			else todo.push(item);
 		}
 		todo.sort((a, b) => (a.effective_due_at ?? Infinity) - (b.effective_due_at ?? Infinity));
+		missed.sort((a, b) => (b.effective_due_at ?? 0) - (a.effective_due_at ?? 0));
 		done.sort((a, b) => (b.updated_at ?? 0) - (a.updated_at ?? 0));
-		return { todo, done };
+		return { todo, missed, done };
 	};
 
 	// 卡片右侧的按钮按状态说清楚下一步,而不是一律「打开作业」。
@@ -236,9 +244,8 @@
 		}
 		const { role } = result;
 		if (role === 'student') {
-			const hasPendingAssignments = (home?.assignment_items ?? []).some(
-				(item) => item.status !== 'submitted'
-			);
+			const hasPendingAssignments =
+				groupAssignmentItems(home?.assignment_items).todo.length > 0;
 			// 还没加入班级的学生要先落在作业页，邀请码入口就在这一屏。
 			const hasClassroom = (home?.classrooms ?? []).length > 0;
 			activeTab = hasPendingAssignments || !hasClassroom ? 'assignment' : 'personal';
@@ -393,6 +400,31 @@
 									{@render assignmentCard(item)}
 								{/each}
 							</div>
+						{/if}
+
+						{#if assignmentGroups.missed.length > 0}
+							<button
+								class="mt-8 mb-3 flex items-center gap-1.5 text-base font-semibold"
+								aria-expanded={showMissed}
+								on:click={() => (showMissed = !showMissed)}
+							>
+								<ChevronRight
+									className="size-4 text-gray-400 transition-transform {showMissed
+										? 'rotate-90'
+										: ''}"
+								/>
+								{$i18n.t('Past due, not submitted')}
+								<span class="text-sm font-normal text-gray-500 tabular-nums dark:text-gray-400">
+									{assignmentGroups.missed.length}
+								</span>
+							</button>
+							{#if showMissed}
+								<div class="grid gap-3">
+									{#each assignmentGroups.missed as item (item.assignment.id)}
+										{@render assignmentCard(item)}
+									{/each}
+								</div>
+							{/if}
 						{/if}
 
 						{#if assignmentGroups.done.length > 0}

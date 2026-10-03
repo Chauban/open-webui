@@ -20,6 +20,7 @@
 	import EduButton from '$lib/components/education/EduButton.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 	import {
+		adaptDefaultReflectionQuestions,
 		cloneReflectionQuestions,
 		getDefaultReflectionQuestions
 	} from '$lib/utils/reflection-questions';
@@ -72,14 +73,21 @@
 			draft.taskMode = assignmentDefaults.task_mode;
 			reflectionQuestionSets = questionSets;
 			// 教师大多一门课一套反思，所以默认沿用最近一份作业的题；第一次出题才给推荐题。
-			if (questionSets.length > 0) {
-				draft.reflectionQuestions = cloneReflectionQuestions(questionSets[0].questions);
+			// 上一份沿用的若只是另一种作业形式的默认题（没改过），换成这种形式的默认题，
+			// 免得从零写作的默认题带进修订初稿作业、和修改清单重复。
+			const carried =
+				questionSets.length > 0
+					? cloneReflectionQuestions(questionSets[0].questions)
+					: getDefaultReflectionQuestions(t, draft.taskMode);
+			const adapted = adaptDefaultReflectionQuestions(carried, t, draft.taskMode);
+			if (questionSets.length > 0 && adapted === carried) {
+				draft.reflectionQuestions = carried;
 				reflectionNotice = t(
 					'Pre-filled with the questions from your last assignment "{{title}}". Edit them, import another set, or restore defaults.',
 					{ title: questionSets[0].assignment_title }
 				);
 			} else {
-				draft.reflectionQuestions = getDefaultReflectionQuestions(t);
+				draft.reflectionQuestions = adapted;
 				reflectionNotice = t(
 					'Pre-filled with recommended questions. Add, remove, or rewrite them to fit this assignment.'
 				);
@@ -127,6 +135,11 @@
 			if (presetChallengeFocus) {
 				// 质疑式读者只有从零写作才有；实例默认是修订初稿时也要切回来，焦点才不会被丢掉。
 				draft.taskMode = 'from_scratch';
+				draft.reflectionQuestions = adaptDefaultReflectionQuestions(
+					draft.reflectionQuestions,
+					t,
+					'from_scratch'
+				);
 				draft.challengeEnabled = true;
 				draft.challengeFocusKeys = [presetChallengeFocus];
 			}

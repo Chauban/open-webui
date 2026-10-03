@@ -83,7 +83,7 @@
 		</h3>
 		<p class="mt-1 text-sm text-gray-600 dark:text-gray-300">
 			{$i18n.t(
-				'Paste the first draft you wrote outside class here, or import it from a Word file. Once confirmed it is saved as the starting point of your revision and cannot be changed.'
+				'Paste the first draft you wrote outside class here, or import it from a Word file. Once confirmed it is saved as the starting point of your revision. If you confirm the wrong text, withdraw it from the "…" menu at the top right before you submit.'
 			)}
 		</p>
 		<p class="mt-1 text-xs text-gray-500 dark:text-gray-400">

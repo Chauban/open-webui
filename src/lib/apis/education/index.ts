@@ -440,6 +440,70 @@ export const resetDraftBaseline = async (token: string, sessionId: string) => {
 	}).then(handleJson);
 };
 
+export type RevisionDecision = 'revised' | 'partly' | 'kept';
+
+// 第一次通读给每个评分维度的结论:要改(提交时必须交代)、可改进(可以交代)、达标、暂缓。
+export type RevisionStatus = 'problem' | 'minor' | 'ok' | 'deferred';
+
+export type RevisionItem = {
+	item_no: number;
+	criterion_key: string;
+	status: RevisionStatus;
+	finding: string | null;
+	quoted_span: string | null;
+	decision: RevisionDecision | null;
+	reason: string | null;
+	// 挡住暂缓项的那一项(如综述定位);follow_up_at:补看补上结论 / 确认改到位的时间。
+	is_blocking: boolean;
+	follow_up_at: number | null;
+};
+
+export type RevisionItemsResult = {
+	// pending:别的请求正在通读;failed:这次没通读成,再调一次会重试。
+	status: 'ready' | 'pending' | 'failed';
+	items: RevisionItem[];
+};
+
+/**
+ * 修订初稿作业的第一次通读:取已有的结论;还没通读就用 modelId 当场通读(要半分钟上下)。
+ */
+export const getRevisionItems = async (token: string, sessionId: string, modelId?: string) => {
+	return fetch(`${WEBUI_API_BASE_URL}/writing-sessions/${sessionId}/revision-items`, {
+		method: 'POST',
+		headers: withAuth(token),
+		body: JSON.stringify({ model_id: modelId || null })
+	}).then(handleJson) as Promise<RevisionItemsResult>;
+};
+
+export type RevisionFollowUpResult = {
+	// not_ready:挡住暂缓项的那一项还没改到位,note 说还差在哪,暂缓项不动。
+	status: 'ready' | 'not_ready' | 'pending' | 'failed';
+	note: string | null;
+	items: RevisionItem[];
+};
+
+/** 补看:学生说挡住暂缓项的那一项改好了。平台先确认改到位,再给暂缓的几项补上结论。 */
+export const followUpRevisionItems = async (token: string, sessionId: string, modelId: string) => {
+	return fetch(`${WEBUI_API_BASE_URL}/writing-sessions/${sessionId}/revision-items/follow-up`, {
+		method: 'POST',
+		headers: withAuth(token),
+		body: JSON.stringify({ model_id: modelId })
+	}).then(handleJson) as Promise<RevisionFollowUpResult>;
+};
+
+export const updateRevisionItem = async (
+	token: string,
+	sessionId: string,
+	itemNo: number,
+	payload: { decision: RevisionDecision | null; reason: string | null }
+) => {
+	return fetch(`${WEBUI_API_BASE_URL}/writing-sessions/${sessionId}/revision-items/${itemNo}`, {
+		method: 'PATCH',
+		headers: withAuth(token),
+		body: JSON.stringify({ item_no: itemNo, ...payload })
+	}).then(handleJson) as Promise<RevisionItemsResult>;
+};
+
 // 只解析不保存:返回文件里的正文,学生核对后仍走 submitDraftBaseline。
 export const extractDraftBaselineFile = async (token: string, sessionId: string, file: File) => {
 	const body = new FormData();
@@ -515,6 +579,11 @@ export const submitAssignment = async (
 		final_content_text: string;
 		ai_used: boolean;
 		reflection_answers: ReflectionAnswer[];
+		revision_decisions?: Array<{
+			item_no: number;
+			decision: RevisionDecision | null;
+			reason: string | null;
+		}>;
 		data_completeness: {
 			version_data_complete: boolean;
 			editor_operations_complete: boolean;

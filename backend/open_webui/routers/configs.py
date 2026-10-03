@@ -77,6 +77,7 @@ EDUCATION_CONFIG_KEYS = {
     'EDUCATION_DEFAULT_COACHING_STYLE': 'education.default_coaching_style',
     'EDUCATION_DEFAULT_TASK_MODE': 'education.default_task_mode',
     'EDUCATION_ENABLE_RETURN': 'education.enable_return',
+    'EDUCATION_ENABLE_COACHING_STYLES': 'education.enable_coaching_styles',
     'EDUCATION_CHALLENGE_PROMPTS': 'education.challenge_prompts',
 }
 SUBAGENTS_CONFIG_KEYS = {
@@ -835,6 +836,7 @@ class EducationConfigForm(BaseModel):
     EDUCATION_DEFAULT_COACHING_STYLE: CoachingStyle
     EDUCATION_DEFAULT_TASK_MODE: TaskMode
     EDUCATION_ENABLE_RETURN: bool
+    EDUCATION_ENABLE_COACHING_STYLES: bool
 
 
 class EducationConfigResponse(EducationConfigForm):

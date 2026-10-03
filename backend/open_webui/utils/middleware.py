@@ -81,6 +81,7 @@ from open_webui.tasks import clear_response_stream, save_response_stream
 from open_webui.utils.access_control import has_connection_access, has_permission
 from open_webui.utils.access_control.files import get_owner_accessible_folder_files
 from open_webui.utils.access_control.folders import has_folder_access
+from open_webui.services.education.revision_items import build_first_read_context
 from open_webui.services.education.writing_context import (
     build_current_text_context,
     get_folder_writing_session,
@@ -2589,7 +2590,13 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         # 写作区:每轮把右侧编辑器最近一次保存的正文追加到系统提示末尾,AI 才看得到学生在改什么。
         # 不走 apply_system_prompt_to_body,学生正文不该被当成提示词模板解析变量。
         # 当前提问的父消息就是模型上一次的回复,据此判断这之后学生改没改稿。
+        # 修订初稿作业在正文前面先附第一次通读的结论表,首轮回复按它写。
         if writing_session:
+            first_read = build_first_read_context(writing_session)
+            if first_read:
+                form_data['messages'] = add_or_update_system_message(
+                    first_read, form_data.get('messages', []), append=True
+                )
             form_data['messages'] = add_or_update_system_message(
                 await build_current_text_context(
                     writing_session,

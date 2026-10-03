@@ -213,6 +213,24 @@
 	// 预填撤掉(有了对话或撤回了初稿)再出现时算新的一次:撤回初稿后重交,开场照样自动发出。
 	$: if (!prefillPrompt) appliedPrefillPrompt = '';
 
+	// 写作区替学生发出的一句话(带 meta.auto_started,教师端标「平台自动发起」、不计提问数)。
+	// 用在已有对话的中途:学生点「改好了，接着看」、平台补看完之后,替他说一句「请接着看」,
+	// AI 按补全后的结论表回复。每个 nonce 只发一次;要等对话解锁、模型就绪。
+	export let platformMessage: { text: string; nonce: number } | null = null;
+	let sentPlatformNonce = 0;
+	const sendPlatformMessage = async (message: { text: string; nonce: number }) => {
+		sentPlatformNonce = message.nonce;
+		const ready = () =>
+			!readOnly &&
+			selectedModels.length > 0 &&
+			selectedModels.every((modelId) => $models.some((model) => model.id === modelId));
+		if (!(await waitFor(ready, 100))) return;
+		await submitPrompt(message.text, [], { meta: { auto_started: true } });
+	};
+	$: if (platformMessage && platformMessage.nonce !== sentPlatformNonce) {
+		void sendPlatformMessage(platformMessage);
+	}
+
 	// The workspace clears chatIdProp to start a fresh conversation in place;
 	// upstream only reacts to a non-empty chatIdProp.
 	let previousChatIdProp: string | undefined = undefined;

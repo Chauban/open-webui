@@ -107,6 +107,8 @@
 	};
 	// 教师能否把作业退回重写;关掉后批改页不出现「退回重写」，后端也拒绝退回。
 	let enableReturn = false;
+	// 作业能否选辅导风格;关掉后作业表单不显示档位,对话也不附档位提示词。
+	let enableCoachingStyles = true;
 	let editing: { section: SectionKey; key: string } | null = null;
 	let draft = '';
 
@@ -129,6 +131,7 @@
 			defaults = read(config, 'defaultsKey');
 			assignmentDefaults = readAssignmentDefaults(config);
 			enableReturn = config.EDUCATION_ENABLE_RETURN;
+			enableCoachingStyles = config.EDUCATION_ENABLE_COACHING_STYLES;
 		} catch (error) {
 			loadFailed = true;
 			toast.error(`${error}`);
@@ -165,12 +168,14 @@
 			const config = await setEducationConfig(localStorage.token, {
 				...Object.fromEntries(sections.map((section) => [section.configKey, next[section.key]])),
 				...nextAssignmentDefaults,
-				EDUCATION_ENABLE_RETURN: enableReturn
+				EDUCATION_ENABLE_RETURN: enableReturn,
+				EDUCATION_ENABLE_COACHING_STYLES: enableCoachingStyles
 			});
 			prompts = read(config, 'configKey');
 			defaults = read(config, 'defaultsKey');
 			assignmentDefaults = readAssignmentDefaults(config);
 			enableReturn = config.EDUCATION_ENABLE_RETURN;
+			enableCoachingStyles = config.EDUCATION_ENABLE_COACHING_STYLES;
 			editing = null;
 			draft = '';
 			toast.success($i18n.t('Settings saved successfully!'));
@@ -249,6 +254,20 @@
 							</p>
 						</div>
 						<Switch bind:state={enableReturn} on:change={() => persist(prompts)} />
+					</div>
+
+					<div class="flex items-start justify-between gap-4">
+						<div class="min-w-0">
+							<div class="text-xs font-medium text-gray-700 dark:text-gray-300">
+								{$i18n.t('Let assignments choose a coaching style')}
+							</div>
+							<p class="mt-0.5 text-[0.6875rem] text-gray-400 dark:text-gray-600">
+								{$i18n.t(
+									'When off, the assignment form has no coaching style and the chat gets no style prompt: how the AI coaches is written entirely in the task instructions below.'
+								)}
+							</p>
+						</div>
+						<Switch bind:state={enableCoachingStyles} on:change={() => persist(prompts)} />
 					</div>
 				</div>
 

@@ -4,9 +4,12 @@
 	import { getContext } from 'svelte';
 	import { get } from 'svelte/store';
 
-	import type { ReflectionQuestionSet } from '$lib/apis/education';
+	import { config } from '$lib/stores';
+
+	import type { ReflectionQuestionSet, TaskMode } from '$lib/apis/education';
 	import type { AssignmentDraft } from '$lib/utils/assignment-form';
 	import { getClassroomDisplayName } from '$lib/utils/education';
+	import { adaptDefaultReflectionQuestions } from '$lib/utils/reflection-questions';
 	import EduCard from './EduCard.svelte';
 	import EduDateTimeField from './EduDateTimeField.svelte';
 	import RubricCriteriaEditor from './RubricCriteriaEditor.svelte';
@@ -37,13 +40,19 @@
 	const i18n = getContext<Writable<i18nType>>('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
 
-	// 修订初稿作业没有试读，第 3 节标题里就不提「试读」。
-	$: aiSectionLabel =
-		draft.taskMode === 'revise_draft' ? 'AI Coaching' : 'AI Coaching & Reader Check';
+	// 管理员可以关掉辅导风格(怎么辅导全写在任务说明里),这时表单不出现档位。
+	$: coachingEnabled = $config?.features?.enable_education_coaching_styles ?? true;
+	// 修订初稿作业没有试读，第 3 节标题里就不提「试读」;档位也关了时这一节没东西可设，整节不出现。
+	$: aiSectionLabel = !coachingEnabled
+		? 'AI Reader Check'
+		: draft.taskMode === 'revise_draft'
+			? 'AI Coaching'
+			: 'AI Coaching & Reader Check';
+	$: showAiSection = coachingEnabled || draft.taskMode !== 'revise_draft';
 	$: SECTIONS = [
 		{ id: 'assignment-basics', label: 'Basics' },
 		{ id: 'assignment-scoring', label: 'Scoring' },
-		{ id: 'assignment-ai', label: aiSectionLabel },
+		...(showAiSection ? [{ id: 'assignment-ai', label: aiSectionLabel }] : []),
 		{ id: 'assignment-reflection', label: 'Reflection Before Submitting' }
 	];
 	const COACHING_TITLES = { socratic: 'Socratic', balanced: 'Balanced', hands_off: 'Hands-off' };
@@ -68,7 +77,7 @@
 	$: isReviseDraft = draft.taskMode === 'revise_draft';
 	$: taskModeHint = TASK_MODES.find((mode) => mode.key === draft.taskMode)?.hint ?? '';
 	$: aiSummary = [
-		t(COACHING_TITLES[draft.coachingStyle]),
+		...(coachingEnabled ? [t(COACHING_TITLES[draft.coachingStyle])] : []),
 		...(isReviseDraft
 			? []
 			: [
@@ -77,9 +86,24 @@
 						: t('AI reader check off')
 				])
 	].join(' · ');
-	$: reflectionSummary = t('{{count}} reflection questions, plus "Did you use AI?"', {
-		count: draft.reflectionQuestions.length
-	});
+	$: reflectionSummary = isReviseDraft
+		? t('{{count}} reflection questions, plus the revision list', {
+				count: draft.reflectionQuestions.length
+			})
+		: t('{{count}} reflection questions, plus "Did you use AI?"', {
+				count: draft.reflectionQuestions.length
+			});
+
+	// 两种形式的默认反思题不同（修订初稿不问和修改清单重复的题）。
+	// 题目还是原形式的默认题、教师没动过时，跟着换；动过就不碰。
+	const chooseTaskMode = (taskMode: TaskMode) => {
+		draft.taskMode = taskMode;
+		draft.reflectionQuestions = adaptDefaultReflectionQuestions(
+			draft.reflectionQuestions,
+			t,
+			taskMode
+		);
+	};
 
 	const toggleClassroom = (id: string) => {
 		const next = new Set(selectedClassroomIds);
@@ -187,7 +211,7 @@
 								class={eduSegmentClass(draft.taskMode === mode.key)}
 								aria-pressed={draft.taskMode === mode.key}
 								disabled={taskModeLocked}
-								on:click={() => (draft.taskMode = mode.key)}
+								on:click={() => chooseTaskMode(mode.key)}
 							>
 								{$i18n.t(mode.title)}
 							</button>
@@ -234,37 +258,41 @@
 			</section>
 		</EduCard>
 
-		<EduCard padding="lg">
-			<section id="assignment-ai" class="scroll-mt-4">
-				<button
-					type="button"
-					class="flex w-full items-start justify-between gap-4 text-left"
-					aria-expanded={aiOpen}
-					on:click={() => (aiOpen = !aiOpen)}
-				>
-					<div>
-						<h2 class="text-base font-semibold">3 · {$i18n.t(aiSectionLabel)}</h2>
-						{#if !aiOpen}
-							<div class="mt-1 text-sm text-gray-500 dark:text-gray-400">{aiSummary}</div>
+		{#if showAiSection}
+			<EduCard padding="lg">
+				<section id="assignment-ai" class="scroll-mt-4">
+					<button
+						type="button"
+						class="flex w-full items-start justify-between gap-4 text-left"
+						aria-expanded={aiOpen}
+						on:click={() => (aiOpen = !aiOpen)}
+					>
+						<div>
+							<h2 class="text-base font-semibold">3 · {$i18n.t(aiSectionLabel)}</h2>
+							{#if !aiOpen}
+								<div class="mt-1 text-sm text-gray-500 dark:text-gray-400">{aiSummary}</div>
+							{/if}
+						</div>
+						<span class="shrink-0 text-sm text-gray-500 dark:text-gray-400">
+							{aiOpen ? $i18n.t('Collapse') : $i18n.t('Edit')}
+						</span>
+					</button>
+					<div class="mt-4 grid gap-4" class:hidden={!aiOpen}>
+						{#if coachingEnabled}
+							<CoachingStyleSelector bind:value={draft.coachingStyle} />
+						{/if}
+						{#if !isReviseDraft}
+							<ChallengeSettings
+								criteria={draft.rubricCriteria}
+								bind:enabled={draft.challengeEnabled}
+								bind:rounds={draft.challengeRounds}
+								bind:focusKeys={draft.challengeFocusKeys}
+							/>
 						{/if}
 					</div>
-					<span class="shrink-0 text-sm text-gray-500 dark:text-gray-400">
-						{aiOpen ? $i18n.t('Collapse') : $i18n.t('Edit')}
-					</span>
-				</button>
-				<div class="mt-4 grid gap-4" class:hidden={!aiOpen}>
-					<CoachingStyleSelector bind:value={draft.coachingStyle} />
-					{#if !isReviseDraft}
-						<ChallengeSettings
-							criteria={draft.rubricCriteria}
-							bind:enabled={draft.challengeEnabled}
-							bind:rounds={draft.challengeRounds}
-							bind:focusKeys={draft.challengeFocusKeys}
-						/>
-					{/if}
-				</div>
-			</section>
-		</EduCard>
+				</section>
+			</EduCard>
+		{/if}
 
 		<EduCard padding="lg">
 			<section id="assignment-reflection" class="scroll-mt-4">
@@ -275,7 +303,9 @@
 					on:click={() => (reflectionOpen = !reflectionOpen)}
 				>
 					<div>
-						<h2 class="text-base font-semibold">4 · {$i18n.t('Reflection Before Submitting')}</h2>
+						<h2 class="text-base font-semibold">
+							{showAiSection ? 4 : 3} · {$i18n.t('Reflection Before Submitting')}
+						</h2>
 						{#if !reflectionOpen}
 							<div class="mt-1 text-sm text-gray-500 dark:text-gray-400">{reflectionSummary}</div>
 							{#if reflectionNotice}
@@ -292,6 +322,7 @@
 						bind:questions={draft.reflectionQuestions}
 						questionSets={reflectionQuestionSets}
 						notice={reflectionNotice}
+						taskMode={draft.taskMode}
 						{currentAssignmentId}
 						{hasSubmissions}
 					/>

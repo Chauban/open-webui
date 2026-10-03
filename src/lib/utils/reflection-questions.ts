@@ -2,6 +2,7 @@
 // 后端 models/education.py 的 ReflectionQuestion / build_reflection_record 是最终裁判，
 // 这里只是提前把错误拦在表单上，让教师和学生不必等到保存/提交才知道哪里没填好。
 
+import type { TaskMode } from '$lib/apis/education';
 import type {
 	ReflectionAnswer,
 	ReflectionQuestion,
@@ -34,9 +35,19 @@ export const createReflectionQuestion = (kind: ReflectionQuestionKind): Reflecti
 	show_when: 'always'
 });
 
+const TASK_MODES: TaskMode[] = ['from_scratch', 'revise_draft'];
+
+// 两种作业形式要问的反思不一样：
+// - 从零写作：用没用 AI、AI 帮了什么、改了什么，只有学生自己知道，要学生自报。
+// - 修订初稿：这些别处都有了——首轮通读是平台发起的，一定用了 AI；AI 指出了什么、
+//   学生怎么处理，提交时逐条交代在修改清单里；改了什么、改在哪，老师在初稿与终稿的
+//   对比里直接看得到。再问一遍，学生只会答「见修改清单」。所以修订初稿的默认题只问
+//   这些地方都看不到的东西，推荐题库里也不放和清单重复的题。
 type RecommendedQuestion = {
-	/** 进默认题组（教师第一次出题时预填的那一套）。 */
-	isDefault: boolean;
+	/** 在哪些作业形式下进默认题组（教师第一次出题时预填的那一套）。 */
+	defaultFor: TaskMode[];
+	/** 在哪些作业形式下不进推荐题库（和那种形式里别的环节重复）。 */
+	hiddenFor?: TaskMode[];
 	kind: ReflectionQuestionKind;
 	prompt: string;
 	options?: string[];
@@ -50,7 +61,8 @@ type RecommendedQuestion = {
 // 学生看到的就是这段原文，不再跟着界面语言变。
 const RECOMMENDED_QUESTIONS: RecommendedQuestion[] = [
 	{
-		isDefault: true,
+		defaultFor: ['from_scratch'],
+		hiddenFor: ['revise_draft'],
 		kind: 'multi_choice',
 		prompt: 'What did AI help you with?',
 		options: [
@@ -68,45 +80,74 @@ const RECOMMENDED_QUESTIONS: RecommendedQuestion[] = [
 		showWhen: 'ai_used'
 	},
 	{
-		isDefault: true,
+		defaultFor: ['from_scratch'],
+		hiddenFor: ['revise_draft'],
 		kind: 'text',
 		prompt: 'What did you change?',
 		placeholder: 'Describe the concrete revision you made.'
 	},
 	{
-		isDefault: true,
+		defaultFor: ['from_scratch'],
+		hiddenFor: ['revise_draft'],
 		kind: 'text',
 		prompt: 'Where did you make this change?',
 		placeholder: 'For example: paragraph 2, the conclusion, or the evidence section.'
 	},
 	{
-		isDefault: true,
+		defaultFor: ['from_scratch'],
+		hiddenFor: ['revise_draft'],
 		kind: 'text',
 		prompt: 'Why did you make this judgement?',
 		placeholder: 'Explain why you accepted, rejected, or changed the suggestion or feedback.'
 	},
 	{
-		isDefault: true,
+		defaultFor: ['from_scratch'],
 		kind: 'text',
 		prompt: 'What will you do next time?',
 		placeholder: 'Write one concrete action for your next assignment.'
 	},
 	{
-		isDefault: false,
+		defaultFor: ['revise_draft'],
+		kind: 'single_choice',
+		prompt: 'Did you find the original of every source you cite?',
+		options: ['Found all of them', 'Found some of them', 'Did not check']
+	},
+	{
+		// 修改清单列的是 AI 通读指出的问题;这道题只问清单之外、学生自己看出来的,
+		// 两处不重复,也让老师看到学生离开 AI 还能不能自己挑出毛病。
+		defaultFor: ['revise_draft'],
+		hiddenFor: ['from_scratch'],
+		kind: 'text',
+		prompt: 'Besides the revision list, what in this draft are you still not happy with, and why?',
+		placeholder: 'No need to repeat items on the revision list. If nothing, write "nothing".'
+	},
+	{
+		// 修订初稿作业里学生多半照抄清单上没改完的那一条,所以只留给从零写作。
+		defaultFor: [],
+		hiddenFor: ['revise_draft'],
+		kind: 'text',
+		prompt: 'Against the rubric, which part of this draft is weakest now, and why?',
+		placeholder: 'Name one part and say what it still lacks.'
+	},
+	{
+		defaultFor: [],
+		hiddenFor: ['revise_draft'],
 		kind: 'text',
 		prompt: 'Which AI suggestion did you not adopt, and why?',
 		placeholder: 'Name the suggestion and your reason.',
 		showWhen: 'ai_used'
 	},
 	{
-		isDefault: false,
+		defaultFor: [],
+		hiddenFor: ['revise_draft'],
 		kind: 'single_choice',
 		prompt: 'How much of your final draft did AI shape?',
 		options: ['Hardly any', 'Some parts', 'Most of it'],
 		showWhen: 'ai_used'
 	},
 	{
-		isDefault: false,
+		defaultFor: [],
+		hiddenFor: ['revise_draft'],
 		kind: 'single_choice',
 		prompt: 'Why did you choose not to use AI?',
 		options: ['I did not need it', 'I wanted to practise on my own', 'I do not trust its answers'],
@@ -115,13 +156,13 @@ const RECOMMENDED_QUESTIONS: RecommendedQuestion[] = [
 		showWhen: 'ai_not_used'
 	},
 	{
-		isDefault: false,
+		defaultFor: [],
 		kind: 'single_choice',
 		prompt: 'How satisfied are you with this draft?',
 		options: ['Not satisfied', 'Mostly satisfied', 'Very satisfied']
 	},
 	{
-		isDefault: false,
+		defaultFor: [],
 		kind: 'text',
 		prompt: 'What was the hardest part of this assignment?',
 		placeholder: 'For example: finding evidence, or structuring the argument.'
@@ -140,14 +181,14 @@ const materialize = (item: RecommendedQuestion, t: Translate): ReflectionQuestio
 });
 
 /** 推荐题库，按教师界面语言成文。 */
-export const getRecommendedReflectionQuestions = (t: Translate) =>
-	RECOMMENDED_QUESTIONS.map((item) => ({
-		isDefault: item.isDefault,
+export const getRecommendedReflectionQuestions = (t: Translate, taskMode: TaskMode) =>
+	RECOMMENDED_QUESTIONS.filter((item) => !item.hiddenFor?.includes(taskMode)).map((item) => ({
+		isDefault: item.defaultFor.includes(taskMode),
 		question: materialize(item, t)
 	}));
 
-export const getDefaultReflectionQuestions = (t: Translate) =>
-	getRecommendedReflectionQuestions(t)
+export const getDefaultReflectionQuestions = (t: Translate, taskMode: TaskMode) =>
+	getRecommendedReflectionQuestions(t, taskMode)
 		.filter((item) => item.isDefault)
 		.map((item) => item.question);
 
@@ -172,6 +213,28 @@ export const reflectionQuestionsFingerprint = (questions: ReflectionQuestion[]) 
 			show_when
 		])
 	);
+
+/**
+ * 题目还是另一种作业形式的默认题、教师没动过时，换成 taskMode 的默认题；动过就原样返回。
+ * 用在切换作业形式、以及新建作业沿用上一份作业的题时：从零写作的默认题原样带进
+ * 修订初稿作业，就会和修改清单重复。
+ */
+export const adaptDefaultReflectionQuestions = (
+	questions: ReflectionQuestion[],
+	t: Translate,
+	taskMode: TaskMode
+): ReflectionQuestion[] => {
+	const fingerprint = reflectionQuestionsFingerprint(normalizeReflectionQuestions(questions));
+	const isOtherModesDefaults = TASK_MODES.some(
+		(mode) =>
+			mode !== taskMode &&
+			fingerprint ===
+				reflectionQuestionsFingerprint(
+					normalizeReflectionQuestions(getDefaultReflectionQuestions(t, mode))
+				)
+	);
+	return isOtherModesDefaults ? getDefaultReflectionQuestions(t, taskMode) : questions;
+};
 
 /** 保存前整理：去首尾空白、丢掉空选项，按题型清掉不适用的字段。 */
 export const normalizeReflectionQuestions = (

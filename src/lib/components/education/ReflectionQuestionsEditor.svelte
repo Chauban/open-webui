@@ -6,9 +6,12 @@
 	// - 以后新建作业由页面预填上一次用过的那套，也可以从以往任意一份作业导入；
 	// - 推荐题库随时可以单题加回来，删错了不用重写。
 	// 「这次用了 AI 吗」是系统固定题，不在这里编辑，只在顶部说明和预览里出现。
+	// 修订初稿作业不问它（一定用了），默认题和推荐题库也换一套，避开和修改清单重复的题；
+	// 顶部说明告诉教师对话和修改清单已经问了什么，自拟题时不必去猜 AI 会问什么。
 	import { getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
 
+	import type { TaskMode } from '$lib/apis/education';
 	import type {
 		ReflectionQuestion,
 		ReflectionQuestionKind,
@@ -49,6 +52,7 @@
 	/** 页面给的一句来源说明，例如「已沿用上一份作业的题目」。 */
 	export let notice = '';
 	export let hasSubmissions = false;
+	export let taskMode: TaskMode = 'from_scratch';
 
 	const KINDS: Array<{ key: ReflectionQuestionKind; label: string }> = [
 		{ key: 'single_choice', label: 'Single choice' },
@@ -63,6 +67,8 @@
 
 	let showPreview = false;
 	let previewAiUsage: AiUsage = null;
+	$: isReviseDraft = taskMode === 'revise_draft';
+	$: if (isReviseDraft) previewAiUsage = 'used';
 	let previewDrafts: ReflectionAnswerDrafts = {};
 	let showRecommended = false;
 	let importValue = '';
@@ -72,7 +78,7 @@
 	$: importableSets = questionSets.filter((set) => set.assignment_id !== currentAssignmentId);
 	$: atLimit = questions.length >= REFLECTION_MAX_QUESTIONS;
 	$: currentPrompts = new Set(questions.map((question) => question.prompt.trim()));
-	$: recommended = getRecommendedReflectionQuestions(t).filter(
+	$: recommended = getRecommendedReflectionQuestions(t, taskMode).filter(
 		(item) => !currentPrompts.has(item.question.prompt)
 	);
 	$: previewQuestions = normalizeReflectionQuestions(questions).filter(
@@ -181,7 +187,10 @@
 	};
 
 	const resetToDefaults = () => {
-		replaceWith(getDefaultReflectionQuestions(t), t('Restored the recommended questions.'));
+		replaceWith(
+			getDefaultReflectionQuestions(t, taskMode),
+			t('Restored the recommended questions.')
+		);
 	};
 </script>
 
@@ -200,10 +209,16 @@
 		</EduButton>
 	</div>
 
-	<div class="text-xs text-gray-400">
-		{$i18n.t(
-			'Students answer these right before submitting. "Did you use AI?" is always asked first; everything below it is up to you.'
-		)}
+	<div class="text-xs leading-relaxed text-gray-400">
+		{#if isReviseDraft}
+			{$i18n.t(
+				'In a revise-the-draft assignment, the AI questions the draft against the rubric in the chat; at submission students first account for each item on the revision list; what they changed and where, you can see by comparing the first and final drafts. Ask here only what none of these show, such as whether they found their sources or what they see wrong beyond the revision list. "Did you use AI?" is not asked: the platform starts the first read-through, so they always did.'
+			)}
+		{:else}
+			{$i18n.t(
+				'Students answer these right before submitting. "Did you use AI?" is always asked first; everything below it is up to you.'
+			)}
+		{/if}
 	</div>
 	{#if hasSubmissions}
 		<div class="mt-1 text-xs text-gray-400">
@@ -224,10 +239,14 @@
 		<div class="mt-4 rounded-3xl border border-dashed border-gray-300 p-5 dark:border-gray-700">
 			<div class="mb-4 text-xs text-gray-400">
 				{$i18n.t('What students see')}
+				{#if isReviseDraft}
+					· {$i18n.t('Students see the revision list first, then these questions.')}
+				{/if}
 			</div>
 			<ReflectionAnswerForm
 				questions={previewQuestions}
 				idPrefix="reflection-preview"
+				askAiUsage={!isReviseDraft}
 				bind:aiUsage={previewAiUsage}
 				bind:drafts={previewDrafts}
 			/>
@@ -440,19 +459,29 @@
 					<div
 						class="mt-3 flex flex-wrap items-center gap-4 border-t border-gray-100 pt-3 dark:border-gray-800"
 					>
-						<label class="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
-							{$i18n.t('Shown to')}
-							<select
-								value={question.show_when}
-								class="rounded-lg border border-gray-300 bg-white py-1 pl-2 pr-7 text-xs outline-none dark:border-gray-700 dark:bg-gray-850"
-								on:change={(event) =>
-									update(index, { show_when: event.currentTarget.value as ReflectionShowWhen })}
-							>
-								{#each SHOW_WHEN as item}
-									<option value={item.key}>{$i18n.t(item.label)}</option>
-								{/each}
-							</select>
-						</label>
+						<!-- 修订初稿里人人都用了 AI，「给谁看」没有意义；只有只给没用 AI 的学生的题要提醒一句。 -->
+						{#if !isReviseDraft || question.show_when === 'ai_not_used'}
+							<label class="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+								{$i18n.t('Shown to')}
+								<select
+									value={question.show_when}
+									class="rounded-lg border border-gray-300 bg-white py-1 pl-2 pr-7 text-xs outline-none dark:border-gray-700 dark:bg-gray-850"
+									on:change={(event) =>
+										update(index, { show_when: event.currentTarget.value as ReflectionShowWhen })}
+								>
+									{#each SHOW_WHEN as item}
+										<option value={item.key}>{$i18n.t(item.label)}</option>
+									{/each}
+								</select>
+							</label>
+						{/if}
+						{#if isReviseDraft && question.show_when === 'ai_not_used'}
+							<span class="text-xs text-amber-600 dark:text-amber-400">
+								{$i18n.t(
+									'Every student in a revise-the-draft assignment used AI, so this question will never be shown.'
+								)}
+							</span>
+						{/if}
 						<label
 							class="flex cursor-pointer items-center gap-2 text-xs text-gray-600 dark:text-gray-300"
 						>
@@ -470,7 +499,9 @@
 				<div
 					class="rounded-2xl border border-dashed border-gray-300 px-4 py-6 text-center text-xs text-gray-400 dark:border-gray-700"
 				>
-					{$i18n.t('No reflection questions. Students will only be asked whether they used AI.')}
+					{isReviseDraft
+						? $i18n.t('No reflection questions. Students will only account for the revision list.')
+						: $i18n.t('No reflection questions. Students will only be asked whether they used AI.')}
 				</div>
 			{/each}
 		</div>

@@ -215,8 +215,58 @@ class WritingSession(Base):
     # 修订初稿作业的初稿基线,确认后不可改。
     draft_baseline_text = Column(Text, nullable=True)
     draft_baseline_at = Column(BigInteger, nullable=True)
+    # 修改清单:整理完成的时间(0 条也记),以及整理进行中的占位。
+    revision_items_generated_at = Column(BigInteger, nullable=True)
+    revision_items_claimed_at = Column(BigInteger, nullable=True)
     created_at = Column(BigInteger, nullable=False)
     updated_at = Column(BigInteger, nullable=False)
+
+
+class RevisionItem(Base):
+    """修订初稿作业第一次通读的一项结论(一个评分维度一条),和学生对它的处理。
+
+    学生交了初稿后,服务端先让模型对每个评分维度逐项下结论,首轮回复再按这张表写;
+    之后的对话不改这张表。status:problem 要改(提交时必须交代)、minor 可改进、
+    ok 达标、deferred 暂缓(is_blocking 的那一项出问题时,另几项先不看)。
+    学生改好那一项后可以点「接着看」:平台确认它改到位了,再给暂缓的几项补上结论,
+    follow_up_at 记补看的时间(暂缓项:补上结论;那一项:确认改到位)。
+    quoted_span 是初稿里的原句(必须是初稿的连续子串,锚不住或不需要时为空);
+    提交时拿它判「说改了,原句却一字没动」。
+    """
+
+    __tablename__ = "revision_item"
+    __table_args__ = (
+        UniqueConstraint(
+            "writing_session_id", "item_no", name="revision_item_order_idx"
+        ),
+        UniqueConstraint(
+            "writing_session_id",
+            "criterion_key",
+            name="revision_item_criterion_idx",
+        ),
+        CheckConstraint(
+            "status IN ('problem', 'minor', 'ok', 'deferred')",
+            name="revision_item_status_check",
+        ),
+        CheckConstraint(
+            "decision IS NULL OR decision IN ('revised', 'partly', 'kept')",
+            name="revision_item_decision_check",
+        ),
+    )
+
+    id = Column(Text, primary_key=True, unique=True)
+    writing_session_id = Column(Text, nullable=False)
+    item_no = Column(Integer, nullable=False)
+    criterion_key = Column(Text, nullable=False)
+    status = Column(Text, nullable=False)
+    finding = Column(Text, nullable=True)
+    quoted_span = Column(Text, nullable=True)
+    decision = Column(Text, nullable=True)
+    reason = Column(Text, nullable=True)
+    decided_at = Column(BigInteger, nullable=True)
+    is_blocking = Column(Boolean, nullable=False, default=False)
+    follow_up_at = Column(BigInteger, nullable=True)
+    created_at = Column(BigInteger, nullable=False)
 
 
 class WritingVersion(Base):
@@ -1254,8 +1304,33 @@ class WritingSessionModel(BaseModel):
     submitted_submission_id: Optional[str] = None
     draft_baseline_text: Optional[str] = None
     draft_baseline_at: Optional[int] = None
+    revision_items_generated_at: Optional[int] = None
     created_at: int
     updated_at: int
+
+
+RevisionDecision = Literal["revised", "partly", "kept"]
+RevisionStatus = Literal["problem", "minor", "ok", "deferred"]
+# 学生能对它表态的两档:要改的必须交代,可改进的可以交代。
+REVISION_DECIDABLE_STATUSES = ("problem", "minor")
+
+
+class RevisionItemModel(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    writing_session_id: str
+    item_no: int
+    criterion_key: str
+    status: RevisionStatus
+    finding: Optional[str] = None
+    quoted_span: Optional[str] = None
+    decision: Optional[RevisionDecision] = None
+    reason: Optional[str] = None
+    decided_at: Optional[int] = None
+    is_blocking: bool = False
+    follow_up_at: Optional[int] = None
+    created_at: int
 
 
 class WritingVersionModel(BaseModel):
@@ -1622,6 +1697,37 @@ class DraftBaselineForm(BaseModel):
     text: str = Field(max_length=200_000)
 
 
+class RevisionDecisionForm(BaseModel):
+    """学生对修改清单里一条(要改或可改进)的处理。可以先只选不写理由,提交时再校验。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    item_no: int = Field(ge=1)
+    decision: Optional[RevisionDecision] = None
+    reason: Optional[str] = Field(default=None, max_length=2000)
+
+
+class RevisionItemsResponse(BaseModel):
+    status: Literal["ready", "pending", "failed"]
+    items: list[RevisionItemModel]
+
+
+class RevisionFollowUpResponse(BaseModel):
+    """补看的结果。not_ready:那一项还没改到位,note 说还差在哪,暂缓项保持不变。"""
+
+    status: Literal["ready", "not_ready", "pending", "failed"]
+    note: Optional[str] = None
+    items: list[RevisionItemModel]
+
+
+class RevisionItemsStartForm(BaseModel):
+    """开始第一次通读。用学生接下来要对话的那个模型。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    model_id: Optional[str] = Field(default=None, max_length=256)
+
+
 class VersionCreateForm(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -1718,6 +1824,10 @@ class SubmissionCreateForm(BaseModel):
     # 答案要对着作业当前的题目校验,题目不在请求里,所以交叉校验放在提交接口做。
     reflection_answers: list[ReflectionAnswerForm] = Field(
         default_factory=list, max_length=REFLECTION_MAX_QUESTIONS
+    )
+    # 修订初稿作业:修改清单里各条的处理,随提交一起落库,免得最后一次修改还在路上。
+    revision_decisions: list[RevisionDecisionForm] = Field(
+        default_factory=list, max_length=20
     )
     data_completeness: SubmissionEvidenceCompleteness
 
@@ -3396,6 +3506,8 @@ class EducationTable:
                     {
                         WritingSession.draft_baseline_text: None,
                         WritingSession.draft_baseline_at: None,
+                        WritingSession.revision_items_generated_at: None,
+                        WritingSession.revision_items_claimed_at: None,
                         WritingSession.chat_id: None,
                         WritingSession.active_chat_id: None,
                         WritingSession.updated_at: int(time.time()),
@@ -3407,7 +3519,12 @@ class EducationTable:
                 db.rollback()
                 return None
 
-            for model in (WritingVersion, ProvenanceSegment, EditorOperation):
+            for model in (
+                WritingVersion,
+                ProvenanceSegment,
+                EditorOperation,
+                RevisionItem,
+            ):
                 db.query(model).filter(
                     model.writing_session_id == session_id
                 ).delete(synchronize_session=False)
@@ -3422,6 +3539,220 @@ class EducationTable:
             db.commit()
             db.refresh(session)
             return WritingSessionModel.model_validate(session)
+
+    def claim_revision_items(
+        self, session_id: str, stale_after: int, db: Optional[Session] = None
+    ) -> bool:
+        """占位开始第一次通读。已通读完、或别的请求正在通读(占位未过期)时返回 False。
+
+        占位要单独提交:通读要调模型,不能把一个没提交的事务夹在模型调用两头。
+        """
+        with get_db_context(db) as db:
+            now = int(time.time())
+            claimed = (
+                db.query(WritingSession)
+                .filter(
+                    WritingSession.id == session_id,
+                    WritingSession.draft_baseline_at.is_not(None),
+                    WritingSession.revision_items_generated_at.is_(None),
+                    (
+                        WritingSession.revision_items_claimed_at.is_(None)
+                        | (WritingSession.revision_items_claimed_at < now - stale_after)
+                    ),
+                )
+                .update(
+                    {WritingSession.revision_items_claimed_at: now},
+                    synchronize_session=False,
+                )
+            )
+            db.commit()
+            return claimed == 1
+
+    def release_revision_items_claim(
+        self, session_id: str, db: Optional[Session] = None
+    ) -> None:
+        with get_db_context(db) as db:
+            db.query(WritingSession).filter(
+                WritingSession.id == session_id,
+                WritingSession.revision_items_generated_at.is_(None),
+            ).update(
+                {WritingSession.revision_items_claimed_at: None},
+                synchronize_session=False,
+            )
+            db.commit()
+
+    def store_revision_items(
+        self,
+        session_id: str,
+        baseline_text: str,
+        items: list[dict],
+        db: Optional[Session] = None,
+    ) -> Optional[list[RevisionItemModel]]:
+        """落库通读结论并标记通读完成。只成功一次;已通读过就原样返回已有的。
+
+        baseline_text 是这次通读读的那份初稿。通读要半分钟,期间学生可能撤回初稿、
+        又交了不一样的一份:这时结论属于旧初稿,不落库,返回 None。
+        """
+        with get_db_context(db) as db:
+            now = int(time.time())
+            done = (
+                db.query(WritingSession)
+                .filter(
+                    WritingSession.id == session_id,
+                    WritingSession.draft_baseline_text == baseline_text,
+                    WritingSession.revision_items_generated_at.is_(None),
+                )
+                .update(
+                    {
+                        WritingSession.revision_items_generated_at: now,
+                        WritingSession.revision_items_claimed_at: None,
+                    },
+                    synchronize_session=False,
+                )
+            )
+            if done != 1:
+                db.rollback()
+                session = db.get(WritingSession, session_id)
+                if session is None or session.draft_baseline_text != baseline_text:
+                    return None
+                return self.get_revision_items(session_id, db=db)
+            for index, item in enumerate(items, start=1):
+                db.add(
+                    RevisionItem(
+                        id=str(uuid.uuid4()),
+                        writing_session_id=session_id,
+                        item_no=index,
+                        criterion_key=item["criterion_key"],
+                        status=item["status"],
+                        finding=item.get("finding"),
+                        quoted_span=item.get("quoted_span"),
+                        is_blocking=bool(item.get("is_blocking")),
+                        decision=None,
+                        reason=None,
+                        decided_at=None,
+                        created_at=now,
+                    )
+                )
+            db.commit()
+            return self.get_revision_items(session_id, db=db)
+
+    def claim_revision_follow_up(
+        self, session_id: str, stale_after: int, db: Optional[Session] = None
+    ) -> bool:
+        """占位开始补看。和第一次通读共用一个占位:两者都要调模型,不能同时进行。"""
+        with get_db_context(db) as db:
+            now = int(time.time())
+            claimed = (
+                db.query(WritingSession)
+                .filter(
+                    WritingSession.id == session_id,
+                    WritingSession.revision_items_generated_at.is_not(None),
+                    (
+                        WritingSession.revision_items_claimed_at.is_(None)
+                        | (WritingSession.revision_items_claimed_at < now - stale_after)
+                    ),
+                )
+                .update(
+                    {WritingSession.revision_items_claimed_at: now},
+                    synchronize_session=False,
+                )
+            )
+            db.commit()
+            return claimed == 1
+
+    def release_revision_follow_up_claim(
+        self, session_id: str, db: Optional[Session] = None
+    ) -> None:
+        with get_db_context(db) as db:
+            db.query(WritingSession).filter(
+                WritingSession.id == session_id,
+                WritingSession.revision_items_generated_at.is_not(None),
+            ).update(
+                {WritingSession.revision_items_claimed_at: None},
+                synchronize_session=False,
+            )
+            db.commit()
+
+    def apply_revision_follow_up(
+        self, session_id: str, items: list[dict], db: Optional[Session] = None
+    ) -> list[RevisionItemModel]:
+        """补看通过:给暂缓的几项补上结论,并记下那一项已确认改到位。
+
+        只改仍是暂缓的条目;别的请求已经补过就原样返回。完成后放掉占位。
+        """
+        with get_db_context(db) as db:
+            now = int(time.time())
+            rows = {
+                row.criterion_key: row
+                for row in db.query(RevisionItem)
+                .filter(RevisionItem.writing_session_id == session_id)
+                .all()
+            }
+            deferred = [row for row in rows.values() if row.status == "deferred"]
+            if deferred:
+                for item in items:
+                    row = rows.get(item["criterion_key"])
+                    if row is None or row.status != "deferred":
+                        continue
+                    row.status = item["status"]
+                    row.finding = item.get("finding")
+                    row.quoted_span = item.get("quoted_span")
+                    row.follow_up_at = now
+                for row in rows.values():
+                    if row.is_blocking:
+                        row.follow_up_at = now
+            db.query(WritingSession).filter(WritingSession.id == session_id).update(
+                {WritingSession.revision_items_claimed_at: None},
+                synchronize_session=False,
+            )
+            db.commit()
+            return self.get_revision_items(session_id, db=db)
+
+    def get_revision_items(
+        self, session_id: str, db: Optional[Session] = None
+    ) -> list[RevisionItemModel]:
+        with get_db_context(db) as db:
+            rows = (
+                db.query(RevisionItem)
+                .filter(RevisionItem.writing_session_id == session_id)
+                .order_by(RevisionItem.item_no.asc())
+                .all()
+            )
+            return [RevisionItemModel.model_validate(row) for row in rows]
+
+    def set_revision_decisions(
+        self,
+        session_id: str,
+        decisions: list[tuple[int, Optional[str], Optional[str]]],
+        commit: bool = True,
+        db: Optional[Session] = None,
+    ) -> list[RevisionItemModel]:
+        """写入学生对若干条的处理 (item_no, decision, reason)。
+
+        不存在的条目号、或对达标/暂缓的条目表态,抛 ValueError。
+        """
+        with get_db_context(db) as db:
+            now = int(time.time())
+            rows = {
+                row.item_no: row
+                for row in db.query(RevisionItem)
+                .filter(RevisionItem.writing_session_id == session_id)
+                .all()
+            }
+            for item_no, decision, reason in decisions:
+                row = rows.get(item_no)
+                if row is None or row.status not in REVISION_DECIDABLE_STATUSES:
+                    raise ValueError("Unknown revision item")
+                row.decision = decision
+                row.reason = reason
+                row.decided_at = now if decision else None
+            if commit:
+                db.commit()
+            else:
+                db.flush()
+            return [
+                RevisionItemModel.model_validate(rows[key]) for key in sorted(rows)
+            ]
 
     def assignment_has_draft_baseline(
         self, assignment_id: str, db: Optional[Session] = None

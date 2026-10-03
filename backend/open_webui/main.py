@@ -2211,6 +2211,7 @@ async def get_app_config(request: Request):
         'ui.pending_user_overlay_content',
         'ui.watermark',
         'education.enable_return',
+        'education.enable_coaching_styles',
     )
 
     return {
@@ -2280,6 +2281,7 @@ async def get_app_config(request: Request):
                     'enable_onedrive_integration': config.get('onedrive.enable'),
                     'enable_memories': config.get('memories.enable'),
                     'enable_education_return': config.get('education.enable_return'),
+                    'enable_education_coaching_styles': config.get('education.enable_coaching_styles'),
                     **(
                         {
                             'enable_onedrive_personal': ENABLE_ONEDRIVE_PERSONAL,

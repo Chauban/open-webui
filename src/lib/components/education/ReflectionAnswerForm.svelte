@@ -3,6 +3,7 @@
 	//
 	// 「这次用了 AI 吗」是系统固定题，永远排第一；其余题目按作业设定渲染，
 	// 并按 show_when 随这道题的答案出现或隐藏。
+	// 修订初稿作业不问这道题：首轮通读是平台替学生发起的，一定用了，由调用方把 aiUsage 定为 used。
 	import { getContext } from 'svelte';
 
 	import type { ReflectionQuestion } from '$lib/apis/education/types';
@@ -19,6 +20,7 @@
 
 	export let questions: ReflectionQuestion[] = [];
 	export let aiUsage: AiUsage = null;
+	export let askAiUsage = true;
 	export let drafts: ReflectionAnswerDrafts = {};
 	/** 预览里区分同一页上的多份表单，避免 label for 撞 id。 */
 	export let idPrefix = 'reflection';
@@ -65,29 +67,31 @@
 </script>
 
 <div class="space-y-5">
-	<div>
-		<div class="mb-2 text-sm font-medium text-gray-800 dark:text-gray-200">
-			{$i18n.t('Did you use AI for this submission?')}
+	{#if askAiUsage}
+		<div>
+			<div class="mb-2 text-sm font-medium text-gray-800 dark:text-gray-200">
+				{$i18n.t('Did you use AI for this submission?')}
+			</div>
+			<div class="flex flex-wrap gap-2">
+				<button
+					type="button"
+					aria-pressed={aiUsage === 'used'}
+					class={eduSegmentClass(aiUsage === 'used')}
+					on:click={() => selectAiUsage('used')}
+				>
+					{$i18n.t('Used AI')}
+				</button>
+				<button
+					type="button"
+					aria-pressed={aiUsage === 'none'}
+					class={eduSegmentClass(aiUsage === 'none')}
+					on:click={() => selectAiUsage('none')}
+				>
+					{$i18n.t('Did not use AI')}
+				</button>
+			</div>
 		</div>
-		<div class="flex flex-wrap gap-2">
-			<button
-				type="button"
-				aria-pressed={aiUsage === 'used'}
-				class={eduSegmentClass(aiUsage === 'used')}
-				on:click={() => selectAiUsage('used')}
-			>
-				{$i18n.t('Used AI')}
-			</button>
-			<button
-				type="button"
-				aria-pressed={aiUsage === 'none'}
-				class={eduSegmentClass(aiUsage === 'none')}
-				on:click={() => selectAiUsage('none')}
-			>
-				{$i18n.t('Did not use AI')}
-			</button>
-		</div>
-	</div>
+	{/if}
 
 	{#each visibleQuestions as question (question.id)}
 		{@const draft = draftOf(drafts, question.id)}
@@ -153,7 +157,7 @@
 		</div>
 	{/each}
 
-	{#if aiUsage == null && questions.some((question) => question.show_when !== 'always')}
+	{#if askAiUsage && aiUsage == null && questions.some((question) => question.show_when !== 'always')}
 		<div class="text-xs text-gray-400">
 			{$i18n.t('More questions appear after you answer whether you used AI.')}
 		</div>
