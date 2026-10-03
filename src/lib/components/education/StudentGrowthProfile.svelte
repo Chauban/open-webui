@@ -4,6 +4,7 @@
 	import { createEventDispatcher, getContext } from 'svelte';
 	import { get } from 'svelte/store';
 	import { toast } from 'svelte-sonner';
+	import { config } from '$lib/stores';
 
 	import EduBadge from './EduBadge.svelte';
 	import EduButton from './EduButton.svelte';
@@ -90,6 +91,14 @@
 		{ key: 'rounds', label: 'Revision Between Rounds' },
 		{ key: 'assignments', label: 'Assignment History' }
 	];
+	// 「轮次之间的修改」只有退回重交才有数据。管理员关了退回、也没有旧的重交记录时，
+	// 这一页永远是空的，不摆出来。
+	$: visibleSections = sections.filter(
+		(section) =>
+			section.key !== 'rounds' ||
+			$config?.features?.enable_education_return ||
+			(profile?.round_progress?.length ?? 0) > 0
+	);
 
 	const STATUS_TONES: Record<string, 'gray' | 'amber' | 'emerald' | 'rose'> = {
 		unsubmitted: 'gray',
@@ -415,7 +424,7 @@
 			class="flex gap-1 overflow-x-auto border-b border-gray-200 pb-px dark:border-gray-800"
 			aria-label={$i18n.t('Growth profile sections')}
 		>
-			{#each sections as section}
+			{#each visibleSections as section}
 				<button
 					type="button"
 					class="shrink-0 rounded-t-lg px-3 py-2 text-sm font-medium transition {activeSection ===
@@ -802,13 +811,15 @@
 				<EduCard>
 					<div class="mb-3 flex flex-wrap items-center justify-between gap-2">
 						<div class="text-sm font-semibold">{$i18n.t('Latest data completeness')}</div>
-						<span class="text-xs text-gray-500"
-							>metric {profile.metric_version} · {$i18n.t(
-								profile.metric_version === profile.active_metric_version ? 'Current' : 'Historical'
-							)}{profile.aggregate_materialized && profile.aggregate_revision
-								? ` · aggregate r${profile.aggregate_revision}`
-								: ''}</span
-						>
+						<!-- 指标版本号是核对口径用的内部标识，老师看不懂；只在不是当前口径时提一句，版本号放进悬停提示。 -->
+						{#if profile.metric_version !== profile.active_metric_version}
+							<span
+								class="text-xs text-gray-500"
+								title={`metric ${profile.metric_version}${
+									profile.aggregate_revision ? ` · aggregate r${profile.aggregate_revision}` : ''
+								}`}>{$i18n.t('Historical')}</span
+							>
+						{/if}
 					</div>
 					{#if latest}
 						<div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
