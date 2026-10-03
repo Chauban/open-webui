@@ -112,6 +112,52 @@
 	let editing: { section: SectionKey; key: string } | null = null;
 	let draft = '';
 
+	// 新建作业预填的评分维度，按作业形式各一份；空列表表示用内置的「观点 / 结构 / 论据」。
+	// 修订初稿的第一次通读按作业的评分维度逐项下结论，所以这一份要和任务说明里的标准同名。
+	type RubricRow = { label: string; max_score: number };
+	type RubricMode = 'from_scratch' | 'revise_draft';
+	const RUBRIC_LIMIT = 8;
+	let defaultRubrics: Record<RubricMode, RubricRow[]> = { from_scratch: [], revise_draft: [] };
+	let rubricEditing: RubricMode | null = null;
+	let rubricDraft: Array<{ label: string; max_score: string }> = [];
+
+	const readRubrics = (config): Record<RubricMode, RubricRow[]> => ({
+		from_scratch: config?.EDUCATION_DEFAULT_RUBRICS?.from_scratch ?? [],
+		revise_draft: config?.EDUCATION_DEFAULT_RUBRICS?.revise_draft ?? []
+	});
+
+	const builtinRubric = (): RubricRow[] => [
+		{ label: $i18n.t('Ideas'), max_score: 34 },
+		{ label: $i18n.t('Structure'), max_score: 33 },
+		{ label: $i18n.t('Evidence'), max_score: 33 }
+	];
+
+	const startRubricEditing = (mode: RubricMode) => {
+		rubricEditing = mode;
+		const rows = defaultRubrics[mode].length ? defaultRubrics[mode] : builtinRubric();
+		rubricDraft = rows.map((row) => ({ label: row.label, max_score: String(row.max_score) }));
+	};
+
+	$: rubricDraftTotal = rubricDraft.reduce((sum, row) => sum + (Number(row.max_score) || 0), 0);
+
+	const saveRubric = () => {
+		if (!rubricEditing) return;
+		const rows = rubricDraft.map((row) => ({
+			label: row.label.trim(),
+			max_score: Number(row.max_score)
+		}));
+		if (
+			rows.length === 0 ||
+			rows.some((row) => !row.label || !Number.isInteger(row.max_score) || row.max_score <= 0)
+		) {
+			toast.error(
+				$i18n.t('Every rubric criterion needs a name and a positive whole-number maximum.')
+			);
+			return;
+		}
+		persist(prompts, assignmentDefaults, { ...defaultRubrics, [rubricEditing]: rows });
+	};
+
 	const read = (config, field: 'configKey' | 'defaultsKey'): Prompts =>
 		Object.fromEntries(
 			sections.map((section) => [
@@ -130,6 +176,7 @@
 			prompts = read(config, 'configKey');
 			defaults = read(config, 'defaultsKey');
 			assignmentDefaults = readAssignmentDefaults(config);
+			defaultRubrics = readRubrics(config);
 			enableReturn = config.EDUCATION_ENABLE_RETURN;
 			enableCoachingStyles = config.EDUCATION_ENABLE_COACHING_STYLES;
 		} catch (error) {
@@ -162,21 +209,28 @@
 			assignmentDefaultFields.map((field) => [field.configKey, config[field.configKey]])
 		) as Record<AssignmentDefaultKey, string>;
 
-	const persist = async (next: Prompts, nextAssignmentDefaults = assignmentDefaults) => {
+	const persist = async (
+		next: Prompts,
+		nextAssignmentDefaults = assignmentDefaults,
+		nextRubrics = defaultRubrics
+	) => {
 		saving = true;
 		try {
 			const config = await setEducationConfig(localStorage.token, {
 				...Object.fromEntries(sections.map((section) => [section.configKey, next[section.key]])),
 				...nextAssignmentDefaults,
+				EDUCATION_DEFAULT_RUBRICS: nextRubrics,
 				EDUCATION_ENABLE_RETURN: enableReturn,
 				EDUCATION_ENABLE_COACHING_STYLES: enableCoachingStyles
 			});
 			prompts = read(config, 'configKey');
 			defaults = read(config, 'defaultsKey');
 			assignmentDefaults = readAssignmentDefaults(config);
+			defaultRubrics = readRubrics(config);
 			enableReturn = config.EDUCATION_ENABLE_RETURN;
 			enableCoachingStyles = config.EDUCATION_ENABLE_COACHING_STYLES;
 			editing = null;
+			rubricEditing = null;
 			draft = '';
 			toast.success($i18n.t('Settings saved successfully!'));
 		} catch (error) {
@@ -241,6 +295,120 @@
 							</select>
 						</div>
 					{/each}
+
+					<div class="flex flex-col gap-2">
+						<div class="min-w-0">
+							<div class="text-xs font-medium text-gray-700 dark:text-gray-300">
+								{$i18n.t('Default rubric for new assignments')}
+							</div>
+							<p class="mt-0.5 text-[0.6875rem] text-gray-400 dark:text-gray-600">
+								{$i18n.t(
+									'Pre-filled when a teacher creates an assignment of this type; teachers can still edit it. For revision assignments the first read-through gives one conclusion per rubric criterion, so name them after the standards in the task instructions.'
+								)}
+							</p>
+						</div>
+						{#each sections[0].items as item}
+							{@const mode = item.key}
+							<div class="rounded-xl border border-gray-100/50 px-3 py-2.5 dark:border-white/[0.04]">
+								<div class="flex items-start justify-between gap-2">
+									<div class="text-xs text-gray-700 dark:text-gray-300">{$i18n.t(item.title)}</div>
+									{#if rubricEditing !== mode}
+										<div class="flex shrink-0 items-center gap-1">
+											{#if defaultRubrics[mode].length}
+												<button
+													class="rounded-full px-2 py-0.5 text-[0.6875rem] text-gray-400 transition-colors hover:text-gray-700 disabled:opacity-50 dark:hover:text-gray-300"
+													type="button"
+													disabled={saving}
+													on:click={() =>
+														persist(prompts, assignmentDefaults, { ...defaultRubrics, [mode]: [] })}
+												>
+													{$i18n.t('Restore default')}
+												</button>
+											{/if}
+											<button
+												class="rounded-lg p-1 text-gray-400 transition-colors hover:bg-gray-50 hover:text-gray-700 dark:hover:bg-white/[0.05] dark:hover:text-gray-300"
+												type="button"
+												title={$i18n.t('Edit')}
+												aria-label={$i18n.t('Edit')}
+												on:click={() => startRubricEditing(mode)}
+											>
+												<Pencil className="size-3.5" />
+											</button>
+										</div>
+									{/if}
+								</div>
+								{#if rubricEditing === mode}
+									<div class="mt-2 flex flex-col gap-1.5">
+										{#each rubricDraft as row, index}
+											<div class="flex items-center gap-2">
+												<span class="w-4 text-right text-[0.6875rem] text-gray-400">{index + 1}</span>
+												<input
+													class="min-w-0 flex-1 rounded-lg border border-gray-100/50 bg-gray-50/40 px-2 py-1 text-xs text-gray-700 outline-hidden focus:border-blue-400 dark:border-white/[0.04] dark:bg-white/[0.03] dark:text-gray-300"
+													placeholder={$i18n.t('Criterion name')}
+													bind:value={row.label}
+												/>
+												<input
+													class="w-14 rounded-lg border border-gray-100/50 bg-gray-50/40 px-2 py-1 text-right text-xs text-gray-700 outline-hidden focus:border-blue-400 dark:border-white/[0.04] dark:bg-white/[0.03] dark:text-gray-300"
+													type="number"
+													min="1"
+													bind:value={row.max_score}
+												/>
+												<button
+													class="px-1 text-xs text-gray-400 hover:text-red-500"
+													type="button"
+													aria-label={$i18n.t('Remove')}
+													on:click={() => (rubricDraft = rubricDraft.filter((_, i) => i !== index))}
+												>
+													×
+												</button>
+											</div>
+										{/each}
+										<div class="mt-1 flex items-center justify-between gap-2">
+											<div class="flex items-center gap-3 text-[0.6875rem] text-gray-400">
+												{#if rubricDraft.length < RUBRIC_LIMIT}
+													<button
+														class="text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
+														type="button"
+														on:click={() => (rubricDraft = [...rubricDraft, { label: '', max_score: '' }])}
+													>
+														+ {$i18n.t('Add criterion')}
+													</button>
+												{/if}
+												<span>{$i18n.t('Total {{total}}', { total: rubricDraftTotal })}</span>
+											</div>
+											<div class="flex items-center gap-2">
+												<button
+													class="rounded-full px-3 py-1 text-xs text-gray-500 transition hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200"
+													type="button"
+													disabled={saving}
+													on:click={() => (rubricEditing = null)}
+												>
+													{$i18n.t('Cancel')}
+												</button>
+												<button
+													class="rounded-full bg-black px-3.5 py-1.5 text-xs font-normal text-white transition hover:bg-gray-900 disabled:opacity-50 dark:bg-white dark:text-black dark:hover:bg-gray-100"
+													type="button"
+													disabled={saving}
+													on:click={saveRubric}
+												>
+													{$i18n.t('Save')}
+												</button>
+											</div>
+										</div>
+									</div>
+								{:else}
+									<div class="mt-1 text-[0.6875rem] leading-5 text-gray-500 dark:text-gray-400">
+										{(defaultRubrics[mode].length ? defaultRubrics[mode] : builtinRubric())
+											.map((row) => `${row.label} ${row.max_score}`)
+											.join(' · ')}
+										{#if !defaultRubrics[mode].length}
+											<span class="text-gray-400">{$i18n.t('(built-in)')}</span>
+										{/if}
+									</div>
+								{/if}
+							</div>
+						{/each}
+					</div>
 
 					<div class="flex items-start justify-between gap-4">
 						<div class="min-w-0">

@@ -227,7 +227,11 @@ export const getTeacherReflectionQuestionSets = async (
 
 export const getTeacherAssignmentDefaults = async (
 	token: string
-): Promise<{ coaching_style: CoachingStyle; task_mode: TaskMode }> => {
+): Promise<{
+	coaching_style: CoachingStyle;
+	task_mode: TaskMode;
+	rubrics: Record<TaskMode, Array<{ label: string; max_score: number }>>;
+}> => {
 	return fetch(`${WEBUI_API_BASE_URL}/teacher/assignment-defaults`, {
 		method: 'GET',
 		headers: withAuth(token)

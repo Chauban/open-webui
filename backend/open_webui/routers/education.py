@@ -1399,9 +1399,15 @@ async def get_teacher_assignments(
 _REFLECTION_QUESTION_SET_LIMIT = 10
 
 
+class DefaultRubricCriterionItem(BaseModel):
+    label: str
+    max_score: int
+
+
 class AssignmentDefaultsResponse(BaseModel):
     coaching_style: CoachingStyle
     task_mode: TaskMode
+    rubrics: dict[TaskMode, list[DefaultRubricCriterionItem]]
 
 
 @router.get("/teacher/assignment-defaults", response_model=AssignmentDefaultsResponse)
@@ -1411,6 +1417,7 @@ async def get_teacher_assignment_defaults(user=Depends(get_verified_user)):
     return {
         "coaching_style": await Config.get("education.default_coaching_style"),
         "task_mode": await Config.get("education.default_task_mode"),
+        "rubrics": await Config.get("education.default_rubrics"),
     }
 
 

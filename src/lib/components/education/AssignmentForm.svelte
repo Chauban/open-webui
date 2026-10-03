@@ -7,7 +7,13 @@
 	import { config } from '$lib/stores';
 
 	import type { ReflectionQuestionSet, TaskMode } from '$lib/apis/education';
-	import type { AssignmentDraft } from '$lib/utils/assignment-form';
+	import {
+		getDefaultRubricCriteria,
+		isSameRubric,
+		rubricTotal,
+		type AssignmentDraft,
+		type DefaultRubrics
+	} from '$lib/utils/assignment-form';
 	import { getClassroomDisplayName } from '$lib/utils/education';
 	import { adaptDefaultReflectionQuestions } from '$lib/utils/reflection-questions';
 	import EduCard from './EduCard.svelte';
@@ -36,6 +42,8 @@
 	export let expandAll = false;
 	/** 有学生交了初稿或已有提交后,作业形式锁定(后端同样拒绝)。 */
 	export let taskModeLocked = false;
+	/** 只有新建作业传:管理员按作业形式设的默认评分维度。作业设置页不传,改形式不碰已有维度。 */
+	export let rubricDefaults: DefaultRubrics | null = null;
 
 	const i18n = getContext<Writable<i18nType>>('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
@@ -97,7 +105,19 @@
 
 	// 两种形式的默认反思题不同（修订初稿不问和修改清单重复的题）。
 	// 题目还是原形式的默认题、教师没动过时，跟着换；动过就不碰。
+	// 评分维度同理：还是原形式的默认维度、满分也没改时，换成新形式的默认（修订初稿的
+	// 第一次通读按评分维度逐项下结论，实例会把这一份设成提示词里的标准）。
 	const chooseTaskMode = (taskMode: TaskMode) => {
+		if (
+			rubricDefaults &&
+			!hasSubmissions &&
+			taskMode !== draft.taskMode &&
+			isSameRubric(draft.rubricCriteria, getDefaultRubricCriteria(rubricDefaults, draft.taskMode, t)) &&
+			draft.scoreMax === rubricTotal(draft.rubricCriteria)
+		) {
+			draft.rubricCriteria = getDefaultRubricCriteria(rubricDefaults, taskMode, t);
+			draft.scoreMax = rubricTotal(draft.rubricCriteria);
+		}
 		draft.taskMode = taskMode;
 		draft.reflectionQuestions = adaptDefaultReflectionQuestions(
 			draft.reflectionQuestions,

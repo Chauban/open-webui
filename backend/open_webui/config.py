@@ -3190,6 +3190,9 @@ DEFAULT_CONFIG = {
     'education.default_coaching_style': 'balanced',
     # 新建作业时作业形式的初始值;哈工深学生都带着课外初稿来,设为 revise_draft。
     'education.default_task_mode': 'from_scratch',
+    # 新建作业时预填的评分维度,按作业形式各一份;空列表=用前端内置的「观点 / 结构 / 论据」。
+    # 修订初稿的第一次通读按作业的评分维度逐项下结论,哈工深要把修订初稿这份设成提示词里那 8 项。
+    'education.default_rubrics': {'from_scratch': [], 'revise_draft': []},
     # 教师能否把作业退回重写。多数课程批完就结束,学生看批改结果即可,所以默认关;要退回的实例由管理员打开。
     'education.enable_return': False,
     # 作业能否选辅导风格(严格 / 平衡 / 放手)。关掉后表单不显示档位,对话也不附档位提示词,

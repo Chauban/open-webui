@@ -90,3 +90,35 @@ export const buildAssignmentPayload = (
 		}
 	};
 };
+
+export type DefaultRubrics = Partial<Record<TaskMode, Array<{ label: string; max_score: number }>>>;
+
+/**
+ * 新建作业预填的评分维度。管理员按作业形式设过就用设定的,没设(空列表)用内置三项。
+ * 修订初稿的第一次通读按作业的评分维度逐项下结论,所以实例要按提示词里的标准设这一份。
+ */
+export const getDefaultRubricCriteria = (
+	rubrics: DefaultRubrics | undefined,
+	taskMode: TaskMode,
+	t: Translate
+): RubricCriterionDraft[] => {
+	const configured = rubrics?.[taskMode] ?? [];
+	const criteria = configured.length
+		? configured.map((criterion) => ({ label: criterion.label, maxScore: String(criterion.max_score) }))
+		: [
+				{ label: t('Ideas'), maxScore: '34' },
+				{ label: t('Structure'), maxScore: '33' },
+				{ label: t('Evidence'), maxScore: '33' }
+			];
+	return criteria.map((criterion, index) => ({ key: `criterion_${index + 1}`, ...criterion }));
+};
+
+export const rubricTotal = (criteria: RubricCriterionDraft[]) =>
+	String(criteria.reduce((sum, criterion) => sum + (Number(criterion.maxScore) || 0), 0));
+
+export const isSameRubric = (a: RubricCriterionDraft[], b: RubricCriterionDraft[]) =>
+	a.length === b.length &&
+	a.every(
+		(criterion, index) =>
+			criterion.label.trim() === b[index].label.trim() && criterion.maxScore === b[index].maxScore
+	);

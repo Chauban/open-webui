@@ -37,7 +37,7 @@ from open_webui.utils.tools import (
     set_terminal_servers,
     set_tool_servers,
 )
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 router = APIRouter()
 
@@ -76,6 +76,7 @@ EDUCATION_CONFIG_KEYS = {
     'EDUCATION_TASK_PROMPTS': 'education.task_prompts',
     'EDUCATION_DEFAULT_COACHING_STYLE': 'education.default_coaching_style',
     'EDUCATION_DEFAULT_TASK_MODE': 'education.default_task_mode',
+    'EDUCATION_DEFAULT_RUBRICS': 'education.default_rubrics',
     'EDUCATION_ENABLE_RETURN': 'education.enable_return',
     'EDUCATION_ENABLE_COACHING_STYLES': 'education.enable_coaching_styles',
     'EDUCATION_CHALLENGE_PROMPTS': 'education.challenge_prompts',
@@ -830,11 +831,24 @@ class EducationTaskPromptsForm(BaseModel):
     revise_draft: str
 
 
+class DefaultRubricCriterion(BaseModel):
+    label: str = Field(min_length=1, max_length=100)
+    max_score: int = Field(gt=0)
+
+
+class EducationDefaultRubricsForm(BaseModel):
+    """新建作业预填的评分维度;空列表表示用内置的三项。上限与作业评分维度一致(8 项)。"""
+
+    from_scratch: list[DefaultRubricCriterion] = Field(max_length=8)
+    revise_draft: list[DefaultRubricCriterion] = Field(max_length=8)
+
+
 class EducationConfigForm(BaseModel):
     EDUCATION_COACHING_PROMPTS: EducationCoachingPromptsForm
     EDUCATION_TASK_PROMPTS: EducationTaskPromptsForm
     EDUCATION_DEFAULT_COACHING_STYLE: CoachingStyle
     EDUCATION_DEFAULT_TASK_MODE: TaskMode
+    EDUCATION_DEFAULT_RUBRICS: EducationDefaultRubricsForm
     EDUCATION_ENABLE_RETURN: bool
     EDUCATION_ENABLE_COACHING_STYLES: bool
 

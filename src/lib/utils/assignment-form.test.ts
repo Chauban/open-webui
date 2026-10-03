@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildAssignmentPayload, type AssignmentDraft } from './assignment-form';
+import {
+	buildAssignmentPayload,
+	getDefaultRubricCriteria,
+	isSameRubric,
+	rubricTotal,
+	type AssignmentDraft
+} from './assignment-form';
 
 const t = (key: string) => key;
 
@@ -61,5 +67,27 @@ describe('buildAssignmentPayload', () => {
 		expect(buildAssignmentPayload(draft({ scoreMax: '12' }), t).error).toBe(
 			'Rubric maximum scores must add up to the assignment maximum.'
 		);
+	});
+});
+
+describe('getDefaultRubricCriteria', () => {
+	it('falls back to the built-in three criteria when the instance set none', () => {
+		const criteria = getDefaultRubricCriteria({ revise_draft: [] }, 'revise_draft', t);
+		expect(criteria.map((criterion) => criterion.label)).toEqual(['Ideas', 'Structure', 'Evidence']);
+		expect(rubricTotal(criteria)).toBe('100');
+	});
+
+	it('uses the instance default for that assignment type, with fresh keys', () => {
+		const criteria = getDefaultRubricCriteria(
+			{ revise_draft: [{ label: '综述只写已有研究', max_score: 10 }, { label: '出处与参考文献', max_score: 15 }] },
+			'revise_draft',
+			t
+		);
+		expect(criteria).toEqual([
+			{ key: 'criterion_1', label: '综述只写已有研究', maxScore: '10' },
+			{ key: 'criterion_2', label: '出处与参考文献', maxScore: '15' }
+		]);
+		expect(rubricTotal(criteria)).toBe('25');
+		expect(isSameRubric(criteria, getDefaultRubricCriteria(undefined, 'revise_draft', t))).toBe(false);
 	});
 });

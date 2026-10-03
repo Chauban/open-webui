@@ -24,7 +24,13 @@
 		cloneReflectionQuestions,
 		getDefaultReflectionQuestions
 	} from '$lib/utils/reflection-questions';
-	import { buildAssignmentPayload, type AssignmentDraft } from '$lib/utils/assignment-form';
+	import {
+		buildAssignmentPayload,
+		getDefaultRubricCriteria,
+		rubricTotal,
+		type AssignmentDraft,
+		type DefaultRubrics
+	} from '$lib/utils/assignment-form';
 	import { resolveErrorMessage } from '$lib/utils/education';
 
 	const i18n = getContext<Writable<i18nType>>('i18n');
@@ -46,12 +52,10 @@
 		challengeRounds: 3,
 		challengeFocusKeys: [],
 		reflectionQuestions: [],
-		rubricCriteria: [
-			{ key: 'criterion_1', label: t('Ideas'), maxScore: '34' },
-			{ key: 'criterion_2', label: t('Structure'), maxScore: '33' },
-			{ key: 'criterion_3', label: t('Evidence'), maxScore: '33' }
-		]
+		rubricCriteria: getDefaultRubricCriteria(undefined, 'from_scratch', t)
 	};
+	// 管理员按作业形式设的默认评分维度;切换作业形式时,维度还是原形式的默认、没动过就跟着换。
+	let rubricDefaults: DefaultRubrics = {};
 	let loading = true;
 	let saving = false;
 	let loadError = '';
@@ -71,6 +75,9 @@
 			// 档位和作业形式的初始值由管理员按实例设定；复制作业时下面会改用源作业的设置。
 			draft.coachingStyle = assignmentDefaults.coaching_style;
 			draft.taskMode = assignmentDefaults.task_mode;
+			rubricDefaults = assignmentDefaults.rubrics ?? {};
+			draft.rubricCriteria = getDefaultRubricCriteria(rubricDefaults, draft.taskMode, t);
+			draft.scoreMax = rubricTotal(draft.rubricCriteria);
 			reflectionQuestionSets = questionSets;
 			// 教师大多一门课一套反思，所以默认沿用最近一份作业的题；第一次出题才给推荐题。
 			// 上一份沿用的若只是另一种作业形式的默认题（没改过），换成这种形式的默认题，
@@ -134,6 +141,10 @@
 
 			if (presetChallengeFocus) {
 				// 质疑式读者只有从零写作才有；实例默认是修订初稿时也要切回来，焦点才不会被丢掉。
+				if (draft.taskMode !== 'from_scratch' && !duplicateFromId) {
+					draft.rubricCriteria = getDefaultRubricCriteria(rubricDefaults, 'from_scratch', t);
+					draft.scoreMax = rubricTotal(draft.rubricCriteria);
+				}
 				draft.taskMode = 'from_scratch';
 				draft.reflectionQuestions = adaptDefaultReflectionQuestions(
 					draft.reflectionQuestions,
@@ -208,6 +219,7 @@
 				{classrooms}
 				{reflectionQuestionSets}
 				{reflectionNotice}
+				{rubricDefaults}
 			>
 				<div
 					slot="footer"
