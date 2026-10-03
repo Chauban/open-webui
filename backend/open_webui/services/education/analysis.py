@@ -11,7 +11,7 @@ from open_webui.models.education import Education
 
 # Bump whenever the provenance/highlight analysis logic changes so cached
 # results produced by older logic are recomputed instead of served stale.
-_ANALYSIS_LOGIC_VERSION = "6"
+_ANALYSIS_LOGIC_VERSION = "7"
 
 SOURCE_MAP_TYPES = {
     "ai_inserted",
@@ -540,16 +540,55 @@ def _diff_text(previous_text: str, current_text: str) -> Optional[dict]:
     else:
         change_type = "delete"
 
+    inserted_length, deleted_length = _changed_lengths(deleted_text, inserted_text)
     return {
         "change_type": change_type,
         "start_offset": start,
         "end_offset": start + len(inserted_text),
         "inserted_text": inserted_text,
         "deleted_text": deleted_text,
-        "inserted_length": len(inserted_text),
-        "deleted_length": len(deleted_text),
+        "inserted_length": inserted_length,
+        "deleted_length": deleted_length,
         "net_growth": len(current_text) - len(previous_text),
     }
+
+
+_SENTENCE_SPLIT = re.compile(r".*?(?:[。！？!?；;]|\n|$)", re.S)
+
+
+def _changed_lengths(deleted_text: str, inserted_text: str) -> tuple[int, int]:
+    """前后缀比较得到的是「第一处改动到最后一处改动」的整段。一次保存里有两处以上分开的改动时,
+    中间没动的句子也被算成既删又增(净增 18 字的保存报出 490 字插入,触发大段突增)。
+    这里按句对齐,把没动的句子从两边扣掉;改过的句子内部再各自去掉公共前后缀,
+    所以只改一个句子时结果与整段前后缀比较完全一致。"""
+    if not deleted_text or not inserted_text:
+        return len(inserted_text), len(deleted_text)
+    old_parts = _SENTENCE_SPLIT.findall(deleted_text)
+    new_parts = _SENTENCE_SPLIT.findall(inserted_text)
+    old_parts = [part for part in old_parts if part]
+    new_parts = [part for part in new_parts if part]
+    if len(old_parts) < 2 and len(new_parts) < 2:
+        return len(inserted_text), len(deleted_text)
+    inserted_length = deleted_length = 0
+    matcher = difflib.SequenceMatcher(None, old_parts, new_parts, autojunk=False)
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        old_chunk = "".join(old_parts[i1:i2])
+        new_chunk = "".join(new_parts[j1:j2])
+        prefix = 0
+        while prefix < len(old_chunk) and prefix < len(new_chunk) and old_chunk[prefix] == new_chunk[prefix]:
+            prefix += 1
+        suffix = 0
+        while (
+            suffix < len(old_chunk) - prefix
+            and suffix < len(new_chunk) - prefix
+            and old_chunk[-1 - suffix] == new_chunk[-1 - suffix]
+        ):
+            suffix += 1
+        deleted_length += len(old_chunk) - prefix - suffix
+        inserted_length += len(new_chunk) - prefix - suffix
+    return inserted_length, deleted_length
 
 
 def build_version_diffs(versions, baseline_text: str = "") -> list[dict]:
@@ -634,7 +673,10 @@ def _detect_large_bursts(version_diffs: list[dict], final_text: str, operations:
     for diff in version_diffs:
         inserted_length = diff.get("inserted_length", 0)
         inserted_ratio = inserted_length / total_chars
-        if inserted_length < 120 and diff.get("net_growth", 0) < 80:
+        # 突增指净增出来的新文字:把一句话换成差不多长的另一句是改稿,不是突增。
+        # 整段替换式粘贴仍会在来源占比里记为外部粘贴,不靠这里兜。
+        added_length = inserted_length - diff.get("deleted_length", 0)
+        if added_length < 120 and diff.get("net_growth", 0) < 80:
             continue
 
         nearby_operation = next(

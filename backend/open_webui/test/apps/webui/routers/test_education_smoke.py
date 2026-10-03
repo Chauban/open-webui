@@ -79,7 +79,9 @@ from open_webui.routers.notes import router as notes_router
 from open_webui.services.education.analysis import (
     collect_clarification_exchanges,
     _build_operation_timeline,
+    _detect_large_bursts,
     build_submission_analysis,
+    build_version_diffs,
     count_clarifications,
     filter_segments_for_final_text,
 )
@@ -165,6 +167,31 @@ def _typing_op(op_id, at, op_type, start, end, inserted=None, deleted=None, sour
         occurred_at_ms=at * 1000,
         created_at=at,
     )
+
+
+def test_scattered_edits_in_one_save_are_not_a_large_burst():
+    # 修订初稿:一次保存里改了三处分开的句子,首尾之间没动的句子不能算成新写入
+    untouched = "这一句没有任何改动。" * 40
+    baseline = f"甲说有学者指出这样。{untouched}乙说有研究认为那样。{untouched}结尾泛泛而谈。"
+    revised = f"甲说王某某（2016）在《某文》中指出这样。{untouched}乙说李某某（2019）在《另文》中认为那样。{untouched}结尾落到本研究，拟从戍卒视角入手。"
+    version = SimpleNamespace(id="v1", version_no=1, trigger_type="autosave", note_snapshot_text=revised, created_at=1000)
+
+    diffs = build_version_diffs([version], baseline)
+
+    assert diffs[0]["inserted_length"] < 80
+    assert diffs[0]["deleted_length"] < 40
+    assert _detect_large_bursts(diffs, revised, []) == []
+
+
+def test_pasted_block_is_still_a_large_burst():
+    baseline = "开头。结尾。"
+    revised = "开头。" + "新增内容。" * 100 + "结尾。"
+    version = SimpleNamespace(id="v1", version_no=1, trigger_type="autosave", note_snapshot_text=revised, created_at=1000)
+
+    diffs = build_version_diffs([version], baseline)
+
+    assert diffs[0]["inserted_length"] == 500
+    assert len(_detect_large_bursts(diffs, revised, [])) == 1
 
 
 def test_operation_timeline_merges_consecutive_typing_into_runs():
