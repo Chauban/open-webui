@@ -30,6 +30,7 @@ from open_webui.models.education import (
     RubricSchema,
 )
 from open_webui.utils.chat import generate_chat_completion
+from open_webui.utils.models import get_all_models
 
 log = logging.getLogger(__name__)
 
@@ -187,6 +188,11 @@ async def generate_completion(request, user, model_id: str, messages: list[dict]
     不走 task model 降级,直接用学生写作区当前选的模型;模型可见性与访问控制由
     generate_chat_completion 自己校验。
     """
+
+    # 模型列表是进程内缓存,进程重启后要等有人请求 /api/models 才会填上;
+    # 聊天接口自己会先补一次,这里同样补,否则会报 Model not found。
+    if not request.app.state.MODELS:
+        await get_all_models(request, user=user)
 
     payload = {"model": model_id, "messages": messages, "stream": False}
     response = await generate_chat_completion(request, form_data=payload, user=user)
