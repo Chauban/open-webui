@@ -77,9 +77,12 @@
 		tokens = marked.lexer(processed);
 	};
 
-	const updateHandler = (content) => {
+	// done 也要作为依赖:最后一段内容常在 done 还为假时到达、排进动画帧,done 随后变真时
+	// 内容没变,只依赖 content 就不会再跑。后台标签页里浏览器暂停动画帧,那一帧永远不来,
+	// 回复就一直是空白(学生等第一次通读时切去别的页面就会碰上)。不绘制时直接解析。
+	const updateHandler = (content, done) => {
 		if (content) {
-			if (done) {
+			if (done || document.hidden) {
 				cancelAnimationFrame(pendingUpdate);
 				pendingUpdate = null;
 				parseTokens();
@@ -92,7 +95,7 @@
 		}
 	};
 
-	$: updateHandler(content);
+	$: updateHandler(content, done);
 
 	// Throttle parsing to once per animation frame while streaming
 	onDestroy(() => {

@@ -127,7 +127,13 @@
 			buildMessages();
 		} else if (_messages) {
 			// Content update (streaming) — throttle to once per frame
-			if (!pendingRebuild) {
+			if (document.hidden) {
+				// 后台标签页里浏览器整个暂停 requestAnimationFrame:学生等通读时切去别的页面,
+				// 回复写完了列表却停在空白,要刷新才出来。不绘制时节流没有意义,直接重建。
+				cancelAnimationFrame(pendingRebuild);
+				pendingRebuild = null;
+				buildMessages();
+			} else if (!pendingRebuild) {
 				pendingRebuild = requestAnimationFrame(() => {
 					pendingRebuild = null;
 					buildMessages();
