@@ -4465,18 +4465,28 @@ def test_assignment_defaults_follow_instance_settings(education_client):
     UserContext.current_user = teacher
     res = client.get("/api/v1/teacher/assignment-defaults")
     assert res.status_code == 200, res.text
-    assert res.json() == {"coaching_style": "balanced", "task_mode": "from_scratch"}
+    assert res.json() == {
+        "coaching_style": "balanced",
+        "task_mode": "from_scratch",
+        "rubrics": {"from_scratch": [], "revise_draft": []},
+    }
 
+    revise_rubric = [{"label": "综述只写已有研究", "max_score": 40}, {"label": "出处与参考文献", "max_score": 60}]
     asyncio.run(
         Config.upsert(
             {
                 "education.default_coaching_style": "socratic",
                 "education.default_task_mode": "revise_draft",
+                "education.default_rubrics": {"from_scratch": [], "revise_draft": revise_rubric},
             }
         )
     )
     res = client.get("/api/v1/teacher/assignment-defaults")
-    assert res.json() == {"coaching_style": "socratic", "task_mode": "revise_draft"}
+    assert res.json() == {
+        "coaching_style": "socratic",
+        "task_mode": "revise_draft",
+        "rubrics": {"from_scratch": [], "revise_draft": revise_rubric},
+    }
 
     UserContext.current_user = student
     assert client.get("/api/v1/teacher/assignment-defaults").status_code == 403
@@ -7051,6 +7061,8 @@ def test_revise_draft_analysis_starts_from_the_declared_draft(education_client):
     assert draft_diff.status_code == 200, draft_diff.text
     assert draft_diff.json()["has_baseline"] is True
     assert _diff_sides(draft_diff.json()["blocks"]) == (_DRAFT_MD, first_final)
+    assert draft_diff.json()["same_as_draft"] is False
+    assert draft_diff.json()["added_sentence_count"] >= 1
 
     # 退回重交:对比的起点仍是最初那份初稿
     returned = client.post(
@@ -7250,3 +7262,56 @@ def test_draft_file_upload_only_for_revise_draft_assignments(education_client):
         files={"file": ("初稿.txt", "x".encode())},
     )
     assert res.status_code == 400, res.text
+
+
+def test_revision_overview_and_first_read_distribution():
+    from open_webui.services.education.revision_items import (
+        build_first_read_distribution,
+        is_same_as_draft,
+        summarize_revision_snapshot,
+    )
+
+    def snapshot(*items):
+        return {"revision_items": {"status": "ready", "items": list(items)}}
+
+    def item(key, status, decision=None, quote_unchanged=False):
+        return {
+            "criterion_key": key,
+            "status": status,
+            "decision": decision,
+            "quote_unchanged": quote_unchanged,
+        }
+
+    lazy = snapshot(item("c1", "problem", "revised", True), item("c2", "ok"))
+    overview = summarize_revision_snapshot(lazy, True)
+    assert overview["problem_count"] == 1
+    assert overview["decisions"] == {"revised": 1, "partly": 0, "kept": 0}
+    assert overview["claimed_untouched"] == 1
+    assert overview["unchanged_from_draft"] is True
+    assert summarize_revision_snapshot({}, False) is None
+    assert is_same_as_draft("一句。\n\n二句。", "一句。\n二句。")
+
+    assignment = SimpleNamespace(
+        task_mode="revise_draft",
+        rubric_schema=SimpleNamespace(
+            criteria=[SimpleNamespace(key="c1", label="出处"), SimpleNamespace(key="c2", label="分类")]
+        ),
+    )
+    submissions = [
+        # 同一学生两轮:只算最新一轮
+        SimpleNamespace(id="s1", student_id="a", round_no=1, stats_json=lazy),
+        SimpleNamespace(
+            id="s2", student_id="a", round_no=2, stats_json=snapshot(item("c1", "problem", "kept"), item("c2", "minor"))
+        ),
+        SimpleNamespace(id="s3", student_id="b", round_no=1, stats_json=lazy),
+    ]
+    result = build_first_read_distribution(assignment, submissions, {"s3": True})
+    assert result["submission_count"] == 2
+    assert result["unchanged_from_draft_count"] == 1
+    c1 = next(row for row in result["criteria"] if row["criterion_key"] == "c1")
+    assert c1["statuses"]["problem"] == 2
+    assert c1["decisions"] == {"revised": 1, "partly": 0, "kept": 1}
+    assert c1["claimed_untouched"] == 1
+    assert result["criteria"][0]["criterion_key"] == "c1"
+    from_scratch = SimpleNamespace(task_mode="from_scratch", rubric_schema=assignment.rubric_schema)
+    assert build_first_read_distribution(from_scratch, submissions, {}) is None

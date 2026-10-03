@@ -143,10 +143,13 @@ from open_webui.services.education.profile_snapshots import (
 )
 from open_webui.services.education.profile import PROFILE_METRIC_VERSION
 from open_webui.services.education.revision_items import (
+    build_first_read_distribution,
     build_revision_snapshot,
     ensure_follow_up,
     ensure_revision_items,
+    is_same_as_draft,
     normalize_revision_decision,
+    summarize_revision_snapshot,
 )
 from open_webui.services.education.identity import get_education_role
 from open_webui.services.education.writing_context import (
@@ -303,6 +306,11 @@ async def _build_submission_list_item(submission, assignment, db: Session):
         else None
     )
     analysis = await get_materialized_submission_analysis(submission, session, db)
+    revision_overview = None
+    if assignment.task_mode == "revise_draft":
+        revision_overview = summarize_revision_snapshot(
+            submission.stats_json, _is_submission_same_as_draft(submission, session, db)
+        )
     return SubmissionListItem(
         submission=submission,
         session=session,
@@ -313,6 +321,16 @@ async def _build_submission_list_item(submission, assignment, db: Session):
         review_status=review.review_status if review else "pending",
         score=review.score if review else None,
         risk_summary=analysis.get("summary", {}),
+        revision_overview=revision_overview,
+    )
+
+
+def _is_submission_same_as_draft(submission, session, db: Session) -> bool:
+    if session is None or session.draft_baseline_at is None:
+        return False
+    version = Education.get_version_by_id(submission.final_version_id, db=db)
+    return is_same_as_draft(
+        version.note_snapshot_text if version else "", session.draft_baseline_text
     )
 
 
@@ -3713,7 +3731,24 @@ async def get_submission_draft_diff(
     current_version = Education.get_version_by_id(submission.final_version_id, db=db)
     old_text = session.draft_baseline_text or ""
     new_text = (current_version.note_snapshot_text or "") if current_version else ""
-    return {"has_baseline": True, "blocks": _sentence_diff_blocks(old_text, new_text)}
+    blocks = _sentence_diff_blocks(old_text, new_text)
+    # 批改页顶部一句话:「初稿 N 句,改动或删去 M 句,终稿里新写 K 句」。只说改了多少,不评价改得好不好。
+    def count(text: str) -> int:
+        return len([sentence for sentence in _SENTENCE_RE.findall(text) if sentence.strip()])
+
+    return {
+        "has_baseline": True,
+        "blocks": blocks,
+        "draft_sentence_count": count(old_text),
+        "changed_sentence_count": sum(
+            count(block["old_text"]) for block in blocks if block["op"] in ("replace", "delete")
+        ),
+        # 终稿里初稿没有的句子(改写后的新句 + 新加的句子)。
+        "added_sentence_count": sum(
+            count(block["new_text"]) for block in blocks if block["op"] in ("replace", "insert")
+        ),
+        "same_as_draft": is_same_as_draft(new_text, old_text),
+    }
 
 
 # 句末标点或换行之后断句;标点留在句子里,各句拼回去就是原文。
@@ -4090,6 +4125,17 @@ async def get_teacher_dashboard(
         [submission.micro_reflection_id for submission in submissions], db=db
     )
     analyses = await get_materialized_submission_analyses(submissions, sessions, db)
+    is_revise_draft = assignment.task_mode == "revise_draft"
+    same_as_draft = (
+        {
+            submission.id: _is_submission_same_as_draft(
+                submission, sessions.get(submission.writing_session_id), db
+            )
+            for submission in submissions
+        }
+        if is_revise_draft
+        else {}
+    )
     for submission in submissions:
         student = students.get(submission.student_id)
         analysis = analyses.get(submission.id) or {}
@@ -4107,6 +4153,13 @@ async def get_teacher_dashboard(
                 has_reflection=submission.micro_reflection_id in reflections,
                 submitted_at=submission.submitted_at,
                 risk_summary=analysis.get("summary", {}),
+                revision_overview=(
+                    summarize_revision_snapshot(
+                        submission.stats_json, same_as_draft.get(submission.id, False)
+                    )
+                    if is_revise_draft
+                    else None
+                ),
             )
         )
     distributions = {
@@ -4118,6 +4171,11 @@ async def get_teacher_dashboard(
     challenge_distribution = build_challenge_distribution(assignment, submissions)
     if challenge_distribution is not None:
         distributions["challenge"] = challenge_distribution
+    # 修订初稿:全班第一次通读汇总——每个维度多少人要改、改了没有,哪些人终稿和初稿一样。
+    if is_revise_draft:
+        first_read = build_first_read_distribution(assignment, submissions, same_as_draft)
+        if first_read is not None:
+            distributions["first_read"] = first_read
 
     # 风险信号只落在逐份提交上(items[].risk_summary),不做全班加总:
     # 加总看不出是谁,还会把正常使用 AI 与风险标签并排。

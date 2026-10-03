@@ -1919,6 +1919,8 @@ class SubmissionListItem(BaseModel):
     review_status: str = "pending"
     score: Optional[float] = None
     risk_summary: Optional[dict] = None
+    # 只有修订初稿作业有:修改清单概况与「终稿与初稿相同」,见 revision_items.summarize_revision_snapshot。
+    revision_overview: Optional[dict] = None
 
 
 class SubmissionDetailResponse(BaseModel):
@@ -1979,6 +1981,7 @@ class DashboardItem(BaseModel):
     has_reflection: bool
     submitted_at: int
     risk_summary: Optional[dict] = None
+    revision_overview: Optional[dict] = None
 
 
 class DashboardResponse(BaseModel):

@@ -467,6 +467,15 @@
 	};
 
 	// 初稿 → 终稿:老师要看的是从第一稿到这一轮的完整修改，退回重交后起点仍是最初那份初稿。
+	// 修订初稿作业批改时最常看的就是它，所以放在左栏正文上方切换，进页面就取回。
+	let docView: 'final' | 'draft' = 'final';
+	let draftDiffFor = '';
+	$: if (isReviseDraft && detail?.submission?.id && draftDiffFor !== detail.submission.id) {
+		draftDiffFor = detail.submission.id;
+		draftDiffData = null;
+		docView = 'final';
+		loadDraftDiff();
+	}
 	let draftDiffData = null;
 	let draftDiffLoading = false;
 	let draftDiffSeq = 0;
@@ -653,6 +662,23 @@
 						<span class="opacity-70">{$i18n.t('Process Focus')}</span>
 						<span class="font-semibold">{$i18n.t(reviewOverview.focusLabel)}</span>
 					</span>
+					<!-- 修订初稿:和初稿比改了多少。只是提示，不是判定，所以用灰色。 -->
+					{#if isReviseDraft && draftDiffData?.has_baseline}
+						<span
+							class="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2.5 py-0.5 text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300"
+						>
+							{draftDiffData.same_as_draft
+								? $i18n.t('Same as first draft')
+								: $i18n.t(
+										'First draft {{total}} sentences: {{changed}} changed or removed; {{added}} newly written sentences in the final',
+										{
+											total: draftDiffData.draft_sentence_count,
+											changed: draftDiffData.changed_sentence_count,
+											added: draftDiffData.added_sentence_count
+										}
+									)}
+						</span>
+					{/if}
 				</div>
 
 				<div>
@@ -693,17 +719,46 @@
 					<!-- Article header (fixed) -->
 					<div class="shrink-0 border-b border-gray-100 dark:border-gray-800 px-6 pt-5 pb-4">
 						<div class="flex items-center justify-between">
-							<div class="text-sm font-semibold text-gray-950 dark:text-gray-100">{$i18n.t('Final Submission')}</div>
-							<label class="flex cursor-pointer items-center gap-2 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300">
-								<input type="checkbox" bind:checked={highlight} class="accent-black dark:accent-white" />
-								{$i18n.t('Highlight sources')}
-							</label>
+							{#if isReviseDraft}
+								<div class="flex items-center gap-1 rounded-full bg-gray-100 p-0.5 text-sm dark:bg-gray-800">
+									{#each [
+										{ key: 'final', label: 'Final Submission' },
+										{ key: 'draft', label: 'First draft → final' }
+									] as view}
+										<button
+											type="button"
+											class="rounded-full px-3 py-1 font-medium transition {docView === view.key
+												? 'bg-white text-gray-950 shadow-sm dark:bg-gray-700 dark:text-gray-100'
+												: 'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'}"
+											on:click={() => (docView = view.key)}
+										>
+											{$i18n.t(view.label)}
+										</button>
+									{/each}
+								</div>
+							{:else}
+								<div class="text-sm font-semibold text-gray-950 dark:text-gray-100">{$i18n.t('Final Submission')}</div>
+							{/if}
+							{#if docView === 'final'}
+								<label class="flex cursor-pointer items-center gap-2 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300">
+									<input type="checkbox" bind:checked={highlight} class="accent-black dark:accent-white" />
+									{$i18n.t('Highlight sources')}
+								</label>
+							{/if}
 						</div>
 					</div>
 					<!-- Article body (scrollable) -->
 					<div class="flex-1 overflow-y-auto px-6 py-5">
 						<div class="rounded-2xl bg-stone-50 dark:bg-gray-900 p-5">
-							{#if highlight}
+							{#if docView === 'draft'}
+								{#if draftDiffLoading && !draftDiffData}
+									<div class="text-sm text-gray-400">{$i18n.t('Loading...')}</div>
+								{:else if draftDiffData?.has_baseline}
+									<TextDiffBlocks blocks={draftDiffData.blocks} />
+								{:else}
+									<div class="text-sm text-gray-400">{$i18n.t('No first draft was submitted.')}</div>
+								{/if}
+							{:else if highlight}
 								<SourceHighlightedText
 									json={detail.final_version.note_snapshot_json}
 									text={detail.final_version.note_snapshot_text ?? detail.note?.data?.content?.md ?? ''}
@@ -1108,7 +1163,8 @@
 									{/if}
 								</div>
 
-								<!-- AI clarification questions -->
+								<!-- AI clarification questions：没有就不摆这一块(哈工深关了「询问用户」，永远是空的) -->
+								{#if clarifications.length > 0}
 								<div>
 									<div class="mb-3">
 										<div class="text-sm font-semibold text-gray-950 dark:text-gray-100">
@@ -1187,6 +1243,7 @@
 										</div>
 									{/if}
 								</div>
+								{/if}
 
 								<!-- 提交前读者试读 -->
 								<ChallengeRounds detail={challengeDetail} {criteriaLabels} />
@@ -1292,26 +1349,6 @@
 										</div>
 									{/if}
 								</div>
-
-								<!-- First draft → this round's final -->
-								{#if isReviseDraft}
-									<div class="mt-4">
-										<button
-											class="text-sm font-medium underline disabled:opacity-50"
-											disabled={draftDiffLoading}
-											on:click={loadDraftDiff}
-										>
-											{draftDiffLoading ? $i18n.t('Loading...') : $i18n.t('Compare first draft with final')}
-										</button>
-										{#if draftDiffData}
-											{#if draftDiffData.has_baseline}
-												<TextDiffBlocks blocks={draftDiffData.blocks} />
-											{:else}
-												<div class="mt-2 text-sm text-gray-400">{$i18n.t('No first draft was submitted.')}</div>
-											{/if}
-										{/if}
-									</div>
-								{/if}
 
 								<!-- Previous-round diff -->
 								{#if detail?.submission?.round_no > 1}

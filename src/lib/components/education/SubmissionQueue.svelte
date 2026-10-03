@@ -21,6 +21,7 @@
 	import EduCard from './EduCard.svelte';
 	import EduRiskBadges from './EduRiskBadges.svelte';
 	import EduStateCard from './EduStateCard.svelte';
+	import RevisionOverviewCell from './RevisionOverviewCell.svelte';
 	import { EDU_FILTER_FIELD_CLASS, eduFilterClass, eduSegmentClass } from './styles';
 	import {
 		formatEpoch,
@@ -77,6 +78,14 @@
 	let notificationsInitialized = false;
 
 	$: scoped = Boolean(assignmentId);
+	// 修订初稿作业「用了 AI 吗」永远是用了(首轮通读是平台发起的)，这一列改看修改清单。
+	$: reviseCount = items.filter((item) => item.assignment.task_mode === 'revise_draft').length;
+	$: lastColumnLabel =
+		reviseCount === 0
+			? $i18n.t('AI Use')
+			: reviseCount === items.length
+				? $i18n.t('Revision list')
+				: $i18n.t('AI Use / Revision list');
 	// 作业下拉跟着班级走,选了班级就只列那个班的作业。
 	$: assignmentOptions = assignments.filter(
 		(item) => selectedClassroom === 'all' || item.classroom?.id === selectedClassroom
@@ -295,7 +304,7 @@
 						<th class="px-4 py-2.5 font-medium">{$i18n.t('Submitted At')}</th>
 						<th class="px-4 py-2.5 font-medium">{$i18n.t('Status')}</th>
 						<th class="px-4 py-2.5 font-medium">{$i18n.t('Process Signals')}</th>
-						<th class="px-4 py-2.5 font-medium">{$i18n.t('AI Use')}</th>
+						<th class="px-4 py-2.5 font-medium">{lastColumnLabel}</th>
 						<th class="w-8"></th>
 					</tr>
 				</thead>
@@ -349,12 +358,18 @@
 									<span class="text-gray-300 dark:text-gray-600">—</span>
 								{/if}
 							</td>
-							<td class="whitespace-nowrap px-4 py-3 text-gray-600 dark:text-gray-300">
-								{item.reflection
-									? item.reflection.ai_used
-										? $i18n.t('Used AI')
-										: $i18n.t('Did not use AI')
-									: '—'}
+							<td class="px-4 py-3 text-gray-600 dark:text-gray-300">
+								{#if item.assignment.task_mode === 'revise_draft'}
+									<RevisionOverviewCell overview={item.revision_overview} />
+								{:else}
+									<span class="whitespace-nowrap">
+										{item.reflection
+											? item.reflection.ai_used
+												? $i18n.t('Used AI')
+												: $i18n.t('Did not use AI')
+											: '—'}
+									</span>
+								{/if}
 							</td>
 							<td class="pr-4 text-gray-300 dark:text-gray-600" aria-hidden="true">&rsaquo;</td>
 						</tr>

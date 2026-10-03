@@ -125,6 +125,7 @@
 						{#each group.list as item (item.item_no)}
 							{@const missing = showMissing && isMissing(item)}
 							<li
+								data-revision-missing={missing ? 'true' : undefined}
 								class="rounded-xl px-2.5 py-2 {missing
 									? 'bg-rose-50 ring-1 ring-rose-200 dark:bg-rose-950/30 dark:ring-rose-900'
 									: 'bg-gray-50 dark:bg-gray-850'}"

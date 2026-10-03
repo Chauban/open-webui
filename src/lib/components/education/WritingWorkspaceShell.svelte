@@ -2,7 +2,7 @@
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 	import type { WritingVersionTrigger } from '$lib/apis/education/types';
-	import { getContext, onDestroy, onMount } from 'svelte';
+	import { getContext, onDestroy, onMount, tick } from 'svelte';
 	import { get } from 'svelte/store';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
@@ -340,6 +340,12 @@
 			toast.error(resolveErrorMessage(error, t));
 		}
 	};
+
+	$: sameAsDraft =
+		isAssignment &&
+		assignment?.task_mode === 'revise_draft' &&
+		Boolean(writingSession?.draft_baseline_at) &&
+		noteText.replace(/\s+/g, '') === (writingSession?.draft_baseline_text ?? '').replace(/\s+/g, '');
 
 	// 只有「要改」的必须交代;「可改进」的可填可不填。
 	const getRevisionError = () => {
@@ -905,6 +911,11 @@
 		if (revisionError) {
 			revisionShowMissing = true;
 			toast.error($i18n.t(revisionError));
+			// 清单长时漏标的那条常在弹窗下面看不到，滚过去。
+			await tick();
+			document
+				.querySelector('[data-revision-missing]')
+				?.scrollIntoView({ block: 'center', behavior: 'smooth' });
 			return;
 		}
 		const reflectionError = getReflectionAnswersError(
@@ -1502,6 +1513,16 @@
 				</div>
 
 				<div class="min-h-0 flex-1 overflow-y-auto px-6 py-2">
+					{#if sameAsDraft}
+						<!-- 只是提醒，不拦提交：学生可能真的认为初稿不用改，理由写在清单里由老师判断。 -->
+						<div
+							class="mb-3 rounded-xl bg-gray-50 px-3 py-2 text-xs text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+						>
+							{$i18n.t(
+								'Your text is still exactly the same as the first draft you submitted. You can still submit; your teacher will see this.'
+							)}
+						</div>
+					{/if}
 					{#if hasRevisionList}
 						<div class="mb-4">
 							<RevisionList

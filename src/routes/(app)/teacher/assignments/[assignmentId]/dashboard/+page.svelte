@@ -19,6 +19,7 @@
 	import EduEmpty from '$lib/components/education/EduEmpty.svelte';
 	import EduRiskBadges from '$lib/components/education/EduRiskBadges.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
+	import RevisionOverviewCell from '$lib/components/education/RevisionOverviewCell.svelte';
 	import { assignmentTabs } from '$lib/components/education/teacher-nav';
 
 	// 这一页是「单份作业」的分析,此前标题写成「班级概览」。风险只在逐份提交上出现,
@@ -32,13 +33,22 @@
 
 	let dashboard = null;
 	let assignmentTitle = '';
+	let taskMode = 'from_scratch';
 	let loadError = '';
 	let unsubscribeNotifications;
 	let notificationsInitialized = false;
 	let insight: ChallengeInsight | null = null;
 	let insightLoading = false;
 
-	type SortKey = 'student' | 'typed' | 'inserted' | 'pasted' | 'prompts' | 'signals';
+	type SortKey =
+		| 'student'
+		| 'typed'
+		| 'inserted'
+		| 'pasted'
+		| 'external'
+		| 'prompts'
+		| 'signals'
+		| 'revision';
 	let sortKey: SortKey = 'signals';
 	let sortDesc = true;
 
@@ -50,6 +60,21 @@
 		{ key: 'prompts', label: 'Prompts', numeric: true },
 		{ key: 'signals', label: 'Process Signals', numeric: true }
 	];
+	// 修订初稿作业里 AI 不往正文里插字(只在对话里提问)，那两列永远是 0；
+	// 换成外部粘贴和修改清单。
+	const REVISE_COLUMNS: Array<{ key: SortKey; label: string; numeric: boolean }> = [
+		{ key: 'student', label: 'Student', numeric: false },
+		{ key: 'typed', label: 'Typed', numeric: true },
+		{ key: 'external', label: 'External paste', numeric: true },
+		{ key: 'prompts', label: 'Prompts', numeric: true },
+		{ key: 'signals', label: 'Process Signals', numeric: true },
+		{ key: 'revision', label: 'Revision list', numeric: true }
+	];
+	$: isReviseDraft = taskMode === 'revise_draft';
+	$: columns = isReviseDraft ? REVISE_COLUMNS : COLUMNS;
+	$: firstRead = dashboard?.distributions?.first_read ?? null;
+	// 修订初稿作业没有站内导入，改写分布多半是空的，空就不摆这张卡。
+	$: showRewrite = !(isReviseDraft && rewriteLevels.every(([, count]) => count === 0));
 
 	const signalScore = (item) =>
 		(item.risk_summary?.suspected_unmarked_import_count ?? 0) * 1000 +
@@ -65,6 +90,15 @@
 				return item.source_stats.ai_inserted_chars ?? 0;
 			case 'pasted':
 				return item.source_stats.ai_pasted_chars ?? 0;
+			case 'external':
+				return item.risk_summary?.external_paste_chars ?? 0;
+			case 'revision':
+				// 说改了却原句未动、终稿与初稿相同的排前面，再按要改项数。
+				return (
+					(item.revision_overview?.unchanged_from_draft ? 10000 : 0) +
+					(item.revision_overview?.claimed_untouched ?? 0) * 100 +
+					(item.revision_overview?.problem_count ?? 0)
+				);
 			case 'prompts':
 				return item.prompt_count ?? 0;
 			default:
@@ -136,7 +170,10 @@
 
 	onMount(async () => {
 		getTeacherAssignment(localStorage.token, assignmentId)
-			.then((item) => (assignmentTitle = item?.assignment?.title ?? ''))
+			.then((item) => {
+				assignmentTitle = item?.assignment?.title ?? '';
+				taskMode = item?.assignment?.task_mode ?? 'from_scratch';
+			})
 			.catch(() => {});
 		await loadDashboard();
 		// 收到教学通知(如新提交)时后台刷新
@@ -164,6 +201,71 @@
 			{#if dashboard.items.length === 0}
 				<EduStateCard>{$i18n.t('No submissions yet.')}</EduStateCard>
 			{:else}
+				{#if firstRead}
+					<EduCard class="mb-6">
+						<div class="text-sm font-semibold">{$i18n.t('First read-through across the class')}</div>
+						<!-- 每个评分维度：第一次通读判了多少人要改，这些人提交时怎么交代的。按人数，每人取最新一轮。 -->
+						<div class="mt-1 text-xs text-gray-400">
+							{$i18n.t('{{count}} submissions with a revision list', {
+								count: firstRead.submission_count
+							})}{#if firstRead.unchanged_from_draft_count > 0}
+								· {$i18n.t('{{count}} final drafts are the same as the first draft', {
+									count: firstRead.unchanged_from_draft_count
+								})}{/if}
+						</div>
+						<div class="mt-4 overflow-x-auto">
+							<table class="w-full min-w-[40rem] text-sm">
+								<thead class="text-left text-xs text-gray-500 dark:text-gray-400">
+									<tr>
+										<th class="py-2 pr-4 font-medium">{$i18n.t('Criterion')}</th>
+										<th class="py-2 pr-4 text-right font-medium">{$i18n.t('To fix')}</th>
+										<th class="py-2 pr-4 text-right font-medium">{$i18n.t('Could improve')}</th>
+										<th class="py-2 pr-4 text-right font-medium">{$i18n.t('Meets')}</th>
+										<th class="py-2 pr-4 font-medium">{$i18n.t('How the "to fix" ones were handled')}</th>
+									</tr>
+								</thead>
+								<tbody>
+									{#each firstRead.criteria as row (row.criterion_key)}
+										<tr class="border-t border-gray-100 dark:border-gray-800">
+											<td class="py-2.5 pr-4 text-gray-800 dark:text-gray-100">{row.label}</td>
+											<td class="py-2.5 pr-4 text-right tabular-nums font-medium">
+												{row.statuses.problem}
+											</td>
+											<td class="py-2.5 pr-4 text-right tabular-nums text-gray-500">{row.statuses.minor}</td>
+											<td class="py-2.5 pr-4 text-right tabular-nums text-gray-500">{row.statuses.ok}</td>
+											<td class="py-2.5 pr-4 text-xs text-gray-600 dark:text-gray-300">
+												{#if row.statuses.problem > 0}
+													{$i18n.t('revised {{revised}} · partly {{partly}} · kept {{kept}}', {
+														revised: row.decisions.revised,
+														partly: row.decisions.partly,
+														kept: row.decisions.kept
+													})}
+													{#if row.claimed_untouched > 0}
+														<span class="text-gray-400">
+															· {$i18n.t('{{count}} marked revised, sentence unchanged', {
+																count: row.claimed_untouched
+															})}
+														</span>
+													{/if}
+													{#if row.statuses.deferred > 0}
+														<span class="text-gray-400">
+															· {$i18n.t('{{count}} never got the deferred check', {
+																count: row.statuses.deferred
+															})}
+														</span>
+													{/if}
+												{:else}
+													<span class="text-gray-300 dark:text-gray-600">—</span>
+												{/if}
+											</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						</div>
+					</EduCard>
+				{/if}
+
 				{#if dashboard.distributions?.challenge}
 					{@const challenge = dashboard.distributions.challenge}
 					<EduCard class="mb-6">
@@ -266,7 +368,11 @@
 					</EduCard>
 				{/if}
 
-				<div class="mb-6 grid gap-4 {flagged.length > 0 ? 'lg:grid-cols-[0.9fr_1.1fr]' : ''}">
+				{#if showRewrite || flagged.length > 0}
+				<div
+					class="mb-6 grid gap-4 {flagged.length > 0 && showRewrite ? 'lg:grid-cols-[0.9fr_1.1fr]' : ''}"
+				>
+					{#if showRewrite}
 					<EduCard>
 						<div class="mb-4 text-sm font-semibold">{$i18n.t('Rewrite Distribution')}</div>
 						{#if rewriteLevels.every(([, count]) => count === 0)}
@@ -292,6 +398,7 @@
 							</div>
 						{/if}
 					</EduCard>
+					{/if}
 
 					{#if flagged.length > 0}
 						<EduCard>
@@ -311,6 +418,7 @@
 						</EduCard>
 					{/if}
 				</div>
+				{/if}
 
 				<EduCard padding="none">
 					<div class="border-b border-gray-100 px-4 py-3 text-sm font-semibold dark:border-gray-800">
@@ -322,7 +430,7 @@
 								class="bg-gray-50 text-left text-xs text-gray-500 dark:bg-gray-800 dark:text-gray-400"
 							>
 								<tr>
-									{#each COLUMNS as column}
+									{#each columns as column}
 										<th
 											class="px-4 py-2.5 font-medium {column.numeric && column.key !== 'signals'
 												? 'text-right'
@@ -364,8 +472,14 @@
 											</a>
 										</td>
 										<td class="px-4 py-3 text-right tabular-nums">{item.source_stats.user_typed_chars ?? 0}</td>
-										<td class="px-4 py-3 text-right tabular-nums">{item.source_stats.ai_inserted_chars ?? 0}</td>
-										<td class="px-4 py-3 text-right tabular-nums">{item.source_stats.ai_pasted_chars ?? 0}</td>
+										{#if isReviseDraft}
+											<td class="px-4 py-3 text-right tabular-nums">
+												{item.risk_summary?.external_paste_chars ?? 0}
+											</td>
+										{:else}
+											<td class="px-4 py-3 text-right tabular-nums">{item.source_stats.ai_inserted_chars ?? 0}</td>
+											<td class="px-4 py-3 text-right tabular-nums">{item.source_stats.ai_pasted_chars ?? 0}</td>
+										{/if}
 										<td class="px-4 py-3 text-right tabular-nums">{item.prompt_count}</td>
 										<td class="px-4 py-3">
 											{#if signalScore(item) > 0}
@@ -374,6 +488,11 @@
 												<span class="text-gray-300 dark:text-gray-600">—</span>
 											{/if}
 										</td>
+										{#if isReviseDraft}
+											<td class="px-4 py-3">
+												<RevisionOverviewCell overview={item.revision_overview} />
+											</td>
+										{/if}
 										<td class="px-4 py-3 text-gray-600 dark:text-gray-300">
 											{item.has_reflection ? $i18n.t('Yes') : $i18n.t('No')}
 										</td>
