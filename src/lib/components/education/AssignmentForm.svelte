@@ -72,7 +72,8 @@
 	] as const;
 
 	let aiOpen = expandAll;
-	let reflectionOpen = expandAll;
+	// 反思题折起来只剩一行摘要,老师以为题没了;它是提交那一刻学生要答的,默认展开。
+	let reflectionOpen = true;
 
 	$: isReviseDraft = draft.taskMode === 'revise_draft';
 	$: taskModeHint = TASK_MODES.find((mode) => mode.key === draft.taskMode)?.hint ?? '';

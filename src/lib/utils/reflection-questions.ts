@@ -107,7 +107,9 @@ const RECOMMENDED_QUESTIONS: RecommendedQuestion[] = [
 		placeholder: 'Write one concrete action for your next assignment.'
 	},
 	{
-		defaultFor: ['revise_draft'],
+		// 不进默认题组:AI 在对话里已按评分维度追问出处是否真实、有没有查到原文,
+		// 修改清单里也有出处这一项,学生会被问三遍。老师要一份可统计的自述时,从推荐题里点一下加入。
+		defaultFor: [],
 		kind: 'single_choice',
 		prompt: 'Did you find the original of every source you cite?',
 		options: ['Found all of them', 'Found some of them', 'Did not check']

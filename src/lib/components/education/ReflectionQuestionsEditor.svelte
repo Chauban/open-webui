@@ -212,7 +212,7 @@
 	<div class="text-xs leading-relaxed text-gray-400">
 		{#if isReviseDraft}
 			{$i18n.t(
-				'In a revise-the-draft assignment, the AI questions the draft against the rubric in the chat; at submission students first account for each item on the revision list; what they changed and where, you can see by comparing the first and final drafts. Ask here only what none of these show, such as whether they found their sources or what they see wrong beyond the revision list. "Did you use AI?" is not asked: the platform starts the first read-through, so they always did.'
+				'In a revise-the-draft assignment, the AI questions the draft against the rubric in the chat; at submission students first account for each item on the revision list; what they changed and where, you can see by comparing the first and final drafts. Ask here only what none of these show, such as what they see wrong beyond the revision list. Whether their sources are real and were checked against the original is already pressed in the chat and on the revision list, so it is not a default question; add it from the recommended questions if you want a tally. "Did you use AI?" is not asked: the platform starts the first read-through, so they always did.'
 			)}
 		{:else}
 			{$i18n.t(

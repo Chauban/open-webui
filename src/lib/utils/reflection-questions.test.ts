@@ -34,7 +34,6 @@ describe('teacher reflection questions', () => {
 	test('revise-draft defaults skip what the revision list already asks', () => {
 		const defaults = getDefaultReflectionQuestions(t, 'revise_draft');
 		expect(defaults.map((question) => question.prompt)).toEqual([
-			'Did you find the original of every source you cite?',
 			'Besides the revision list, what in this draft are you still not happy with, and why?'
 		]);
 		expect(getReflectionQuestionsError(normalizeReflectionQuestions(defaults))).toBeNull();
@@ -55,6 +54,8 @@ describe('teacher reflection questions', () => {
 			expect(library).not.toContain(duplicate);
 		}
 		expect(library).toContain('What will you do next time?');
+		// 出处是否查到原文 AI 在对话和清单里已追问,不进默认,但一键可加
+		expect(library).toContain('Did you find the original of every source you cite?');
 	});
 
 	test('switching task mode swaps untouched defaults and keeps edited questions', () => {
