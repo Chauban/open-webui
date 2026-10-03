@@ -15,6 +15,24 @@ from open_webui.utils.json_codec import JSONCodec
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
+# 教学模块:学生组硬性收回的权限。组权限按「最宽松」合并、默认权限一开组里就关不掉,
+# 所以在这里对学生收回。记忆会把一处对话的内容带进另一处(包括教师不可见的个人写作区、
+# 上一份作业),学生的任何对话都不读不写记忆。
+STUDENT_DENIED_PERMISSIONS = ('features.memories',)
+# 同 services.education.identity.STUDENT_GROUP_ID;那个模块的导入链会绕回这里,不能直接导入。
+STUDENT_GROUP_ID = 'education-student'
+
+
+def _deny_for_students(permissions: dict[str, Any]) -> dict[str, Any]:
+    for permission_key in STUDENT_DENIED_PERMISSIONS:
+        *parents, leaf = permission_key.split('.')
+        node = permissions
+        for key in parents:
+            node = node.setdefault(key, {})
+        node[leaf] = False
+    return permissions
+
+
 def fill_missing_permissions(permissions: dict[str, Any], default_permissions: dict[str, Any]) -> dict[str, Any]:
     """
     Recursively fills in missing properties in the permissions dictionary
@@ -66,6 +84,9 @@ async def get_permissions(
     # Ensure all fields from default_permissions are present and filled in
     permissions = fill_missing_permissions(permissions, default_permissions)
 
+    if any(group.id == STUDENT_GROUP_ID for group in user_groups):
+        permissions = _deny_for_students(permissions)
+
     return permissions
 
 
@@ -95,6 +116,9 @@ async def has_permission(
 
     # Retrieve user group permissions
     user_groups = await Groups.get_groups_by_member_id(user_id, db=db)
+
+    if permission_key in STUDENT_DENIED_PERMISSIONS and any(group.id == STUDENT_GROUP_ID for group in user_groups):
+        return False
 
     for group in user_groups:
         if get_permission(group.permissions or {}, permission_hierarchy):
