@@ -230,6 +230,8 @@
 	"Rate the AI prompts before marking this submission reviewed.": "",
 	"Rate how the student questioned the AI this round, not how often. 1 = asked it to write for them, 5 = specific questions that pushed their own thinking.": "",
 	"Average of prompt quality and reflection quality, both rated by the teacher. See how it is calculated below.": "",
+	"Graded. The assignment is now view-only.": "",
+	"Show assignment requirements": "",
 	"Show assignment requirements and read-through notes": "Show assignment requirements and read-through notes",
 	"The teacher's 1—5 rating of the reflection, mapped onto 0—100.": "",
 	"The teacher's 1—5 rating of how the AI was questioned, mapped onto 0—100. Empty when there was no AI conversation.": "",

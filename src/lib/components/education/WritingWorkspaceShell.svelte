@@ -7,7 +7,7 @@
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
-	import { selectedFolder } from '$lib/stores';
+	import { config, selectedFolder } from '$lib/stores';
 
 	import RichTextInput from '$lib/components/common/RichTextInput.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
@@ -1105,7 +1105,10 @@
 							{#if isGraded || isPastDue || isSubmitted}
 								<div class="text-xs text-gray-500 dark:text-gray-400">
 									{#if isGraded}
-										{$i18n.t('Graded. Ask your teacher to return it if you need to revise.')}
+										<!-- 退回重写是管理员开关,关着时老师没有退回入口,别让学生去找老师要 -->
+										{$config?.features?.enable_education_return
+											? $i18n.t('Graded. Ask your teacher to return it if you need to revise.')
+											: $i18n.t('Graded. The assignment is now view-only.')}
 									{:else if isPastDue}
 										{$i18n.t('Submitted assignments stay available for review in read-only mode.')}
 									{:else}
@@ -1191,7 +1194,9 @@
 						class="mt-2 text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:underline"
 						on:click={() => (showLockedDetails = true)}
 					>
-						{$i18n.t('Show assignment requirements and read-through notes')}
+						{challengeEnabled
+							? $i18n.t('Show assignment requirements and read-through notes')
+							: $i18n.t('Show assignment requirements')}
 					</button>
 				{:else}
 					{#if isAssignment}
@@ -1360,7 +1365,9 @@
 							class="mt-2 text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:underline"
 							on:click={() => (showLockedDetails = true)}
 						>
-							{$i18n.t('Show assignment requirements and read-through notes')}
+							{challengeEnabled
+								? $i18n.t('Show assignment requirements and read-through notes')
+								: $i18n.t('Show assignment requirements')}
 						</button>
 					{:else}
 						{#if isAssignment}

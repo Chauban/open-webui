@@ -2676,6 +2676,11 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             raise Exception(f'{e}')
 
     features = form_data.pop('features', None) or {}
+    if is_assignment_writing:
+        # 作业写作区不读也不写记忆:否则别处(含教师不可见的个人写作区)的记忆会带进作业对话,
+        # 作业对话也会被后台整理成记忆,带到下一份作业里。下面 metadata['features'] 用的是同一份,
+        # 回复后的记忆整理(review_memory_after_turn)因此也会跳过。
+        features = {**features, 'memory': False}
     extra_params['__features__'] = features
     if features:
         if 'voice' in features and features['voice']:
