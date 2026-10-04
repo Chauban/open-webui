@@ -389,13 +389,18 @@
 					/>
 
 					{#if question.kind === 'text'}
-						<input
-							value={question.placeholder ?? ''}
-							maxlength="200"
-							class="mt-2 w-full {EDU_FIELD_CLASS}"
-							placeholder={$i18n.t('Hint shown in the answer box (optional)')}
-							on:input={(event) => update(index, { placeholder: event.currentTarget.value })}
-						/>
+						<label class="mt-3 block">
+							<span class="mb-1 block pl-1 text-xs text-gray-400">
+								{$i18n.t('Answer box hint: grey text students see before typing (optional)')}
+							</span>
+							<input
+								value={question.placeholder ?? ''}
+								maxlength="200"
+								class="w-full text-gray-500 dark:!text-gray-400 {EDU_FIELD_CLASS}"
+								placeholder={$i18n.t('Leave empty for no hint')}
+								on:input={(event) => update(index, { placeholder: event.currentTarget.value })}
+							/>
+						</label>
 					{:else}
 						<div class="mt-2 space-y-2 pl-4">
 							{#each question.options as option, optionIndex}
