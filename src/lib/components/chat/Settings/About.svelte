@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { getVersionUpdates } from '$lib/apis';
 	import { WEBUI_BUILD_HASH, WEBUI_VERSION } from '$lib/constants';
-	import { WEBUI_NAME, config, showChangelog } from '$lib/stores';
+	import { WEBUI_NAME, config, showChangelog, user } from '$lib/stores';
 	import { compareVersion } from '$lib/utils';
 	import { onMount, getContext } from 'svelte';
 
@@ -34,8 +34,11 @@
 		console.log(updateAvailable);
 	};
 
+	// 版本更新与更新日志指向上游发布，只对管理员有意义
+	$: canCheckUpdates = $user?.role === 'admin' && $config?.features?.enable_version_update_check;
+
 	onMount(async () => {
-		if ($config?.features?.enable_version_update_check) {
+		if (canCheckUpdates) {
 			checkForVersionUpdates();
 		}
 	});
@@ -58,7 +61,7 @@
 							v{WEBUI_VERSION}
 						</Tooltip>
 
-						{#if $config?.features?.enable_version_update_check}
+						{#if canCheckUpdates}
 							<a
 								href="https://github.com/open-webui/open-webui/releases/tag/v{version.latest}"
 								target="_blank"
@@ -72,17 +75,19 @@
 						{/if}
 					</div>
 
-					<button
-						class={actionButtonClass}
-						on:click={() => {
-							showChangelog.set(true);
-						}}
-					>
-						<div>{$i18n.t("See what's new")}</div>
-					</button>
+					{#if $user?.role === 'admin'}
+						<button
+							class={actionButtonClass}
+							on:click={() => {
+								showChangelog.set(true);
+							}}
+						>
+							<div>{$i18n.t("See what's new")}</div>
+						</button>
+					{/if}
 				</div>
 
-				{#if $config?.features?.enable_version_update_check}
+				{#if canCheckUpdates}
 					<button
 						class={actionButtonClass}
 						on:click={() => {
@@ -107,24 +112,6 @@
 
 					<span class="capitalize">{$config?.license_metadata?.type}</span> license purchased by
 					<span class="capitalize">{$config?.license_metadata?.organization_name}</span>
-				</div>
-			{:else}
-				<div class="flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-400 dark:text-gray-600">
-					<a
-						class="hover:text-gray-700 dark:hover:text-gray-400"
-						href="https://discord.gg/5rJgQTnV4s"
-						target="_blank">Discord</a
-					>
-					<a
-						class="hover:text-gray-700 dark:hover:text-gray-400"
-						href="https://twitter.com/OpenWebUI"
-						target="_blank">X</a
-					>
-					<a
-						class="hover:text-gray-700 dark:hover:text-gray-400"
-						href="https://github.com/open-webui/open-webui"
-						target="_blank">GitHub</a
-					>
 				</div>
 			{/if}
 
