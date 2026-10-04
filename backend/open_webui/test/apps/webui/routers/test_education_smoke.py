@@ -80,6 +80,7 @@ from open_webui.services.education.analysis import (
     collect_clarification_exchanges,
     _build_operation_timeline,
     _detect_large_bursts,
+    _order_chat_messages,
     build_submission_analysis,
     build_version_diffs,
     count_clarifications,
@@ -3203,6 +3204,24 @@ def test_review_requires_prompt_score_only_when_there_is_an_ai_conversation(
         },
     )
     assert returned_res.status_code == 200, returned_res.text
+
+
+def test_prompt_timeline_puts_reply_after_its_prompt_in_the_same_second():
+    # 时间戳只到秒，平台自动发起的提问和 AI 首轮回复常在同一秒，数据库返回顺序不定。
+    chat_id = "chat-1"
+    messages = [
+        {"id": f"{chat_id}-a2", "role": "assistant", "created_at": 200, "parent_id": "u2"},
+        {"id": f"{chat_id}-u2", "role": "user", "created_at": 200, "parent_id": "a1"},
+        {"id": f"{chat_id}-a1", "role": "assistant", "created_at": 100, "parent_id": "u1"},
+        {"id": f"{chat_id}-u1", "role": "user", "created_at": 100, "parent_id": None},
+    ]
+    ordered = _order_chat_messages(messages, chat_id)
+    assert [item["id"].removeprefix(f"{chat_id}-") for item in ordered] == [
+        "u1",
+        "a1",
+        "u2",
+        "a2",
+    ]
 
 
 def test_auto_started_diagnosis_is_not_a_student_prompt(education_client):

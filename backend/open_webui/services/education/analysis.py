@@ -1148,6 +1148,26 @@ def is_student_prompt(message: dict) -> bool:
     return message.get("role") == "user" and not message.get("auto_started")
 
 
+def _order_chat_messages(messages: list[dict], chat_id: str) -> list[dict]:
+    """时间戳只精确到秒，提问和 AI 回复常落在同一秒；同秒内按对话树深度排，回复必在其提问之后。"""
+    prefix = f"{chat_id}-"
+    parents = {
+        (message.get("id") or "").removeprefix(prefix): message.get("parent_id")
+        for message in messages
+    }
+
+    def depth(message: dict) -> int:
+        level, visited = 0, set()
+        current = message.get("parent_id")
+        while current and current in parents and current not in visited:
+            visited.add(current)
+            level += 1
+            current = parents[current]
+        return level
+
+    return sorted(messages, key=lambda item: (item.get("created_at") or 0, depth(item)))
+
+
 async def get_prompt_timeline(session, db: Session) -> list[dict]:
     chat_ids: list[str] = []
 
@@ -1162,40 +1182,47 @@ async def get_prompt_timeline(session, db: Session) -> list[dict]:
         chat_messages = await ChatMessages.get_messages_by_chat_id(chat_id, db=db)
         if chat_messages:
             prompt_timeline.extend(
-                [
-                    {
-                        "id": message.id,
-                        "role": message.role,
-                        "content": message.content,
-                        "created_at": message.created_at,
-                        "parent_id": message.parent_id,
-                        "model_id": message.model_id,
-                        "output": message.output,
-                        "usage": message.usage,
-                        "auto_started": _is_auto_started(message.meta),
-                    }
-                    for message in chat_messages
-                ]
+                _order_chat_messages(
+                    [
+                        {
+                            "id": message.id,
+                            "role": message.role,
+                            "content": message.content,
+                            "created_at": message.created_at,
+                            "parent_id": message.parent_id,
+                            "model_id": message.model_id,
+                            "output": message.output,
+                            "usage": message.usage,
+                            "auto_started": _is_auto_started(message.meta),
+                        }
+                        for message in chat_messages
+                    ],
+                    chat_id,
+                )
             )
             continue
 
         chat = await Chats.get_chat_by_id(chat_id, db=db)
         prompt_timeline.extend(
-            [
-                {
-                    "id": message.get("id"),
-                    "role": message.get("role"),
-                    "content": message.get("content"),
-                    "created_at": message.get("timestamp"),
-                    "parent_id": message.get("parentId"),
-                    "model_id": message.get("model"),
-                    "output": message.get("output"),
-                    "usage": message.get("usage"),
-                    "auto_started": _is_auto_started(message.get("meta")),
-                }
-                for message in _get_chat_history_messages(chat)
-            ]
+            _order_chat_messages(
+                [
+                    {
+                        "id": message.get("id"),
+                        "role": message.get("role"),
+                        "content": message.get("content"),
+                        "created_at": message.get("timestamp"),
+                        "parent_id": message.get("parentId"),
+                        "model_id": message.get("model"),
+                        "output": message.get("output"),
+                        "usage": message.get("usage"),
+                        "auto_started": _is_auto_started(message.get("meta")),
+                    }
+                    for message in _get_chat_history_messages(chat)
+                ],
+                chat_id,
+            )
         )
 
+    # 稳定排序：同秒的消息保留各对话内已排好的先后。
     prompt_timeline.sort(key=lambda item: item.get("created_at") or 0)
     return prompt_timeline
