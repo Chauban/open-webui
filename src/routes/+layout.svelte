@@ -119,7 +119,6 @@
 	let syncStatsEventData = null;
 
 	let heartbeatInterval = null;
-	let socketFallbackApplied = false;
 	let disconnectToastTimer = null;
 	let disconnectWarningShown = false;
 	let pageIsVisible = true;
@@ -177,37 +176,16 @@
 		});
 		await socket.set(_socket);
 
-		const fallbackToPolling = async (reason) => {
-			if (!enableWebsocket || socketFallbackApplied) {
-				return;
-			}
-
-			socketFallbackApplied = true;
-			console.log(`Falling back to polling socket transport due to ${reason}`);
-
-			if (heartbeatInterval) {
-				clearInterval(heartbeatInterval);
-				heartbeatInterval = null;
-			}
-
-			_socket.removeAllListeners();
-			_socket.close();
-
-			await setupSocket(false);
-		};
-
+		// 不降级到 polling：多 worker 部署没有粘性会话，polling 握手会落到别的 worker 而永远 400。
+		// 断线后交给 socket.io 自带的 websocket 重连。
 		_socket.on('connect_error', (err) => {
 			console.log('connect_error', err);
-			fallbackToPolling('connect_error');
 		});
 
 		let hasConnectedOnce = false;
 
 		_socket.on('connect', async () => {
 			console.log('connected', _socket.id);
-			if (!enableWebsocket) {
-				socketFallbackApplied = true;
-			}
 
 			// Cancel any pending disconnect toast if we reconnected quickly
 			clearDisconnectToastTimer();
@@ -300,10 +278,6 @@
 
 			if (details) {
 				console.log('Additional details:', details);
-			}
-
-			if (reason === 'transport close') {
-				fallbackToPolling(reason);
 			}
 		});
 	};
