@@ -555,6 +555,7 @@ async def get_builtin_tools(
         'ui.enable_user_webhooks',
         'subagents.enable',
         'subagents.background_enabled',
+        'rag.bypass_embedding_and_retrieval',
     )
 
     async def has_user_permission(feature_key: str) -> bool:
@@ -605,7 +606,8 @@ async def get_builtin_tools(
     # If model has attached knowledge (any type), only provide query_knowledge_files
     # Otherwise, provide all KB browsing tools
     model_knowledge = get_attached_knowledge(model, metadata)
-    if is_builtin_tool_enabled('knowledge'):
+    # 跳过嵌入检索时附加知识已整份注入上下文，检索类工具没有可用的向量模型，调用只会报错拖慢回复
+    if is_builtin_tool_enabled('knowledge') and not config.get('rag.bypass_embedding_and_retrieval'):
         from open_webui.env import ENABLE_KB_EXEC
 
         if ENABLE_KB_EXEC:
