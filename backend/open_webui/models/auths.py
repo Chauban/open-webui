@@ -77,6 +77,11 @@ class UpdatePasswordForm(BaseModel):
     new_password: str
 
 
+class UpdateEmailForm(BaseModel):
+    password: str
+    email: str
+
+
 class SignupForm(BaseModel):
     name: str
     email: str

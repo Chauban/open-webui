@@ -47,6 +47,7 @@ from open_webui.models.auths import (
     SigninResponse,
     SignupForm,
     Token,
+    UpdateEmailForm,
     UpdatePasswordForm,
 )
 from open_webui.models.config import Config
@@ -429,6 +430,52 @@ async def update_password(
             raise HTTPException(400, detail=ERROR_MESSAGES.INCORRECT_PASSWORD)
     else:
         raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_CRED)
+
+
+############################
+# Update Email
+############################
+
+
+@router.post('/update/email')
+async def update_email(
+    request: Request,
+    form_data: UpdateEmailForm,
+    session_user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    # Trusted-header auth mode takes the login email from the reverse proxy
+    if WEBUI_AUTH_TRUSTED_EMAIL_HEADER:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=ERROR_MESSAGES.ACTION_PROHIBITED)
+
+    new_email = form_data.email.strip().lower()
+    if not validate_email_format(new_email):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=ERROR_MESSAGES.INVALID_EMAIL_FORMAT)
+
+    user = await Auths.authenticate_user(
+        session_user.email,
+        lambda pw: verify_password(form_data.password, pw),
+        db=db,
+    )
+    if not user:
+        raise HTTPException(400, detail=ERROR_MESSAGES.INCORRECT_PASSWORD)
+
+    if new_email == user.email:
+        return {'email': new_email}
+    if await Users.get_user_by_email(new_email, db=db):
+        raise HTTPException(400, detail=ERROR_MESSAGES.EMAIL_TAKEN)
+
+    if not await Auths.update_email_by_id(user.id, new_email, db=db):
+        raise HTTPException(400, detail=ERROR_MESSAGES.DEFAULT())
+
+    await publish_event(
+        request,
+        EVENTS.USER_UPDATED,
+        actor=user,
+        subject_id=user.id,
+        data={'updated_fields': ['email']},
+    )
+    return {'email': new_email}
 
 
 def _unescape_ldap_dn_value(value: str) -> str:

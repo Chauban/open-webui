@@ -12,6 +12,7 @@
 	} from '$lib/apis/auths';
 	import { getUserVariables, updateUserVariables } from '$lib/apis/users';
 
+	import UpdateEmail from './Account/UpdateEmail.svelte';
 	import UpdatePassword from './Account/UpdatePassword.svelte';
 	import { generateInitialsImage } from '$lib/utils';
 	import { copyToClipboard } from '$lib/utils';
@@ -367,6 +368,10 @@
 		</section>
 
 		{#if $config?.features.enable_login_form && $config?.features.enable_password_change_form}
+			<UserSettingSection title={$i18n.t('Email')}>
+				<UpdateEmail />
+			</UserSettingSection>
+
 			<UserSettingSection title={$i18n.t('Password')}>
 				<UpdatePassword />
 			</UserSettingSection>
