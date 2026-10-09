@@ -1,3 +1,14 @@
+# Right Write 成长写作教学平台
+
+本仓库是基于 Open WebUI v0.11.2 的定制 Fork。开发前请阅读 [AGENTS.md](AGENTS.md) 和 [项目文档索引](docs/README.md)。
+
+- [本地开发与启动](docs/development/local-development.md)
+- [当前教学架构与产品规则](docs/product/education.md)
+- [Git 协作规范](docs/development/git-workflow.md)
+- [仓库结构与同步范围](docs/development/repository-layout.md)
+
+本地开发使用仓库根目录的 `start_backend.bat` 和 `start_frontend.bat`，访问 `http://localhost:5050`。以下保留上游项目介绍；本 Fork 的产品行为以当前代码和以上文档为准。
+
 # Open WebUI 👋
 
 ![GitHub stars](https://img.shields.io/github/stars/open-webui/open-webui?style=social)

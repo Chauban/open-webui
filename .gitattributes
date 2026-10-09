@@ -47,3 +47,5 @@
 # Misc
 *.env text eol=lf
 *.lock text eol=lf
+# Windows development launchers
+*.bat text eol=crlf
