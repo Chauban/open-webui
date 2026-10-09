@@ -1,8 +1,13 @@
 // @vitest-environment jsdom
 
-import { render } from '@testing-library/svelte';
+import { cleanup, fireEvent, render } from '@testing-library/svelte';
 import { readable } from 'svelte/store';
-import { describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+
+vi.mock('$lib/stores', async () => {
+	const { writable } = await import('svelte/store');
+	return { config: writable({ features: { enable_education_return: false } }) };
+});
 
 vi.mock('$lib/apis/education', () => ({
 	createGrowthGoal: vi.fn(),
@@ -13,6 +18,7 @@ vi.mock('$lib/apis/education', () => ({
 }));
 
 import type { StudentProfile, TeacherStudentProfile } from '$lib/apis/education/types';
+import { config } from '$lib/stores';
 import StudentGrowthProfile from './StudentGrowthProfile.svelte';
 
 const context = new Map([
@@ -115,8 +121,18 @@ const teacherProfile: TeacherStudentProfile = {
 	teacher_notes: []
 };
 
+const setReturnEnabled = (enabled: boolean) => {
+	config.update((current) => ({
+		...current!,
+		features: { ...current!.features, enable_education_return: enabled }
+	}));
+};
+
+beforeEach(() => setReturnEnabled(false));
+afterEach(cleanup);
+
 describe('StudentGrowthProfile', () => {
-	test('renders responsive filters, six sections, and evidence metadata', () => {
+	test('renders responsive filters and hides evidence metadata from students', () => {
 		const { container } = render(StudentGrowthProfile, {
 			context,
 			props: { profile, variant: 'student' }
@@ -126,12 +142,64 @@ describe('StudentGrowthProfile', () => {
 		expect(body).toContain('sm:grid-cols-2');
 		expect(body).toContain('Overview');
 		expect(body).toContain('Writing Process');
-		expect(body).toContain('Revision Between Rounds');
 		expect(body).toContain('Add goal');
 		// 置信度、样本数、指标/洞察版本号是给教师核对口径的,学生端不出现
 		expect(body).not.toContain('Samples');
 		expect(body).not.toContain('Confidence');
 		expect(body).not.toContain('Latest data completeness');
+	});
+
+	describe.each(['student', 'teacher'] as const)('%s round revision section', (variant) => {
+		const variantProfile = variant === 'teacher' ? teacherProfile : profile;
+
+		test('hides the section when returns are disabled and there are no resubmissions', () => {
+			const { queryByRole } = render(StudentGrowthProfile, {
+				context,
+				props: { profile: variantProfile, variant }
+			});
+
+			expect(queryByRole('button', { name: 'Revision Between Rounds' })).toBeNull();
+		});
+
+		test('shows the section when returns are enabled even without resubmissions', async () => {
+			setReturnEnabled(true);
+			const { getByRole, getByText } = render(StudentGrowthProfile, {
+				context,
+				props: { profile: variantProfile, variant }
+			});
+
+			await fireEvent.click(getByRole('button', { name: 'Revision Between Rounds' }));
+			expect(getByText('No resubmissions yet.')).toBeTruthy();
+		});
+
+		test('keeps existing resubmissions accessible when returns are disabled', async () => {
+			const { getByRole, getByText, queryByText } = render(StudentGrowthProfile, {
+				context,
+				props: {
+					profile: {
+						...variantProfile,
+						round_progress: [
+							{
+								assignment_id: 'assignment-1',
+								assignment_title: 'Revised essay',
+								from_round: 1,
+								to_round: 2,
+								char_delta: 120,
+								revision_ratio: 25,
+								score_delta: 5,
+								turnaround_seconds: 3600,
+								comparison_scope: 'same_assignment_rounds'
+							}
+						]
+					},
+					variant
+				}
+			});
+
+			await fireEvent.click(getByRole('button', { name: 'Revision Between Rounds' }));
+			expect(getByText('Revised essay')).toBeTruthy();
+			expect(queryByText('No resubmissions yet.')).toBeNull();
+		});
 	});
 
 	test('shows evidence metadata and data completeness only in the teacher variant', () => {
