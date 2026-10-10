@@ -1,38 +1,52 @@
 # Right Write 项目文档
 
-当前项目是基于 Open WebUI v0.11.2 的成长写作教学平台。项目代码和共享协作资料都在本 Git 仓库内维护。
+本项目是基于 Open WebUI v0.11.2 的成长写作教学平台。当前规则、操作说明和共享工具随代码维护；历史资料用于追溯。
 
 ## 开始开发
 
 1. 阅读根目录 [AGENTS.md](../AGENTS.md)，了解工程规则和业务边界。
 2. 按 [本地开发说明](development/local-development.md) 准备环境并启动。
-3. 修改教学功能前阅读 [当前教学规则](product/education.md) 与 [架构说明](architecture/overview.md)。
+3. 修改教学功能前阅读 [当前架构与教学规则](product/education.md)。
 4. 提交前按 [Git 协作规范](development/git-workflow.md) 检查修改和同步状态。
 
-## 当前维护的文档
+## 当前维护的说明
 
-| 文档                                                                        | 用途                                     |
-| --------------------------------------------------------------------------- | ---------------------------------------- |
-| [本地开发](development/local-development.md)                                | Windows 环境、5050/8080 启动、密钥和排障 |
-| [Git 协作](development/git-workflow.md)                                     | 分支、中文提交、同步范围检查             |
-| [仓库结构与同步范围](development/repository-layout.md)                      | 文件位置、共享资料与本地资料边界         |
-| [架构概览](architecture/overview.md)                                        | 前后端入口和教学业务分层                 |
-| [教学模块规则](product/education.md)                                        | 身份、作业、修订初稿、批改和画像         |
-| [画像投影](../backend/open_webui/services/education/PROFILE_PROJECTIONS.md) | 冻结证据、版本投影和显式重算             |
-| [品牌资源边界](rightwrite-branding-boundary.md)                             | 品牌静态资源的维护规则                   |
-| [压测工具](../scripts/loadtest/README.md)                                   | 模拟模型服务、k6 和诊断并发工具          |
-| [安全说明](SECURITY.md)                                                     | 漏洞报告渠道                             |
+| 文档                                                                        | 用途                                       |
+| --------------------------------------------------------------------------- | ------------------------------------------ |
+| [本地开发](development/local-development.md)                                | 环境、5050/8080 启动和排障                 |
+| [Git 协作](development/git-workflow.md)                                     | 分支、提交和同步检查                       |
+| [架构与教学规则](product/education.md)                                      | 代码入口、业务分层、身份、写作、批改和画像 |
+| [画像投影](../backend/open_webui/services/education/PROFILE_PROJECTIONS.md) | 冻结证据、版本投影和显式重算               |
+| [品牌资源边界](rightwrite-branding-boundary.md)                             | 品牌静态资源的维护范围                     |
+| [压测工具](../scripts/loadtest/README.md)                                   | 模拟模型、k6 和诊断并发工具的运行方法      |
+| [部署工具](../deploy/README.md)                                             | 部署入口及服务器配置副本                   |
+| [部署实例记录](deployment/README.md)                                        | 现网与哈工深实例的配置和运维记录           |
+| [安全说明](SECURITY.md)                                                     | 漏洞报告渠道                               |
 
-## 部署与原始需求
+工具的运行说明与工具放在一起维护，部署和压测只在对应任务中使用。
 
-- [部署实例记录](deployment/README.md)：现网与哈工深的原始部署流程，仅在部署任务中使用。
-- [部署工具](../deploy/README.md) 与 [历史压测记录](deployment/loadtest/README.md)：共享脚本、服务器配置副本和旧测试结果。
-- [产品需求原始资料](product/sources/README.md)：哈工深课程研讨逐字稿，用于追溯需求来源。
+## 需求来源与历史资料
 
-## 历史资料
+- [需求原始资料](product/sources/README.md)：哈工深课程研讨逐字稿，用于追溯设计背景。
+- [历史文档](archive/README.md)：旧需求、计划和会话记录；`superpowers/` 中的既有设计和计划也用于追溯。
+- [压测记录](archive/压测记录.md)：测试条件、实测数据及测量限制；运行方法以压测工具 README 为准。
 
-[docs/archive/](archive/README.md) 保留整理前的需求、计划与会话记录，每份文档都标注为历史资料。`docs/superpowers/` 中的既有设计和计划也用于追溯，不能直接视为当前待办。
+旧方案与会话状态不能作为当前待办。产品行为变化时维护当前规则，设计与测量记录注明日期及适用范围；临时过程和目录迁移历史由 Git 追溯。
 
-产品规则变化时维护当前文档；新设计和计划应注明日期、状态和适用范围。不要维护两份互相重复的协作规范。
+## 仓库与同步范围
 
-部署流程、部署工具、压测记录和需求研讨原文随仓库同步；外层工作区的行政资料、真实学生材料、品牌源素材和个人工具配置仍单独管理，详见 [同步范围](development/repository-layout.md)。
+`open-webui/` 是唯一的代码 Git 仓库，外层 `right_chat/` 不是 Git 仓库。
+
+- `src/`、`backend/`、`static/`：应用代码和静态资源。
+- `scripts/`：开发和测试工具，其中 `loadtest/` 保存三个压测脚本及其 README。
+- `deploy/`：部署脚本、systemd、Nginx 等服务器文件副本。
+- `docs/`：开发说明、产品规则、部署实例记录、原始需求和历史资料。
+- 根目录保留工具要求的配置、许可证、包管理清单、`AGENTS.md` 和两个 Windows 启动脚本。
+
+以上共享规范、文档、脚本、配置模板和正式静态资源随仓库同步。构建工具需要的根目录文件继续放在原位置，不为整理文档而搬动。
+
+密钥、实际环境文件、数据库及备份、上传文件、向量库、依赖、虚拟环境、构建产物、缓存、日志和本机工具状态不入库。`.env.example`、品牌静态资源和 Pyodide 锁文件属于共享资源，按既有规则维护。
+
+外层保留完整 `CLAUDE.md`、要求读取仓库规范的 `AGENTS.md` 和两个双击启动入口；启动逻辑在仓库中维护。外层行政资料、真实学生材料、品牌源素材、手册、截图和个人配置仍单独管理，不能把“仓库已同步”描述成“整个工作区已同步”。
+
+当前文档统一从此索引查找，不在外层恢复重复副本，也不为少量文件增加只负责跳转的说明文档。

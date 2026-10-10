@@ -166,11 +166,11 @@ Windows 上不要用 `bash dev.sh`（本机无可用 WSL），不要为本地 uv
 - [文档索引](docs/README.md)：当前文档、历史资料与目录边界。
 - [本地开发](docs/development/local-development.md)：环境准备、启动与排障。
 - [Git 协作规范](docs/development/git-workflow.md)：分支、提交、同步状态检查。
-- [仓库结构与同步范围](docs/development/repository-layout.md)：哪些文件入库、哪些留在本地。
-- [当前架构](docs/architecture/overview.md) 与 [教学产品规则](docs/product/education.md)。
+- [仓库与同步范围](docs/README.md#仓库与同步范围)：哪些文件入库、哪些留在本地。
+- [当前架构与教学规则](docs/product/education.md)。
 - [压测工具](scripts/loadtest/README.md)：仅在明确要求压测时使用。
 - [历史资料](docs/archive/README.md)：旧需求、计划和交接，不代表当前实现。
 - [部署实例记录](docs/deployment/README.md)：现网与哈工深的原始部署流程，只用于明确的部署任务。
-- [部署工具](deploy/README.md) 与 [历史压测记录](docs/deployment/loadtest/README.md)：不把文内旧授权视为新任务授权。
+- [部署工具](deploy/README.md) 与 [历史压测记录](docs/archive/压测记录.md)：旧测量结果不代表当前承载能力。
 - [需求原始资料](docs/product/sources/README.md)：哈工深课程研讨逐字稿，不代表当前待办。
 - 外层工作区的课程批注材料、行政资料和品牌源素材按需读取；普通功能开发不因此扩展成生产部署任务。

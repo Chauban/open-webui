@@ -5,7 +5,7 @@
 - [本地开发与启动](docs/development/local-development.md)
 - [当前教学架构与产品规则](docs/product/education.md)
 - [Git 协作规范](docs/development/git-workflow.md)
-- [仓库结构与同步范围](docs/development/repository-layout.md)
+- [文档与同步范围](docs/README.md#仓库与同步范围)
 
 本地开发使用仓库根目录的 `start_backend.bat` 和 `start_frontend.bat`，访问 `http://localhost:5050`。以下保留上游项目介绍；本 Fork 的产品行为以当前代码和以上文档为准。
 

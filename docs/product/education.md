@@ -2,6 +2,27 @@
 
 > 核对日期：2026-10-09。依据现有代码及项目工程规范整理；变更业务行为时同步维护本文。历史方案见 [归档说明](../archive/README.md)，不能依据旧方案恢复已删除功能。
 
+## 技术栈与通用入口
+
+Right Write 基于 Open WebUI v0.11.2。前端使用 Svelte 5、SvelteKit 2、TypeScript 和 Tailwind CSS 4，后端使用 FastAPI、SQLAlchemy 和 Alembic。
+
+| 位置                                      | 职责                       |
+| ----------------------------------------- | -------------------------- |
+| `src/routes/`                             | 页面与布局                 |
+| `src/lib/components/`                     | 共享组件与教学 UI          |
+| `src/lib/apis/`                           | 前端 HTTP 客户端和类型     |
+| `src/lib/stores/`                         | 全局状态和实例功能开关     |
+| `backend/open_webui/main.py`              | 应用、路由挂载和中间件     |
+| `backend/open_webui/routers/`             | HTTP、身份权限和事务入口   |
+| `backend/open_webui/models/`              | 严格模型、数据库约束和仓储 |
+| `backend/open_webui/services/education/`  | 教学业务逻辑               |
+| `backend/open_webui/migrations/versions/` | Alembic 数据结构迁移       |
+| `backend/open_webui/socket/main.py`       | Socket.IO 服务             |
+
+前端通过同源 `/api/...` 请求后端，开发时 Vite 默认代理到 8080。路由检查身份和资源权限，调用业务服务与仓储，并控制事务；Socket.IO 负责实时通知和流式消息。教学数据沿班级与作业、写作会话、提交快照、教师批改和成长画像流转，详细边界见下文。
+
+后端品牌图片、字体等位于 `backend/open_webui/static/`，是项目资源；维护范围见 [品牌资源边界](../rightwrite-branding-boundary.md)。
+
 ## Backend Boundaries
 
 - `routers/education.py`：HTTP、身份权限、资源装配与事务入口；`models/education.py`：严格数据模型、数据库约束与仓储。
