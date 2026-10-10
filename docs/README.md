@@ -11,17 +11,18 @@
 
 ## 当前维护的说明
 
-| 文档                                                                        | 用途                                       |
-| --------------------------------------------------------------------------- | ------------------------------------------ |
-| [本地开发](development/local-development.md)                                | 环境、5050/8080 启动和排障                 |
-| [Git 协作](development/git-workflow.md)                                     | 分支、提交和同步检查                       |
-| [架构与教学规则](product/education.md)                                      | 代码入口、业务分层、身份、写作、批改和画像 |
-| [画像投影](../backend/open_webui/services/education/PROFILE_PROJECTIONS.md) | 冻结证据、版本投影和显式重算               |
-| [品牌资源边界](rightwrite-branding-boundary.md)                             | 品牌静态资源的维护范围                     |
-| [压测工具](../scripts/loadtest/README.md)                                   | 模拟模型、k6 和诊断并发工具的运行方法      |
-| [部署工具](../deploy/README.md)                                             | 部署入口及服务器配置副本                   |
-| [部署实例记录](deployment/README.md)                                        | 现网与哈工深实例的配置和运维记录           |
-| [安全说明](SECURITY.md)                                                     | 漏洞报告渠道                               |
+| 文档                                                                        | 用途                                           |
+| --------------------------------------------------------------------------- | ---------------------------------------------- |
+| [本地开发](development/local-development.md)                                | 环境、5050/8080 启动和排障                     |
+| [Git 协作](development/git-workflow.md)                                     | 分支、提交和同步检查                           |
+| [架构与教学规则](product/education.md)                                      | 代码入口、业务分层、身份、写作、批改和画像     |
+| [教学模块 Userflow](product/教学模块Userflow.md)                            | 持续维护的学生与教师流程、页面、接口和状态流转 |
+| [画像投影](../backend/open_webui/services/education/PROFILE_PROJECTIONS.md) | 冻结证据、版本投影和显式重算                   |
+| [品牌资源边界](rightwrite-branding-boundary.md)                             | 品牌静态资源的维护范围                         |
+| [压测工具](../scripts/loadtest/README.md)                                   | 模拟模型、k6 和诊断并发工具的运行方法          |
+| [部署工具](../deploy/README.md)                                             | 部署入口及服务器配置副本                       |
+| [部署实例记录](deployment/README.md)                                        | 现网与哈工深实例的配置和运维记录               |
+| [安全说明](SECURITY.md)                                                     | 漏洞报告渠道                                   |
 
 工具的运行说明与工具放在一起维护，部署和压测只在对应任务中使用。
 

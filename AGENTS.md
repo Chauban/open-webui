@@ -39,7 +39,7 @@
 
 ## Education Architecture & Current Product Rules
 
-修改教学业务前，必须阅读 [教学模块当前架构与产品规则](docs/product/education.md)，并遵守其中的身份、权限、任务模式、冻结证据和投影边界。画像实现细节见 [PROFILE_PROJECTIONS.md](backend/open_webui/services/education/PROFILE_PROJECTIONS.md)。
+修改教学业务前，必须阅读 [教学模块当前架构与产品规则](docs/product/education.md) 和 [教学模块 Userflow](docs/product/教学模块Userflow.md)，并遵守身份、权限、任务模式、冻结证据和投影边界。涉及教学页面、接口或状态流转的功能变化时，同步更新 Userflow 的相关章节；它是持续维护的开发文档，不作为历史资料归档。画像实现细节见 [PROFILE_PROJECTIONS.md](backend/open_webui/services/education/PROFILE_PROJECTIONS.md)。
 
 ## Build, Test, and Development Commands
 
@@ -168,6 +168,7 @@ Windows 上不要用 `bash dev.sh`（本机无可用 WSL），不要为本地 uv
 - [Git 协作规范](docs/development/git-workflow.md)：分支、提交、同步状态检查。
 - [仓库与同步范围](docs/README.md#仓库与同步范围)：哪些文件入库、哪些留在本地。
 - [当前架构与教学规则](docs/product/education.md)。
+- [教学模块 Userflow](docs/product/教学模块Userflow.md)：持续维护的学生与教师完整流程。
 - [压测工具](scripts/loadtest/README.md)：仅在明确要求压测时使用。
 - [历史资料](docs/archive/README.md)：旧需求、计划和交接，不代表当前实现。
 - [部署实例记录](docs/deployment/README.md)：现网与哈工深的原始部署流程，只用于明确的部署任务。

@@ -2,6 +2,8 @@
 
 > 核对日期：2026-10-09。依据现有代码及项目工程规范整理；变更业务行为时同步维护本文。历史方案见 [归档说明](../archive/README.md)，不能依据旧方案恢复已删除功能。
 
+学生与教师的完整流程在 [教学模块 Userflow](教学模块Userflow.md) 持续维护。本文记录架构与业务边界，Userflow 记录页面、接口和状态流转；相关功能变化时同步更新两者涉及的内容。
+
 ## 技术栈与通用入口
 
 Right Write 基于 Open WebUI v0.11.2。前端使用 Svelte 5、SvelteKit 2、TypeScript 和 Tailwind CSS 4，后端使用 FastAPI、SQLAlchemy 和 Alembic。
