@@ -2,12 +2,12 @@
 
 本目录从外层工作区迁入仓库，所有本地命令均从仓库根目录运行。仅在明确的部署任务中使用；日常功能开发使用根目录的两个 `start_*.bat`。
 
-| 位置                                         | 用途                                                |
-| -------------------------------------------- | --------------------------------------------------- |
-| `deploy.sh`                                  | 本地入口：同步 Git、检查目标版本、触发服务器部署    |
-| `remote.sh`                                  | 安装到服务器 `/opt/rightwrite/deploy.sh` 的部署脚本 |
-| [server/](server/README.md)                  | 服务器脚本、systemd 单元和 Nginx 配置副本           |
-| [部署实例记录](../docs/deployment/README.md) | 现网与哈工深部署流程                                |
+| 位置                            | 用途                                                |
+| ------------------------------- | --------------------------------------------------- |
+| `deploy.sh`                     | 本地入口：同步 Git、检查目标版本、触发服务器部署    |
+| `remote.sh`                     | 安装到服务器 `/opt/rightwrite/deploy.sh` 的部署脚本 |
+| [server/](server/README.md)     | 服务器脚本、systemd 单元和 Nginx 配置副本           |
+| [实例记录](#实例记录与相关资料) | 现网与哈工深部署流程                                |
 
 ## 本地入口
 
@@ -29,3 +29,16 @@ bash deploy/deploy.sh --target hitsz
 SSH 别名 `rightwrite`、`rightwrite-hitsz` 由本机 `~/.ssh/config` 配置；私钥留在本机或密钥管理器。服务器的 `rightwrite.env`、`.cos.yaml`、数据库及备份不入库。
 
 `server/` 保存的是实例文件副本，修改域名、证书路径、服务账户或服务器目录前需对照目标实例。文件入库不会自动安装到服务器；`deploy.sh` 自动更新的只有 `remote.sh`。
+
+## 实例记录与相关资料
+
+[现网部署流程](../docs/deployment/部署流程.md) 和 [哈工深部署流程](../docs/deployment/哈工深部署流程.md) 保存实际部署过程。记录应随环境变化维护，其中的价格、组件版本、已部署提交及验收结果属于注明日期时的事实，不代表读取时的实时状态。
+
+- [本地开发](../docs/development/local-development.md)：日常开发的启动与排障。
+- [修订初稿历史方案](../docs/archive/哈工深修订初稿方案.md)：实例记录中的课程背景。
+- [当前 PRD](../docs/product/PRD.md) 与 [架构规则](../docs/product/education.md)：当前产品和实现边界。
+- [压测工具](../scripts/loadtest/README.md) 与 [历史压测记录](../docs/archive/压测记录.md)：运行方法及旧实测数据。
+
+服务器命令从对应服务器目录执行；本地 `deploy/deploy.sh` 从仓库根目录运行。本机 `.ssh`、实际密钥和外层 `哈工深批注/` 材料仍单独管理。
+
+旧实例记录中的 `本地开发启动流程.md`、`哈工深修订初稿方案.md` 和 `loadtest/README.md` 分别对应以上开发说明、历史方案和当前压测工具说明。文档中的历史清表步骤不代表新的操作授权。

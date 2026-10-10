@@ -8,7 +8,7 @@
 - 工作区根目录 `right_chat/` **不是 Git 仓库**；实际仓库是 `open-webui/`，常规工作分支为 `main`。Git 命令必须在实际仓库内执行。
 - `origin`：`https://github.com/Chauban/open-webui.git`；`upstream`：`https://github.com/open-webui/open-webui.git`。核对本项目同步状态应比较 `origin`，官方更新仅按任务需要选择性引入。
 - 本文件、`docs/` 中的协作资料和仓库根目录 `start_*.bat` 纳入版本管理。外层工作区仅保留原有完整 `CLAUDE.md`、`AGENTS.md` 指引和两个启动入口；已迁入仓库的重复文档入口已删除。个人资料及实例状态不随代码同步。不要把“仓库已同步”描述成“整个工作区已同步”。
-- 当前规则见 `docs/product/education.md`；旧需求、任务清单和会话记录在 `docs/archive/`，仅用于追溯，不能当作当前待办。不要依据旧文档恢复已删除的接口或页面。
+- 当前产品需求、规则、Userflow 和待办在 `docs/product/` 持续维护；`docs/archive/` 仅保留已结束、被替代或固定时期的资料。先核对旧内容，不因日期早就自动归档，也不依据旧方案恢复已删除的接口或页面。
 
 ##【代码重构与优化原则：绝对的向前看】
 在接下来的代码编写和架构优化中，请完全从“产品与功能的最优实现”角度出发，绝对不要考虑任何开发期历史脏数据的兼容问题。
@@ -38,6 +38,8 @@
 - `package.json` 保留 `cy:open` 命令，但当前仓库没有 `cypress/` 目录；不要把不存在的 E2E 规格当成现成测试。
 
 ## Education Architecture & Current Product Rules
+
+开始教学功能任务时还需阅读 [当前 PRD](docs/product/PRD.md) 和 [当前任务清单](docs/product/教学模块开发任务清单.md)，区分当前待办、待确认候选、已完成和已废弃条目。
 
 修改教学业务前，必须阅读 [教学模块当前架构与产品规则](docs/product/education.md) 和 [教学模块 Userflow](docs/product/教学模块Userflow.md)，并遵守身份、权限、任务模式、冻结证据和投影边界。涉及教学页面、接口或状态流转的功能变化时，同步更新 Userflow 的相关章节；它是持续维护的开发文档，不作为历史资料归档。画像实现细节见 [PROFILE_PROJECTIONS.md](backend/open_webui/services/education/PROFILE_PROJECTIONS.md)。
 
@@ -168,10 +170,10 @@ Windows 上不要用 `bash dev.sh`（本机无可用 WSL），不要为本地 uv
 - [Git 协作规范](docs/development/git-workflow.md)：分支、提交、同步状态检查。
 - [仓库与同步范围](docs/README.md#仓库与同步范围)：哪些文件入库、哪些留在本地。
 - [当前架构与教学规则](docs/product/education.md)。
+- [当前 PRD](docs/product/PRD.md) 与 [当前开发任务](docs/product/教学模块开发任务清单.md)：持续维护，已完成和冲突项见开发记录。
 - [教学模块 Userflow](docs/product/教学模块Userflow.md)：持续维护的学生与教师完整流程。
 - [压测工具](scripts/loadtest/README.md)：仅在明确要求压测时使用。
 - [历史资料](docs/archive/README.md)：旧需求、计划和交接，不代表当前实现。
-- [部署实例记录](docs/deployment/README.md)：现网与哈工深的原始部署流程，只用于明确的部署任务。
 - [部署工具](deploy/README.md) 与 [历史压测记录](docs/archive/压测记录.md)：旧测量结果不代表当前承载能力。
-- [需求原始资料](docs/product/sources/README.md)：哈工深课程研讨逐字稿，不代表当前待办。
+- [需求原始资料与用途说明](docs/README.md#需求来源与历史资料)：研讨原文用于追溯，不代表当前待办。
 - 外层工作区的课程批注材料、行政资料和品牌源素材按需读取；普通功能开发不因此扩展成生产部署任务。

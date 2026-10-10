@@ -66,4 +66,4 @@ backend\.venv\Scripts\python.exe scripts\loadtest\diagnosis_burst.py --n 5 --mod
 
 用 Ctrl+C 停止模拟服务，删除临时模型连接和访问授权，按被测环境的数据管理要求处理测试对话。不要把通用工具的清理说明理解为删除生产数据的授权。
 
-旧实例测试条件和结果见 [历史压测记录](../../docs/archive/压测记录.md)，服务器运维记录见 [部署文档](../../docs/deployment/README.md)。
+旧实例测试条件和结果见 [历史压测记录](../../docs/archive/压测记录.md)，服务器运维记录见 [部署文档](../../deploy/README.md)。
