@@ -49,3 +49,7 @@
 *.lock text eol=lf
 # Windows development launchers
 *.bat text eol=crlf
+
+# Linux server configuration files
+deploy/server/nginx/* text eol=lf
+deploy/server/systemd/* text eol=lf

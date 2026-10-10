@@ -1,0 +1,55 @@
+upstream rightwrite_backend {
+    server 127.0.0.1:8080;
+    keepalive 32;
+}
+
+# 哈工深实例（hitsz.rightwrite.cc）。首次安装时只有这个 80 端口的块，
+# 443 段由 `certbot --nginx -d hitsz.rightwrite.cc --redirect` 生成；证书签好后从服务器把改写后的版本拷回这里。
+server {
+    server_name hitsz.rightwrite.cc;
+
+    # 学生上传初稿（Word）
+    client_max_body_size 100M;
+
+    # SSE 流式回复的命门：一旦 buffering 打开，回复会攒完才吐，看起来像卡死
+    proxy_buffering off;
+    proxy_cache off;
+    # 第一次通读要 20～90 秒，默认 60 秒会被掐断
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+
+    location / {
+        proxy_pass http://rightwrite_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade           $http_upgrade;
+        proxy_set_header Connection        $connection_upgrade;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    listen [::]:443 ssl http2 ipv6only=on; # managed by Certbot
+    listen 443 ssl http2; # managed by Certbot
+    # HSTS：告诉浏览器今后半年只用 HTTPS 访问本站
+    add_header Strict-Transport-Security "max-age=15768000" always;
+    ssl_certificate /etc/letsencrypt/live/hitsz.rightwrite.cc/fullchain.pem; # managed by Certbot
+    ssl_certificate_key /etc/letsencrypt/live/hitsz.rightwrite.cc/privkey.pem; # managed by Certbot
+    include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem; # managed by Certbot
+
+}
+
+server {
+    if ($host = hitsz.rightwrite.cc) {
+        return 301 https://$host$request_uri;
+    } # managed by Certbot
+
+
+    listen 80;
+    listen [::]:80;
+    server_name hitsz.rightwrite.cc;
+    return 404; # managed by Certbot
+
+
+}

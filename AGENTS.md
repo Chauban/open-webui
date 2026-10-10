@@ -171,5 +171,6 @@ Windows 上不要用 `bash dev.sh`（本机无可用 WSL），不要为本地 uv
 - [压测工具](scripts/loadtest/README.md)：仅在明确要求压测时使用。
 - [历史资料](docs/archive/README.md)：旧需求、计划和交接，不代表当前实现。
 - [部署实例记录](docs/deployment/README.md)：现网与哈工深的原始部署流程，只用于明确的部署任务。
+- [部署工具](deploy/README.md) 与 [历史压测记录](docs/deployment/loadtest/README.md)：不把文内旧授权视为新任务授权。
 - [需求原始资料](docs/product/sources/README.md)：哈工深课程研讨逐字稿，不代表当前待办。
-- 外层工作区的部署工具、课程批注材料、行政资料和品牌源素材按需读取；普通功能开发不因此扩展成生产部署任务。
+- 外层工作区的课程批注材料、行政资料和品牌源素材按需读取；普通功能开发不因此扩展成生产部署任务。

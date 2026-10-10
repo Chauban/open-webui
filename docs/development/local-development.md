@@ -77,4 +77,4 @@ npm run test:education
 - Vite 在 5050 被占用时可能顺延端口，以终端打印的地址为准。使用其他端口前确认它在 CORS 白名单中；后端 8080 被占用时先确认占用进程，避免启动错项目。
 - Socket.IO 使用自身的 WebSocket 重连，不人为降级到 polling。更改 CORS 后需重启后端。
 - 默认 SQLite 为 `backend/data/webui.db`；登录密钥为 `backend/.webui_secret_key`，不要随意更换或提交。
-- 普通功能开发使用以上本地入口。生产实例记录见 [部署文档](../deployment/README.md)，只有明确的部署任务才读取并执行；部署工具仍在外层工作区。
+- 普通功能开发使用以上本地入口。生产实例记录见 [部署文档](../deployment/README.md)，部署工具在仓库 `deploy/`，只有明确的部署任务才读取并执行。
