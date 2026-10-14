@@ -1,5 +1,16 @@
 type NumericRecord = Record<string, number | null | undefined>;
 
+export const getReviewQueueNavigation = (
+	queue: { ids: string[]; total: number },
+	preferredNextId: string | null
+) => ({
+	nextId:
+		preferredNextId && queue.ids.includes(preferredNextId)
+			? preferredNextId
+			: (queue.ids[0] ?? null),
+	isEmpty: queue.total === 0
+});
+
 type SubmissionReviewOverviewInput = {
 	analysisSummary?: NumericRecord;
 	stats?: NumericRecord;

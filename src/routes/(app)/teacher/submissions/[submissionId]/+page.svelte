@@ -27,7 +27,10 @@
 	import EduEvidenceDisclaimer from '$lib/components/education/EduEvidenceDisclaimer.svelte';
 	import ChallengeRounds from '$lib/components/education/ChallengeRounds.svelte';
 	import RevisionItemsReview from '$lib/components/education/RevisionItemsReview.svelte';
-	import { buildSubmissionReviewOverview } from '$lib/utils/submission-review';
+	import {
+		buildSubmissionReviewOverview,
+		getReviewQueueNavigation
+	} from '$lib/utils/submission-review';
 	import {
 		formatEpoch,
 		formatEpochTime,
@@ -395,11 +398,19 @@
 		const target = nextPendingId === currentId ? (queueIds[queueIndex + 1] ?? null) : nextPendingId;
 		const saved = await saveReview('reviewed');
 		if (!saved) return;
-		queueIds = queueIds.filter((id) => id !== currentId);
-		if (target) {
-			goto(`/teacher/submissions/${target}`);
+		const queue = await loadQueueContext();
+		if (!queue) {
+			goto('/teacher/review');
+			return;
+		}
+		const { nextId, isEmpty } = getReviewQueueNavigation(
+			{ ids: queueIds, total: queue.total },
+			target
+		);
+		if (nextId) {
+			goto(`/teacher/submissions/${nextId}`);
 		} else {
-			toast.success(t('Review queue is clear.'));
+			if (isEmpty) toast.success(t('Review queue is clear.'));
 			goto('/teacher/review');
 		}
 	};
@@ -412,8 +423,10 @@
 				limit: 200
 			});
 			queueIds = (res.items ?? []).map((item) => item.submission.id);
+			return res;
 		} catch {
 			queueIds = [];
+			return null;
 		}
 	};
 

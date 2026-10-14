@@ -152,6 +152,12 @@ from open_webui.services.education.revision_items import (
     summarize_revision_snapshot,
 )
 from open_webui.services.education.identity import get_education_role
+from open_webui.services.education.writing_access import (
+    ensure_writing_session_writable,
+    get_effective_due_at as _get_effective_due_at,
+    load_submission_rounds_with_reviews as _load_submission_rounds_with_reviews,
+    resolve_effective_due_at as _resolve_effective_due_at,
+)
 from open_webui.services.education.writing_context import (
     DRAFT_FILE_MAX_BYTES,
     DraftFileError,
@@ -502,46 +508,6 @@ def _get_submission_or_404(submission_id: str, db: Session) -> SubmissionModel:
     return submission
 
 
-def _load_submission_rounds_with_reviews(
-    assignment, student_id: str, db: Session
-) -> tuple[list, dict]:
-    rounds = Education.get_submission_rounds(assignment.id, student_id, db=db)
-    reviews = Education.get_submission_reviews_by_submission_ids(
-        [submission.id for submission in rounds], db=db
-    )
-    return rounds, reviews
-
-
-def _resolve_effective_due_at(
-    assignment, rounds: list, reviews: dict, extension_due_at: Optional[int] = None
-) -> Optional[int]:
-    """这个学生在这个作业上真正生效的截止时间。
-
-    优先级只有一条:个人延期存在就是它。教师是对着某个学生单独设的,比退回轮次的
-    resubmit_due_at 和全班的 due_at 都更具体;要改就改这条延期,名单页会显示它在。
-    """
-    if extension_due_at is not None:
-        return extension_due_at
-    for submission in rounds:
-        review = reviews.get(submission.id)
-        if review is None or review.review_status == "pending":
-            continue
-        if review.review_status == "returned" and review.resubmit_due_at:
-            return review.resubmit_due_at
-        break  # reviewed:本作业反馈循环已关闭,回落到原始截止
-    return assignment.due_at
-
-
-def _get_effective_due_at(
-    assignment, student_id: str, db: Session
-) -> Optional[int]:
-    rounds, reviews = _load_submission_rounds_with_reviews(assignment, student_id, db)
-    extension = Education.get_assignment_extension(assignment.id, student_id, db=db)
-    return _resolve_effective_due_at(
-        assignment, rounds, reviews, extension.due_at if extension else None
-    )
-
-
 def _build_student_review_view(
     assignment, student_id: str, db: Session
 ) -> tuple[Optional[dict], Optional[int]]:
@@ -838,6 +804,14 @@ def require_owned_writing_session(
     """路径含 {session_id} 的写作接口:会话必须属于当前用户。"""
     session = _get_workspace_session_or_404(session_id, db)
     _ensure_workspace_session_owner(user, session)
+    return session
+
+
+def require_writable_writing_session(
+    session: WritingSessionModel = Depends(require_owned_writing_session),
+    db: Session = Depends(get_session),
+) -> WritingSessionModel:
+    ensure_writing_session_writable(session, db)
     return session
 
 
@@ -2555,7 +2529,7 @@ async def get_student_assignment_workspaces(
 @router.post("/writing-sessions/{session_id}/autosave")
 async def autosave_writing_session(
     form_data: AutosaveForm,
-    session: WritingSessionModel = Depends(require_owned_writing_session),
+    session: WritingSessionModel = Depends(require_writable_writing_session),
     db: Session = Depends(get_session),
 ):
     _ensure_draft_baseline_ready(session, db)
@@ -2587,7 +2561,7 @@ async def autosave_writing_session(
 @router.post("/writing-sessions/{session_id}/versions")
 async def create_writing_version(
     form_data: VersionCreateForm,
-    session: WritingSessionModel = Depends(require_owned_writing_session),
+    session: WritingSessionModel = Depends(require_writable_writing_session),
     db: Session = Depends(get_session),
 ):
     _ensure_draft_baseline_ready(session, db)
@@ -2605,7 +2579,7 @@ async def create_writing_version(
 @router.post("/writing-sessions/{session_id}/provenance")
 async def create_provenance_segments(
     form_data: ProvenanceCreateForm,
-    session: WritingSessionModel = Depends(require_owned_writing_session),
+    session: WritingSessionModel = Depends(require_writable_writing_session),
     db: Session = Depends(get_session),
 ):
     _ensure_draft_baseline_ready(session, db)
@@ -2677,7 +2651,7 @@ async def extract_draft_baseline_file(
 )
 async def submit_draft_baseline(
     form_data: DraftBaselineForm,
-    session: WritingSessionModel = Depends(require_owned_writing_session),
+    session: WritingSessionModel = Depends(require_writable_writing_session),
     db: Session = Depends(get_session),
 ):
     """修订初稿作业:冻结课外写好的初稿为修改起点,同时成为编辑器的初始正文。"""
@@ -2711,7 +2685,7 @@ async def submit_draft_baseline(
 )
 async def reset_draft_baseline(
     request: Request,
-    session: WritingSessionModel = Depends(require_owned_writing_session),
+    session: WritingSessionModel = Depends(require_writable_writing_session),
     db: Session = Depends(get_session),
 ):
     """撤回初稿重新开始:基线、正文、写作过程和本作业的对话全部删掉,不留痕。
@@ -2780,6 +2754,8 @@ async def get_or_build_revision_items(
     生产的反向代理读超时远大于一次通读的耗时。
     """
     assignment = _get_revise_draft_session(session, db)
+    if session.revision_items_generated_at is None:
+        ensure_writing_session_writable(session, db)
     status_value, items = await ensure_revision_items(
         request,
         user,
@@ -2799,7 +2775,7 @@ async def get_or_build_revision_items(
 async def follow_up_revision_items(
     request: Request,
     form_data: RevisionItemsStartForm,
-    session: WritingSessionModel = Depends(require_owned_writing_session),
+    session: WritingSessionModel = Depends(require_writable_writing_session),
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
@@ -2837,7 +2813,7 @@ async def follow_up_revision_items(
 async def update_revision_item(
     item_no: int,
     form_data: RevisionDecisionForm,
-    session: WritingSessionModel = Depends(require_owned_writing_session),
+    session: WritingSessionModel = Depends(require_writable_writing_session),
     db: Session = Depends(get_session),
 ):
     _get_revise_draft_session(session, db)
@@ -2862,7 +2838,7 @@ async def update_revision_item(
 @router.post("/writing-sessions/{session_id}/operations")
 async def create_editor_operations(
     form_data: EditorOperationCreateForm,
-    session: WritingSessionModel = Depends(require_owned_writing_session),
+    session: WritingSessionModel = Depends(require_writable_writing_session),
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
@@ -2879,7 +2855,7 @@ async def create_editor_operations(
 async def upsert_writing_chat_message(
     message_id: str,
     form_data: ChatMessageUpsertForm,
-    session: WritingSessionModel = Depends(require_owned_writing_session),
+    session: WritingSessionModel = Depends(require_writable_writing_session),
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
@@ -2981,6 +2957,7 @@ async def start_assignment_challenge(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Mismatched session"
         )
     _ensure_workspace_session_owner(user, session)
+    ensure_writing_session_writable(session, db)
 
     try:
         challenge_session, _ = await start_challenge(
@@ -3049,6 +3026,7 @@ async def skip_assignment_challenge_before_start(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Mismatched session"
         )
     _ensure_workspace_session_owner(user, session)
+    ensure_writing_session_writable(session, db)
 
     try:
         challenge_session = skip_challenge_before_start(assignment, session, db)
@@ -3071,6 +3049,9 @@ async def respond_to_challenge(
     challenge_session = _get_challenge_session_or_404(session_id, db)
     _ensure_challenge_owner(user, challenge_session)
     assignment = _get_assignment_or_404(challenge_session.assignment_id, db)
+    ensure_writing_session_writable(
+        _get_workspace_session_or_404(challenge_session.writing_session_id, db), db
+    )
 
     try:
         result = await submit_challenge_response(
@@ -3105,6 +3086,9 @@ async def skip_assignment_challenge(
 
     challenge_session = _get_challenge_session_or_404(session_id, db)
     _ensure_challenge_owner(user, challenge_session)
+    ensure_writing_session_writable(
+        _get_workspace_session_or_404(challenge_session.writing_session_id, db), db
+    )
     if challenge_session.status != "in_progress":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -3126,6 +3110,9 @@ async def update_challenge_checklist(
 ):
     challenge_session = _get_challenge_session_or_404(session_id, db)
     _ensure_challenge_owner(user, challenge_session)
+    ensure_writing_session_writable(
+        _get_workspace_session_or_404(challenge_session.writing_session_id, db), db
+    )
     if challenge_session.status != "completed":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -3234,6 +3221,7 @@ async def submit_assignment(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Mismatched session"
         )
     _ensure_workspace_session_owner(user, session)
+    ensure_writing_session_writable(session, db)
     _ensure_draft_baseline_ready(session, db)
 
     # 修订初稿作业不问「用了 AI 吗」:首轮通读是平台替学生发起的,一定用了。
@@ -3257,27 +3245,17 @@ async def submit_assignment(
         else None
     )
 
-    # 已批改即定稿,提前拦下,免得白跑一遍保存与分析。
     current_submission = Education.get_current_submission(
         assignment.id, session.owner_user_id, db=db
     )
-    if current_submission is not None:
-        current_review = Education.get_submission_review_by_submission_id(
-            current_submission.id, db=db
-        )
-        if current_review is not None and current_review.review_status == "reviewed":
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Submission has already been reviewed",
-            )
+    current_review = (
+        Education.get_submission_review_by_submission_id(current_submission.id, db=db)
+        if current_submission is not None
+        else None
+    )
 
     # 截止时间按会话归属人算:管理员代提交时不应套用管理员自己的轮次。
     effective_due_at = _get_effective_due_at(assignment, session.owner_user_id, db)
-    if effective_due_at is not None and effective_due_at <= int(time.time()):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Assignment due time has passed",
-        )
 
     previous_round_submission = None
     if current_submission is not None:

@@ -30,6 +30,7 @@ Right Write 基于 Open WebUI v0.11.2。前端使用 Svelte 5、SvelteKit 2、Ty
 - `routers/education.py`：HTTP、身份权限、资源装配与事务入口；`models/education.py`：严格数据模型、数据库约束与仓储。
 - `services/education/identity.py`：教学身份，使用 `education-teacher` / `education-student` 用户组；平台角色 `user.role` 与教学身份不是同一字段，管理员通过平台角色获权。
 - `writing_context.py`：初稿文件解析、初稿基线和每轮对话的当前正文上下文；`revision_items.py`：第一次通读、修改清单、补看和提交快照汇总。
+- `writing_access.py`：统一有效截止时间及写作状态校验。作业已批改返回 409，超过有效截止返回 400；写入路由、对话入口和模型调用共用校验。对话入口在创建聊天或保存消息之前检查，个人写作继续允许写入。
 - `challenge.py` / `challenge_insight.py`：提交前 AI 读者试读及维度聚合；`analysis.py`：来源、过程指标及分析缓存。
 - `profile_evidence.py` / `profile_snapshots.py`：冻结证据；`profile.py` / `profile_aggregates.py`：画像指标和聚合投影；`profile_recompute.py`：显式批量重算。细节参见 [画像投影说明](../../backend/open_webui/services/education/PROFILE_PROJECTIONS.md)。
 
@@ -49,6 +50,8 @@ Right Write 基于 Open WebUI v0.11.2。前端使用 Svelte 5、SvelteKit 2、Ty
 - 教师按作业配置反思题（单选、多选、文本），提交时冻结题目及回答；批改展示本轮快照，不能用后来编辑的题目替换。修订初稿作业不再问必然为“是”的 AI 使用题。
 - 满分与评分维度在首次提交后锁定；已有初稿基线或提交时作业形式锁定，前后端都应执行边界校验。
 - 退回重写由实例级 `education.enable_return` 控制，**默认关闭**；前端按 `features.enable_education_return` 显示相关操作与统计，后端在关闭时拒绝退回请求。不要把开关关闭诊断成 UI 或接口缺陷。
+- 已批改或已截止的作业禁止写正文、版本、来源、操作、修订清单及试读记录，也禁止发起新对话。只读工作区、过程摘要及已生成通读结论仍可读取；切换已有对话作为查看操作保留。退回、个人延期及待批改编辑按当前有效截止判断。
+- 完成批改后重新读取教师待批改队列，优先继续原后序记录，否则进入剩余队列首项；仅服务器总数为零时提示清空，刷新失败返回队列页。
 
 ## Task Modes & Writing Context
 

@@ -137,6 +137,9 @@ from open_webui.internal.db import engine, get_async_session
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.channels import Channels
 from open_webui.models.chats import ChatForm, Chats
+from open_webui.models.folders import Folders
+from open_webui.services.education.writing_access import ensure_writing_session_writable
+from open_webui.services.education.writing_context import get_folder_writing_session
 from open_webui.models.config import Config
 from open_webui.models.functions import Functions
 from open_webui.models.messages import Messages
@@ -1207,6 +1210,17 @@ async def chat_completion(
                 'tool_approval_mode': tool_approval_mode,
             },
         }
+
+        writing_folder_id = (
+            await Chats.get_chat_folder_id(chat_id, user.id)
+            if is_saved_chat_id(chat_id)
+            else None
+        ) or metadata.get('folder_id')
+        if writing_folder_id:
+            writing_folder = await Folders.get_folder_by_id(writing_folder_id)
+            writing_session = get_folder_writing_session(writing_folder, user.id) if writing_folder else None
+            if writing_session:
+                ensure_writing_session_writable(writing_session)
 
         if is_new_chat:
             metadata['chat_id'] = str(uuid4())

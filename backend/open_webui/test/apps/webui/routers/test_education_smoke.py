@@ -23,7 +23,7 @@ if str(BACKEND_ROOT) not in sys.path:
 
 import open_webui.internal.db as internal_db
 from open_webui.internal.db import get_session
-from open_webui.models.chats import Chat
+from open_webui.models.chats import Chat, ChatForm, Chats
 from open_webui.models.chat_messages import ChatMessage
 from open_webui.models.education import (
     AnalysisResult,
@@ -2557,6 +2557,232 @@ def test_reviewed_submission_cannot_be_resubmitted(education_client):
     )
     assert after_return.status_code == 200, after_return.text
     assert after_return.json()["submission_id"] != submission_id
+
+
+_WRITING_WRITE_REQUESTS = [
+    ('autosave', {'content_text': 'attempted change', 'content_json': None}),
+    ('versions', {'trigger_type': 'manual', 'content_text': 'attempted change'}),
+    (
+        'provenance',
+        {
+            'replace_existing': True,
+            'segments': [
+                {
+                    'segment_id': 'write-guard-probe',
+                    'source_type': 'user_typed',
+                    'segment_text': 'attempted change',
+                    'start_offset': 0,
+                    'end_offset': 16,
+                }
+            ],
+        },
+    ),
+    (
+        'operations',
+        {
+            'operations': [
+                {
+                    'op_type': 'keyboard_input',
+                    'source_type': 'user_typed',
+                    'start_offset': 0,
+                    'end_offset': 0,
+                    'inserted_text': 'attempted change',
+                    'deleted_text': '',
+                    'batch_id': 'write-guard-probe',
+                    'occurred_at_ms': 1,
+                    'client_sequence': 0,
+                }
+            ]
+        },
+    ),
+    (
+        'chat/messages/write-guard-probe',
+        {'message': {'id': 'write-guard-probe', 'role': 'user', 'content': 'New question'}},
+    ),
+]
+
+
+def _grade_writing_guard_submission(client, teacher, submission_id):
+    UserContext.current_user = teacher
+    response = client.post(
+        f'/api/v1/teacher/submissions/{submission_id}/review',
+        json={
+            'review_status': 'reviewed',
+            'reflection_score': 4,
+            'score': 85,
+            'rubric_scores': {'ideas': 29, 'structure': 28, 'evidence': 28},
+        },
+    )
+    assert response.status_code == 200, response.text
+
+
+@pytest.mark.parametrize('endpoint,payload', _WRITING_WRITE_REQUESTS)
+@pytest.mark.parametrize('state', ['pending', 'reviewed', 'expired', 'returned'])
+def test_assignment_process_writes_enforce_readonly_state(education_client, endpoint, payload, state):
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id, submission_id = _setup_submitted_assignment(client, teacher, student, 'Writing state guard')
+    if state == 'reviewed':
+        _grade_writing_guard_submission(client, teacher, submission_id)
+    elif state in ('expired', 'returned'):
+        UserContext.current_user = teacher
+        closed = client.patch(f'/api/v1/assignments/{assignment["id"]}', json={'due_at': 1})
+        assert closed.status_code == 200, closed.text
+        if state == 'returned':
+            returned = client.post(
+                f'/api/v1/teacher/submissions/{submission_id}/review',
+                json={
+                    'review_status': 'returned',
+                    'returned_comment': 'Please revise',
+                    'resubmit_due_at': 2100000000,
+                },
+            )
+            assert returned.status_code == 200, returned.text
+
+    UserContext.current_user = student
+    workspace_url = f'/api/v1/assignments/{assignment["id"]}/workspace'
+    before = client.get(workspace_url).json()
+    history_url = f'/api/v1/assignments/{assignment["id"]}/me/submissions'
+    history_before = client.get(history_url).json()
+    response = client.post(f'/api/v1/writing-sessions/{session_id}/{endpoint}', json=payload)
+    expected = {'reviewed': 409, 'expired': 400}.get(state, 200)
+    assert response.status_code == expected, response.text
+    if expected != 200:
+        after = client.get(workspace_url).json()
+        assert after['note'] == before['note']
+        assert after['source_map'] == before['source_map']
+        assert after['writing_session'] == before['writing_session']
+        assert client.get(history_url).json() == history_before
+        assert client.get(f'/api/v1/writing/{session_id}/process-summary').status_code == 200
+
+
+@pytest.mark.parametrize('new_chat', [False, True])
+def test_chat_completion_rejects_reviewed_writing_before_persisting(education_client, monkeypatch, new_chat):
+    import open_webui.main as webui_main
+
+    client, teacher, _, student, _, SessionLocal = education_client
+    monkeypatch.setattr(internal_db, 'SessionLocal', SessionLocal)
+    assignment, _, submission_id = _setup_submitted_assignment(client, teacher, student, 'Chat finalization guard')
+    workspace = client.get(f'/api/v1/assignments/{assignment["id"]}/workspace').json()
+    chat = asyncio.run(
+        Chats.insert_new_chat(
+            str(uuid.uuid4()),
+            student.id,
+            ChatForm(
+                chat={'title': 'Writing chat', 'history': {'messages': {}}, 'messages': []},
+                folder_id=workspace['project']['id'],
+            ),
+        )
+    )
+    _grade_writing_guard_submission(client, teacher, submission_id)
+    # The model permission check is unrelated to this test's writing state gate.
+    monkeypatch.setattr(webui_main, 'BYPASS_MODEL_ACCESS_CONTROL', True)
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(MODELS={'guard-test-model': {'id': 'guard-test-model'}})),
+        headers={},
+        state=SimpleNamespace(),
+    )
+    body = {
+        'model': 'guard-test-model',
+        'stream': False,
+        'messages': [{'role': 'user', 'content': 'Forbidden after review'}],
+        'user_message': {'id': 'write-probe', 'role': 'user', 'content': 'Forbidden after review'},
+        'id': 'assistant-probe',
+        'parent_id': None if new_chat else 'previous-reply',
+        'chat_id': None if new_chat else chat.id,
+        'folder_id': workspace['project']['id'] if new_chat else None,
+    }
+    with SessionLocal() as db:
+        before = (db.query(Chat).count(), db.query(ChatMessage).count())
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(webui_main.chat_completion(request, body, student))
+    assert error.value.status_code == 409
+    assert error.value.detail == 'Submission has already been reviewed'
+    with SessionLocal() as db:
+        assert (db.query(Chat).count(), db.query(ChatMessage).count()) == before
+        assert db.get(Chat, chat.id).chat['history']['messages'] == {}
+
+
+def test_personal_writing_autosave_stays_writable(education_client):
+    client, _, _, student, _, _ = education_client
+    UserContext.current_user = student
+    workspace = client.post('/api/v1/me/writing/personal', json={'title': 'Personal writing'}).json()
+    session_id = workspace['writing_session']['id']
+    response = client.post(
+        f'/api/v1/writing-sessions/{session_id}/autosave',
+        json={'content_text': 'Independent personal writing'},
+    )
+    assert response.status_code == 200, response.text
+    saved = client.get(f'/api/v1/writing/{session_id}/workspace').json()
+    assert saved['note']['data']['content']['md'] == 'Independent personal writing'
+
+
+def test_extension_reopens_process_writes_and_revoking_it_closes_them(education_client):
+    client, teacher, _, student, _, _ = education_client
+    assignment, _ = _open_past_due_assignment(client, teacher, [student])
+    UserContext.current_user = student
+    workspace = client.get(f'/api/v1/assignments/{assignment["id"]}/workspace').json()
+    save_url = f'/api/v1/writing-sessions/{workspace["writing_session"]["id"]}/autosave'
+    assert client.post(save_url, json={'content_text': 'Too late'}).status_code == 400
+    UserContext.current_user = teacher
+    extension_url = f'/api/v1/teacher/assignments/{assignment["id"]}/extensions/{student.id}'
+    assert client.put(extension_url, json={'due_at': 2100000000}).status_code == 200
+    UserContext.current_user = student
+    assert client.post(save_url, json={'content_text': 'Allowed by extension'}).status_code == 200
+    UserContext.current_user = teacher
+    assert client.delete(extension_url).status_code == 200
+    UserContext.current_user = student
+    assert client.post(save_url, json={'content_text': 'Closed again'}).status_code == 400
+
+
+@pytest.mark.parametrize(
+    'method,endpoint,payload',
+    [
+        ('POST', 'revision-items', {'model_id': 'test-model'}),
+        ('POST', 'revision-items/follow-up', {'model_id': 'test-model'}),
+        ('PATCH', 'revision-items/1', {'item_no': 1, 'decision': 'revised'}),
+    ],
+)
+def test_reviewed_revision_workflow_cannot_write(education_client, method, endpoint, payload):
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id = _revise_draft_with_baseline(client, teacher, student)
+    submitted = client.post(
+        f'/api/v1/assignments/{assignment["id"]}/submit',
+        json=_submit_body(session_id, _DRAFT_MD),
+    )
+    assert submitted.status_code == 200, submitted.text
+    _grade_writing_guard_submission(client, teacher, submitted.json()['submission_id'])
+    UserContext.current_user = student
+    response = client.request(method, f'/api/v1/writing-sessions/{session_id}/{endpoint}', json=payload)
+    assert response.status_code == 409, response.text
+
+
+def test_reviewed_first_read_can_still_read_existing_items(education_client):
+    client, teacher, _, student, _, SessionLocal = education_client
+    assignment, session_id = _revise_draft_with_baseline(client, teacher, student)
+    with SessionLocal() as db:
+        Education.store_revision_items(
+            session_id,
+            _DRAFT_MD,
+            [
+                {
+                    'criterion_key': key,
+                    'status': 'ok',
+                    'finding': None,
+                    'quoted_span': None,
+                    'is_blocking': False,
+                }
+                for key in ('ideas', 'structure', 'evidence')
+            ],
+            db=db,
+        )
+    submitted = client.post(f'/api/v1/assignments/{assignment["id"]}/submit', json=_submit_body(session_id, _DRAFT_MD))
+    assert submitted.status_code == 200, submitted.text
+    _grade_writing_guard_submission(client, teacher, submitted.json()['submission_id'])
+    UserContext.current_user = student
+    response = client.post(f'/api/v1/writing-sessions/{session_id}/revision-items')
+    assert response.status_code == 200, response.text
+    assert response.json()['status'] == 'ready'
+    assert len(response.json()['items']) == 3
 
 
 def test_effective_due_uses_resubmit_due_after_return(education_client):

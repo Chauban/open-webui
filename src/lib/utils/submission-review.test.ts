@@ -1,6 +1,40 @@
 import { describe, expect, test } from 'vitest';
 
-import { buildSubmissionReviewOverview } from './submission-review';
+import { buildSubmissionReviewOverview, getReviewQueueNavigation } from './submission-review';
+
+describe('review queue after completing a submission', () => {
+	test('continues with an earlier pending submission after completing the last item', () => {
+		expect(getReviewQueueNavigation({ ids: ['newer-pending'], total: 1 }, null)).toEqual({
+			nextId: 'newer-pending',
+			isEmpty: false
+		});
+	});
+
+	test('keeps the selected next item when it is still pending in the refreshed queue', () => {
+		expect(getReviewQueueNavigation({ ids: ['newer', 'next'], total: 2 }, 'next')).toEqual({
+			nextId: 'next',
+			isEmpty: false
+		});
+	});
+
+	test('skips a preferred item that another teacher has already reviewed', () => {
+		expect(getReviewQueueNavigation({ ids: ['remaining'], total: 1 }, 'already-reviewed')).toEqual({
+			nextId: 'remaining',
+			isEmpty: false
+		});
+	});
+
+	test('only reports the queue clear when the server total is zero', () => {
+		expect(getReviewQueueNavigation({ ids: [], total: 0 }, null)).toEqual({
+			nextId: null,
+			isEmpty: true
+		});
+		expect(getReviewQueueNavigation({ ids: [], total: 201 }, null)).toEqual({
+			nextId: null,
+			isEmpty: false
+		});
+	});
+});
 
 describe('buildSubmissionReviewOverview', () => {
 	test('summarizes teacher-facing metrics and uses neutral process focus wording', () => {

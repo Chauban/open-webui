@@ -1,0 +1,31 @@
+{
+  "date": "2026-10-14",
+  "codeBaseline": "feba8a722 plus V2/V3 fixes",
+  "resolvedIssues": ["V2", "V3"],
+  "browserVerification": {
+    "reviewedWriting": {
+      "statuses": {"autosave": 409, "versions": 409, "provenance": 409, "operations": 409, "chat/messages": 409},
+      "workDraftUnchanged": true
+    },
+    "queueLastItem": {
+      "pendingBefore": 2,
+      "pendingAfter": 1,
+      "completedSubmissionId": "b1208c40-af25-446d-a797-8e5bb3776b21",
+      "navigatedToSubmissionId": "9f12a513-ffba-43d4-bbe9-c0810678ce15",
+      "falseClearToast": false,
+      "screenshot": "01-next-pending.png"
+    }
+  },
+  "additionalHttpVerification": {
+    "existingChatCompletionStatus": 409,
+    "newChatCompletionStatus": 409,
+    "workDraftUnchanged": true,
+    "pendingBeforeFixtureRestore": 1,
+    "pendingAfterFixtureRestore": 0
+  },
+  "tests": {"backendPassed": 220, "newBackendCases": 28, "frontendPassed": 101, "newFrontendCases": 4, "incrementalTypeCheck": "passed"},
+  "database": "isolated SQLite with Alembic migrations",
+  "databaseSchemaChanged": false,
+  "testFixtureRestored": true,
+  "productionDeployment": false
+}

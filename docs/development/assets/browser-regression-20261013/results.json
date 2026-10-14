@@ -1,0 +1,67 @@
+{
+  "assignments": {
+    "fromScratch": "00d1a3f7-65a0-4a0e-aa98-8cbec8a7ba1e",
+    "reviseDraft": "2539064c-60d5-49b7-8340-32ac082e5e28"
+  },
+  "backend": "http://localhost:8080",
+  "classroomId": "532e731d-e293-4aeb-98eb-fca1862e600e",
+  "codeBaseline": "feba8a722",
+  "confirmed": {
+    "baselineDuplicate409": true,
+    "baselineMinimum200": true,
+    "baselineNormalized": true,
+    "classroomAndAssignmentUi": true,
+    "frozenBody": true,
+    "frozenReflectionQuestion": true,
+    "noRepeatedAutoStart": true,
+    "requiredReflection": true,
+    "requiredRevisionDecision": true,
+    "returnDeadline": true,
+    "returnDisabled403": true,
+    "returnEnabled": true,
+    "round2PreservesBaseline": true,
+    "round2PreservesRound1": true,
+    "saveBeforeChat": true,
+    "scoringConfig409": true,
+    "studentTeacherApi403": true,
+    "studentWorkspace": true,
+    "uiReadonlyAfterReview": true
+  },
+  "database": "isolated SQLite (Alembic)",
+  "date": "2026-10-13",
+  "failures": [
+    {
+      "afterReview": {
+        "changed": true,
+        "frozenSubmissionUnchanged": true,
+        "restored": true,
+        "status": 200
+      },
+      "endpoint": "POST /api/v1/writing-sessions/{id}/autosave",
+      "id": "V2",
+      "priority": "high"
+    },
+    {
+      "behavior": "Completing the last item in descending pending order shows queue clear while earlier pending items remain.",
+      "id": "V3",
+      "priority": "low"
+    }
+  ],
+  "model": "local deterministic browser-regression",
+  "origin": "http://localhost:5050",
+  "scores": {
+    "fromScratch": 87,
+    "promptScoreForPlatformOnly": null,
+    "reviseRound2": 92
+  },
+  "submissions": {
+    "fromScratch": "b1208c40-af25-446d-a797-8e5bb3776b21",
+    "reviseRound1": "bf6bbdf9-0e50-4967-a5d8-4948f111b1e3",
+    "reviseRound2": "9f12a513-ffba-43d4-bbe9-c0810678ce15"
+  },
+  "testFixtureRestored": true,
+  "frontendTests": {
+    "files": 25,
+    "passed": 97
+  }
+}
