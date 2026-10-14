@@ -15,7 +15,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 .nvmrc
+# Share repository guidance; keep nested local copies ignored
 CLAUDE.md
+!/CLAUDE.md
 # C extensions
 *.so
 

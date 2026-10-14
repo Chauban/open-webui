@@ -5,9 +5,9 @@
 ## Project Context & Repository Boundary
 
 - 产品是 **Right Write 成长写作教学平台**，基于 Open WebUI v0.11.2 的定制 Fork；主要工作是本地功能开发，不要把普通功能修改扩展成 Docker 或生产部署任务。
-- 工作区根目录 `right_chat/` **不是 Git 仓库**；实际仓库是 `open-webui/`，常规工作分支为 `main`。Git 命令必须在实际仓库内执行。
+- 工作区根目录 `right-write/` **不是 Git 仓库**；实际仓库是 `open-webui/`，常规工作分支为 `main`。Git 命令必须在实际仓库内执行。
 - `origin`：`https://github.com/Chauban/open-webui.git`；`upstream`：`https://github.com/open-webui/open-webui.git`。核对本项目同步状态应比较 `origin`，官方更新仅按任务需要选择性引入。
-- 本文件、`docs/` 中的协作资料和仓库根目录 `start_*.bat` 纳入版本管理。外层工作区仅保留原有完整 `CLAUDE.md`、`AGENTS.md` 指引和两个启动入口；已迁入仓库的重复文档入口已删除。个人资料及实例状态不随代码同步。不要把“仓库已同步”描述成“整个工作区已同步”。
+- 本文件、仓库根目录 `CLAUDE.md`、`docs/` 中的协作资料和 `start_*.bat` 纳入版本管理。完整 Claude Code 指引在本仓库维护，外层 `CLAUDE.md` 和 `AGENTS.md` 只保留入口；启动时使用本仓库的两个脚本，外层不维护副本。个人资料及实例状态不随代码同步。不要把“仓库已同步”描述成“整个工作区已同步”。
 - 当前产品需求、规则、Userflow 和待办在 `docs/product/` 持续维护；`docs/archive/` 仅保留已结束、被替代或固定时期的资料。先核对旧内容，不因日期早就自动归档，也不依据旧方案恢复已删除的接口或页面。
 
 ##【代码重构与优化原则：绝对的向前看】
@@ -126,7 +126,7 @@ When debugging runtime issues involving models, chat, education roles, or studen
 
 ## Local Development Startup
 
-When the user asks to start local development, use the two repository-root launchers. The outer workspace launchers delegate to these files. They are the canonical startup entry points and each opens in its own terminal window:
+When the user asks to start local development, use the two repository-root launchers. The outer workspace has no launcher copies. They are the canonical startup entry points and each opens in its own terminal window:
 
 1. `start_backend.bat`：后端 8080；首次运行生成 `backend/.webui_secret_key`，之后自动加载 `WEBUI_SECRET_KEY` 与本地 CORS 白名单。
 2. `start_frontend.bat`：前端 5050；内部执行 `npm run dev:5050`。

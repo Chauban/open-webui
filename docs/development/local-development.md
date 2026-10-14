@@ -21,7 +21,7 @@ backend\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
 1. `start_backend.bat`：生成或加载 `backend/.webui_secret_key`，设置开发 CORS 白名单与默认中文，启动 uvicorn。
 2. `start_frontend.bat`：执行 `npm run dev:5050`。
 
-原有外层工作区的同名脚本调用仓库中的脚本，可继续双击使用。启动脚本的逻辑只在仓库中维护。
+外层工作区不保留同名脚本；请直接双击本仓库根目录的两个启动脚本。启动逻辑只在仓库中维护。
 
 访问 `http://localhost:5050`，检查：
 

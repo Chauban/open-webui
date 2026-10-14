@@ -22,7 +22,7 @@ bash deploy/deploy.sh --target hitsz
 
 `--truncate` 涉及清表，只有当前任务明确授权且备份、迁移要求已核对后才能使用。脚本注释、旧文档和历史测试记录不能替代本次操作授权。
 
-参数说明见 `deploy.sh` 开头注释。入口按脚本位置定位本仓库和同目录 `remote.sh`，不依赖外层 `right_chat/` 或其目录名称。
+参数说明见 `deploy.sh` 开头注释。入口按脚本位置定位本仓库和同目录 `remote.sh`，不依赖外层 `right-write/` 或其目录名称。
 
 ## 凭据与实例配置
 

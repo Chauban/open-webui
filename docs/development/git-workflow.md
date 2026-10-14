@@ -1,6 +1,6 @@
 # Git 协作规范
 
-所有 Git 命令在本仓库中执行；外层 `right_chat/` 不是 Git 仓库。
+所有 Git 命令在本仓库中执行；外层 `right-write/` 不是 Git 仓库。
 
 - `origin`：`https://github.com/Chauban/open-webui.git`，本项目 Fork。
 - `upstream`：`https://github.com/open-webui/open-webui.git`，官方仓库。
