@@ -461,7 +461,7 @@
 							</div>
 							<p class="mt-0.5 text-[0.6875rem] text-gray-400 dark:text-gray-600">
 								{$i18n.t(
-									'Students can import photos of a handwritten or printed draft; this model transcribes them into text for the student to check. Pick a model that can read images. Students do not need access to it in chat. When none is chosen, image import is turned off.'
+									'Students can import photos of a handwritten or printed draft; this model transcribes them into text for the student to check. Pick a model that can read images; a fast model without step-by-step reasoning keeps the wait short, since most of the time goes into writing out the text. Students do not need access to it in chat. When none is chosen, image import is turned off.'
 								)}
 							</p>
 							{#if draftImageModelMissing}

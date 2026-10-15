@@ -7779,10 +7779,10 @@ def test_prepare_draft_image_uprights_and_shrinks_photos():
     photo.save(buffer, "JPEG", exif=exif)
     assert decode(draft_import_module.prepare_draft_image(buffer.getvalue())) == ("JPEG", (200, 400))
 
-    # 大图缩到长边 2048
+    # 大图缩到长边 1600
     buffer = io.BytesIO()
-    Image.new("RGB", (4096, 1024), "white").save(buffer, "PNG")
-    assert decode(draft_import_module.prepare_draft_image(buffer.getvalue())) == ("JPEG", (2048, 512))
+    Image.new("RGB", (4800, 1200), "white").save(buffer, "PNG")
+    assert decode(draft_import_module.prepare_draft_image(buffer.getvalue())) == ("JPEG", (1600, 400))
 
 
 def test_revision_overview_and_first_read_distribution():
@@ -7869,3 +7869,45 @@ def test_admin_sets_the_draft_image_model_in_education_settings(education_client
     res = configs_client.post("/api/v1/configs/education", json=form)
     assert res.status_code == 422, res.text
     configs_client.close()
+
+
+def test_draft_images_are_transcribed_concurrently_with_a_small_limit():
+    """8 张照片:同时最多 4 路模型调用,排两轮;结果按页序拼接,不按完成先后。"""
+    in_flight = 0
+    peak = 0
+
+    async def fake_generate(request, user, model_id, messages):
+        nonlocal in_flight, peak
+        page = messages[-1]["content"][1]["image_url"]["url"]
+        in_flight += 1
+        peak = max(peak, in_flight)
+        # 页号越小越慢,完成顺序与页序相反
+        await asyncio.sleep(0.02 * (10 - int(page)))
+        in_flight -= 1
+        return f"第{page}页。"
+
+    original = draft_import_module.generate_transcription
+    draft_import_module.generate_transcription = fake_generate
+    try:
+        started = time.perf_counter()
+        text = asyncio.run(
+            draft_import_module.transcribe_draft_images(
+                None, None, "vision-model", [str(page) for page in range(1, 9)]
+            )
+        )
+        elapsed = time.perf_counter() - started
+    finally:
+        draft_import_module.generate_transcription = original
+
+    assert text == "\n".join(f"第{page}页。" for page in range(1, 9))
+    assert peak == 4
+    # 逐张串行要 0.02×(9+8+…+2)=0.88 秒;4 路并发两轮约 0.36 秒
+    assert elapsed < 0.6
+
+
+def test_prepare_draft_images_validates_every_image_before_any_model_call():
+    good = _png_bytes("red")
+    urls = asyncio.run(draft_import_module.prepare_draft_images([good, good]))
+    assert len(urls) == 2 and all(url.startswith("data:image/jpeg;base64,") for url in urls)
+    with pytest.raises(draft_import_module.DraftImageError):
+        asyncio.run(draft_import_module.prepare_draft_images([good, b"not an image"]))

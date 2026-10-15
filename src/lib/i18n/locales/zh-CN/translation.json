@@ -125,7 +125,7 @@
 	"Imported text from images": "从图片导入了文字",
 	"Imported text from a file": "从文件导入了文字",
 	"Draft image parsing model": "初稿图片识别模型",
-	"Students can import photos of a handwritten or printed draft; this model transcribes them into text for the student to check. Pick a model that can read images. Students do not need access to it in chat. When none is chosen, image import is turned off.": "学生可以导入手写稿或打印稿的照片，由这个模型转录成文字，再交给学生核对。请选择能读图的模型；学生不需要在聊天里有这个模型的使用权限。不选则关闭图片导入。",
+	"Students can import photos of a handwritten or printed draft; this model transcribes them into text for the student to check. Pick a model that can read images; a fast model without step-by-step reasoning keeps the wait short, since most of the time goes into writing out the text. Students do not need access to it in chat. When none is chosen, image import is turned off.": "学生可以导入手写稿或打印稿的照片，由这个模型转录成文字，再交给学生核对。请选择能读图的模型；耗时主要花在逐字输出上，选不带深度思考的快速模型等待更短。学生不需要在聊天里有这个模型的使用权限。不选则关闭图片导入。",
 	"The chosen model is no longer available. Image import will fail until you pick another one.": "所选模型已不可用。改选其他模型之前，图片导入会失败。",
 	"Off (no image import)": "关闭（不提供图片导入）",
 	"Imported the questions from \"{{title}}\".": "已导入「{{title}}」的反思题。",

@@ -125,7 +125,7 @@
 	"Imported text from images": "",
 	"Imported text from a file": "",
 	"Draft image parsing model": "",
-	"Students can import photos of a handwritten or printed draft; this model transcribes them into text for the student to check. Pick a model that can read images. Students do not need access to it in chat. When none is chosen, image import is turned off.": "",
+	"Students can import photos of a handwritten or printed draft; this model transcribes them into text for the student to check. Pick a model that can read images; a fast model without step-by-step reasoning keeps the wait short, since most of the time goes into writing out the text. Students do not need access to it in chat. When none is chosen, image import is turned off.": "",
 	"The chosen model is no longer available. Image import will fail until you pick another one.": "",
 	"Off (no image import)": "",
 	"Imported the questions from \"{{title}}\".": "Imported the questions from \"{{title}}\".",

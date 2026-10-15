@@ -23,13 +23,18 @@ log = logging.getLogger(__name__)
 DRAFT_IMAGE_MAX_COUNT = 8
 DRAFT_IMAGE_MAX_BYTES = 10 * 1024 * 1024
 DRAFT_IMAGE_TOTAL_MAX_BYTES = 30 * 1024 * 1024
-# 发给模型前把长边缩到这个尺寸:一页手写稿 2048 像素足够认字,原图动辄四五千像素只多花钱。
-_MAX_EDGE = 2048
+# 发给模型前把长边缩到这个尺寸、按这个质量存 JPEG。实测(12MP 手机照片,A4 满页
+# 40 行×38 字的密排印刷稿)1600 像素时字高约 27 像素,仍清楚可认;1280 像素只剩 21 像素,
+# 给手写和虚焦照片留的余量不够。比 2048/90 小约 43%,而主流识图模型自己也会把图缩到
+# 1568(Claude)或短边 768(OpenAI)上下,更大的图只是多传、多算视觉 token。
+_MAX_EDGE = 1600
+_JPEG_QUALITY = 85
 # 再大的多半不是照片;Pillow 自己到 1.8 亿像素才报解压炸弹。
 _MAX_PIXELS = 100_000_000
 _ACCEPTED_FORMATS = {"JPEG", "PNG", "WEBP"}
 # 同时转录几张。逐张发而不是一次全塞进去:一张认不出不至于拖垮整份,也不会撞上单次输出上限。
-_CONCURRENCY = 3
+# 一张的耗时主要花在模型逐字输出上(一页几百到上千字),4 路并发时最多 8 张只排两轮。
+_CONCURRENCY = 4
 _NO_TEXT = "<<NO_TEXT>>"
 
 TRANSCRIBE_PROMPT = f"""你是文字转录工具。图片是学生写作初稿的照片或扫描件，可能是手写，也可能是打印稿。请把图片里的正文逐字转录成纯文本。
@@ -98,7 +103,7 @@ def prepare_draft_image(data: bytes) -> str:
                 image = image.convert("RGB")
             image.thumbnail((_MAX_EDGE, _MAX_EDGE))
             buffer = io.BytesIO()
-            image.save(buffer, "JPEG", quality=90)
+            image.save(buffer, "JPEG", quality=_JPEG_QUALITY, optimize=True)
     except DraftImageError:
         raise
     except Image.DecompressionBombError as error:
@@ -107,6 +112,14 @@ def prepare_draft_image(data: bytes) -> str:
         raise DraftImageError("Could not read this image") from error
     encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
     return f"data:image/jpeg;base64,{encoded}"
+
+
+async def prepare_draft_images(images: list[bytes]) -> list[str]:
+    """并行转码多张图(每张 0.2 秒上下的 CPU 活,放在线程里),全部通过校验才去调模型。
+
+    任何一张不合格就整批报错,不先把前几张送去转录、白花模型调用。
+    """
+    return list(await asyncio.gather(*(asyncio.to_thread(prepare_draft_image, data) for data in images)))
 
 
 async def generate_transcription(request, user, model_id: str, messages: list[dict]) -> str:

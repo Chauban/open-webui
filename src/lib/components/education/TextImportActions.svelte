@@ -13,6 +13,7 @@
 		IMAGE_ACCEPT,
 		checkImageFiles,
 		isImageFile,
+		shrinkImageForUpload,
 		sortImageFiles,
 		type ImportInfo
 	} from '$lib/utils/text-import';
@@ -63,13 +64,16 @@
 				);
 				return;
 			}
-			const sorted = sortImageFiles(files);
-			const error = checkImageFiles(sorted);
+			// 先缩再查上限:手机原图超过 10MB 的,缩完多半就够了。
+			reading = 'images';
+			const shrunk = await Promise.all(sortImageFiles(files).map(shrinkImageForUpload));
+			reading = null;
+			const error = checkImageFiles(shrunk);
 			if (error) {
 				toast.error(t(error));
 				return;
 			}
-			await run('images', sorted);
+			await run('images', shrunk);
 			return;
 		}
 		if (files.length > 1) {

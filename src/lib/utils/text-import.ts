@@ -49,3 +49,44 @@ export const importedTextToHtml = (text: string) =>
 		.filter(Boolean)
 		.map((line) => `<p>${escapeHtml(line)}</p>`)
 		.join('');
+
+// 上传前在浏览器里先把照片缩到长边 2048:手机原图三五兆一张,8 张在校园网或流量下光上传
+// 就要十几二十秒。服务端还会再转一次(长边 1600 交给模型),这里只为少传,留些余量。
+export const UPLOAD_MAX_EDGE = 2048;
+const UPLOAD_JPEG_QUALITY = 0.9;
+// 本来就小的图原样上传,不白白多压一次。
+const UPLOAD_KEEP_BYTES = 1.5 * 1024 * 1024;
+const SHRINKABLE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+
+/**
+ * 把一张照片缩小再上传;读不了(如 Chrome 打不开 HEIC)或缩完反而更大时原样返回,
+ * 由服务端照常校验。按 EXIF 摆正后再画,透明底铺白(JPEG 没有透明,不铺会变黑底)。
+ */
+export const shrinkImageForUpload = async (file: File): Promise<File> => {
+	if (typeof createImageBitmap !== 'function' || typeof document === 'undefined') return file;
+	if (!SHRINKABLE_TYPES.includes(file.type)) return file;
+	let bitmap: ImageBitmap | null = null;
+	try {
+		bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+		const scale = Math.min(1, UPLOAD_MAX_EDGE / Math.max(bitmap.width, bitmap.height));
+		if (scale === 1 && file.size <= UPLOAD_KEEP_BYTES) return file;
+		const canvas = document.createElement('canvas');
+		canvas.width = Math.round(bitmap.width * scale);
+		canvas.height = Math.round(bitmap.height * scale);
+		const context = canvas.getContext('2d');
+		if (!context) return file;
+		context.fillStyle = '#ffffff';
+		context.fillRect(0, 0, canvas.width, canvas.height);
+		context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+		const blob = await new Promise<Blob | null>((resolve) =>
+			canvas.toBlob(resolve, 'image/jpeg', UPLOAD_JPEG_QUALITY)
+		);
+		if (!blob || blob.size >= file.size) return file;
+		// 保留原文件名:页序按文件名排,弹窗和提示里也显示它。
+		return new File([blob], file.name, { type: 'image/jpeg', lastModified: file.lastModified });
+	} catch {
+		return file;
+	} finally {
+		bitmap?.close();
+	}
+};

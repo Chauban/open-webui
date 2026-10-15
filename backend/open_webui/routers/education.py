@@ -1,4 +1,3 @@
-import asyncio
 import csv
 import difflib
 import hashlib
@@ -165,7 +164,7 @@ from open_webui.services.education.draft_import import (
     DRAFT_IMAGE_TOTAL_MAX_BYTES,
     DraftImageError,
     DraftImageModelError,
-    prepare_draft_image,
+    prepare_draft_images,
     resolve_draft_image_model,
     transcribe_draft_images,
 )
@@ -2710,7 +2709,7 @@ async def extract_import_images(
     try:
         model_id = await resolve_draft_image_model(request, user)
         total = 0
-        image_urls = []
+        images = []
         for file in files:
             data = await file.read(DRAFT_IMAGE_MAX_BYTES + 1)
             if len(data) > DRAFT_IMAGE_MAX_BYTES:
@@ -2719,8 +2718,8 @@ async def extract_import_images(
             total += len(data)
             if total > DRAFT_IMAGE_TOTAL_MAX_BYTES:
                 raise DraftImageError("The images add up to more than 30 MB")
-            # 解码、缩图是 CPU 活,放到线程里做,不卡住事件循环。
-            image_urls.append(await asyncio.to_thread(prepare_draft_image, data))
+            images.append(data)
+        image_urls = await prepare_draft_images(images)
     except DraftImageError as err:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(err)
