@@ -99,6 +99,8 @@
 	"This image is too large": "图片太大了",
 	"Could not read this image": "读取不了这张图片",
 	"Could not read the images. Please try again.": "这次没能识别图片，请重试。",
+	"The image model is busy right now. Wait a minute, then import again.": "识图模型现在太忙，请等一分钟再导入。",
+	"The image parsing model returned an error. Ask your administrator to check the setting.": "识图模型返回了错误，请联系管理员检查设置。",
 	"No text found in these images": "图片里没有识别出正文",
 	"Choose at least one image": "请至少选择一张图片",
 	"Upload at most 8 images at a time": "一次最多上传 8 张图片",

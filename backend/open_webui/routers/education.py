@@ -163,6 +163,7 @@ from open_webui.services.education.draft_import import (
     DRAFT_IMAGE_MAX_COUNT,
     DRAFT_IMAGE_TOTAL_MAX_BYTES,
     DraftImageError,
+    DraftImageModelBusyError,
     DraftImageModelError,
     prepare_draft_images,
     resolve_draft_image_model,
@@ -2722,6 +2723,11 @@ async def extract_import_images(
         ) from err
     try:
         pages = await transcribe_draft_images(request, user, model_id, image_urls)
+    except DraftImageModelBusyError as err:
+        # 已自动重发过几次,服务商仍在限流或过载。
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(err)
+        ) from err
     except DraftImageModelError as err:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY, detail=str(err)

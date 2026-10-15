@@ -9,7 +9,11 @@ import asyncio
 import base64
 import io
 import logging
+import random
+from typing import Optional
 
+import aiohttp
+from fastapi import HTTPException
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 from open_webui.models.config import Config
@@ -36,6 +40,13 @@ _ACCEPTED_FORMATS = {"JPEG", "PNG", "WEBP"}
 # 一张的耗时主要花在模型逐字输出上(一页几百到上千字);与一次最多 8 张对齐,8 张一轮发完,
 # 总耗时约等于最慢的那一页。服务商有并发或每分钟请求数限制时,超限的会报错让学生重试。
 _CONCURRENCY = 8
+# 单页遇到限流或服务端一时出错时自动重发:分别等 1、2、4 秒(各 ±25% 抖动,免得 8 路一起撞上
+# 限流后又同时重发),连首次最多 4 次;学生不用自己点重试。还不行就整份失败,不悄悄少一页。
+_RETRY_DELAYS = (1.0, 2.0, 4.0)
+# 值得重发的上游状态:请求超时、限流、5xx 与网关错误(含 Cloudflare 52x)、Anthropic 的 529 过载。
+# 连接失败、读超时在 openai 路由里统一包成 500,同样重发。
+_RETRYABLE_STATUS = {408, 425, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 529}
+_BUSY_STATUS = {429, 529}
 _NO_TEXT = "<<NO_TEXT>>"
 
 TRANSCRIBE_PROMPT = f"""你是文字转录工具。图片是学生写作初稿的照片或扫描件，可能是手写，也可能是打印稿。请把图片里的正文逐字转录成纯文本。
@@ -52,7 +63,20 @@ class DraftImageError(ValueError):
 
 
 class DraftImageModelError(DraftImageError):
-    """识图模型这次没调通(而不是图片本身有问题),学生可以重试。"""
+    """识图模型这次没调通(而不是图片本身有问题)。"""
+
+
+class DraftImageModelBusyError(DraftImageModelError):
+    """自动重发几次后服务商仍在限流或过载。"""
+
+
+class TranscriptionCallError(Exception):
+    """一次模型调用失败。status 是上游 HTTP 状态(拿不到时为 None),retryable 决定要不要重发。"""
+
+    def __init__(self, status: Optional[int], retryable: bool):
+        super().__init__(f"transcription call failed (status={status})")
+        self.status = status
+        self.retryable = retryable
 
 
 async def resolve_draft_image_model(request, user) -> str:
@@ -129,17 +153,30 @@ async def generate_transcription(request, user, model_id: str, messages: list[di
     识图模型是管理员为这项平台功能指定的,学生在聊天里未必有权用它,所以跳过模型访问控制。
     """
     payload = {"model": model_id, "messages": messages, "stream": False}
-    response = await generate_chat_completion(
-        request, form_data=payload, user=user, bypass_filter=True
-    )
-    # 出错时 generate_chat_completion 返回 JSONResponse,流式模型返回 StreamingResponse。
+    try:
+        response = await generate_chat_completion(
+            request, form_data=payload, user=user, bypass_filter=True
+        )
+    except HTTPException as error:
+        raise TranscriptionCallError(
+            error.status_code, error.status_code in _RETRYABLE_STATUS
+        ) from error
+    except (asyncio.TimeoutError, aiohttp.ClientError, ConnectionError) as error:
+        raise TranscriptionCallError(None, True) from error
+    except Exception as error:
+        # 模型不存在之类,重发也没用。
+        log.error("draft image transcription failed: %s", error)
+        raise TranscriptionCallError(None, False) from error
+    # 上游返回错误状态时,generate_chat_completion 原样给出带状态码的 JSONResponse / PlainTextResponse。
+    status_code = getattr(response, "status_code", None)
     if not isinstance(response, dict):
-        raise DraftImageModelError("Could not read the images. Please try again.")
+        status = status_code if isinstance(status_code, int) else None
+        raise TranscriptionCallError(status, status in _RETRYABLE_STATUS)
     try:
         return response["choices"][0]["message"]["content"] or ""
     except (KeyError, IndexError, TypeError) as error:
         log.error("draft image transcription returned an unexpected payload: %s", error)
-        raise DraftImageModelError("Could not read the images. Please try again.") from error
+        raise TranscriptionCallError(None, False) from error
 
 
 def clean_transcription(raw: str) -> list[str]:
@@ -173,22 +210,54 @@ async def transcribe_draft_images(request, user, model_id: str, image_urls: list
 
     逐张返回而不是拼好:浏览器读 PDF 时,扫描页的转录结果要插回原来的页位置。
 
-    任何一张失败整份作废:悄悄少一页比报错更糟,学生不一定发现。
+    限流、过载和服务端一时出错的页自动重发(见 _RETRY_DELAYS)。任何一张最终失败整份作废,
+    并取消还在转录的其他页:悄悄少一页比报错更糟,学生不一定发现。
     """
     semaphore = asyncio.Semaphore(_CONCURRENCY)
 
-    async def transcribe(image_url: str) -> list[str]:
+    async def transcribe(page_no: int, image_url: str) -> list[str]:
+        messages = build_transcription_messages(image_url)
         async with semaphore:
-            raw = await generate_transcription(
-                request, user, model_id, build_transcription_messages(image_url)
-            )
-            return clean_transcription(raw)
+            for attempt in range(len(_RETRY_DELAYS) + 1):
+                try:
+                    return clean_transcription(
+                        await generate_transcription(request, user, model_id, messages)
+                    )
+                except TranscriptionCallError as error:
+                    if not error.retryable or attempt == len(_RETRY_DELAYS):
+                        raise
+                    delay = _RETRY_DELAYS[attempt] * random.uniform(0.75, 1.25)
+                    log.warning(
+                        "draft image page %d: status %s, retrying in %.1fs",
+                        page_no,
+                        error.status,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
 
+    tasks = [
+        asyncio.ensure_future(transcribe(page_no, url))
+        for page_no, url in enumerate(image_urls, start=1)
+    ]
     try:
-        pages = await asyncio.gather(*(transcribe(url) for url in image_urls))
-    except DraftImageError:
-        raise
-    except Exception as error:
+        pages = await asyncio.gather(*tasks)
+    except BaseException as error:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        if isinstance(error, TranscriptionCallError):
+            log.warning("draft image transcription failed: status %s", error.status)
+            if error.status in _BUSY_STATUS:
+                raise DraftImageModelBusyError(
+                    "The image model is busy right now. Wait a minute, then import again."
+                ) from error
+            if not error.retryable:
+                raise DraftImageModelError(
+                    "The image parsing model returned an error. Ask your administrator to check the setting."
+                ) from error
+            raise DraftImageModelError("Could not read the images. Please try again.") from error
+        if isinstance(error, DraftImageError) or not isinstance(error, Exception):
+            raise
         log.exception("draft image transcription failed")
         raise DraftImageModelError("Could not read the images. Please try again.") from error
     if not any(pages):

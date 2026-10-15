@@ -99,6 +99,8 @@
 	"This image is too large": "",
 	"Could not read this image": "",
 	"Could not read the images. Please try again.": "",
+	"The image model is busy right now. Wait a minute, then import again.": "",
+	"The image parsing model returned an error. Ask your administrator to check the setting.": "",
 	"No text found in these images": "",
 	"Choose at least one image": "",
 	"Upload at most 8 images at a time": "",

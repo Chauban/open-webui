@@ -7891,3 +7891,114 @@ def test_prepare_draft_images_validates_every_image_before_any_model_call():
     assert len(urls) == 2 and all(url.startswith("data:image/jpeg;base64,") for url in urls)
     with pytest.raises(draft_import_module.DraftImageError):
         asyncio.run(draft_import_module.prepare_draft_images([good, b"not an image"]))
+
+
+@contextmanager
+def _fake_chat_completion(handler):
+    """替换 generate_chat_completion(转录出口之下那一层),连同上游状态的分类一起测;重发等待缩到毫秒。"""
+    calls = []
+
+    async def fake(request, form_data, user, bypass_filter=False, **_):
+        page = form_data["messages"][-1]["content"][1]["image_url"]["url"]
+        calls.append(page)
+        return await handler(page, calls.count(page))
+
+    original = (draft_import_module.generate_chat_completion, draft_import_module._RETRY_DELAYS)
+    draft_import_module.generate_chat_completion = fake
+    draft_import_module._RETRY_DELAYS = (0.01, 0.02, 0.04)
+    try:
+        yield calls
+    finally:
+        draft_import_module.generate_chat_completion, draft_import_module._RETRY_DELAYS = original
+
+
+def _completion(text):
+    return {"choices": [{"message": {"content": text}}]}
+
+
+def _transcribe(pages):
+    return asyncio.run(
+        draft_import_module.transcribe_draft_images(None, None, "vision-model", pages)
+    )
+
+
+def test_rate_limited_page_is_retried_with_backoff_then_succeeds():
+    from fastapi.responses import JSONResponse, PlainTextResponse
+
+    async def handler(page, attempt):
+        if page == "1" and attempt <= 2:
+            return JSONResponse(status_code=429, content={"error": {"message": "rate limited"}})
+        if page == "2" and attempt == 1:
+            # 连接失败、读超时在 openai 路由里包成 500
+            raise HTTPException(status_code=500, detail="Server Connection Error")
+        if page == "3" and attempt == 1:
+            return PlainTextResponse(status_code=503, content="overloaded")
+        return _completion(f"第{page}页。")
+
+    with _fake_chat_completion(handler) as calls:
+        pages = _transcribe(["1", "2", "3", "4"])
+
+    assert pages == ["第1页。", "第2页。", "第3页。", "第4页。"]
+    assert [calls.count(page) for page in ("1", "2", "3", "4")] == [3, 2, 2, 1]
+
+
+def test_page_still_rate_limited_after_retries_fails_the_whole_import():
+    from fastapi.responses import JSONResponse
+
+    finished = []
+
+    async def handler(page, attempt):
+        if page == "1":
+            return JSONResponse(status_code=429, content={"error": {"message": "rate limited"}})
+        await asyncio.sleep(2)
+        finished.append(page)
+        return _completion("不该等到这一页。")
+
+    started = time.perf_counter()
+    with _fake_chat_completion(handler) as calls:
+        with pytest.raises(draft_import_module.DraftImageModelBusyError) as raised:
+            _transcribe(["1", "2"])
+    # 首次加三次重发;另一页被取消,不等它跑完,也不交出缺页的结果
+    assert calls.count("1") == 4
+    assert finished == []
+    assert time.perf_counter() - started < 1.5
+    assert str(raised.value) == "The image model is busy right now. Wait a minute, then import again."
+
+
+def test_non_transient_model_error_is_not_retried_and_nothing_is_kept():
+    from fastapi.responses import JSONResponse
+
+    async def handler(page, attempt):
+        if page == "2":
+            return JSONResponse(status_code=400, content={"error": {"message": "image not supported"}})
+        return _completion(f"第{page}页。")
+
+    with _fake_chat_completion(handler) as calls:
+        with pytest.raises(draft_import_module.DraftImageModelError) as raised:
+            _transcribe(["1", "2"])
+    assert calls.count("2") == 1
+    assert not isinstance(raised.value, draft_import_module.DraftImageModelBusyError)
+    assert str(raised.value) == (
+        "The image parsing model returned an error. Ask your administrator to check the setting."
+    )
+
+
+def test_image_import_reports_busy_after_retries(education_client):
+    from fastapi.responses import JSONResponse
+
+    client, teacher, _, student, _, _ = education_client
+    asyncio.run(Config.upsert({"education.draft_image_model": "vision-model"}))
+    client.app.state.MODELS = _VISION_MODELS
+    _, session_id = _setup_revise_draft_assignment(client, teacher, student)
+
+    async def handler(page, attempt):
+        return JSONResponse(status_code=529, content={"error": {"type": "overloaded_error"}})
+
+    with _fake_chat_completion(handler) as calls:
+        res = client.post(
+            f"/api/v1/writing-sessions/{session_id}/import/images",
+            files=[("files", ("1.png", _png_bytes("red"), "image/png"))],
+        )
+    assert res.status_code == 503, res.text
+    assert res.json()["detail"] == "The image model is busy right now. Wait a minute, then import again."
+    assert len(calls) == 4
