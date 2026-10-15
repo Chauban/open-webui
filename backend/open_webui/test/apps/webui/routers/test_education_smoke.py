@@ -7511,30 +7511,6 @@ def test_draft_file_is_parsed_into_text_without_freezing_baseline(education_clie
     assert res.status_code == 409, res.text
 
 
-def test_old_draft_extract_path_still_reaches_the_document_import(education_client):
-    """旧前端(部署前打开着的页面)还会调旧路径,它与 /import/document 是同一个处理函数。"""
-    client, teacher, _, student, outsider, _ = education_client
-    _, session_id = _setup_revise_draft_assignment(client, teacher, student)
-    old_url = f"/api/v1/writing-sessions/{session_id}/draft-baseline/extract"
-
-    UserContext.current_user = student
-    res = client.post(old_url, files={"file": ("初稿.txt", "第一段。\n\n第二段。".encode())})
-    assert res.status_code == 200, res.text
-    assert res.json() == {"text": "第一段。\n第二段。"}
-
-    UserContext.current_user = outsider
-    res = client.post(old_url, files={"file": ("初稿.txt", "x".encode())})
-    assert res.status_code == 403, res.text
-
-    UserContext.current_user = student
-    client.post(
-        f"/api/v1/writing-sessions/{session_id}/draft-baseline",
-        json={"text": _DRAFT_TEXT},
-    )
-    res = client.post(old_url, files={"file": ("初稿.txt", "x".encode())})
-    assert res.status_code == 409, res.text
-
-
 def _png_bytes(color, size=(40, 20), mode="RGB"):
     from PIL import Image
 

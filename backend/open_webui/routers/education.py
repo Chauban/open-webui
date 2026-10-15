@@ -2654,11 +2654,6 @@ def _ensure_text_import_open(user, session: WritingSessionModel, db: Session) ->
 
 
 @router.post("/writing-sessions/{session_id}/import/document")
-# 旧路径的兼容别名:部署前就打开着工作区的学生,浏览器里还是旧前端,交初稿时会调它,
-# 刷新页面后就不再用。同一个处理函数,不另写逻辑;等现网都换上新前端后删掉。
-@router.post(
-    "/writing-sessions/{session_id}/draft-baseline/extract", include_in_schema=False
-)
 async def extract_import_document(
     file: UploadFile = File(...),
     user=Depends(get_verified_user),
