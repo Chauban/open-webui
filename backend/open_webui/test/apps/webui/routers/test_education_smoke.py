@@ -66,6 +66,7 @@ from open_webui.services.education.writing_context import (
 import open_webui.routers.education as education_router_module
 import open_webui.services.education.analysis as education_analysis_module
 import open_webui.services.education.challenge as education_challenge_module
+import open_webui.services.education.draft_import as draft_import_module
 import open_webui.services.education.profile as education_profile_module
 import open_webui.services.education.profile_snapshots as profile_snapshots_module
 import open_webui.services.education.profile_recompute as profile_recompute_module
@@ -233,6 +234,17 @@ def test_operation_timeline_merges_consecutive_typing_into_runs():
     assert events[2]["op_type"] == "paste_detected"
     assert events[3]["inserted_text"] == "补"
     assert events[4]["created_at"] == 723
+
+
+def test_operation_timeline_marks_imported_text():
+    """从零写作作业在编辑器里导入的文件/照片记为外部粘贴,时间线上注明是导入的。"""
+    imported = _typing_op("i1", 100, "paste_detected", 0, 0, inserted="照片里的段落", source="external_paste")
+    imported.metadata_json = {"import_kind": "images", "file_names": ["1.jpg"]}
+    pasted = _typing_op("p1", 200, "paste_detected", 10, 10, inserted="外部段落", source="external_paste")
+
+    events = _build_operation_timeline([imported, pasted], [])
+
+    assert [event["import_kind"] for event in events] == ["images", None]
 
 
 def test_filter_segments_prioritizes_full_ai_insert_over_short_typed_fragments():
@@ -7415,7 +7427,7 @@ def _docx_bytes(paragraphs, table=None):
 def test_draft_file_is_parsed_into_text_without_freezing_baseline(education_client):
     client, teacher, _, student, _, SessionLocal = education_client
     assignment, session_id = _setup_revise_draft_assignment(client, teacher, student)
-    url = f"/api/v1/writing-sessions/{session_id}/draft-baseline/extract"
+    url = f"/api/v1/writing-sessions/{session_id}/import/document"
     docx_type = (
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
@@ -7499,14 +7511,254 @@ def test_draft_file_is_parsed_into_text_without_freezing_baseline(education_clie
     assert res.status_code == 409, res.text
 
 
-def test_draft_file_upload_only_for_revise_draft_assignments(education_client):
-    client, teacher, _, student, _, _ = education_client
-    _, session_id, _ = _setup_submitted_assignment(client, teacher, student)
+def _png_bytes(color, size=(40, 20), mode="RGB"):
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.new(mode, size, color).save(buffer, "PNG")
+    return buffer.getvalue()
+
+
+_VISION_MODELS = {
+    "vision-model": {"id": "vision-model", "info": {"meta": {"capabilities": {"vision": True}}}},
+    "text-only": {"id": "text-only", "info": {"meta": {"capabilities": {"vision": False}}}},
+}
+
+
+def _dominant_channel(image_url):
+    """转码后的 JPEG 颜色会有偏差,按哪个通道最亮认出是哪张图。"""
+    from PIL import Image
+    import base64
+
+    data = base64.b64decode(image_url.split(",", 1)[1])
+    with Image.open(io.BytesIO(data)) as image:
+        pixel = image.convert("RGB").getpixel((5, 5))
+    if min(pixel) > 200:
+        return "w"
+    return "rgb"[pixel.index(max(pixel))]
+
+
+@contextmanager
+def _fake_transcription(by_channel=None, error=None):
+    """替换模型调用:图片导入只经过 draft_import.generate_transcription 这一个出口。"""
+    calls = []
+
+    async def fake_generate(request, user, model_id, messages):
+        image_url = messages[-1]["content"][1]["image_url"]["url"]
+        calls.append({"model_id": model_id, "messages": messages, "image_url": image_url})
+        if error is not None:
+            raise error
+        return (by_channel or {}).get(_dominant_channel(image_url), "")
+
+    original = draft_import_module.generate_transcription
+    draft_import_module.generate_transcription = fake_generate
+    try:
+        yield calls
+    finally:
+        draft_import_module.generate_transcription = original
+
+
+def test_text_import_is_only_for_the_assignment_student_while_writable(education_client):
+    client, teacher, _, student, outsider, SessionLocal = education_client
+    asyncio.run(Config.upsert({"education.draft_image_model": "vision-model"}))
+    client.app.state.MODELS = _VISION_MODELS
+    assignment, session_id, submission_id = _setup_submitted_assignment(
+        client, teacher, student
+    )
+    doc_url = f"/api/v1/writing-sessions/{session_id}/import/document"
+    image_url = f"/api/v1/writing-sessions/{session_id}/import/images"
+
+    # 从零写作作业:提交过、未批改,还能改稿,学生本人可以导入
+    UserContext.current_user = student
+    res = client.post(doc_url, files={"file": ("草稿.txt", "第一段。\n\n第二段。".encode())})
+    assert res.status_code == 200, res.text
+    assert res.json() == {"text": "第一段。\n第二段。"}
+    with _fake_transcription({"r": "照片里的字。"}):
+        res = client.post(image_url, files=[("files", ("p.png", _png_bytes("red"), "image/png"))])
+    assert res.status_code == 200, res.text
+    assert res.json() == {"text": "照片里的字。"}
+
+    # 别人都不行:任课老师、同学、管理员(图片导入要调模型,只算学生自己的)
+    admin = teacher.model_copy(update={"id": "admin-1", "role": "admin"})
+    for other in (teacher, outsider, admin):
+        UserContext.current_user = other
+        res = client.post(doc_url, files={"file": ("草稿.txt", "x".encode())})
+        assert res.status_code == 403, res.text
+        res = client.post(image_url, files=[("files", ("p.png", _png_bytes("red"), "image/png"))])
+        assert res.status_code == 403, res.text
+
+    # 个人写作区没有导入
+    UserContext.current_user = student
+    personal_res = client.post("/api/v1/me/writing/personal", json={"title": "Mine"})
+    assert personal_res.status_code == 200, personal_res.text
+    personal = personal_res.json()
     res = client.post(
-        f"/api/v1/writing-sessions/{session_id}/draft-baseline/extract",
-        files={"file": ("初稿.txt", "x".encode())},
+        f"/api/v1/writing-sessions/{personal['writing_session']['id']}/import/document",
+        files={"file": ("草稿.txt", "x".encode())},
     )
     assert res.status_code == 400, res.text
+
+    # 过了截止不能导入
+    def set_due(due_at):
+        with SessionLocal() as db:
+            db.query(Assignment).filter(Assignment.id == assignment["id"]).update(
+                {Assignment.due_at: due_at}
+            )
+            db.commit()
+
+    set_due(int(time.time()) - 60)
+    res = client.post(doc_url, files={"file": ("草稿.txt", "x".encode())})
+    assert res.status_code == 400, res.text
+    assert res.json()["detail"] == "Assignment due time has passed"
+    set_due(2000000000)
+
+    # 批改后定稿,不能再导入
+    UserContext.current_user = teacher
+    res = client.post(
+        f"/api/v1/teacher/submissions/{submission_id}/review",
+        json={
+            "review_status": "reviewed",
+            "reflection_score": 4,
+            "score": 92,
+            "rubric_scores": {"ideas": 30, "structure": 31, "evidence": 31},
+        },
+    )
+    assert res.status_code == 200, res.text
+    UserContext.current_user = student
+    res = client.post(doc_url, files={"file": ("草稿.txt", "x".encode())})
+    assert res.status_code == 409, res.text
+
+
+
+def test_draft_image_import_needs_an_admin_chosen_vision_model(education_client):
+    client, teacher, _, student, _, _ = education_client
+    client.app.state.MODELS = _VISION_MODELS
+    _, session_id = _setup_revise_draft_assignment(client, teacher, student)
+    url = f"/api/v1/writing-sessions/{session_id}/import/images"
+    files = [("files", ("p.png", _png_bytes("red"), "image/png"))]
+
+    for model_id, detail in [
+        ("", "Image import is not set up. Ask your administrator to choose an image parsing model."),
+        ("gone-model", "The image parsing model is not available. Ask your administrator to check the setting."),
+        ("text-only", "The image parsing model cannot read images. Ask your administrator to choose another model."),
+    ]:
+        asyncio.run(Config.upsert({"education.draft_image_model": model_id}))
+        with _fake_transcription({"r": "不该调到模型。"}) as calls:
+            res = client.post(url, files=files)
+        assert res.status_code == 400, res.text
+        assert res.json()["detail"] == detail
+        assert calls == []
+
+
+def test_draft_images_are_transcribed_in_page_order_without_freezing_baseline(
+    education_client,
+):
+    client, teacher, _, student, _, SessionLocal = education_client
+    asyncio.run(Config.upsert({"education.draft_image_model": "vision-model"}))
+    client.app.state.MODELS = _VISION_MODELS
+    _, session_id = _setup_revise_draft_assignment(client, teacher, student)
+    url = f"/api/v1/writing-sessions/{session_id}/import/images"
+
+    pages = {
+        "r": "第一页第一段，\n\n　　第一页第二段。\n",
+        "b": "```text\n第二页接着写。\n```",
+        "w": "<<NO_TEXT>>",
+    }
+    with _fake_transcription(pages) as calls:
+        res = client.post(
+            url,
+            files=[
+                ("files", ("1.png", _png_bytes("red"), "image/png")),
+                ("files", ("2.png", _png_bytes((0, 255, 0, 0), mode="RGBA"), "image/png")),
+                ("files", ("3.png", _png_bytes("blue"), "image/png")),
+            ],
+        )
+    assert res.status_code == 200, res.text
+    # 按上传顺序拼接,一段一行;代码围栏去掉,空白页不占行
+    assert res.json() == {"text": "第一页第一段，\n第一页第二段。\n第二页接着写。"}
+    assert len(calls) == 3
+    assert {call["model_id"] for call in calls} == {"vision-model"}
+    assert all(call["image_url"].startswith("data:image/jpeg;base64,") for call in calls)
+    assert calls[0]["messages"][0]["role"] == "system"
+    assert "只转录，不改写" in calls[0]["messages"][0]["content"]
+    # 透明底铺白:全透明的那张转出来是白的,不是黑的
+    assert sorted(_dominant_channel(call["image_url"]) for call in calls) == ["b", "r", "w"]
+
+    # 只识别不冻结;交过初稿后再导入被拒绝
+    with SessionLocal() as db:
+        assert Education.get_writing_session_by_id(session_id, db=db).draft_baseline_at is None
+    client.post(
+        f"/api/v1/writing-sessions/{session_id}/draft-baseline",
+        json={"text": _DRAFT_TEXT},
+    )
+    with _fake_transcription(pages):
+        res = client.post(url, files=[("files", ("1.png", _png_bytes("red"), "image/png"))])
+    assert res.status_code == 409, res.text
+
+
+def test_draft_image_import_validates_files_and_model_failures(education_client):
+    client, teacher, _, student, _, _ = education_client
+    asyncio.run(Config.upsert({"education.draft_image_model": "vision-model"}))
+    client.app.state.MODELS = _VISION_MODELS
+    _, session_id = _setup_revise_draft_assignment(client, teacher, student)
+    url = f"/api/v1/writing-sessions/{session_id}/import/images"
+    gif = io.BytesIO()
+    from PIL import Image
+
+    Image.new("RGB", (10, 10), "red").save(gif, "GIF")
+
+    for files, detail in [
+        (
+            [("files", (f"{index}.png", _png_bytes("red"), "image/png")) for index in range(9)],
+            "Upload at most 8 images at a time",
+        ),
+        (
+            [("files", ("big.png", b"\0" * (10 * 1024 * 1024 + 1), "image/png"))],
+            "Each image must be 10 MB or smaller",
+        ),
+        ([("files", ("x.gif", gif.getvalue(), "image/gif"))], "Only JPG, PNG and WebP images are supported"),
+        ([("files", ("x.png", b"not an image", "image/png"))], "Could not read this image"),
+    ]:
+        with _fake_transcription({"r": "不该调到模型。"}) as calls:
+            res = client.post(url, files=files)
+        assert res.status_code == 400, res.text
+        assert res.json()["detail"] == detail
+        assert calls == []
+
+    files = [("files", ("1.png", _png_bytes("red"), "image/png"))]
+    with _fake_transcription({"r": "<<NO_TEXT>>"}):
+        res = client.post(url, files=files)
+    assert res.status_code == 400, res.text
+    assert res.json()["detail"] == "No text found in these images"
+
+    with _fake_transcription(error=RuntimeError("upstream timeout")):
+        res = client.post(url, files=files)
+    assert res.status_code == 502, res.text
+    assert res.json()["detail"] == "Could not read the images. Please try again."
+
+
+def test_prepare_draft_image_uprights_and_shrinks_photos():
+    from PIL import Image
+
+    def decode(image_url):
+        import base64
+
+        data = base64.b64decode(image_url.split(",", 1)[1])
+        with Image.open(io.BytesIO(data)) as image:
+            return image.format, image.size
+
+    # 手机竖拍:像素是横的,方向记在 EXIF(6 = 顺时针转 90°)
+    photo = Image.new("RGB", (400, 200), "white")
+    exif = photo.getexif()
+    exif[0x0112] = 6
+    buffer = io.BytesIO()
+    photo.save(buffer, "JPEG", exif=exif)
+    assert decode(draft_import_module.prepare_draft_image(buffer.getvalue())) == ("JPEG", (200, 400))
+
+    # 大图缩到长边 2048
+    buffer = io.BytesIO()
+    Image.new("RGB", (4096, 1024), "white").save(buffer, "PNG")
+    assert decode(draft_import_module.prepare_draft_image(buffer.getvalue())) == ("JPEG", (2048, 512))
 
 
 def test_revision_overview_and_first_read_distribution():
@@ -7560,3 +7812,36 @@ def test_revision_overview_and_first_read_distribution():
     assert result["criteria"][0]["criterion_key"] == "c1"
     from_scratch = SimpleNamespace(task_mode="from_scratch", rubric_schema=assignment.rubric_schema)
     assert build_first_read_distribution(from_scratch, submissions, {}) is None
+
+
+def test_admin_sets_the_draft_image_model_in_education_settings(education_client):
+    from open_webui.routers.configs import router as configs_router
+
+    client, teacher, _, _, _, _ = education_client
+    app = FastAPI()
+    app.include_router(configs_router, prefix="/api/v1/configs")
+    admin = teacher.model_copy(update={"id": "admin-1", "role": "admin"})
+    app.dependency_overrides[get_admin_user] = lambda: admin
+    configs_client = TestClient(app)
+
+    settings = configs_client.get("/api/v1/configs/education").json()
+    assert settings["EDUCATION_DRAFT_IMAGE_MODEL"] == ""
+
+    form = {
+        key: value
+        for key, value in settings.items()
+        if not key.endswith("_DEFAULTS")
+    }
+    res = configs_client.post(
+        "/api/v1/configs/education",
+        json={**form, "EDUCATION_DRAFT_IMAGE_MODEL": "  vision-model "},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["EDUCATION_DRAFT_IMAGE_MODEL"] == "vision-model"
+    assert asyncio.run(Config.get("education.draft_image_model")) == "vision-model"
+
+    # 表单是整份提交,漏了这一项说明前端还是旧版本,直接拒绝而不是悄悄清空
+    form.pop("EDUCATION_DRAFT_IMAGE_MODEL")
+    res = configs_client.post("/api/v1/configs/education", json=form)
+    assert res.status_code == 422, res.text
+    configs_client.close()

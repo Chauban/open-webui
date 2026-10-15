@@ -5,22 +5,24 @@
 	import { get } from 'svelte/store';
 	import { toast } from 'svelte-sonner';
 
-	import { extractDraftBaselineFile, submitDraftBaseline } from '$lib/apis/education';
+	import { submitDraftBaseline } from '$lib/apis/education';
 	import { resolveErrorMessage } from '$lib/utils/education';
+	import type { ImportInfo } from '$lib/utils/text-import';
 	import EduButton from './EduButton.svelte';
+	import TextImportActions from './TextImportActions.svelte';
 	import { EDU_FIELD_CLASS } from './styles';
 
 	// 修订初稿作业的第一步:学生把课外写好的初稿交进来,冻结为修改的起点。
 	// 显式步骤本身就是「先交初稿」的关卡,也让学生清楚哪一份是初稿;
 	// 不做「空文档里第一次大段粘贴自动认定为初稿」,那样会把第二次粘贴误判成初稿。
-	// 初稿多半是 Word 文件,可以上传或拖进来:后端解析成纯文本填回框里,学生核对后再确认。
+	// 初稿多半是 Word 文件,也可能是手写稿的照片:上传或拖进来,后端解析(照片由管理员选定的
+	// 识图模型转录)成纯文本填回框里,学生核对后再确认。
 
 	export let sessionId: string;
 	export let onSubmitted: () => Promise<void> | void;
 
 	// 与后端 DRAFT_BASELINE_MIN_CHARS 一致,按去掉空白后的字数算。
 	const MIN_CHARS = 200;
-	const ACCEPTED_FILES = '.docx,.doc,.txt,.md';
 
 	const i18n = getContext<Writable<i18nType>>('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
@@ -29,36 +31,26 @@
 	let submitting = false;
 	let importing = false;
 	let dragging = false;
-	let fileInput: HTMLInputElement;
+	let importer: TextImportActions;
 
 	$: charCount = text.replace(/\s/g, '').length;
 	$: tooShort = charCount < MIN_CHARS;
 	$: busy = submitting || importing;
 
-	const importFile = async (file: File | undefined) => {
-		if (!file || busy) return;
-		importing = true;
-		try {
-			const result = await extractDraftBaselineFile(localStorage.token, sessionId, file);
-			text = result.text;
-			toast.success(t('Read from {{name}}. Check the text before confirming.', { name: file.name }));
-		} catch (error) {
-			toast.error(resolveErrorMessage(error, t));
-		} finally {
-			importing = false;
-		}
-	};
-
-	const onFileChange = async () => {
-		const file = fileInput.files?.[0];
-		// 清空,同一个文件改完再选一次也能触发 change
-		fileInput.value = '';
-		await importFile(file);
+	const onImported = (imported: string, info: ImportInfo) => {
+		text = imported;
+		toast.success(
+			info.kind === 'images'
+				? t('Read the text from {{count}} image(s). Check it against your draft before confirming.', {
+						count: info.names.length
+					})
+				: t('Read from {{name}}. Check the text before confirming.', { name: info.names[0] })
+		);
 	};
 
 	const onDrop = async (event: DragEvent) => {
 		dragging = false;
-		await importFile(event.dataTransfer?.files?.[0]);
+		await importer.importFiles(Array.from(event.dataTransfer?.files ?? []));
 	};
 
 	const confirm = async () => {
@@ -83,29 +75,20 @@
 		</h3>
 		<p class="mt-1 text-sm text-gray-600 dark:text-gray-300">
 			{$i18n.t(
-				'Paste the first draft you wrote outside class here, or import it from a Word file. Once confirmed it is saved as the starting point of your revision. If you confirm the wrong text, withdraw it from the "…" menu at the top right before you submit.'
+				'Paste the first draft you wrote outside class here, or import it from a Word file or from photos of the pages. Once confirmed it is saved as the starting point of your revision. If you confirm the wrong text, withdraw it from the "…" menu at the top right before you submit.'
 			)}
 		</p>
 		<p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
 			{$i18n.t('The editor and the AI chat unlock after you confirm.')}
 		</p>
 	</div>
-	<div class="flex flex-wrap items-center gap-2">
-		<input
-			bind:this={fileInput}
-			type="file"
-			accept={ACCEPTED_FILES}
-			class="hidden"
-			data-testid="draft-file-input"
-			on:change={onFileChange}
-		/>
-		<EduButton disabled={busy} on:click={() => fileInput.click()}>
-			{importing ? $i18n.t('Reading file...') : $i18n.t('Import from file')}
-		</EduButton>
-		<span class="text-xs text-gray-500 dark:text-gray-400">
-			{$i18n.t('Supports .docx, .doc, .txt and .md. For PDF, copy the text in or save it as .docx.')}
-		</span>
-	</div>
+	<TextImportActions
+		bind:this={importer}
+		bind:busy={importing}
+		{sessionId}
+		disabled={submitting}
+		{onImported}
+	/>
 	<textarea
 		bind:value={text}
 		class="min-h-64 w-full flex-1 resize-none {EDU_FIELD_CLASS} {dragging

@@ -37,7 +37,7 @@ from open_webui.utils.tools import (
     set_terminal_servers,
     set_tool_servers,
 )
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 router = APIRouter()
 
@@ -80,6 +80,7 @@ EDUCATION_CONFIG_KEYS = {
     'EDUCATION_ENABLE_RETURN': 'education.enable_return',
     'EDUCATION_ENABLE_COACHING_STYLES': 'education.enable_coaching_styles',
     'EDUCATION_CHALLENGE_PROMPTS': 'education.challenge_prompts',
+    'EDUCATION_DRAFT_IMAGE_MODEL': 'education.draft_image_model',
 }
 SUBAGENTS_CONFIG_KEYS = {
     'ENABLE_SUBAGENTS': 'subagents.enable',
@@ -851,6 +852,13 @@ class EducationConfigForm(BaseModel):
     EDUCATION_DEFAULT_RUBRICS: EducationDefaultRubricsForm
     EDUCATION_ENABLE_RETURN: bool
     EDUCATION_ENABLE_COACHING_STYLES: bool
+    # 作业写作区「导入图片」用的识图模型 id;空串表示不提供图片导入。
+    EDUCATION_DRAFT_IMAGE_MODEL: str = Field(max_length=256)
+
+    @field_validator('EDUCATION_DRAFT_IMAGE_MODEL', mode='before')
+    @classmethod
+    def strip_draft_image_model(cls, value):
+        return value.strip() if isinstance(value, str) else value
 
 
 class EducationConfigResponse(EducationConfigForm):

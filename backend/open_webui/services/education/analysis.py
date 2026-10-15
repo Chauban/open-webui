@@ -775,6 +775,10 @@ def _build_operation_timeline(operations: list, prompt_timeline: list) -> list[d
                     "source_type": operation.source_type,
                     "inserted_length": len(inserted.strip()),
                     "label": f"{operation.source_type}:{operation.op_type}",
+                    # 从零写作作业在编辑器里导入的文件/照片(外部粘贴的一种):document / images。
+                    "import_kind": (getattr(operation, "metadata_json", None) or {}).get(
+                        "import_kind"
+                    ),
                 }
             )
             continue
