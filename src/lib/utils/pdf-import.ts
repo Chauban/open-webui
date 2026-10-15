@@ -57,7 +57,7 @@ export const pageHasImages = async (pdfjs: Pick<PdfJs, 'OPS'>, page: PdfPageProx
 	return fnArray.some((op) => imageOps.has(op));
 };
 
-/** 扫描页渲染成与「从图片导入」上传时同样规格的图:长边 2048、白底 JPEG。 */
+/** 扫描页渲染成与「从图片导入」上传时同样规格的图:长边 1600、白底 JPEG 0.85。 */
 const renderPage = async (page: PdfPageProxy, name: string): Promise<File | null> => {
 	const base = page.getViewport({ scale: 1 });
 	const viewport = page.getViewport({

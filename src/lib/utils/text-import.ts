@@ -55,10 +55,12 @@ export const importedTextToHtml = (text: string) =>
 		.map((line) => `<p>${escapeHtml(line)}</p>`)
 		.join('');
 
-// 上传前在浏览器里先把照片缩到长边 2048:手机原图三五兆一张,8 张在校园网或流量下光上传
-// 就要十几二十秒。服务端还会再转一次(长边 1600 交给模型),这里只为少传,留些余量。
-export const UPLOAD_MAX_EDGE = 2048;
-export const UPLOAD_JPEG_QUALITY = 0.9;
+// 上传前在浏览器里就缩到服务端交给模型的规格(长边 1600、JPEG 0.85):手机原图三五兆一张,
+// 8 张在校园网或流量下光上传就要十几二十秒;更大的图服务端反正要缩掉,多传只是白等。
+// 服务端照样校验、再转一次 JPEG(尺寸已到位,不再缩小)。不用 WebP:iOS 的画布编码不了
+// WebP 会退回 PNG,而且编码比 JPEG 慢一个数量级,省下的上传时间被抵掉。
+export const UPLOAD_MAX_EDGE = 1600;
+export const UPLOAD_JPEG_QUALITY = 0.85;
 // 本来就小的图原样上传,不白白多压一次。
 const UPLOAD_KEEP_BYTES = 1.5 * 1024 * 1024;
 const SHRINKABLE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];

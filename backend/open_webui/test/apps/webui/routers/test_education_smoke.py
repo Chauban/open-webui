@@ -7851,7 +7851,7 @@ def test_admin_sets_the_draft_image_model_in_education_settings(education_client
 
 
 def test_draft_images_are_transcribed_concurrently_with_a_small_limit():
-    """8 张照片:同时最多 4 路模型调用,排两轮;结果按页序拼接,不按完成先后。"""
+    """同时最多 8 路模型调用(一次最多 8 张,一轮发完);结果按页序排,不按完成先后。"""
     in_flight = 0
     peak = 0
 
@@ -7861,7 +7861,7 @@ def test_draft_images_are_transcribed_concurrently_with_a_small_limit():
         in_flight += 1
         peak = max(peak, in_flight)
         # 页号越小越慢,完成顺序与页序相反
-        await asyncio.sleep(0.02 * (10 - int(page)))
+        await asyncio.sleep(0.02 * (12 - int(page)))
         in_flight -= 1
         return f"第{page}页。"
 
@@ -7871,16 +7871,17 @@ def test_draft_images_are_transcribed_concurrently_with_a_small_limit():
         started = time.perf_counter()
         pages = asyncio.run(
             draft_import_module.transcribe_draft_images(
-                None, None, "vision-model", [str(page) for page in range(1, 9)]
+                None, None, "vision-model", [str(page) for page in range(1, 11)]
             )
         )
         elapsed = time.perf_counter() - started
     finally:
         draft_import_module.generate_transcription = original
 
-    assert pages == [f"第{page}页。" for page in range(1, 9)]
-    assert peak == 4
-    # 逐张串行要 0.02×(9+8+…+2)=0.88 秒;4 路并发两轮约 0.36 秒
+    assert pages == [f"第{page}页。" for page in range(1, 11)]
+    # 给 10 张(接口本身最多收 8 张)才看得出上限:前 8 张同时发,后 2 张等空位
+    assert peak == 8
+    # 逐张串行要 0.02×(11+10+…+2)=1.3 秒;8 路并发约 0.22 秒
     assert elapsed < 0.6
 
 

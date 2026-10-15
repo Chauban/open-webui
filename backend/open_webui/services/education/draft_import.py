@@ -33,8 +33,9 @@ _JPEG_QUALITY = 85
 _MAX_PIXELS = 100_000_000
 _ACCEPTED_FORMATS = {"JPEG", "PNG", "WEBP"}
 # 同时转录几张。逐张发而不是一次全塞进去:一张认不出不至于拖垮整份,也不会撞上单次输出上限。
-# 一张的耗时主要花在模型逐字输出上(一页几百到上千字),4 路并发时最多 8 张只排两轮。
-_CONCURRENCY = 4
+# 一张的耗时主要花在模型逐字输出上(一页几百到上千字);与一次最多 8 张对齐,8 张一轮发完,
+# 总耗时约等于最慢的那一页。服务商有并发或每分钟请求数限制时,超限的会报错让学生重试。
+_CONCURRENCY = 8
 _NO_TEXT = "<<NO_TEXT>>"
 
 TRANSCRIBE_PROMPT = f"""你是文字转录工具。图片是学生写作初稿的照片或扫描件，可能是手写，也可能是打印稿。请把图片里的正文逐字转录成纯文本。
@@ -78,7 +79,7 @@ async def resolve_draft_image_model(request, user) -> str:
 
 
 def prepare_draft_image(data: bytes) -> str:
-    """校验图片并转成发给模型的 data URL:按 EXIF 摆正、透明底铺白、缩到长边 2048 的 JPEG。
+    """校验图片并转成发给模型的 data URL:按 EXIF 摆正、透明底铺白、缩到长边 1600 的 JPEG。
 
     按内容判断格式,不看扩展名。手机竖拍的照片像素是横的,方向只记在 EXIF 里,
     不摆正的话模型看到的是躺倒的字。

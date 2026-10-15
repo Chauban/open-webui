@@ -39,7 +39,7 @@ afterEach(() => {
 	drawn.length = 0;
 });
 
-test('手机大图在上传前按 EXIF 摆正、缩到长边 2048、白底 JPEG,保留文件名', async () => {
+test('手机大图在上传前按 EXIF 摆正、缩到长边 1600、白底 JPEG 0.85,保留文件名', async () => {
 	const createImageBitmap = vi
 		.fn()
 		.mockResolvedValue({ width: 3024, height: 4032, close: vi.fn() });
@@ -50,7 +50,8 @@ test('手机大图在上传前按 EXIF 摆正、缩到长边 2048、白底 JPEG,
 	const shrunk = await shrinkImageForUpload(original);
 
 	expect(createImageBitmap).toHaveBeenCalledWith(original, { imageOrientation: 'from-image' });
-	expect(drawn).toEqual([{ width: 1536, height: UPLOAD_MAX_EDGE, fill: '#ffffff' }]);
+	expect(UPLOAD_MAX_EDGE).toBe(1600);
+	expect(drawn).toEqual([{ width: 1200, height: 1600, fill: '#ffffff' }]);
 	expect(shrunk).not.toBe(original);
 	expect(shrunk.name).toBe('IMG_0001.jpg');
 	expect(shrunk.type).toBe('image/jpeg');
