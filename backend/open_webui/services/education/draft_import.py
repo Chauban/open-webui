@@ -167,8 +167,10 @@ def build_transcription_messages(image_url: str) -> list[dict]:
     ]
 
 
-async def transcribe_draft_images(request, user, model_id: str, image_urls: list[str]) -> str:
-    """按上传顺序逐张转录,拼成一段一行的纯文本(与导入 Word 文件的结果同一形式)。
+async def transcribe_draft_images(request, user, model_id: str, image_urls: list[str]) -> list[str]:
+    """按上传顺序逐张转录,每张一段一行(与导入 Word 文件的结果同一形式),没有正文的那张是空串。
+
+    逐张返回而不是拼好:浏览器读 PDF 时,扫描页的转录结果要插回原来的页位置。
 
     任何一张失败整份作废:悄悄少一页比报错更糟,学生不一定发现。
     """
@@ -188,7 +190,6 @@ async def transcribe_draft_images(request, user, model_id: str, image_urls: list
     except Exception as error:
         log.exception("draft image transcription failed")
         raise DraftImageModelError("Could not read the images. Please try again.") from error
-    paragraphs = [line for page in pages for line in page]
-    if not paragraphs:
+    if not any(pages):
         raise DraftImageError("No text found in these images")
-    return "\n".join(paragraphs)
+    return ["\n".join(page) for page in pages]

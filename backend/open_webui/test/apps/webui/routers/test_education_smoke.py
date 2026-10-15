@@ -7576,7 +7576,7 @@ def test_text_import_is_only_for_the_assignment_student_while_writable(education
     with _fake_transcription({"r": "照片里的字。"}):
         res = client.post(image_url, files=[("files", ("p.png", _png_bytes("red"), "image/png"))])
     assert res.status_code == 200, res.text
-    assert res.json() == {"text": "照片里的字。"}
+    assert res.json() == {"text": "照片里的字。", "pages": ["照片里的字。"]}
 
     # 别人都不行:任课老师、同学、管理员(图片导入要调模型,只算学生自己的)
     admin = teacher.model_copy(update={"id": "admin-1", "role": "admin"})
@@ -7674,8 +7674,11 @@ def test_draft_images_are_transcribed_in_page_order_without_freezing_baseline(
             ],
         )
     assert res.status_code == 200, res.text
-    # 按上传顺序拼接,一段一行;代码围栏去掉,空白页不占行
-    assert res.json() == {"text": "第一页第一段，\n第一页第二段。\n第二页接着写。"}
+    # 按上传顺序拼接,一段一行;代码围栏去掉,空白页不占行;pages 逐张给出,空白页为空串
+    assert res.json() == {
+        "text": "第一页第一段，\n第一页第二段。\n第二页接着写。",
+        "pages": ["第一页第一段，\n第一页第二段。", "", "第二页接着写。"],
+    }
     assert len(calls) == 3
     assert {call["model_id"] for call in calls} == {"vision-model"}
     assert all(call["image_url"].startswith("data:image/jpeg;base64,") for call in calls)
@@ -7866,7 +7869,7 @@ def test_draft_images_are_transcribed_concurrently_with_a_small_limit():
     draft_import_module.generate_transcription = fake_generate
     try:
         started = time.perf_counter()
-        text = asyncio.run(
+        pages = asyncio.run(
             draft_import_module.transcribe_draft_images(
                 None, None, "vision-model", [str(page) for page in range(1, 9)]
             )
@@ -7875,7 +7878,7 @@ def test_draft_images_are_transcribed_concurrently_with_a_small_limit():
     finally:
         draft_import_module.generate_transcription = original
 
-    assert text == "\n".join(f"第{page}页。" for page in range(1, 9))
+    assert pages == [f"第{page}页。" for page in range(1, 9)]
     assert peak == 4
     # 逐张串行要 0.02×(9+8+…+2)=0.88 秒;4 路并发两轮约 0.36 秒
     assert elapsed < 0.6

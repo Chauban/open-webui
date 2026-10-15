@@ -16,6 +16,16 @@ export default defineConfig({
 					src: 'node_modules/onnxruntime-web/dist/*.jsep.*',
 
 					dest: 'wasm'
+				},
+				// 作业写作区在浏览器里读 PDF 时按需取用(src/lib/utils/pdf-import.ts):
+				// 中日韩字符映射与标准字体,不进 JS 包,只在 PDF 用到时下载对应的那一个文件。
+				{
+					src: 'node_modules/pdfjs-dist/cmaps/*',
+					dest: 'pdfjs/cmaps'
+				},
+				{
+					src: 'node_modules/pdfjs-dist/standard_fonts/*',
+					dest: 'pdfjs/standard_fonts'
 				}
 			]
 		})

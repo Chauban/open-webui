@@ -32,6 +32,12 @@ const { config } = vi.hoisted(() => {
 	};
 });
 vi.mock('$lib/stores', () => ({ config }));
+// PDF 在浏览器里读;这里替换掉 pdf.js 那一层,只测读出来之后的流程。
+const readPdf = vi.fn();
+vi.mock('$lib/utils/pdf-import', () => ({
+	readPdf: (...args: unknown[]) => readPdf(...args),
+	PdfImportError: class PdfImportError extends Error {}
+}));
 
 import DraftBaselineStep from './DraftBaselineStep.svelte';
 
@@ -40,6 +46,7 @@ afterEach(() => {
 	submitDraftBaseline.mockReset();
 	extractImportDocument.mockReset();
 	extractImportImages.mockReset();
+	readPdf.mockReset();
 	config.set({ features: { enable_education_draft_image_import: true } });
 });
 const context = new Map([['i18n', readable({ t: (key: string) => key })]]);
@@ -120,4 +127,80 @@ test('一次超过 8 张照片在前端就拦下,不上传', async () => {
 	);
 	await fireEvent.change(screen.getByTestId('draft-image-input'), { target: { files } });
 	expect(extractImportImages).not.toHaveBeenCalled();
+});
+
+const pdfLine = (text: string, y: number) => ({
+	text,
+	left: 72,
+	right: 520,
+	y,
+	size: 11,
+	leadingSpaces: false
+});
+
+test('PDF 在浏览器里读:文字页直接取字,扫描页交给识图,按原页序填回', async () => {
+	const scan = new File(['jpeg'], '初稿-p002.jpg', { type: 'image/jpeg' });
+	readPdf.mockResolvedValue([
+		{ kind: 'text', lines: [pdfLine('第一页写满了整行没有结束', 700)] },
+		{ kind: 'scan', pageNumber: 2, image: scan },
+		{ kind: 'blank' },
+		{ kind: 'text', lines: [pdfLine('第三页另起一段。', 700)] }
+	]);
+	extractImportImages.mockResolvedValue({ text: '扫描页的字。', pages: ['扫描页的字。'] });
+	render(DraftBaselineStep, { props: { sessionId: 'session-1', onSubmitted: vi.fn() }, context });
+
+	const pdf = new File(['%PDF'], '初稿.pdf', { type: 'application/pdf' });
+	await fireEvent.change(screen.getByTestId('draft-file-input'), { target: { files: [pdf] } });
+
+	const textarea = screen.getByPlaceholderText(
+		'Paste your first draft here, or drop a file in'
+	) as HTMLTextAreaElement;
+	await waitFor(() =>
+		expect(textarea.value).toBe('第一页写满了整行没有结束\n扫描页的字。\n第三页另起一段。')
+	);
+	expect(readPdf).toHaveBeenCalledWith(pdf, expect.objectContaining({ renderScans: true }));
+	expect(extractImportImages).toHaveBeenCalledWith(undefined, 'session-1', [scan]);
+	// PDF 不交给后端的文档解析
+	expect(extractImportDocument).not.toHaveBeenCalled();
+});
+
+test('没开图片导入时,PDF 只取文字页,扫描页跳过不渲染', async () => {
+	config.set({ features: { enable_education_draft_image_import: false } });
+	readPdf.mockResolvedValue([
+		{ kind: 'text', lines: [pdfLine('只有这一页有文字。', 700)] },
+		{ kind: 'scan', pageNumber: 2, image: null }
+	]);
+	render(DraftBaselineStep, { props: { sessionId: 'session-1', onSubmitted: vi.fn() }, context });
+
+	const pdf = new File(['%PDF'], '初稿.pdf', { type: 'application/pdf' });
+	await fireEvent.change(screen.getByTestId('draft-file-input'), { target: { files: [pdf] } });
+
+	const textarea = screen.getByPlaceholderText(
+		'Paste your first draft here, or drop a file in'
+	) as HTMLTextAreaElement;
+	await waitFor(() => expect(textarea.value).toBe('只有这一页有文字。'));
+	expect(readPdf).toHaveBeenCalledWith(pdf, expect.objectContaining({ renderScans: false }));
+	expect(extractImportImages).not.toHaveBeenCalled();
+});
+
+test('扫描页超过 8 页时不调识图,也不填框', async () => {
+	readPdf.mockResolvedValue(
+		Array.from({ length: 9 }, (_, index) => ({
+			kind: 'scan',
+			pageNumber: index + 1,
+			image: new File(['jpeg'], `p${index}.jpg`, { type: 'image/jpeg' })
+		}))
+	);
+	render(DraftBaselineStep, { props: { sessionId: 'session-1', onSubmitted: vi.fn() }, context });
+	const pdf = new File(['%PDF'], '扫描.pdf', { type: 'application/pdf' });
+	await fireEvent.change(screen.getByTestId('draft-file-input'), { target: { files: [pdf] } });
+	await waitFor(() => expect(readPdf).toHaveBeenCalled());
+	expect(extractImportImages).not.toHaveBeenCalled();
+	expect(
+		(
+			screen.getByPlaceholderText(
+				'Paste your first draft here, or drop a file in'
+			) as HTMLTextAreaElement
+		).value
+	).toBe('');
 });

@@ -2686,7 +2686,8 @@ async def extract_import_images(
 ):
     """把学生拍的初稿照片交给管理员选定的识图模型转录成纯文本,同样只返回给学生核对。
 
-    多张按上传顺序拼接。一次转录要十几秒到一分钟,同步做完再返回。
+    text 是按上传顺序拼好的全文;pages 是逐张的结果(没有正文的那张为空串),
+    浏览器读扫描版 PDF 时按它把各页插回原位。一次转录要十几秒到一分钟,同步做完再返回。
     """
     _ensure_text_import_open(user, session, db)
     # 后面的模型调用要很久,不把这次只读查询的事务和连接一直占着。
@@ -2720,7 +2721,7 @@ async def extract_import_images(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(err)
         ) from err
     try:
-        text = await transcribe_draft_images(request, user, model_id, image_urls)
+        pages = await transcribe_draft_images(request, user, model_id, image_urls)
     except DraftImageModelError as err:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY, detail=str(err)
@@ -2729,7 +2730,7 @@ async def extract_import_images(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(err)
         ) from err
-    return {"text": text}
+    return {"text": "\n".join(page for page in pages if page), "pages": pages}
 
 
 @router.post(

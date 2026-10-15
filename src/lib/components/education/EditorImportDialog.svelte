@@ -42,7 +42,12 @@
 		info = nextInfo;
 		confirmReplace = false;
 		toast.success(
-			nextInfo.kind === 'images'
+			nextInfo.scannedPages
+				? t(
+						'Read {{name}}; {{count}} scanned page(s) were transcribed by AI. Check the text carefully.',
+						{ name: nextInfo.names[0], count: nextInfo.scannedPages }
+					)
+				: nextInfo.kind === 'images'
 				? t(
 						'Read the text from {{count}} image(s). Check it against your draft before inserting.',
 						{
@@ -72,7 +77,7 @@
 			</h2>
 			<p class="mt-1 text-sm text-gray-600 dark:text-gray-300">
 				{$i18n.t(
-					'Import a Word or text file, or photos of a draft. Check and edit the text below, then insert it. Imported text is recorded as pasted from outside, and your teacher can see that it was imported.'
+					'Import a Word, text or PDF file, or photos of a draft. Check and edit the text below, then insert it. Imported text is recorded as pasted from outside, and your teacher can see that it was imported.'
 				)}
 			</p>
 		</div>

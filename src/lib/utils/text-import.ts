@@ -2,7 +2,8 @@
 // 上限与后端 services/education/draft_import.py、writing_context.py 一致,前端先拦一遍,
 // 免得学生等完上传才被拒;提示文案沿用后端的 i18n 键。
 
-export const DOCUMENT_ACCEPT = '.docx,.doc,.txt,.md';
+// PDF 在浏览器里读(pdf-import.ts),其余文档交给后端解析。
+export const DOCUMENT_ACCEPT = '.docx,.doc,.txt,.md,.pdf,application/pdf';
 // 只收模型和 Pillow 都认的三种。iPhone 的 HEIC 照片在 accept 里不列 heic 时,浏览器会转成 JPEG 再交上来。
 export const IMAGE_ACCEPT = 'image/jpeg,image/png,image/webp';
 export const IMAGE_MAX_COUNT = 8;
@@ -10,9 +11,13 @@ export const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 export const IMAGE_TOTAL_MAX_BYTES = 30 * 1024 * 1024;
 
 export type ImportKind = 'document' | 'images';
-export type ImportInfo = { kind: ImportKind; names: string[] };
+// scannedPages:读 PDF 时有几页扫描页交给了识图模型(kind 因此是 images)。
+export type ImportInfo = { kind: ImportKind; names: string[]; scannedPages?: number };
 
 const IMAGE_NAME = /\.(jpe?g|png|webp|heic|heif)$/i;
+
+export const isPdfFile = (file: File) =>
+	file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
 
 export const isImageFile = (file: File) =>
 	file.type.startsWith('image/') || IMAGE_NAME.test(file.name);
@@ -53,7 +58,7 @@ export const importedTextToHtml = (text: string) =>
 // 上传前在浏览器里先把照片缩到长边 2048:手机原图三五兆一张,8 张在校园网或流量下光上传
 // 就要十几二十秒。服务端还会再转一次(长边 1600 交给模型),这里只为少传,留些余量。
 export const UPLOAD_MAX_EDGE = 2048;
-const UPLOAD_JPEG_QUALITY = 0.9;
+export const UPLOAD_JPEG_QUALITY = 0.9;
 // 本来就小的图原样上传,不白白多压一次。
 const UPLOAD_KEEP_BYTES = 1.5 * 1024 * 1024;
 const SHRINKABLE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
