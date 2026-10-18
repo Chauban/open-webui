@@ -17,6 +17,7 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 import open_webui.internal.db as internal_db
+import open_webui.routers.openai as openai_router_module
 from open_webui.models.config import Config
 from open_webui.models.folders import Folders
 from open_webui.models.groups import Group
@@ -93,6 +94,15 @@ def test_system_prompt_without_params_drops_only_the_params():
     assert 'temperature' not in stripped and 'thinking' not in stripped
     assert stripped['params'] == {'system': STUDENT_PROMPT, 'tool_approval_mode': 'ask'}
     assert stripped['messages'][0] == {'role': 'system', 'content': STUDENT_PROMPT}
+
+
+def test_developer_messages_count_as_system_prompt():
+    body = _request_body(
+        messages=[{'role': 'developer', 'content': STUDENT_PROMPT}, {'role': 'user', 'content': '你好'}]
+    )
+
+    stripped = strip_chat_request_overrides(body, ChatOverrides(params=True, system_prompt=False))
+    assert stripped['messages'] == [{'role': 'user', 'content': '你好'}]
 
 
 def test_all_overrides_leave_the_request_untouched():
@@ -343,3 +353,108 @@ def test_folder_system_prompt_requires_permission(education_client):
     UserContext.current_user = teacher
     res = client.post('/api/v1/folders/', json={'name': 'prompted', 'data': {'system_prompt': '老师的提示'}})
     assert res.status_code == 200, res.text
+
+
+class _Reached(Exception):
+    """被测接口越过权限检查、走到下一步时抛出。"""
+
+
+def _mount_openai(client):
+    client.app.include_router(openai_router_module.router, prefix='/openai')
+
+
+def test_openai_chat_completions_route_strips_overrides(education_client, monkeypatch):
+    client, teacher, _, student, _, SessionLocal = education_client
+    _mount_openai(client)
+    _restrict_students_grant_teachers(SessionLocal)
+    received = {}
+
+    async def fake_generate(request, form_data, user):
+        received[user.id] = form_data
+        return {'ok': True}
+
+    monkeypatch.setattr(openai_router_module, 'generate_chat_completion', fake_generate)
+    for user in (student, teacher):
+        UserContext.current_user = user
+        res = client.post('/openai/chat/completions', json=_request_body())
+        assert res.status_code == 200, res.text
+
+    sent = received[student.id]
+    assert 'temperature' not in sent and 'thinking' not in sent
+    assert sent['params'] == {'tool_approval_mode': 'ask'}
+    assert all(message['role'] != 'system' for message in sent['messages'])
+    assert received[teacher.id] == _request_body()
+
+
+def test_raw_openai_passthroughs_require_both_overrides(education_client, monkeypatch):
+    """/openai/responses 与 /openai/{path} 原样转发，不能逐项去除，受限用户直接拒绝。"""
+    client, teacher, _, student, _, SessionLocal = education_client
+    _mount_openai(client)
+    _restrict_students_grant_teachers(SessionLocal)
+    monkeypatch.setattr(openai_router_module, 'ENABLE_OPENAI_API_PASSTHROUGH', True)
+
+    async def reached(*args, **kwargs):
+        raise HTTPException(status_code=418, detail='reached')
+
+    # 两个接口过了权限检查之后的第一步
+    monkeypatch.setattr(openai_router_module, 'check_model_access', reached)
+    monkeypatch.setattr(openai_router_module, 'get_openai_connection', reached)
+    responses_body = {'model': 'override-test-model', 'input': 'hi', 'instructions': STUDENT_PROMPT}
+
+    UserContext.current_user = student
+    assert client.post('/openai/responses', json=responses_body).status_code == 403
+    assert client.post('/openai/some/path', json={'input': 'hi'}).status_code == 403
+
+    UserContext.current_user = teacher
+    assert client.post('/openai/responses', json=responses_body).status_code == 418
+    assert client.post('/openai/some/path', json={'input': 'hi'}).status_code == 418
+
+
+def test_anthropic_passthrough_only_for_users_with_both_overrides(education_client, monkeypatch):
+    """原生 Anthropic 连接本来原样转发；受限用户改走转换后的对话流水线，由那里去除。"""
+    import open_webui.main as webui_main
+
+    _, teacher, _, student, _, SessionLocal = education_client
+    _restrict_students_grant_teachers(SessionLocal)
+    calls = []
+
+    async def no_token_count(*args, **kwargs):
+        raise RuntimeError('not counted in this test')
+
+    async def connection(idx):
+        return 'https://api.anthropic.com/v1', 'key', {}
+
+    async def fake_passthrough(request, form_data, user):
+        calls.append(('passthrough', user.id))
+        return {'passthrough': True}
+
+    async def fake_chat_completion(request, form_data, user, client_request=False):
+        calls.append(('pipeline', user.id, client_request, form_data))
+        raise _Reached
+
+    monkeypatch.setattr(webui_main.openai, 'count_anthropic_tokens', no_token_count)
+    monkeypatch.setattr(webui_main.openai, 'get_openai_connection', connection)
+    monkeypatch.setattr(webui_main, 'passthrough_anthropic_messages', fake_passthrough)
+    monkeypatch.setattr(webui_main, 'chat_completion', fake_chat_completion)
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(OPENAI_MODELS={'claude-test': {'urlIdx': 0}})),
+        headers={},
+        state=SimpleNamespace(),
+    )
+    body = {
+        'model': 'claude-test',
+        'max_tokens': 256,
+        'system': STUDENT_PROMPT,
+        'temperature': 1,
+        'messages': [{'role': 'user', 'content': '你好'}],
+    }
+
+    assert asyncio.run(webui_main.generate_messages(request, dict(body), teacher)) == {'passthrough': True}
+    with pytest.raises(_Reached):
+        asyncio.run(webui_main.generate_messages(request, dict(body), student))
+
+    assert calls[0] == ('passthrough', teacher.id)
+    kind, user_id, client_request, converted = calls[1]
+    assert (kind, user_id, client_request) == ('pipeline', student.id, True)
+    # 转换后的请求体里系统提示成了 system 消息，进 chat_completion 后按权限去掉
+    assert converted['messages'][0] == {'role': 'system', 'content': STUDENT_PROMPT}

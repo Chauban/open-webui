@@ -7,8 +7,12 @@ chat.system_prompt 三个权限原先只是把面板藏起来，请求照样带�
 
 from dataclasses import dataclass
 
+from fastapi import HTTPException, status
 from open_webui.models.config import Config
 from open_webui.utils.access_control import has_permission
+
+# OpenAI 的 developer 消息与 system 一样充当系统提示。
+SYSTEM_PROMPT_ROLES = frozenset({'system', 'developer'})
 
 # 放在 params 里、却不是模型参数：输入框旁的工具审批开关，不归 chat.params 管。
 NON_MODEL_PARAM_KEYS = frozenset({'tool_approval_mode'})
@@ -82,6 +86,15 @@ async def can_set_folder_system_prompt(user) -> bool:
     )
 
 
+async def ensure_raw_passthrough_allowed(user) -> None:
+    """原样转发给服务商的接口没法逐项去掉参数与提示,两样都能设的用户才可用。"""
+    if await get_chat_overrides(user) != ALL_CHAT_OVERRIDES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail='Raw provider passthrough requires permission to set model parameters and the system prompt.',
+        )
+
+
 def _allowed_params(params: dict, overrides: ChatOverrides) -> dict:
     if overrides.params:
         allowed = dict(params)
@@ -103,7 +116,9 @@ def strip_chat_request_overrides(form_data: dict, overrides: ChatOverrides) -> d
         stripped = {key: value for key, value in form_data.items() if key in CHAT_PIPELINE_KEYS}
     stripped['params'] = _allowed_params(form_data.get('params') or {}, overrides)
     if not overrides.system_prompt and 'messages' in stripped:
-        stripped['messages'] = [message for message in stripped['messages'] or [] if message.get('role') != 'system']
+        stripped['messages'] = [
+            message for message in stripped['messages'] or [] if message.get('role') not in SYSTEM_PROMPT_ROLES
+        ]
     return stripped
 
 

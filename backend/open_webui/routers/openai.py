@@ -40,6 +40,11 @@ from open_webui.models.groups import Groups
 from open_webui.models.models import Models
 from open_webui.models.users import UserModel
 from open_webui.utils.access_control import check_model_access, has_connection_access, has_permission
+from open_webui.utils.access_control.chat import (
+    ensure_raw_passthrough_allowed,
+    get_chat_overrides,
+    strip_chat_request_overrides,
+)
 from open_webui.utils.anthropic import ANTHROPIC_VERSION, get_anthropic_models, is_anthropic_url
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.headers import get_custom_headers, include_user_info_headers
@@ -1462,10 +1467,21 @@ def convert_responses_result(response: dict) -> dict:
 
 
 @router.post('/chat/completions')
-async def generate_chat_completion(
+async def generate_chat_completion_endpoint(
     request: Request,
     form_data: dict,
     user=Depends(get_verified_user),
+):
+    return await generate_chat_completion(
+        request, strip_chat_request_overrides(form_data, await get_chat_overrides(user)), user
+    )
+
+
+# 平台内部经 utils/chat.py 直接调用;请求体是 /api/chat/completions 已按权限处理过的,或由平台拼成。
+async def generate_chat_completion(
+    request: Request,
+    form_data: dict,
+    user,
 ):
     if not await Config.get('openai.enable'):
         raise HTTPException(status_code=503, detail='OpenAI API is disabled')
@@ -1854,6 +1870,7 @@ async def responses(
     Forward requests to the OpenAI Responses API endpoint.
     Routes to the correct upstream backend based on the model field.
     """
+    await ensure_raw_passthrough_allowed(user)
     payload = form_data.model_dump(exclude_none=True)
     is_streaming_request = bool(payload.get('stream', False))
 
@@ -1967,6 +1984,7 @@ async def proxy(path: str, request: Request, user=Depends(get_verified_user)):
             status_code=status.HTTP_403_FORBIDDEN,
             detail='Direct API passthrough is disabled. Set ENABLE_OPENAI_API_PASSTHROUGH=True to enable.',
         )
+    await ensure_raw_passthrough_allowed(user)
 
     body = await request.body()
 

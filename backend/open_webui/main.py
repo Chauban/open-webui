@@ -208,6 +208,7 @@ from open_webui.tasks import (
 from open_webui.utils import logger
 from open_webui.utils.access_control import has_permission
 from open_webui.utils.access_control.chat import (
+    ALL_CHAT_OVERRIDES,
     NO_CHAT_OVERRIDES,
     get_chat_overrides,
     strip_chat_request_overrides,
@@ -1986,7 +1987,10 @@ async def generate_messages(
     model = models.get(model_id)
     if model:
         url, _, api_config = await openai.get_openai_connection(model['urlIdx'])
-        if is_anthropic_messages_passthrough(url, api_config):
+        # 原样转发不经去除;不能设参数或系统提示的用户改走下面转换后的对话流水线。
+        if is_anthropic_messages_passthrough(url, api_config) and (
+            await get_chat_overrides(user) == ALL_CHAT_OVERRIDES
+        ):
             return await passthrough_anthropic_messages(request, form_data, user)
         passthrough_params = api_config.get('passthrough_params') or []
 
