@@ -3,7 +3,7 @@
 
 	import {
 		getTeacherAssignmentAiSettings,
-		type AiStepThinking,
+		type AiStepView,
 		type CoachingThinking
 	} from '$lib/apis/education';
 	import { AI_STEP_TEXT, MODEL_SOURCE_TEXT, THINKING_SETTING_TEXT } from '$lib/utils/ai-steps';
@@ -15,7 +15,7 @@
 	// 之后都以这里为准。读不出来时不挡作业设置页。
 	export let assignmentId: string;
 
-	let steps: AiStepThinking[] = [];
+	let steps: AiStepView[] = [];
 	let coaching: CoachingThinking | null = null;
 	let failed = false;
 
@@ -23,6 +23,22 @@
 		admin: 'Administrator default',
 		teacher: 'Set for this assignment',
 		student: 'Switched off by the student'
+	};
+
+	// 这一步此刻用哪个模型:管理员指定的(名称),或学生 / 教师选的;指定的被删掉时写明回落到哪。
+	const modelLabel = (step: AiStepView) => {
+		if (!step.model_id) {
+			return step.model_source === 'admin_model'
+				? $i18n.t('Off (no image import)')
+				: $i18n.t(MODEL_SOURCE_TEXT[step.model_source]);
+		}
+		if (step.model_available) return step.model_name ?? step.model_id;
+		return step.model_source === 'admin_model'
+			? $i18n.t('{{model}} is no longer available; image import is off', { model: step.model_id })
+			: $i18n.t('{{model}} is no longer available; using: {{fallback}}', {
+					model: step.model_id,
+					fallback: $i18n.t(MODEL_SOURCE_TEXT[step.model_source])
+				});
 	};
 
 	onMount(async () => {
@@ -50,7 +66,7 @@
 						<div class="min-w-0">
 							<div>{$i18n.t(AI_STEP_TEXT[step.key].title)}</div>
 							<div class="text-xs text-gray-400">
-								{$i18n.t(MODEL_SOURCE_TEXT[step.model_source])} ·
+								{modelLabel(step)} ·
 								{step.key === 'coaching_chat'
 									? $i18n.t(COACHING_SOURCE_TEXT[coaching.source])
 									: $i18n.t('Set by the administrator')}

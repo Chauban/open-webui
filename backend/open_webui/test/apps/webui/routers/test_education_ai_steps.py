@@ -4,6 +4,7 @@ import ast
 import asyncio
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
@@ -13,12 +14,14 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 import open_webui.services.education.ai_steps as ai_steps
-from open_webui.config import DEFAULT_EDUCATION_THINKING
+from open_webui.config import DEFAULT_EDUCATION_AI_STEPS
 from open_webui.services.education.ai_steps import (
     AI_STEPS,
-    EducationThinkingPolicy,
+    EducationAiStepPolicy,
+    StepModel,
     call_step_model,
     describe_steps,
+    resolve_step_model,
 )
 
 OPEN_WEBUI = BACKEND_ROOT / 'open_webui'
@@ -26,7 +29,7 @@ EDUCATION_SOURCES = sorted((OPEN_WEBUI / 'services' / 'education').glob('*.py'))
     OPEN_WEBUI / 'routers' / 'education.py'
 ]
 # 接受步骤参数的模型调用出口，以及步骤参数的位置（从 0 数）。
-STEP_CALLS = {'call_step_model': 2, 'generate_completion': 4}
+STEP_CALLS = {'call_step_model': 2, 'generate_completion': 4, 'resolve_step_model': 2}
 PLATFORM_STEPS = {step.key for step in AI_STEPS} - {'coaching_chat'}
 
 
@@ -79,49 +82,106 @@ def test_every_model_call_names_a_registered_step():
     assert used_steps == PLATFORM_STEPS, 'every registered platform step needs a call site'
 
 
-def test_default_policy_is_valid_and_matches_the_registry():
-    policy = EducationThinkingPolicy.model_validate(DEFAULT_EDUCATION_THINKING)
+def _policy(**steps):
+    return EducationAiStepPolicy.model_validate({**DEFAULT_EDUCATION_AI_STEPS, **steps})
 
-    assert policy.image_parsing == 'off'
+
+def test_default_policy_is_valid_and_matches_the_registry():
+    policy = _policy()
+
+    assert policy.image_parsing.model is None and policy.image_parsing.thinking == 'off'
     assert policy.coaching_chat.control == 'admin'
-    assert [row.key for row in describe_steps(policy)] == [step.key for step in AI_STEPS]
-    assert all(row.control == 'admin' for row in describe_steps(policy))
+    rows = describe_steps(policy, {})
+    assert [row.key for row in rows] == [step.key for step in AI_STEPS]
+    assert all(row.control == 'admin' and row.model_id is None and row.model_available for row in rows)
+    assert {row.key: row.model_source for row in rows}['class_insight'] == 'teacher_chat_model'
 
 
 @pytest.mark.parametrize(
     'change',
     [
-        {'first_read': 'max'},
+        {'first_read': {'model': None, 'thinking': 'max'}},
+        {'first_read': {'model': '', 'thinking': 'off'}},
         {'coaching_chat': {'control': 'everyone', 'default': 'off'}},
-        {'unknown_step': 'off'},
+        {'coaching_chat': {'control': 'admin', 'default': 'off', 'model': 'm'}},
+        {'unknown_step': {'model': None, 'thinking': 'off'}},
     ],
 )
 def test_policy_rejects_unknown_values(change):
     with pytest.raises(ValidationError):
-        EducationThinkingPolicy.model_validate({**DEFAULT_EDUCATION_THINKING, **change})
+        _policy(**change)
+
+
+def _request(models):
+    return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(MODELS=models)))
+
+
+def test_resolve_step_model_prefers_the_admin_model_and_falls_back(monkeypatch):
+    request = _request({'reader-model': {'id': 'reader-model'}, 'vision-model': {'id': 'vision-model'}})
+    resolve = lambda step, requested=None, **steps: asyncio.run(  # noqa: E731
+        resolve_step_model(request, None, step, requested, policy=_policy(**steps))
+    )
+
+    # 管理员没指定:通读、试读跟学生选的,班级归纳跟老师选的;没选就没有
+    assert resolve('first_read', 'student-model') == StepModel(model_id='student-model', fixed=False)
+    assert resolve('class_insight', 'teacher-model') == StepModel(model_id='teacher-model', fixed=False)
+    assert resolve('reader_check') is None
+    # 指定了就用指定的,标为 fixed(跳过学生的模型访问控制)
+    assert resolve(
+        'reader_check', 'student-model', reader_check={'model': 'reader-model', 'thinking': 'low'}
+    ) == StepModel(model_id='reader-model', fixed=True)
+    # 指定的已被删掉:回落到学生选的
+    assert resolve(
+        'reader_check', 'student-model', reader_check={'model': 'gone', 'thinking': 'low'}
+    ) == StepModel(model_id='student-model', fixed=False)
+    # 图片识别没有回落
+    assert resolve('image_parsing', 'student-model') is None
+    assert resolve('image_parsing', image_parsing={'model': 'gone', 'thinking': 'off'}) is None
+    assert resolve('image_parsing', image_parsing={'model': 'vision-model', 'thinking': 'off'}) == StepModel(
+        model_id='vision-model', fixed=True
+    )
+
+
+def test_describe_steps_flags_missing_models():
+    rows = {
+        row.key: row
+        for row in describe_steps(
+            _policy(
+                reader_check={'model': 'gone', 'thinking': 'low'},
+                image_parsing={'model': 'vision-model', 'thinking': 'off'},
+            ),
+            {'vision-model': {'id': 'vision-model', 'name': 'Vision'}},
+        )
+    }
+
+    assert (rows['reader_check'].model_id, rows['reader_check'].model_available) == ('gone', False)
+    assert (rows['image_parsing'].model_name, rows['image_parsing'].model_available) == ('Vision', True)
 
 
 def test_call_step_model_sends_the_step_setting(monkeypatch):
     sent = []
-    policy = {**DEFAULT_EDUCATION_THINKING, 'first_read': 'high', 'reader_check': 'model_default'}
+    policy = _policy(
+        first_read={'model': None, 'thinking': 'high'}, reader_check={'model': None, 'thinking': 'model_default'}
+    )
 
     async def fake_policy():
-        return EducationThinkingPolicy.model_validate(policy)
+        return policy
 
     async def fake_generate(request, form_data, user, bypass_filter=False):
         sent.append((form_data, bypass_filter))
         return {'ok': True}
 
-    monkeypatch.setattr(ai_steps, 'get_thinking_policy', fake_policy)
+    monkeypatch.setattr(ai_steps, 'get_ai_step_policy', fake_policy)
     monkeypatch.setattr(ai_steps, 'generate_chat_completion', fake_generate)
     messages = [{'role': 'user', 'content': 'hi'}]
 
-    asyncio.run(call_step_model(None, None, 'first_read', 'm', messages))
-    asyncio.run(call_step_model(None, None, 'reader_check', 'm', messages))
-    asyncio.run(call_step_model(None, None, 'image_parsing', 'vision', messages, bypass_filter=True))
+    asyncio.run(call_step_model(None, None, 'first_read', StepModel(model_id='m', fixed=False), messages))
+    asyncio.run(call_step_model(None, None, 'reader_check', StepModel(model_id='m', fixed=False), messages))
+    asyncio.run(call_step_model(None, None, 'image_parsing', StepModel(model_id='vision', fixed=True), messages))
 
     assert sent[0] == ({'model': 'm', 'messages': messages, 'stream': False, 'thinking_level': 'high'}, False)
     assert 'thinking_level' not in sent[1][0]
+    # 管理员指定的模型跳过模型访问控制
     assert sent[2][0]['thinking_level'] == 'off' and sent[2][1] is True
 
 

@@ -224,6 +224,9 @@ class WritingSession(Base):
     # 修改清单:整理完成的时间(0 条也记),以及整理进行中的占位。
     revision_items_generated_at = Column(BigInteger, nullable=True)
     revision_items_claimed_at = Column(BigInteger, nullable=True)
+    # 第一次通读、补看实际用的模型(按 AI 步骤设置解析后的),提交时冻进本轮记录。
+    revision_items_model_id = Column(Text, nullable=True)
+    revision_follow_up_model_id = Column(Text, nullable=True)
     created_at = Column(BigInteger, nullable=False)
     updated_at = Column(BigInteger, nullable=False)
 
@@ -426,6 +429,8 @@ class ChallengeSession(Base):
     planned_rounds = Column(Integer, nullable=False)
     status = Column(Text, nullable=False, default="in_progress")
     closing_summary_json = Column(JSONField, nullable=True)
+    # 写收尾清单实际用的模型。
+    closing_model_id = Column(Text, nullable=True)
     checklist_state_json = Column(JSONField, nullable=True)
     # 教师退回意见的原文，发起这一轮时冻下来。评语可以事后被改，已开始的这轮不跟着变。
     followup_comment = Column(Text, nullable=True)
@@ -460,6 +465,8 @@ class ChallengeTurn(Base):
     quoted_span = Column(Text, nullable=False)
     response_text = Column(Text, nullable=True)
     responded_at = Column(BigInteger, nullable=True)
+    # 生成这一轮质疑实际用的模型。
+    model_id = Column(Text, nullable=True)
     created_at = Column(BigInteger, nullable=False)
 
 
@@ -484,6 +491,8 @@ class ChallengeInsight(Base):
     input_hash = Column(Text, nullable=False)
     categories_json = Column(JSONField, nullable=False)
     sample_size = Column(Integer, nullable=False)
+    # 归纳这一份实际用的模型。
+    model_id = Column(Text, nullable=True)
     created_at = Column(BigInteger, nullable=False)
 
 
@@ -1195,6 +1204,7 @@ class ChallengeTurnModel(BaseModel):
     quoted_span: str
     response_text: Optional[str] = None
     responded_at: Optional[int] = None
+    model_id: Optional[str] = None
     created_at: int
 
 
@@ -1212,6 +1222,7 @@ class ChallengeSessionModel(BaseModel):
     status: ChallengeStatus
     followup_comment: Optional[str] = None
     closing_summary_json: Optional[ChallengeClosing] = None
+    closing_model_id: Optional[str] = None
     checklist_state_json: Optional[dict] = None
     started_at: int
     ended_at: Optional[int] = None
@@ -1246,6 +1257,7 @@ class ChallengeInsightModel(BaseModel):
     input_hash: str
     categories_json: dict
     sample_size: int
+    model_id: Optional[str] = None
     created_at: int
 
 
@@ -1257,6 +1269,7 @@ class ChallengeInsightResponse(BaseModel):
     below_threshold: bool = False
     threshold: int = 0
     generated_at: Optional[int] = None
+    model_id: Optional[str] = None
 
 
 class ChallengeInsightForm(BaseModel):
@@ -1331,6 +1344,8 @@ class WritingSessionModel(BaseModel):
     draft_baseline_text: Optional[str] = None
     draft_baseline_at: Optional[int] = None
     revision_items_generated_at: Optional[int] = None
+    revision_items_model_id: Optional[str] = None
+    revision_follow_up_model_id: Optional[str] = None
     created_at: int
     updated_at: int
 
@@ -3624,6 +3639,7 @@ class EducationTable:
         session_id: str,
         baseline_text: str,
         items: list[dict],
+        model_id: str,
         db: Optional[Session] = None,
     ) -> Optional[list[RevisionItemModel]]:
         """落库通读结论并标记通读完成。只成功一次;已通读过就原样返回已有的。
@@ -3644,6 +3660,7 @@ class EducationTable:
                     {
                         WritingSession.revision_items_generated_at: now,
                         WritingSession.revision_items_claimed_at: None,
+                        WritingSession.revision_items_model_id: model_id,
                     },
                     synchronize_session=False,
                 )
@@ -3712,7 +3729,7 @@ class EducationTable:
             db.commit()
 
     def apply_revision_follow_up(
-        self, session_id: str, items: list[dict], db: Optional[Session] = None
+        self, session_id: str, items: list[dict], model_id: str, db: Optional[Session] = None
     ) -> list[RevisionItemModel]:
         """补看通过:给暂缓的几项补上结论,并记下那一项已确认改到位。
 
@@ -3740,7 +3757,14 @@ class EducationTable:
                     if row.is_blocking:
                         row.follow_up_at = now
             db.query(WritingSession).filter(WritingSession.id == session_id).update(
-                {WritingSession.revision_items_claimed_at: None},
+                {
+                    WritingSession.revision_items_claimed_at: None,
+                    **(
+                        {WritingSession.revision_follow_up_model_id: model_id}
+                        if deferred
+                        else {}
+                    ),
+                },
                 synchronize_session=False,
             )
             db.commit()
@@ -4357,6 +4381,7 @@ class EducationTable:
         input_hash: str,
         categories_json: dict,
         sample_size: int,
+        model_id: str,
         commit: bool = True,
         db: Optional[Session] = None,
     ) -> ChallengeInsightModel:
@@ -4373,6 +4398,7 @@ class EducationTable:
                     input_hash=input_hash,
                     categories_json=categories_json,
                     sample_size=sample_size,
+                    model_id=model_id,
                     created_at=int(time.time()),
                 )
                 db.add(insight)
@@ -4380,6 +4406,7 @@ class EducationTable:
                 insight.input_hash = input_hash
                 insight.categories_json = categories_json
                 insight.sample_size = sample_size
+                insight.model_id = model_id
                 insight.created_at = int(time.time())
             if commit:
                 db.commit()
@@ -4476,6 +4503,7 @@ class EducationTable:
         focus_key: str,
         challenge_text: str,
         quoted_span: str,
+        model_id: str,
         commit: bool = True,
         db: Optional[Session] = None,
     ) -> ChallengeTurnModel:
@@ -4489,6 +4517,7 @@ class EducationTable:
                 quoted_span=quoted_span,
                 response_text=None,
                 responded_at=None,
+                model_id=model_id,
                 created_at=int(time.time()),
             )
             db.add(turn)
@@ -4531,6 +4560,7 @@ class EducationTable:
         self,
         challenge_session_id: str,
         closing: ChallengeClosing,
+        closing_model_id: Optional[str],
         commit: bool = True,
         db: Optional[Session] = None,
     ) -> Optional[ChallengeSessionModel]:
@@ -4540,6 +4570,7 @@ class EducationTable:
                 return None
             session.status = "completed"
             session.closing_summary_json = closing.model_dump()
+            session.closing_model_id = closing_model_id
             session.ended_at = int(time.time())
             if commit:
                 db.commit()

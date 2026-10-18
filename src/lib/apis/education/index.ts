@@ -199,11 +199,13 @@ export type AiStepKey =
 	| 'reader_check'
 	| 'image_parsing'
 	| 'class_insight';
-export type AiStepModelSource = 'student_chat_model' | 'draft_image_model' | 'teacher_chat_model';
+/** 管理员没给这一步指定模型时用谁的;admin_model 表示必须指定(图片识别)。 */
+export type AiStepModelSource = 'student_chat_model' | 'teacher_chat_model' | 'admin_model';
 /** 后端 services/education/ai_steps.py 的登记,管理员表与教师卡都按它生成。 */
 export type AiStep = {
 	key: AiStepKey;
 	model_source: AiStepModelSource;
+	model_configurable: boolean;
 	teacher_controllable: boolean;
 };
 /** 教师按作业设的辅导对话参数;thinking 为 null 沿用管理员默认。 */
@@ -218,18 +220,27 @@ export type CoachingThinking = {
 	source: 'admin' | 'teacher' | 'student';
 	students_choose: boolean;
 };
-export type AiStepThinking = {
+/**
+ * 管理员表与教师卡的一行。model_id 是管理员为这一步指定的模型(没指定为 null);
+ * model_available 为 false 时它已被删掉,这一步回落到 model_source(图片识别则不可用)。
+ */
+export type AiStepView = {
 	key: AiStepKey;
 	model_source: AiStepModelSource;
+	model_id: string | null;
+	model_name: string | null;
+	model_available: boolean;
 	control: ThinkingControl;
 	thinking: ThinkingSetting;
 };
-export type ThinkingPolicy = {
+/** 平台步骤的设置:model 为 null 时按 model_source(图片识别为 null 即不提供图片导入)。 */
+export type PlatformStepPolicy = { model: string | null; thinking: ThinkingSetting };
+export type AiStepPolicy = {
 	coaching_chat: { control: ThinkingControl; default: ThinkingSetting };
-	first_read: ThinkingSetting;
-	reader_check: ThinkingSetting;
-	image_parsing: ThinkingSetting;
-	class_insight: ThinkingSetting;
+	first_read: PlatformStepPolicy;
+	reader_check: PlatformStepPolicy;
+	image_parsing: PlatformStepPolicy;
+	class_insight: PlatformStepPolicy;
 };
 
 export const createAssignment = async (
@@ -287,7 +298,7 @@ export const getTeacherAssignmentDefaults = async (
 export const getTeacherAssignmentAiSettings = async (
 	token: string,
 	assignmentId: string
-): Promise<{ steps: AiStepThinking[]; coaching_thinking: CoachingThinking }> => {
+): Promise<{ steps: AiStepView[]; coaching_thinking: CoachingThinking }> => {
 	return fetch(`${WEBUI_API_BASE_URL}/teacher/assignments/${assignmentId}/ai-settings`, {
 		method: 'GET',
 		headers: withAuth(token)
@@ -586,7 +597,7 @@ export const extractImportImages = async (token: string, sessionId: string, file
 		method: 'POST',
 		headers: { Accept: 'application/json', authorization: `Bearer ${token}` },
 		body
-	}).then(handleJson) as Promise<{ text: string; pages: string[] }>;
+	}).then(handleJson) as Promise<{ text: string; pages: string[]; model_id: string }>;
 };
 
 export const createEditorOperations = async (

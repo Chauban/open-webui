@@ -16,10 +16,13 @@ import aiohttp
 from fastapi import HTTPException
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-from open_webui.models.config import Config
 from open_webui.services.education.writing_context import normalize_draft_paragraphs
-from open_webui.services.education.ai_steps import call_step_model
-from open_webui.utils.models import get_all_models
+from open_webui.services.education.ai_steps import (
+    StepModel,
+    call_step_model,
+    get_ai_step_policy,
+    resolve_step_model,
+)
 
 log = logging.getLogger(__name__)
 
@@ -79,27 +82,25 @@ class TranscriptionCallError(Exception):
         self.retryable = retryable
 
 
-async def resolve_draft_image_model(request, user) -> str:
-    """管理员选定的识图模型;没设、平台上已没有、或标明不能看图时报错。"""
-    model_id = ((await Config.get("education.draft_image_model")) or "").strip()
-    if not model_id:
+async def resolve_draft_image_model(request, user) -> StepModel:
+    """管理员在 AI 步骤设置里给图片识别选的模型;没设、平台上已没有、或标明不能看图时报错。"""
+    policy = await get_ai_step_policy()
+    if not policy.image_parsing.model:
         raise DraftImageError(
             "Image import is not set up. Ask your administrator to choose an image parsing model."
         )
-    # 模型列表是进程内缓存,重启后要等有人请求过才会填上,与对话接口一样先补一次。
-    if not request.app.state.MODELS:
-        await get_all_models(request, user=user)
-    model = request.app.state.MODELS.get(model_id)
+    model = await resolve_step_model(request, user, "image_parsing", policy=policy)
     if model is None:
         raise DraftImageError(
             "The image parsing model is not available. Ask your administrator to check the setting."
         )
-    capabilities = (model.get("info") or {}).get("meta", {}).get("capabilities") or {}
+    info = request.app.state.MODELS[model.model_id]
+    capabilities = (info.get("info") or {}).get("meta", {}).get("capabilities") or {}
     if capabilities.get("vision") is False:
         raise DraftImageError(
             "The image parsing model cannot read images. Ask your administrator to choose another model."
         )
-    return model_id
+    return model
 
 
 def prepare_draft_image(data: bytes) -> str:
@@ -147,15 +148,14 @@ async def prepare_draft_images(images: list[bytes]) -> list[str]:
     return list(await asyncio.gather(*(asyncio.to_thread(prepare_draft_image, data) for data in images)))
 
 
-async def generate_transcription(request, user, model_id: str, messages: list[dict]) -> str:
+async def generate_transcription(request, user, model: StepModel, messages: list[dict]) -> str:
     """单次非流式生成。图片导入唯一的模型调用出口,测试通过替换它来隔离模型。
 
-    识图模型是管理员为这项平台功能指定的,学生在聊天里未必有权用它,所以跳过模型访问控制。
+    识图模型是管理员为这项平台功能指定的,学生在聊天里未必有权用它,call_step_model 对指定模型
+    跳过模型访问控制。
     """
     try:
-        response = await call_step_model(
-            request, user, "image_parsing", model_id, messages, bypass_filter=True
-        )
+        response = await call_step_model(request, user, "image_parsing", model, messages)
     except HTTPException as error:
         raise TranscriptionCallError(
             error.status_code, error.status_code in _RETRYABLE_STATUS
@@ -204,7 +204,7 @@ def build_transcription_messages(image_url: str) -> list[dict]:
     ]
 
 
-async def transcribe_draft_images(request, user, model_id: str, image_urls: list[str]) -> list[str]:
+async def transcribe_draft_images(request, user, model: StepModel, image_urls: list[str]) -> list[str]:
     """按上传顺序逐张转录,每张一段一行(与导入 Word 文件的结果同一形式),没有正文的那张是空串。
 
     逐张返回而不是拼好:浏览器读 PDF 时,扫描页的转录结果要插回原来的页位置。
@@ -220,7 +220,7 @@ async def transcribe_draft_images(request, user, model_id: str, image_urls: list
             for attempt in range(len(_RETRY_DELAYS) + 1):
                 try:
                     return clean_transcription(
-                        await generate_transcription(request, user, model_id, messages)
+                        await generate_transcription(request, user, model, messages)
                     )
                 except TranscriptionCallError as error:
                     if not error.retryable or attempt == len(_RETRY_DELAYS):

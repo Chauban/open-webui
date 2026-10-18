@@ -15,12 +15,12 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 import open_webui.internal.db as internal_db
-from open_webui.config import DEFAULT_EDUCATION_THINKING
+from open_webui.config import DEFAULT_EDUCATION_AI_STEPS
 from open_webui.models.chats import Chat
 from open_webui.models.config import Config
 from open_webui.models.education import AssignmentModelParams, Submission
 from open_webui.services.education.ai_steps import (
-    EducationThinkingPolicy,
+    EducationAiStepPolicy,
     ModelParamsNotAllowed,
     ensure_model_params_allowed,
     resolve_coaching_thinking,
@@ -34,11 +34,11 @@ from open_webui.test.apps.webui.routers.test_education_smoke import (
 
 
 def _policy(control='admin', default='model_default', **steps):
-    return {**DEFAULT_EDUCATION_THINKING, **steps, 'coaching_chat': {'control': control, 'default': default}}
+    return {**DEFAULT_EDUCATION_AI_STEPS, **steps, 'coaching_chat': {'control': control, 'default': default}}
 
 
 def _set_policy(**kwargs):
-    asyncio.run(Config.upsert({'education.thinking': _policy(**kwargs)}))
+    asyncio.run(Config.upsert({'education.ai_steps': _policy(**kwargs)}))
 
 
 def _params(**kwargs):
@@ -61,7 +61,7 @@ def _params(**kwargs):
     ],
 )
 def test_resolve_coaching_thinking(control, params, student_choice, expected):
-    policy = EducationThinkingPolicy.model_validate(_policy(control=control, default='high'))
+    policy = EducationAiStepPolicy.model_validate(_policy(control=control, default='high'))
     # 构造时绕过「学生开关须写明开的档位」的校验，单测解读规则
     resolved = resolve_coaching_thinking(policy, AssignmentModelParams.model_construct(**params), student_choice)
 
@@ -79,7 +79,7 @@ def test_students_switch_needs_an_on_level():
 
 def test_teachers_set_only_what_was_delegated():
     def check(control, **params):
-        ensure_model_params_allowed(_params(**params), EducationThinkingPolicy.model_validate(_policy(control=control)))
+        ensure_model_params_allowed(_params(**params), EducationAiStepPolicy.model_validate(_policy(control=control)))
 
     check('admin')
     with pytest.raises(ModelParamsNotAllowed):
@@ -145,18 +145,38 @@ def test_assignment_api_follows_the_delegation(education_client):
 
 def test_ai_settings_card_shows_what_applies_now(education_client):
     client, teacher, _, _, _, _ = education_client
-    _set_policy(control='teacher', default='medium', first_read='high')
+    _set_policy(control='teacher', default='medium', first_read={'model': None, 'thinking': 'high'})
     _, res = _create_assignment(client, teacher, {'thinking': 'off'})
     assignment_id = res.json()[0]['id']
 
+    client.app.state.MODELS = {'insight-model': {'id': 'insight-model', 'name': 'Insight'}}
+    asyncio.run(
+        Config.upsert(
+            {
+                'education.ai_steps': _policy(
+                    control='teacher',
+                    default='medium',
+                    first_read={'model': None, 'thinking': 'high'},
+                    class_insight={'model': 'insight-model', 'thinking': 'low'},
+                    reader_check={'model': 'gone-model', 'thinking': 'model_default'},
+                )
+            }
+        )
+    )
     card = client.get(f'/api/v1/teacher/assignments/{assignment_id}/ai-settings').json()
     rows = {row['key']: row for row in card['steps']}
     assert rows['coaching_chat'] == {
         'key': 'coaching_chat',
         'model_source': 'student_chat_model',
+        'model_id': None,
+        'model_name': None,
+        'model_available': True,
         'control': 'teacher',
         'thinking': 'off',
     }
+    # 管理员指定的模型连同名称显示;指定的已被删掉时标出,这一步回落到学生选的模型
+    assert (rows['class_insight']['model_name'], rows['class_insight']['model_available']) == ('Insight', True)
+    assert (rows['reader_check']['model_id'], rows['reader_check']['model_available']) == ('gone-model', False)
     assert (rows['first_read']['control'], rows['first_read']['thinking']) == ('admin', 'high')
     assert rows['image_parsing']['thinking'] == 'off'
 

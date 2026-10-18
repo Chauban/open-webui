@@ -2773,13 +2773,15 @@ DEFAULT_EDUCATION_TASK_PROMPTS = {
 
 # 提交前质疑环节的两段措辞。这是与辅导助手相反的另一个角色：辅导助手负责帮，
 # 质疑读者只负责问。两边的口吻绝对不能互相渗透，否则学生分不清 AI 是帮手还是考官。
-# 教学各 AI 步骤的思考档位默认值。只有辅导对话可交给教师;图片识别默认关思考,转录用不上。
-DEFAULT_EDUCATION_THINKING = {
+# 教学各 AI 步骤的模型与思考档位默认值,结构与校验见 services/education/ai_steps.py。
+# model 为空:通读、试读用学生选的模型,班级归纳用老师选的;图片识别为空即不提供图片导入。
+# 只有辅导对话的思考可交给教师;图片识别默认关思考,转录用不上。
+DEFAULT_EDUCATION_AI_STEPS = {
     'coaching_chat': {'control': 'admin', 'default': 'model_default'},
-    'first_read': 'model_default',
-    'reader_check': 'model_default',
-    'image_parsing': 'off',
-    'class_insight': 'model_default',
+    'first_read': {'model': None, 'thinking': 'model_default'},
+    'reader_check': {'model': None, 'thinking': 'model_default'},
+    'image_parsing': {'model': None, 'thinking': 'off'},
+    'class_insight': {'model': None, 'thinking': 'model_default'},
 }
 
 DEFAULT_EDUCATION_CHALLENGE_PROMPTS = {
@@ -3208,10 +3210,8 @@ DEFAULT_CONFIG = {
     # 怎么辅导全写在任务说明里——哈工深只用一份提示词,所以关。
     'education.enable_coaching_styles': True,
     'education.challenge_prompts': DEFAULT_EDUCATION_CHALLENGE_PROMPTS,
-    # 作业写作区「导入图片」用的识图模型(模型 id)。空=没选,学生端不提供图片导入。
-    'education.draft_image_model': '',
-    # 教学各 AI 步骤的思考档位,结构与校验见 services/education/ai_steps.py。
-    'education.thinking': DEFAULT_EDUCATION_THINKING,
+    # 教学各 AI 步骤的模型与思考档位(含作业写作区「导入图片」用的识图模型)。
+    'education.ai_steps': DEFAULT_EDUCATION_AI_STEPS,
 }
 
 

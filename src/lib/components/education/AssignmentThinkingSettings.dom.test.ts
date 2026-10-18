@@ -43,21 +43,30 @@ test('管理员允许时老师可以把思考交给学生开关', () => {
 });
 
 test('AI 设置卡按后端算出的生效值逐步骤列出', async () => {
+	const view = (key, model_source, control, thinking, model = {}) => ({
+		key,
+		model_source,
+		model_id: null,
+		model_name: null,
+		model_available: true,
+		control,
+		thinking,
+		...model
+	});
 	getTeacherAssignmentAiSettings.mockResolvedValue({
 		steps: [
-			{
-				key: 'coaching_chat',
-				model_source: 'student_chat_model',
-				control: 'student',
-				thinking: 'low'
-			},
-			{
-				key: 'first_read',
-				model_source: 'student_chat_model',
-				control: 'admin',
-				thinking: 'model_default'
-			},
-			{ key: 'image_parsing', model_source: 'draft_image_model', control: 'admin', thinking: 'off' }
+			view('coaching_chat', 'student_chat_model', 'student', 'low'),
+			view('first_read', 'student_chat_model', 'admin', 'model_default'),
+			view('reader_check', 'student_chat_model', 'admin', 'low', {
+				model_id: 'gone-model',
+				model_name: 'gone-model',
+				model_available: false
+			}),
+			view('image_parsing', 'admin_model', 'admin', 'off', {
+				model_id: 'vision-model',
+				model_name: 'Vision'
+			}),
+			view('class_insight', 'teacher_chat_model', 'admin', 'model_default')
 		],
 		coaching_thinking: {
 			control: 'student',
@@ -76,5 +85,16 @@ test('AI 设置卡按后端算出的生效值逐步骤列出', async () => {
 	expect(screen.getByTestId('ai-summary-image_parsing').textContent).toContain('Thinking: Off');
 	expect(screen.getByTestId('ai-summary-first_read').textContent).toContain(
 		'Set by the administrator'
+	);
+	// 模型:没指定的写跟谁的,指定的写名称,指定的被删掉时写明回落
+	expect(screen.getByTestId('ai-summary-first_read').textContent).toContain(
+		'Model the student picked'
+	);
+	expect(screen.getByTestId('ai-summary-image_parsing').textContent).toContain('Vision');
+	expect(screen.getByTestId('ai-summary-reader_check').textContent).toContain(
+		'gone-model is no longer available; using: Model the student picked'
+	);
+	expect(screen.getByTestId('ai-summary-class_insight').textContent).toContain(
+		'Model the teacher picked'
 	);
 });

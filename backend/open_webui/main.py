@@ -140,7 +140,7 @@ from open_webui.models.chats import ChatForm, Chats
 from open_webui.models.folders import Folders
 from open_webui.models.education import Education
 from open_webui.services.education.writing_access import ensure_writing_session_writable
-from open_webui.services.education.ai_steps import get_thinking_policy, resolve_coaching_thinking, thinking_params
+from open_webui.services.education.ai_steps import get_ai_step_policy, resolve_coaching_thinking, thinking_params
 from open_webui.services.education.writing_context import get_folder_writing_session
 from open_webui.utils.thinking import THINKING_LEVEL_PARAM
 from open_webui.models.config import Config
@@ -1120,7 +1120,7 @@ async def chat_completion(
                 form_data = strip_chat_request_overrides(form_data, NO_CHAT_OVERRIDES)
                 writing_assignment = Education.get_assignment_by_id(writing_session.assignment_id)
                 coaching_thinking = resolve_coaching_thinking(
-                    await get_thinking_policy(), writing_assignment.model_params, student_thinking_choice
+                    await get_ai_step_policy(), writing_assignment.model_params, student_thinking_choice
                 )
                 form_data['params'].update(thinking_params(coaching_thinking.level))
                 # 记在回复上给老师看;模型没有思考控制时档位不会发出,如实记成模型默认。
@@ -2271,7 +2271,7 @@ async def get_app_config(request: Request):
         'ui.watermark',
         'education.enable_return',
         'education.enable_coaching_styles',
-        'education.draft_image_model',
+        'education.ai_steps',
     )
 
     return {
@@ -2342,7 +2342,9 @@ async def get_app_config(request: Request):
                     'enable_memories': config.get('memories.enable'),
                     'enable_education_return': config.get('education.enable_return'),
                     'enable_education_coaching_styles': config.get('education.enable_coaching_styles'),
-                    'enable_education_draft_image_import': bool(config.get('education.draft_image_model')),
+                    'enable_education_draft_image_import': bool(
+                        ((config.get('education.ai_steps') or {}).get('image_parsing') or {}).get('model')
+                    ),
                     **(
                         {
                             'enable_onedrive_personal': ENABLE_ONEDRIVE_PERSONAL,

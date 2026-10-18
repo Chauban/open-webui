@@ -24,7 +24,7 @@ export const AI_STEP_TEXT: Record<AiStepKey, { title: string; hint: string; note
 	},
 	image_parsing: {
 		title: 'Draft image parsing',
-		hint: 'Transcribes photos and scanned pages into text.'
+		hint: 'Transcribes photos and scanned pages of a draft into text for the student to check. Pick a model that can read images; a fast model without step-by-step thinking keeps the wait short. Students do not need access to it in chat. Without a model, image import is off.'
 	},
 	class_insight: {
 		title: 'Class argument summary',
@@ -32,10 +32,28 @@ export const AI_STEP_TEXT: Record<AiStepKey, { title: string; hint: string; note
 	}
 };
 
+/** 管理员没给这一步指定模型时用谁的。 */
 export const MODEL_SOURCE_TEXT: Record<AiStepModelSource, string> = {
 	student_chat_model: 'Model the student picked',
-	draft_image_model: 'Draft image parsing model',
-	teacher_chat_model: 'Model the teacher picked'
+	teacher_chat_model: 'Model the teacher picked',
+	admin_model: 'Not set'
+};
+
+/** 管理员表里「不指定」那一项的文字;图片识别不指定就是不提供图片导入。 */
+export const FOLLOW_MODEL_TEXT: Record<AiStepModelSource, string> = {
+	student_chat_model: 'Follow the student’s selected model',
+	teacher_chat_model: 'Follow the teacher’s selected model',
+	admin_model: 'Off (no image import)'
+};
+
+/** 指定的模型已被删掉时,这一步实际怎么办。 */
+export const MISSING_MODEL_TEXT: Record<AiStepModelSource, string> = {
+	student_chat_model:
+		'The chosen model is no longer available; this step uses the student’s model until you pick another one.',
+	teacher_chat_model:
+		'The chosen model is no longer available; this step uses the teacher’s model until you pick another one.',
+	admin_model:
+		'The chosen model is no longer available. Image import will fail until you pick another one.'
 };
 
 export const THINKING_SETTING_TEXT: Record<ThinkingSetting, string> = {

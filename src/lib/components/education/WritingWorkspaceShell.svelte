@@ -823,7 +823,11 @@
 			sourceType: 'external_paste',
 			sourceMessageId: null,
 			text,
-			metadata: { import_kind: info.kind, file_names: info.names.slice(0, 8) }
+			metadata: {
+				import_kind: info.kind,
+				file_names: info.names.slice(0, 8),
+				...(info.modelId ? { model_id: info.modelId } : {})
+			}
 		};
 		const chain = editor.chain().focus();
 		(mode === 'replace' ? chain.selectAll() : chain).insertContent(html).run();

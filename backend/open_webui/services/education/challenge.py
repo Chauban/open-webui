@@ -29,8 +29,12 @@ from open_webui.models.education import (
     RubricCriterion,
     RubricSchema,
 )
-from open_webui.services.education.ai_steps import PlatformStepKey, call_step_model
-from open_webui.utils.models import get_all_models
+from open_webui.services.education.ai_steps import (
+    PlatformStepKey,
+    StepModel,
+    call_step_model,
+    resolve_step_model,
+)
 
 log = logging.getLogger(__name__)
 
@@ -182,21 +186,17 @@ def build_closing_messages(
 
 
 async def generate_completion(
-    request, user, model_id: str, messages: list[dict], step: PlatformStepKey
+    request, user, model: StepModel, messages: list[dict], step: PlatformStepKey
 ) -> str:
     """单次非流式生成。
 
     这是本模块唯一的模型调用出口,测试通过替换它来隔离模型。质疑是核心教学交互,
-    不走 task model 降级,直接用学生写作区当前选的模型;模型可见性与访问控制由
-    generate_chat_completion 自己校验。第一次通读、班级论证归纳也借这个出口,各自写明步骤。
+    不走 task model 降级;用哪个模型由调用方先经 resolve_step_model 按步骤解析(管理员没指定时
+    是学生写作区当前选的模型,访问控制由 generate_chat_completion 校验)。第一次通读、班级论证
+    归纳也借这个出口,各自写明步骤。
     """
 
-    # 模型列表是进程内缓存,进程重启后要等有人请求 /api/models 才会填上;
-    # 聊天接口自己会先补一次,这里同样补,否则会报 Model not found。
-    if not request.app.state.MODELS:
-        await get_all_models(request, user=user)
-
-    response = await call_step_model(request, user, step, model_id, messages)
+    response = await call_step_model(request, user, step, model, messages)
 
     if isinstance(response, JSONResponse):
         raise ChallengeError("Challenge generation failed")
@@ -304,7 +304,7 @@ def parse_turn(raw: str, draft_text: str) -> tuple[str, str]:
 async def generate_turn(
     request,
     user,
-    model_id: str,
+    model: StepModel,
     messages: list[dict],
     draft_text: str,
 ) -> tuple[str, str]:
@@ -315,7 +315,7 @@ async def generate_turn(
 
     last_error: Optional[ChallengeError] = None
     for attempt in range(2):
-        raw = await generate_completion(request, user, model_id, messages, "reader_check")
+        raw = await generate_completion(request, user, model, messages, "reader_check")
         try:
             return parse_turn(raw, draft_text)
         except ChallengeError as error:
@@ -439,6 +439,13 @@ def summarize_post_challenge_revision(
     }
 
 
+async def _reader_check_model(request, user, model_id: Optional[str]) -> StepModel:
+    model = await resolve_step_model(request, user, "reader_check", model_id)
+    if model is None:
+        raise ChallengeError("Choose a model before starting the reader check")
+    return model
+
+
 async def start_challenge(
     request,
     user,
@@ -470,13 +477,14 @@ async def start_challenge(
     if not system_prompt:
         raise ChallengeError("Challenge prompt is not configured")
 
+    model = await _reader_check_model(request, user, model_id)
     focus_keys = list(assignment.challenge_focus_keys or [])
     focus_key = resolve_focus_key(focus_keys, 1)
     followup_comment = resolve_followup_comment(assignment, writing_session, db)
     challenge_text, quoted_span = await generate_turn(
         request,
         user,
-        model_id,
+        model,
         build_turn_messages(
             system_prompt,
             assignment,
@@ -508,6 +516,7 @@ async def start_challenge(
         focus_key,
         challenge_text,
         quoted_span,
+        model.model_id,
         commit=False,
         db=db,
     )
@@ -609,6 +618,7 @@ async def submit_challenge_response(
             challenge_session.id, turn_no, response_text, commit=True, db=db
         )
     turns = Education.get_challenge_turns(challenge_session.id, db=db)
+    model = await _reader_check_model(request, user, model_id)
 
     if turn_no < challenge_session.planned_rounds:
         system_prompt = await get_challenge_prompt("turn")
@@ -625,7 +635,7 @@ async def submit_challenge_response(
         challenge_text, quoted_span = await generate_turn(
             request,
             user,
-            model_id,
+            model,
             build_turn_messages(
                 system_prompt,
                 assignment,
@@ -645,6 +655,7 @@ async def submit_challenge_response(
                 focus_key,
                 challenge_text,
                 quoted_span,
+                model.model_id,
                 commit=True,
                 db=db,
             )
@@ -673,13 +684,17 @@ async def submit_challenge_response(
         raw = await generate_completion(
             request,
             user,
-            model_id,
+            model,
             build_closing_messages(closing_prompt, assignment, turns),
             "reader_check",
         )
         closing = parse_closing(raw, turns)
 
     session = Education.complete_challenge_session(
-        challenge_session.id, closing, commit=True, db=db
+        challenge_session.id,
+        closing,
+        model.model_id if closing_prompt else None,
+        commit=True,
+        db=db,
     )
     return {"session": session, "turn": None, "closing": closing}

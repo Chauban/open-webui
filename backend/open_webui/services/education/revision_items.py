@@ -31,6 +31,7 @@ from sqlalchemy.orm import Session
 from open_webui.models.education import Education, RevisionItemModel
 from open_webui.models.notes import Notes
 from open_webui.services.education import challenge as challenge_service
+from open_webui.services.education.ai_steps import resolve_step_model
 from open_webui.services.education.challenge import (
     ChallengeError,
     _extract_json_object,
@@ -147,7 +148,8 @@ async def ensure_revision_items(
     """
     if session.revision_items_generated_at is not None:
         return "ready", Education.get_revision_items(session.id, db=db)
-    if not model_id:
+    model = await resolve_step_model(request, user, "first_read", model_id)
+    if model is None:
         return "failed", []
 
     if not Education.claim_revision_items(
@@ -168,14 +170,16 @@ async def ensure_revision_items(
         for _ in range(2):
             try:
                 raw = await challenge_service.generate_completion(
-                    request, user, model_id, messages, "first_read"
+                    request, user, model, messages, "first_read"
                 )
                 items = parse_diagnosis(raw, baseline, criteria)
                 break
             except (ChallengeError, RevisionItemsError) as error:
                 log.warning("first read-through failed: %s", error)
         if items is not None:
-            stored = Education.store_revision_items(session.id, baseline, items, db=db)
+            stored = Education.store_revision_items(
+                session.id, baseline, items, model.model_id, db=db
+            )
             if stored is None:
                 # 通读期间初稿被撤回(可能又交了新的一份):占位已随撤回清掉,现在可能是新初稿的通读
                 # 在占着,不能放。
@@ -270,7 +274,8 @@ async def ensure_follow_up(
     deferred_keys = [item.criterion_key for item in items if item.status == "deferred"]
     if not deferred_keys:
         return "ready", None, items
-    if not model_id:
+    model = await resolve_step_model(request, user, "first_read", model_id)
+    if model is None:
         return "failed", None, items
     if not Education.claim_revision_follow_up(
         session.id, REVISION_CLAIM_STALE_SECONDS, db=db
@@ -286,7 +291,7 @@ async def ensure_follow_up(
         for _ in range(2):
             try:
                 raw = await challenge_service.generate_completion(
-                    request, user, model_id, messages, "first_read"
+                    request, user, model, messages, "first_read"
                 )
                 resolved, note, filled = parse_follow_up(raw, current_text, deferred_keys)
             except (ChallengeError, RevisionItemsError) as error:
@@ -296,7 +301,7 @@ async def ensure_follow_up(
                 Education.release_revision_follow_up_claim(session.id, db=db)
                 return "not_ready", note, items
             return "ready", note, Education.apply_revision_follow_up(
-                session.id, filled, db=db
+                session.id, filled, model.model_id, db=db
             )
     except Exception:
         log.exception("follow-up read crashed")
