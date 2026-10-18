@@ -608,11 +608,12 @@
 											<option value="">{$i18n.t('Auto')}</option>
 											<option value="openai">reasoning_effort (OpenAI)</option>
 											<option value="anthropic">thinking.budget_tokens (Anthropic)</option>
-											<option value="qwen">enable_thinking (Qwen / DashScope)</option>
+											<option value="deepseek">DeepSeek</option>
+											<option value="kimi">Kimi (Moonshot)</option>
+											<option value="zhipu">GLM (Zhipu / Z.ai)</option>
+											<option value="doubao">Doubao (Volcengine Ark)</option>
+											<option value="qwen">Qwen (DashScope / Model Studio)</option>
 											<option value="chat_template">chat_template_kwargs (vLLM / SGLang)</option>
-											<option value="thinking_type"
-												>thinking.type (DeepSeek / Volcengine / Zhipu)</option
-											>
 											<option value="openrouter">reasoning (OpenRouter)</option>
 										</select>
 									</div>

@@ -28,9 +28,16 @@ from open_webui.utils.thinking import (
         ('https://api.anthropic.com/v1', {}, 'anthropic'),
         ('https://openrouter.ai/api/v1', {}, 'openrouter'),
         ('https://dashscope.aliyuncs.com/compatible-mode/v1', {}, 'qwen'),
-        ('https://api.deepseek.com/v1', {}, 'thinking_type'),
-        ('https://ark.cn-beijing.volces.com/api/v3', {}, 'thinking_type'),
-        ('https://open.bigmodel.cn/api/paas/v4', {}, 'thinking_type'),
+        ('https://ws-1.cn-beijing.maas.aliyuncs.com/compatible-mode/v1', {}, 'qwen'),
+        ('https://api.deepseek.com', {}, 'deepseek'),
+        ('https://api.moonshot.cn/v1', {}, 'kimi'),
+        ('https://api.moonshot.ai/v1', {}, 'kimi'),
+        ('https://ark.cn-beijing.volces.com/api/v3', {}, 'doubao'),
+        ('https://open.bigmodel.cn/api/paas/v4', {}, 'zhipu'),
+        ('https://api.z.ai/api/paas/v4', {}, 'zhipu'),
+        # 按主机名后缀认,不靠子串:这些都不是对应服务商
+        ('https://notdeepseek.com.example.org/v1', {}, 'openai'),
+        ('https://openai.azure.com/openai/v1', {}, 'openai'),
         ('https://api.openai.com/v1', {}, 'openai'),
         ('http://localhost:8000/v1', {}, 'openai'),
         ('http://localhost:8000/v1', {'thinking_format': 'chat_template'}, 'chat_template'),
@@ -62,17 +69,79 @@ def test_anthropic_format_sets_budget_and_room_for_the_answer():
     }
 
 
-def test_other_formats():
-    assert apply_thinking_level({}, 'off', 'qwen') == {'enable_thinking': False}
-    assert apply_thinking_level({}, 'high', 'qwen') == {
-        'enable_thinking': True,
-        'thinking_budget': THINKING_BUDGET_TOKENS['high'],
+def _levels(thinking_format, model=''):
+    return {
+        level: apply_thinking_level({'model': model} if model else {}, level, thinking_format)
+        for level in ('off', 'low', 'medium', 'high')
     }
+
+
+def test_deepseek_turns_thinking_off_and_maps_three_efforts():
+    """实测:disabled 真的关掉;effort 只有 low / high / max,medium 落到 high。"""
+    assert _levels('deepseek') == {
+        'off': {'thinking': {'type': 'disabled'}},
+        'low': {'thinking': {'type': 'enabled'}, 'reasoning_effort': 'low'},
+        'medium': {'thinking': {'type': 'enabled'}, 'reasoning_effort': 'high'},
+        'high': {'thinking': {'type': 'enabled'}, 'reasoning_effort': 'max'},
+    }
+
+
+def test_kimi_disables_with_thinking_type_and_levels_with_effort():
+    """实测:K2.6 不理 reasoning_effort、只认 thinking.type=disabled;K3 两样都认。不发 enabled。"""
+    assert _levels('kimi') == {
+        'off': {'thinking': {'type': 'disabled'}},
+        'low': {'reasoning_effort': 'low'},
+        'medium': {'reasoning_effort': 'high'},
+        'high': {'reasoning_effort': 'max'},
+    }
+
+
+def test_zhipu_never_disables_always_thinking_models():
+    """实测:GLM-5.3 系列传 disabled 返回 400(code 1210),medium 也报错;关不掉时退到 low。"""
+    for model in ('glm-5.3', 'glm-5.3-flash', 'GLM-5.3-FlashX'):
+        assert _levels('zhipu', model) == {
+            'off': {'model': model, 'thinking': {'type': 'enabled'}, 'reasoning_effort': 'low'},
+            'low': {'model': model, 'thinking': {'type': 'enabled'}, 'reasoning_effort': 'low'},
+            'medium': {'model': model, 'thinking': {'type': 'enabled'}, 'reasoning_effort': 'high'},
+            'high': {'model': model, 'thinking': {'type': 'enabled'}, 'reasoning_effort': 'max'},
+        }
+    # GLM-5.2 可以关,也接受 effort
+    assert apply_thinking_level({'model': 'glm-5.2'}, 'off', 'zhipu') == {
+        'model': 'glm-5.2',
+        'thinking': {'type': 'disabled'},
+    }
+    assert apply_thinking_level({'model': 'glm-5.2'}, 'low', 'zhipu')['reasoning_effort'] == 'low'
+    # 更早的型号只有开 / 关,不发 effort;始终思考的老型号关不掉也没法降档
+    assert apply_thinking_level({'model': 'glm-4.6'}, 'high', 'zhipu') == {
+        'model': 'glm-4.6',
+        'thinking': {'type': 'enabled'},
+    }
+    assert apply_thinking_level({'model': 'glm-4.7'}, 'off', 'zhipu') == {
+        'model': 'glm-4.7',
+        'thinking': {'type': 'enabled'},
+    }
+
+
+def test_doubao_and_qwen_follow_their_docs():
+    assert _levels('doubao') == {
+        'off': {'thinking': {'type': 'disabled'}},
+        'low': {'thinking': {'type': 'enabled'}, 'reasoning_effort': 'low'},
+        'medium': {'thinking': {'type': 'enabled'}, 'reasoning_effort': 'medium'},
+        'high': {'thinking': {'type': 'enabled'}, 'reasoning_effort': 'high'},
+    }
+    assert _levels('qwen') == {
+        'off': {'enable_thinking': False},
+        'low': {'enable_thinking': True, 'thinking_budget': THINKING_BUDGET_TOKENS['low']},
+        'medium': {'enable_thinking': True, 'thinking_budget': THINKING_BUDGET_TOKENS['medium']},
+        # 高档不设预算,用模型上限
+        'high': {'enable_thinking': True},
+    }
+
+
+def test_other_formats():
     assert apply_thinking_level({'chat_template_kwargs': {'x': 1}}, 'off', 'chat_template') == {
         'chat_template_kwargs': {'x': 1, 'enable_thinking': False}
     }
-    assert apply_thinking_level({}, 'low', 'thinking_type') == {'thinking': {'type': 'enabled'}}
-    assert apply_thinking_level({}, 'off', 'thinking_type') == {'thinking': {'type': 'disabled'}}
     assert apply_thinking_level({}, 'medium', 'openrouter') == {'reasoning': {'effort': 'medium'}}
     assert apply_thinking_level({}, 'off', 'openrouter') == {'reasoning': {'enabled': False}}
 

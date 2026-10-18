@@ -67,7 +67,7 @@ Right Write 基于 Open WebUI v0.11.2。前端使用 Svelte 5、SvelteKit 2、Ty
 
 ## AI Steps & Thinking
 
-- 统一思考参数 `thinking_level`（`off / low / medium / high`，不设为模型默认）在 `utils/thinking.py` 按连接翻译：连接设置的「思考格式」（`thinking_format`：`openai` 的 reasoning_effort、Responses 的 reasoning.effort、`anthropic` 的 budget_tokens、`qwen` 的 enable_thinking、`chat_template`、`thinking_type`、`openrouter`），没设时按地址识别。只有模型能力勾了「思考控制」（`capabilities.reasoning`，默认不勾）才翻译，否则丢弃，档位本身不会原样发给服务商。
+- 统一思考参数 `thinking_level`（`off / low / medium / high`，不设为模型默认）在 `utils/thinking.py` 按连接翻译：连接设置的「思考格式」（`thinking_format`：`openai` 的 reasoning_effort、Responses 的 reasoning.effort、`anthropic` 的 budget_tokens、`deepseek`、`kimi`、`zhipu`、`doubao`、`qwen` 的 enable_thinking、`chat_template`、`openrouter`），没设时按主机名后缀识别。各家写法以 2026-10-18 的实测为准，见 [思考档位实测结果](../reference/thinking-params-test-results.md)：GLM-5.3 系列关不掉思考，「关」退到最低档；Kimi 用 `thinking.type=disabled` 关、`reasoning_effort` 分档。只有模型能力勾了「思考控制」（`capabilities.reasoning`，默认不勾）才翻译，否则丢弃，档位本身不会原样发给服务商。
 - `services/education/ai_steps.py` 登记教学的每处模型调用：`coaching_chat`、`first_read`（含补看）、`reader_check`、`image_parsing`、`class_insight`。平台步骤一律经 `call_step_model(step=…)` 发出，测试静态核对教学代码只在这里调用 `generate_chat_completion`，且每处调用写明登记过的步骤；新增调用必须先登记，管理员表与教师 AI 设置卡都按登记生成。
 - `education.ai_steps`：`coaching_chat: {control: admin|teacher|student, default}`，其余平台步骤各 `{model, thinking}`；思考默认全为模型默认，图片识别为关。只有辅导对话可下放；教师设置存 `assignment.model_params`（`{thinking, students_choose_thinking}`，迁移 `b3d5f7a9c1e4`），按此刻的下放方式解读，收回后不再生效。学生只能在允许时关闭当轮，不能调高。
 - 冻结与留痕：`stats_json.coaching.thinking` 冻存提交时的 `{control, level, source, students_choose}`；作业对话的每条回复在 `meta.thinking_level` 记实际发出的档位。
