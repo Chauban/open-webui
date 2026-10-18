@@ -14,7 +14,7 @@
 		getTeacherClassrooms,
 		getTeacherReflectionQuestionSets
 	} from '$lib/apis/education';
-	import type { ReflectionQuestionSet } from '$lib/apis/education';
+	import type { ReflectionQuestionSet, ThinkingControl, ThinkingSetting } from '$lib/apis/education';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import AssignmentForm from '$lib/components/education/AssignmentForm.svelte';
 	import EduButton from '$lib/components/education/EduButton.svelte';
@@ -26,6 +26,7 @@
 	} from '$lib/utils/reflection-questions';
 	import {
 		buildAssignmentPayload,
+		draftThinkingFrom,
 		getDefaultRubricCriteria,
 		rubricTotal,
 		type AssignmentDraft,
@@ -52,8 +53,11 @@
 		challengeRounds: 3,
 		challengeFocusKeys: [],
 		reflectionQuestions: [],
-		rubricCriteria: getDefaultRubricCriteria(undefined, 'from_scratch', t)
+		rubricCriteria: getDefaultRubricCriteria(undefined, 'from_scratch', t),
+		...draftThinkingFrom(null)
 	};
+	// 管理员对辅导对话思考档位的下放方式;仅管理员时表单不显示思考设置。
+	let thinkingPolicy: { control: ThinkingControl; default: ThinkingSetting } | null = null;
 	// 管理员按作业形式设的默认评分维度;切换作业形式时,维度还是原形式的默认、没动过就跟着换。
 	let rubricDefaults: DefaultRubrics = {};
 	let loading = true;
@@ -76,6 +80,7 @@
 			draft.coachingStyle = assignmentDefaults.coaching_style;
 			draft.taskMode = assignmentDefaults.task_mode;
 			rubricDefaults = assignmentDefaults.rubrics ?? {};
+			thinkingPolicy = assignmentDefaults.thinking;
 			draft.rubricCriteria = getDefaultRubricCriteria(rubricDefaults, draft.taskMode, t);
 			draft.scoreMax = rubricTotal(draft.rubricCriteria);
 			reflectionQuestionSets = questionSets;
@@ -126,7 +131,8 @@
 							key: criterion.key,
 							label: criterion.label,
 							maxScore: String(criterion.max_score)
-						}))
+						})),
+						...draftThinkingFrom(source.assignment.model_params)
 					};
 					reflectionNotice = t('Copied the reflection questions from "{{title}}".', {
 						title: source.assignment.title
@@ -174,7 +180,7 @@
 			toast.error(t('Classroom is required.'));
 			return;
 		}
-		const { payload, error } = buildAssignmentPayload(draft, t);
+		const { payload, error } = buildAssignmentPayload(draft, t, thinkingPolicy?.control);
 		if (error) {
 			toast.error(error);
 			return;
@@ -220,6 +226,7 @@
 				{reflectionQuestionSets}
 				{reflectionNotice}
 				{rubricDefaults}
+				{thinkingPolicy}
 			>
 				<div
 					slot="footer"

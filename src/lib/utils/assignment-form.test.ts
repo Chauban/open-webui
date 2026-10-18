@@ -25,6 +25,8 @@ const draft = (overrides: Partial<AssignmentDraft> = {}): AssignmentDraft => ({
 		{ key: 'criterion_1', label: 'Ideas', maxScore: '6' },
 		{ key: 'criterion_2', label: 'Structure', maxScore: '4' }
 	],
+	thinking: null,
+	studentsChooseThinking: false,
 	...overrides
 });
 
@@ -89,5 +91,32 @@ describe('getDefaultRubricCriteria', () => {
 		]);
 		expect(rubricTotal(criteria)).toBe('25');
 		expect(isSameRubric(criteria, getDefaultRubricCriteria(undefined, 'revise_draft', t))).toBe(false);
+	});
+});
+
+describe('buildAssignmentPayload thinking', () => {
+	it('sends no model params while the admin keeps thinking', () => {
+		const { payload } = buildAssignmentPayload(draft({ thinking: 'off' }), t);
+		expect(payload).not.toHaveProperty('model_params');
+	});
+
+	it('sends the teacher setting once delegated, without a student switch', () => {
+		const { payload } = buildAssignmentPayload(
+			draft({ thinking: 'off', studentsChooseThinking: true }),
+			t,
+			'teacher'
+		);
+		expect(payload?.model_params).toEqual({ thinking: 'off', students_choose_thinking: false });
+	});
+
+	it('needs an on level before students may switch thinking off', () => {
+		const choose = (thinking) =>
+			buildAssignmentPayload(draft({ thinking, studentsChooseThinking: true }), t, 'student');
+		expect(choose(null).error).toBe('Pick the thinking level students switch on.');
+		expect(choose('off').error).toBe('Pick the thinking level students switch on.');
+		expect(choose('low').payload?.model_params).toEqual({
+			thinking: 'low',
+			students_choose_thinking: true
+		});
 	});
 });

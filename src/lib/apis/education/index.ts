@@ -206,6 +206,24 @@ export type AiStep = {
 	model_source: AiStepModelSource;
 	teacher_controllable: boolean;
 };
+/** 教师按作业设的辅导对话参数;thinking 为 null 沿用管理员默认。 */
+export type AssignmentModelParams = {
+	thinking: ThinkingSetting | null;
+	students_choose_thinking: boolean;
+};
+/** 一次辅导对话实际用的思考档位与来源(admin 管理员默认 / teacher 作业设定 / student 学生关掉)。 */
+export type CoachingThinking = {
+	control: ThinkingControl;
+	level: ThinkingSetting;
+	source: 'admin' | 'teacher' | 'student';
+	students_choose: boolean;
+};
+export type AiStepThinking = {
+	key: AiStepKey;
+	model_source: AiStepModelSource;
+	control: ThinkingControl;
+	thinking: ThinkingSetting;
+};
 export type ThinkingPolicy = {
 	coaching_chat: { control: ThinkingControl; default: ThinkingSetting };
 	first_read: ThinkingSetting;
@@ -231,6 +249,7 @@ export const createAssignment = async (
 		rubric_schema: {
 			criteria: Array<{ key: string; label: string; max_score: number }>;
 		};
+		model_params?: AssignmentModelParams;
 	}
 ) => {
 	return fetch(`${WEBUI_API_BASE_URL}/assignments`, {
@@ -256,8 +275,20 @@ export const getTeacherAssignmentDefaults = async (
 	coaching_style: CoachingStyle;
 	task_mode: TaskMode;
 	rubrics: Record<TaskMode, Array<{ label: string; max_score: number }>>;
+	thinking: { control: ThinkingControl; default: ThinkingSetting };
 }> => {
 	return fetch(`${WEBUI_API_BASE_URL}/teacher/assignment-defaults`, {
+		method: 'GET',
+		headers: withAuth(token)
+	}).then(handleJson);
+};
+
+/** 作业页「AI 设置」卡:各步骤此刻对本作业生效的思考档位与来源。 */
+export const getTeacherAssignmentAiSettings = async (
+	token: string,
+	assignmentId: string
+): Promise<{ steps: AiStepThinking[]; coaching_thinking: CoachingThinking }> => {
+	return fetch(`${WEBUI_API_BASE_URL}/teacher/assignments/${assignmentId}/ai-settings`, {
 		method: 'GET',
 		headers: withAuth(token)
 	}).then(handleJson);
@@ -345,6 +376,7 @@ export const updateAssignment = async (
 		rubric_schema?: {
 			criteria: Array<{ key: string; label: string; max_score: number }>;
 		};
+		model_params?: AssignmentModelParams;
 	}
 ) => {
 	return fetch(`${WEBUI_API_BASE_URL}/assignments/${assignmentId}`, {

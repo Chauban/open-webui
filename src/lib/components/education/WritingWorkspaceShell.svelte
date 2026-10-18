@@ -7,7 +7,7 @@
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
-	import { config, selectedFolder } from '$lib/stores';
+	import { config, models, selectedFolder } from '$lib/stores';
 
 	import RichTextInput from '$lib/components/common/RichTextInput.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
@@ -27,6 +27,7 @@
 	import RevisionList from '$lib/components/education/RevisionList.svelte';
 	import FirstReadProgress from '$lib/components/education/FirstReadProgress.svelte';
 	import FollowUpBar from '$lib/components/education/FollowUpBar.svelte';
+	import ThinkingSwitch from '$lib/components/education/ThinkingSwitch.svelte';
 	import EduActionMenu from '$lib/components/education/EduActionMenu.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { refreshChatList, refreshFolderChatLists } from '$lib/stores/chatList';
@@ -94,6 +95,9 @@
 	let showChallenge = false;
 	let challengeDetail = null;
 	let selectedModelId = '';
+	// 老师允许时学生可以把辅导对话的思考关掉;只在所选模型支持思考控制时出现,否则开关没有效果。
+	let canSwitchThinking = false;
+	let thinkingOn = true;
 	let isSubmitted = false;
 	let titleSaving = false;
 	let isPastDue = false;
@@ -152,6 +156,15 @@
 	// 已批改即定稿:只有老师退回(review_status 变回 returned)才重新解锁。
 	$: isGraded = review?.review_status === 'reviewed';
 	$: isReadOnly = isAssignment ? isPastDue || isGraded : false;
+	// capabilities 在 Model 类型里是 object,运行时是各项能力的开关表,按宽类型读。
+	$: selectedModelThinks = Boolean(
+		(
+			($models ?? []).find((model) => model.id === selectedModelId)?.info?.meta?.capabilities as
+				| { reasoning?: boolean }
+				| undefined
+		)?.reasoning
+	);
+	$: showThinkingSwitch = isAssignment && canSwitchThinking && selectedModelThinks && !isReadOnly;
 	// 修订初稿作业:还没交初稿时只显示初稿步骤,编辑器、左侧对话和提交都锁着(后端同样拒绝)。
 	$: needsDraftBaseline =
 		isAssignment &&
@@ -1006,6 +1019,7 @@
 			assignment = workspace.assignment ?? null;
 			review = workspace.review ?? null;
 			effectiveDueAt = workspace.effective_due_at ?? null;
+			canSwitchThinking = workspace.can_switch_thinking ?? false;
 			writingSession = workspace.writing_session;
 			void refreshProcessSummary();
 			workspaceProject = workspace.project;
@@ -1123,12 +1137,18 @@
 		disableContextActions={false}
 		allowAssignmentWorkspaceChat={isAssignment}
 		lockModelOverrides={isAssignment}
+		extraRequestParams={showThinkingSwitch && !thinkingOn ? { thinking_level: 'off' } : {}}
 		showRightPanel={!narrowLayout}
 		rightPanelWidth={defaultPanelWidth}
 		rightPanelMinWidth={560}
 		rightPanelMaxWidth={null}
 		rightPanelClassName="hidden lg:flex"
 	>
+		<svelte:fragment slot="input-accessory">
+			{#if showThinkingSwitch}
+				<ThinkingSwitch bind:on={thinkingOn} />
+			{/if}
+		</svelte:fragment>
 		<div
 			slot="right-panel"
 			class="h-full w-full flex-col border-l border-gray-200 dark:border-gray-800 bg-stone-50 dark:bg-gray-900 lg:flex"

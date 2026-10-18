@@ -154,6 +154,9 @@
 	export let disableContextActions = false;
 	export let allowAssignmentWorkspaceChat = false;
 	export let lockModelOverrides = false;
+	// RightWrite: 写作区额外附在请求参数里的值(作业里学生关掉思考时的 thinking_level)。
+	// 服务端只认它允许的那几个,见 main.py 的作业写作分支。
+	export let extraRequestParams: Record<string, unknown> = {};
 	export let projectBaseUrl = '';
 	export let showRightPanel = false;
 	export let rightPanelWidth = 480;
@@ -3686,6 +3689,7 @@
 				params: {
 					...$settings?.params,
 					...params,
+					...extraRequestParams,
 					stop: getStopTokens()
 				},
 
@@ -4588,6 +4592,7 @@
 									id={embedded ? messageInputDropzoneId : undefined}
 									class=" pb-2 {dragged ? 'z-0' : 'z-10'}"
 								>
+									<slot name="input-accessory" />
 									<MessageInput
 										bind:this={messageInput}
 										{history}
@@ -4680,6 +4685,7 @@
 									</div>
 								{/if}
 								<div id={embedded ? messageInputDropzoneId : undefined} class="pb-2 z-10">
+									<slot name="input-accessory" />
 									<MessageInput
 										bind:this={messageInput}
 										{history}

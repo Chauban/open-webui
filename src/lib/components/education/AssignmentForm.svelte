@@ -6,7 +6,12 @@
 
 	import { config } from '$lib/stores';
 
-	import type { ReflectionQuestionSet, TaskMode } from '$lib/apis/education';
+	import type {
+		ReflectionQuestionSet,
+		TaskMode,
+		ThinkingControl,
+		ThinkingSetting
+	} from '$lib/apis/education';
 	import {
 		getDefaultRubricCriteria,
 		isSameRubric,
@@ -21,6 +26,8 @@
 	import RubricCriteriaEditor from './RubricCriteriaEditor.svelte';
 	import CoachingStyleSelector from './CoachingStyleSelector.svelte';
 	import ChallengeSettings from './ChallengeSettings.svelte';
+	import AssignmentThinkingSettings from './AssignmentThinkingSettings.svelte';
+	import { THINKING_SETTING_TEXT } from '$lib/utils/ai-steps';
 	import ReflectionQuestionsEditor from './ReflectionQuestionsEditor.svelte';
 	import { EDU_FIELD_CLASS, eduSegmentClass } from './styles';
 
@@ -44,19 +51,25 @@
 	export let taskModeLocked = false;
 	/** 只有新建作业传:管理员按作业形式设的默认评分维度。作业设置页不传,改形式不碰已有维度。 */
 	export let rubricDefaults: DefaultRubrics | null = null;
+	/** 管理员对辅导对话思考档位的下放方式与默认;仅管理员时表单不显示思考设置。 */
+	export let thinkingPolicy: { control: ThinkingControl; default: ThinkingSetting } | null = null;
 
 	const i18n = getContext<Writable<i18nType>>('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
 
 	// 管理员可以关掉辅导风格(怎么辅导全写在任务说明里),这时表单不出现档位。
 	$: coachingEnabled = $config?.features?.enable_education_coaching_styles ?? true;
-	// 修订初稿作业没有试读，第 3 节标题里就不提「试读」;档位也关了时这一节没东西可设，整节不出现。
-	$: aiSectionLabel = !coachingEnabled
-		? 'AI Reader Check'
-		: draft.taskMode === 'revise_draft'
-			? 'AI Coaching'
-			: 'AI Coaching & Reader Check';
-	$: showAiSection = coachingEnabled || draft.taskMode !== 'revise_draft';
+	// 修订初稿作业没有试读，第 3 节标题里就不提「试读」;档位关了、思考也没下放时这一节没东西可设，整节不出现。
+	$: thinkingDelegated = !!thinkingPolicy && thinkingPolicy.control !== 'admin';
+	$: hasCoachingSettings = coachingEnabled || thinkingDelegated;
+	$: hasReaderCheck = draft.taskMode !== 'revise_draft';
+	$: aiSectionLabel =
+		hasCoachingSettings && hasReaderCheck
+			? 'AI Coaching & Reader Check'
+			: hasCoachingSettings
+				? 'AI Coaching'
+				: 'AI Reader Check';
+	$: showAiSection = hasCoachingSettings || hasReaderCheck;
 	$: SECTIONS = [
 		{ id: 'assignment-basics', label: 'Basics' },
 		{ id: 'assignment-scoring', label: 'Scoring' },
@@ -87,6 +100,9 @@
 	$: taskModeHint = TASK_MODES.find((mode) => mode.key === draft.taskMode)?.hint ?? '';
 	$: aiSummary = [
 		...(coachingEnabled ? [t(COACHING_TITLES[draft.coachingStyle])] : []),
+		...(thinkingDelegated && draft.thinking
+			? [t('Thinking: {{level}}', { level: t(THINKING_SETTING_TEXT[draft.thinking]) })]
+			: []),
 		...(isReviseDraft
 			? []
 			: [
@@ -301,6 +317,14 @@
 					<div class="mt-4 grid gap-4" class:hidden={!aiOpen}>
 						{#if coachingEnabled}
 							<CoachingStyleSelector bind:value={draft.coachingStyle} />
+						{/if}
+						{#if thinkingDelegated && thinkingPolicy}
+							<AssignmentThinkingSettings
+								control={thinkingPolicy.control}
+								adminDefault={thinkingPolicy.default}
+								bind:value={draft.thinking}
+								bind:studentsChoose={draft.studentsChooseThinking}
+							/>
 						{/if}
 						{#if !isReviseDraft}
 							<ChallengeSettings

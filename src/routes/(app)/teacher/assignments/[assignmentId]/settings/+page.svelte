@@ -10,11 +10,17 @@
 	import {
 		deleteAssignment,
 		getTeacherAssignment,
+		getTeacherAssignmentDefaults,
 		getTeacherClassrooms,
 		getTeacherReflectionQuestionSets,
 		updateAssignment
 	} from '$lib/apis/education';
-	import type { ReflectionQuestionSet } from '$lib/apis/education';
+	import type {
+		ReflectionQuestionSet,
+		ThinkingControl,
+		ThinkingSetting
+	} from '$lib/apis/education';
+	import AssignmentAiSummary from '$lib/components/education/AssignmentAiSummary.svelte';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import AssignmentForm from '$lib/components/education/AssignmentForm.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
@@ -22,7 +28,11 @@
 	import EduCard from '$lib/components/education/EduCard.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 	import { assignmentTabs } from '$lib/components/education/teacher-nav';
-	import { buildAssignmentPayload, type AssignmentDraft } from '$lib/utils/assignment-form';
+	import {
+		buildAssignmentPayload,
+		draftThinkingFrom,
+		type AssignmentDraft
+	} from '$lib/utils/assignment-form';
 	import { resolveErrorMessage, toLocalDateTimeInput } from '$lib/utils/education';
 
 	const i18n = getContext<Writable<i18nType>>('i18n');
@@ -39,6 +49,9 @@
 	let loadError = '';
 	let saving = false;
 	let showDeleteConfirm = false;
+	let thinkingPolicy: { control: ThinkingControl; default: ThinkingSetting } | null = null;
+	// 保存后让 AI 设置卡重新读取生效值。
+	let aiSummaryVersion = 0;
 
 	$: hasSubmissions = (item?.submission_count ?? 0) > 0;
 
@@ -63,19 +76,24 @@
 				key: criterion.key,
 				label: criterion.label,
 				maxScore: String(criterion.max_score)
-			}))
+			})),
+			...draftThinkingFrom(assignment.model_params)
 		};
 	};
 
 	const loadData = async () => {
-		const [assignmentItem, teacherClassrooms, questionSets] = await Promise.all([
-			getTeacherAssignment(localStorage.token, assignmentId),
-			getTeacherClassrooms(localStorage.token),
-			getTeacherReflectionQuestionSets(localStorage.token).catch((error) => {
-				console.error(error);
-				return [];
-			})
-		]);
+		const [assignmentItem, teacherClassrooms, questionSets, assignmentDefaults] = await Promise.all(
+			[
+				getTeacherAssignment(localStorage.token, assignmentId),
+				getTeacherClassrooms(localStorage.token),
+				getTeacherReflectionQuestionSets(localStorage.token).catch((error) => {
+					console.error(error);
+					return [];
+				}),
+				getTeacherAssignmentDefaults(localStorage.token)
+			]
+		);
+		thinkingPolicy = assignmentDefaults.thinking;
 		classrooms = teacherClassrooms;
 		reflectionQuestionSets = questionSets;
 		item = assignmentItem;
@@ -87,7 +105,7 @@
 			toast.error(t('Classroom is required.'));
 			return;
 		}
-		const { payload, error } = buildAssignmentPayload(draft, t);
+		const { payload, error } = buildAssignmentPayload(draft, t, thinkingPolicy?.control);
 		if (error) {
 			toast.error(error);
 			return;
@@ -99,6 +117,7 @@
 				classroom_id: classroomId
 			});
 			await loadData();
+			aiSummaryVersion += 1;
 			toast.success(t('Assignment updated.'));
 		} catch (error) {
 			toast.error(resolveErrorMessage(error, t));
@@ -140,6 +159,9 @@
 		{:else if loadError}
 			<EduStateCard tone="error">{loadError}</EduStateCard>
 		{:else if draft}
+			{#key aiSummaryVersion}
+				<AssignmentAiSummary {assignmentId} />
+			{/key}
 			<AssignmentForm
 				bind:draft
 				bind:classroomId
@@ -148,6 +170,7 @@
 				taskModeLocked={item?.task_mode_locked ?? false}
 				{reflectionQuestionSets}
 				currentAssignmentId={assignmentId}
+				{thinkingPolicy}
 			>
 				<svelte:fragment slot="footer">
 					<div

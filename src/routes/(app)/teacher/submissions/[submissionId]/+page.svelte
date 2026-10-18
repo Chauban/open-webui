@@ -46,6 +46,7 @@
 	import EduButton from '$lib/components/education/EduButton.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 	import EduDateTimeField from '$lib/components/education/EduDateTimeField.svelte';
+	import { THINKING_SETTING_TEXT } from '$lib/utils/ai-steps';
 
 	const i18n = getContext<Writable<i18nType>>('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
@@ -196,6 +197,14 @@
 		{ socratic: 'Socratic', balanced: 'Balanced', hands_off: 'Hands-off' }[
 			roundCoaching?.style
 		] ?? null;
+	// 本轮辅导对话的思考档位(提交时冻存)。学生可开关时每条回复另记实际档位,时间线上逐条标出。
+	$: roundThinking = roundCoaching?.thinking ?? null;
+	$: showReplyThinking = Boolean(roundThinking?.students_choose);
+	const THINKING_SOURCE_TEXT = {
+		admin: 'Administrator default',
+		teacher: 'Set for this assignment',
+		student: 'Switched off by the student'
+	};
 	$: segmentCharStats = (() => {
 		if (!analysisHighlights.length) return null;
 		let typed = 0, aiInserted = 0, aiPasted = 0, externalPaste = 0, unknown = 0, declaredDraft = 0;
@@ -262,6 +271,7 @@
 			meta: item.auto_started
 				? t('Sent automatically by the platform')
 				: getTimelineRoleLabel(item.role),
+			thinking_level: item.thinking_level ?? null,
 			created_at: item.created_at,
 			inserted_length: null
 		}))
@@ -1313,7 +1323,10 @@
 														: 'border-gray-300 dark:border-gray-700'}">
 													<div class="mb-1 flex items-center justify-between gap-2 text-[10px]">
 														<span class="font-semibold {isUser ? 'text-blue-500' : isAI ? 'text-purple-500' : 'text-gray-400'}">
-															{item.kind === 'prompt' ? item.meta : (item.meta ?? item.kind)}
+															{item.kind === 'prompt' ? item.meta : (item.meta ?? item.kind)}{#if isAI && showReplyThinking && item.thinking_level}
+																· {$i18n.t('Thinking: {{level}}', {
+																	level: $i18n.t(THINKING_SETTING_TEXT[item.thinking_level])
+																})}{/if}
 														</span>
 														{#if item.created_at}
 															<span class="text-gray-400 tabular-nums">
@@ -1428,6 +1441,30 @@
 										{/if}
 										<div class="mt-2 text-[11px] text-gray-400">
 											{$i18n.t('Frozen at submission time; later edits to this style do not change it.')}
+										</div>
+									</div>
+								{/if}
+
+								<!-- Coaching-chat thinking in force for this round, frozen at submission time -->
+								{#if roundThinking}
+									<div class="rounded-2xl bg-gray-50 dark:bg-gray-800 px-4 py-4" data-testid="round-thinking">
+										<div class="mb-2 text-[11px] text-gray-400">
+											{$i18n.t('AI thinking in the coaching chat')}
+										</div>
+										<div class="flex flex-wrap items-center gap-2">
+											<span class="rounded-full border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-3 py-1 text-xs text-gray-700 dark:text-gray-300">
+												{$i18n.t(THINKING_SETTING_TEXT[roundThinking.level])}
+											</span>
+											<span class="text-xs text-gray-400">
+												{$i18n.t(THINKING_SOURCE_TEXT[roundThinking.source])}
+											</span>
+										</div>
+										<div class="mt-2 text-[11px] text-gray-400">
+											{roundThinking.students_choose
+												? $i18n.t(
+														'Students could switch thinking off; each reply in the timeline shows what it used.'
+													)
+												: $i18n.t('Frozen at submission time; later setting changes do not change it.')}
 										</div>
 									</div>
 								{/if}

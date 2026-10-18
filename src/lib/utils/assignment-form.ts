@@ -1,4 +1,11 @@
-import type { CoachingStyle, ReflectionQuestion, TaskMode } from '$lib/apis/education';
+import type {
+	AssignmentModelParams,
+	CoachingStyle,
+	ReflectionQuestion,
+	TaskMode,
+	ThinkingControl,
+	ThinkingSetting
+} from '$lib/apis/education';
 import {
 	getReflectionQuestionsError,
 	normalizeReflectionQuestions
@@ -20,7 +27,15 @@ export type AssignmentDraft = {
 	challengeFocusKeys: string[];
 	reflectionQuestions: ReflectionQuestion[];
 	rubricCriteria: RubricCriterionDraft[];
+	/** 辅导对话的思考档位;null 沿用管理员默认。只在管理员下放后可设。 */
+	thinking: ThinkingSetting | null;
+	studentsChooseThinking: boolean;
 };
+
+export const draftThinkingFrom = (params?: AssignmentModelParams | null) => ({
+	thinking: params?.thinking ?? null,
+	studentsChooseThinking: params?.students_choose_thinking ?? false
+});
 
 export type AssignmentPayload = {
 	title: string;
@@ -34,14 +49,20 @@ export type AssignmentPayload = {
 	challenge_focus_keys: string[];
 	reflection_questions: ReflectionQuestion[];
 	rubric_schema: { criteria: Array<{ key: string; label: string; max_score: number }> };
+	model_params?: AssignmentModelParams;
 };
 
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 
-/** 校验通过返回提交体;不通过返回已翻译的第一条错误。班级由调用方单独校验(新建多选、编辑单选)。 */
+/**
+ * 校验通过返回提交体;不通过返回已翻译的第一条错误。班级由调用方单独校验(新建多选、编辑单选)。
+ * thinkingControl 是管理员对辅导对话思考档位的下放方式:仅管理员时不提交 model_params,
+ * 作业里原有的设置留着但后端不再采用;下放给教师时不能交给学生开关(后端同样拒绝)。
+ */
 export const buildAssignmentPayload = (
 	draft: AssignmentDraft,
-	t: Translate
+	t: Translate,
+	thinkingControl: ThinkingControl = 'admin'
 ): { payload: AssignmentPayload; error?: undefined } | { payload?: undefined; error: string } => {
 	if (!draft.title.trim()) return { error: t('Assignment title is required.') };
 	if (!draft.dueAt) return { error: t('Assignment due time is required.') };
@@ -74,6 +95,11 @@ export const buildAssignmentPayload = (
 	const reflectionError = getReflectionQuestionsError(reflectionQuestions);
 	if (reflectionError) return { error: t(reflectionError.key, reflectionError.params) };
 
+	const studentsChooseThinking = thinkingControl === 'student' && draft.studentsChooseThinking;
+	if (studentsChooseThinking && (draft.thinking === null || draft.thinking === 'off')) {
+		return { error: t('Pick the thinking level students switch on.') };
+	}
+
 	return {
 		payload: {
 			title: draft.title.trim(),
@@ -86,7 +112,15 @@ export const buildAssignmentPayload = (
 			challenge_rounds: draft.challengeRounds,
 			challenge_focus_keys: challengeEnabled ? draft.challengeFocusKeys : [],
 			reflection_questions: reflectionQuestions,
-			rubric_schema: { criteria }
+			rubric_schema: { criteria },
+			...(thinkingControl === 'admin'
+				? {}
+				: {
+						model_params: {
+							thinking: draft.thinking,
+							students_choose_thinking: studentsChooseThinking
+						}
+					})
 		}
 	};
 };
