@@ -40,6 +40,13 @@ from open_webui.models.groups import Groups
 from open_webui.models.models import Models
 from open_webui.models.users import UserModel
 from open_webui.utils.access_control import check_model_access, has_connection_access, has_permission
+from open_webui.utils.thinking import (
+    THINKING_LEVEL_PARAM,
+    THINKING_LEVELS,
+    apply_thinking_level,
+    detect_thinking_format,
+    model_supports_thinking_control,
+)
 from open_webui.utils.access_control.chat import (
     ensure_raw_passthrough_allowed,
     get_chat_overrides,
@@ -1549,6 +1556,18 @@ async def generate_chat_completion(
 
     prefix_id = api_config.get('prefix_id', None)
     payload['model'] = strip_provider_model_prefix(payload['model'], prefix_id)
+
+    # 统一思考档位按连接换成服务商字段;模型没勾「思考控制」就丢掉,不原样发出去。
+    thinking_level = payload.pop(THINKING_LEVEL_PARAM, None)
+    if thinking_level is not None and thinking_level not in THINKING_LEVELS:
+        raise HTTPException(status_code=400, detail=f'Invalid {THINKING_LEVEL_PARAM}: {thinking_level}')
+    if thinking_level and model_supports_thinking_control(model_info):
+        payload = apply_thinking_level(
+            payload,
+            thinking_level,
+            detect_thinking_format(url, api_config),
+            responses_api=api_config.get('api_type') == 'responses',
+        )
 
     # Add user info to the payload if the model is a pipeline
     if 'pipeline' in model and model.get('pipeline'):
