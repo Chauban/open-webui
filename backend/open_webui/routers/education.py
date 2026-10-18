@@ -158,6 +158,17 @@ from open_webui.services.education.writing_access import (
     load_submission_rounds_with_reviews as _load_submission_rounds_with_reviews,
     resolve_effective_due_at as _resolve_effective_due_at,
 )
+from open_webui.services.education.draft_import import (
+    DRAFT_IMAGE_MAX_BYTES,
+    DRAFT_IMAGE_MAX_COUNT,
+    DRAFT_IMAGE_TOTAL_MAX_BYTES,
+    DraftImageError,
+    DraftImageModelBusyError,
+    DraftImageModelError,
+    prepare_draft_images,
+    resolve_draft_image_model,
+    transcribe_draft_images,
+)
 from open_webui.services.education.writing_context import (
     DRAFT_FILE_MAX_BYTES,
     DraftFileError,
@@ -2624,17 +2635,37 @@ def _ensure_draft_baseline_open(session: WritingSessionModel, db: Session) -> No
         )
 
 
-@router.post("/writing-sessions/{session_id}/draft-baseline/extract")
-async def extract_draft_baseline_file(
+def _ensure_text_import_open(user, session: WritingSessionModel, db: Session) -> None:
+    """导入文件/图片:只给作业的学生本人,且只在能往正文里放东西的时候。
+
+    修订初稿作业在交初稿之前(导入结果填进初稿框);从零写作作业在还能改稿时
+    (导入结果插进编辑器)。管理员也不能代导入:图片导入要调模型,只算学生自己的。
+    """
+    if session.owner_user_id != user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    if session.scope != "assignment":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid writing scope"
+        )
+    assignment = _get_assignment_or_404(session.assignment_id, db)
+    if assignment.task_mode == "revise_draft":
+        _ensure_draft_baseline_open(session, db)
+    else:
+        ensure_writing_session_writable(session, db)
+
+
+@router.post("/writing-sessions/{session_id}/import/document")
+async def extract_import_document(
     file: UploadFile = File(...),
+    user=Depends(get_verified_user),
     session: WritingSessionModel = Depends(require_owned_writing_session),
     db: Session = Depends(get_session),
 ):
-    """把学生上传的初稿文件解析成纯文本,填回初稿框让学生核对后再确认。
+    """把学生上传的 Word/文本文件解析成纯文本,交给前端让学生核对后再用。
 
-    只解析不保存:不落盘、不进文件库,也不冻结基线。
+    只解析不保存:不落盘、不进文件库,也不冻结基线、不改正文。
     """
-    _ensure_draft_baseline_open(session, db)
+    _ensure_text_import_open(user, session, db)
     # 多读 1 字节,超限时不必把整个大文件读进内存。
     data = await file.read(DRAFT_FILE_MAX_BYTES + 1)
     try:
@@ -2644,6 +2675,68 @@ async def extract_draft_baseline_file(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(err)
         ) from err
     return {"text": text}
+
+
+@router.post("/writing-sessions/{session_id}/import/images")
+async def extract_import_images(
+    request: Request,
+    files: list[UploadFile] = File(...),
+    user=Depends(get_verified_user),
+    session: WritingSessionModel = Depends(require_owned_writing_session),
+    db: Session = Depends(get_session),
+):
+    """把学生拍的初稿照片交给管理员选定的识图模型转录成纯文本,同样只返回给学生核对。
+
+    text 是按上传顺序拼好的全文;pages 是逐张的结果(没有正文的那张为空串),
+    浏览器读扫描版 PDF 时按它把各页插回原位。一次转录要十几秒到一分钟,同步做完再返回。
+    """
+    _ensure_text_import_open(user, session, db)
+    # 后面的模型调用要很久,不把这次只读查询的事务和连接一直占着。
+    db.commit()
+    if not files:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Choose at least one image"
+        )
+    if len(files) > DRAFT_IMAGE_MAX_COUNT:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            # 文案是 i18n 键,数字与 DRAFT_IMAGE_MAX_COUNT 保持一致。
+            detail="Upload at most 8 images at a time",
+        )
+    try:
+        model_id = await resolve_draft_image_model(request, user)
+        total = 0
+        images = []
+        for file in files:
+            data = await file.read(DRAFT_IMAGE_MAX_BYTES + 1)
+            if len(data) > DRAFT_IMAGE_MAX_BYTES:
+                # 数字与 DRAFT_IMAGE_MAX_BYTES / DRAFT_IMAGE_TOTAL_MAX_BYTES 保持一致。
+                raise DraftImageError("Each image must be 10 MB or smaller")
+            total += len(data)
+            if total > DRAFT_IMAGE_TOTAL_MAX_BYTES:
+                raise DraftImageError("The images add up to more than 30 MB")
+            images.append(data)
+        image_urls = await prepare_draft_images(images)
+    except DraftImageError as err:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(err)
+        ) from err
+    try:
+        pages = await transcribe_draft_images(request, user, model_id, image_urls)
+    except DraftImageModelBusyError as err:
+        # 已自动重发过几次,服务商仍在限流或过载。
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(err)
+        ) from err
+    except DraftImageModelError as err:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=str(err)
+        ) from err
+    except DraftImageError as err:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(err)
+        ) from err
+    return {"text": "\n".join(page for page in pages if page), "pages": pages}
 
 
 @router.post(

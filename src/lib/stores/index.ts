@@ -324,6 +324,7 @@ type Config = {
 		enable_memories: boolean;
 		enable_education_return?: boolean;
 		enable_education_coaching_styles?: boolean;
+		enable_education_draft_image_import?: boolean;
 		enable_plugins?: boolean;
 		enable_autocomplete_generation: boolean;
 		enable_direct_connections: boolean;

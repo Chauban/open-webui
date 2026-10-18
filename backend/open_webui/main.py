@@ -2226,6 +2226,7 @@ async def get_app_config(request: Request):
         'ui.watermark',
         'education.enable_return',
         'education.enable_coaching_styles',
+        'education.draft_image_model',
     )
 
     return {
@@ -2296,6 +2297,7 @@ async def get_app_config(request: Request):
                     'enable_memories': config.get('memories.enable'),
                     'enable_education_return': config.get('education.enable_return'),
                     'enable_education_coaching_styles': config.get('education.enable_coaching_styles'),
+                    'enable_education_draft_image_import': bool(config.get('education.draft_image_model')),
                     **(
                         {
                             'enable_onedrive_personal': ENABLE_ONEDRIVE_PERSONAL,

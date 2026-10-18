@@ -3199,6 +3199,8 @@ DEFAULT_CONFIG = {
     # 怎么辅导全写在任务说明里——哈工深只用一份提示词,所以关。
     'education.enable_coaching_styles': True,
     'education.challenge_prompts': DEFAULT_EDUCATION_CHALLENGE_PROMPTS,
+    # 作业写作区「导入图片」用的识图模型(模型 id)。空=没选,学生端不提供图片导入。
+    'education.draft_image_model': '',
 }
 
 

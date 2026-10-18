@@ -2,7 +2,9 @@
 	import { getContext, onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
 
+	import { getBackendConfig } from '$lib/apis';
 	import { getEducationConfig, setEducationConfig } from '$lib/apis/configs';
+	import { config as appConfig, models } from '$lib/stores';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Switch from '$lib/components/common/Switch.svelte';
 	import Pencil from '$lib/components/icons/Pencil.svelte';
@@ -109,6 +111,15 @@
 	let enableReturn = false;
 	// 作业能否选辅导风格;关掉后作业表单不显示档位,对话也不附档位提示词。
 	let enableCoachingStyles = true;
+	// 作业写作区「导入图片」用的识图模型;空=不提供图片导入。只列没有标明不能看图的模型。
+	let draftImageModel = '';
+	// Model 类型里 owned_by 不含 arena、capabilities 是 object,运行时两者都有,按宽类型读。
+	const canReadImages = (model) =>
+		(model?.owned_by as string) !== 'arena' &&
+		(model?.info?.meta?.capabilities as { vision?: boolean } | undefined)?.vision !== false;
+	$: visionModels = ($models ?? []).filter(canReadImages);
+	$: draftImageModelMissing =
+		!!draftImageModel && !visionModels.some((model) => model.id === draftImageModel);
 	let editing: { section: SectionKey; key: string } | null = null;
 	let draft = '';
 
@@ -179,6 +190,7 @@
 			defaultRubrics = readRubrics(config);
 			enableReturn = config.EDUCATION_ENABLE_RETURN;
 			enableCoachingStyles = config.EDUCATION_ENABLE_COACHING_STYLES;
+			draftImageModel = config.EDUCATION_DRAFT_IMAGE_MODEL ?? '';
 		} catch (error) {
 			loadFailed = true;
 			toast.error(`${error}`);
@@ -221,7 +233,8 @@
 				...nextAssignmentDefaults,
 				EDUCATION_DEFAULT_RUBRICS: nextRubrics,
 				EDUCATION_ENABLE_RETURN: enableReturn,
-				EDUCATION_ENABLE_COACHING_STYLES: enableCoachingStyles
+				EDUCATION_ENABLE_COACHING_STYLES: enableCoachingStyles,
+				EDUCATION_DRAFT_IMAGE_MODEL: draftImageModel
 			});
 			prompts = read(config, 'configKey');
 			defaults = read(config, 'defaultsKey');
@@ -229,6 +242,9 @@
 			defaultRubrics = readRubrics(config);
 			enableReturn = config.EDUCATION_ENABLE_RETURN;
 			enableCoachingStyles = config.EDUCATION_ENABLE_COACHING_STYLES;
+			draftImageModel = config.EDUCATION_DRAFT_IMAGE_MODEL ?? '';
+			// 学生端是否显示「导入图片」读的是 /api/config 的 features,跟着刷新。
+			await appConfig.set(await getBackendConfig());
 			editing = null;
 			rubricEditing = null;
 			draft = '';
@@ -436,6 +452,44 @@
 							</p>
 						</div>
 						<Switch bind:state={enableCoachingStyles} on:change={() => persist(prompts)} />
+					</div>
+
+					<div class="flex items-start justify-between gap-4">
+						<div class="min-w-0">
+							<div class="text-xs font-medium text-gray-700 dark:text-gray-300">
+								{$i18n.t('Draft image parsing model')}
+							</div>
+							<p class="mt-0.5 text-[0.6875rem] text-gray-400 dark:text-gray-600">
+								{$i18n.t(
+									'Students can import photos of a handwritten or printed draft; this model transcribes them into text for the student to check. Pick a model that can read images; a fast model without step-by-step reasoning keeps the wait short, since most of the time goes into writing out the text. Students do not need access to it in chat. When none is chosen, image import is turned off.'
+								)}
+							</p>
+							{#if draftImageModelMissing}
+								<p class="mt-0.5 text-[0.6875rem] text-rose-500">
+									{$i18n.t(
+										'The chosen model is no longer available. Image import will fail until you pick another one.'
+									)}
+								</p>
+							{/if}
+						</div>
+						<select
+							class="w-48 shrink-0 rounded-lg bg-transparent px-2 py-1 text-xs text-gray-700 outline-hidden dark:text-gray-300"
+							value={draftImageModel}
+							disabled={saving}
+							data-testid="draft-image-model-select"
+							on:change={(event) => {
+								draftImageModel = event.currentTarget.value;
+								persist(prompts);
+							}}
+						>
+							<option value="">{$i18n.t('Off (no image import)')}</option>
+							{#if draftImageModelMissing}
+								<option value={draftImageModel}>{draftImageModel}</option>
+							{/if}
+							{#each visionModels as model}
+								<option value={model.id}>{model.name ?? model.id}</option>
+							{/each}
+						</select>
 					</div>
 				</div>
 

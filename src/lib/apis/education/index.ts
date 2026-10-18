@@ -508,15 +508,28 @@ export const updateRevisionItem = async (
 	}).then(handleJson) as Promise<RevisionItemsResult>;
 };
 
-// 只解析不保存:返回文件里的正文,学生核对后仍走 submitDraftBaseline。
-export const extractDraftBaselineFile = async (token: string, sessionId: string, file: File) => {
+// 作业写作区的导入(修订初稿交初稿前、从零写作改稿时)只解析不保存:返回正文,
+// 学生核对后自己确认初稿(submitDraftBaseline)或插进编辑器。
+export const extractImportDocument = async (token: string, sessionId: string, file: File) => {
 	const body = new FormData();
 	body.append('file', file);
-	return fetch(`${WEBUI_API_BASE_URL}/writing-sessions/${sessionId}/draft-baseline/extract`, {
+	return fetch(`${WEBUI_API_BASE_URL}/writing-sessions/${sessionId}/import/document`, {
 		method: 'POST',
 		headers: { Accept: 'application/json', authorization: `Bearer ${token}` },
 		body
 	}).then(handleJson) as Promise<{ text: string }>;
+};
+
+// 照片交给管理员选定的识图模型逐张转录:text 按传入顺序拼好,pages 是逐张结果(读 PDF 时插回原页);
+// 一次要十几秒到一分钟。
+export const extractImportImages = async (token: string, sessionId: string, files: File[]) => {
+	const body = new FormData();
+	for (const file of files) body.append('files', file);
+	return fetch(`${WEBUI_API_BASE_URL}/writing-sessions/${sessionId}/import/images`, {
+		method: 'POST',
+		headers: { Accept: 'application/json', authorization: `Bearer ${token}` },
+		body
+	}).then(handleJson) as Promise<{ text: string; pages: string[] }>;
 };
 
 export const createEditorOperations = async (

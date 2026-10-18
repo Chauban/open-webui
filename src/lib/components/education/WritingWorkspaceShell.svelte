@@ -23,6 +23,7 @@
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 	import ReflectionAnswerForm from '$lib/components/education/ReflectionAnswerForm.svelte';
 	import DraftBaselineStep from '$lib/components/education/DraftBaselineStep.svelte';
+	import EditorImportDialog from '$lib/components/education/EditorImportDialog.svelte';
 	import RevisionList from '$lib/components/education/RevisionList.svelte';
 	import FirstReadProgress from '$lib/components/education/FirstReadProgress.svelte';
 	import FollowUpBar from '$lib/components/education/FollowUpBar.svelte';
@@ -31,6 +32,7 @@
 	import { refreshChatList, refreshFolderChatLists } from '$lib/stores/chatList';
 	import { getChatById } from '$lib/apis/chats';
 	import { prepareAssistantContentForWriting } from '$lib/utils/writing-content';
+	import { importedTextToHtml, type ImportInfo } from '$lib/utils/text-import';
 	import { createSerializedSaveRunner } from '$lib/utils/save-coordinator';
 	import {
 		buildReflectionAnswers,
@@ -115,8 +117,13 @@
 	let lastText = '';
 	// 最近一次真正落成版本的正文，用来跳过「内容没变」的自动保存。
 	let lastVersionedText = '';
-	let pendingSource: null | { sourceType: string; sourceMessageId?: string | null; text?: string } =
-		null;
+	let pendingSource: null | {
+		sourceType: string;
+		sourceMessageId?: string | null;
+		text?: string;
+		// 随这次改动的编辑器操作一起记下的附加信息(如导入的文件名)。
+		metadata?: Record<string, unknown> | null;
+	} = null;
 	let sourceRuns: SourceRun[] = [];
 	let clarificationAnsweredCount: number | null = null;
 	let processSummaryRequest = 0;
@@ -764,7 +771,7 @@
 				inserted_text: diff.insertedText || null,
 				deleted_text: diff.deletedText || null,
 				batch_id: makeBatchId(),
-				metadata_json: null
+				metadata_json: pendingSource?.metadata ?? null
 			});
 		}
 
@@ -786,6 +793,29 @@
 			text: insertedText
 		};
 		editor.chain().focus().insertContent(preparedContent.html).run();
+	};
+
+	// --- 导入文件 / 图片(从零写作作业) ----------------------------------------
+	// 修订初稿作业的导入在交初稿那一步;从零写作没有那一步,导入直接进编辑器。
+	// 导入的文字记为外部粘贴,并在操作里注明来自文件还是照片,老师在时间线上看得到。
+	let showImportDialog = false;
+	$: canImportIntoEditor =
+		isAssignment && assignment?.task_mode === 'from_scratch' && !isReadOnly;
+
+	const insertImportedText = (text: string, mode: 'insert' | 'replace', info: ImportInfo) => {
+		if (isReadOnly || !editor) return;
+		const html = importedTextToHtml(text);
+		if (!html) return;
+		pendingSource = {
+			sourceType: 'external_paste',
+			sourceMessageId: null,
+			text,
+			metadata: { import_kind: info.kind, file_names: info.names.slice(0, 8) }
+		};
+		const chain = editor.chain().focus();
+		(mode === 'replace' ? chain.selectAll() : chain).insertContent(html).run();
+		// onChange 在事务里同步跑完;正文没变(没触发 onChange)时别让来源留给下一次键入。
+		pendingSource = null;
 	};
 
 	const copyAssistantContentWithSource = async (message) => {
@@ -1260,6 +1290,13 @@
 				{#if needsDraftBaseline}
 					<DraftBaselineStep sessionId={writingSession.id} onSubmitted={onDraftBaselineSubmitted} />
 				{:else}
+					{#if canImportIntoEditor}
+						<div class="mb-2 flex justify-end">
+							<EduButton size="sm" on:click={() => (showImportDialog = true)}>
+								{$i18n.t('Import from file or images')}
+							</EduButton>
+						</div>
+					{/if}
 					<RichTextInput
 						bind:editor
 						bind:value={noteJson}
@@ -1429,6 +1466,13 @@
 					{#if needsDraftBaseline}
 						<DraftBaselineStep sessionId={writingSession.id} onSubmitted={onDraftBaselineSubmitted} />
 					{:else}
+						{#if canImportIntoEditor}
+							<div class="mb-2 flex justify-end">
+								<EduButton size="sm" on:click={() => (showImportDialog = true)}>
+									{$i18n.t('Import from file or images')}
+								</EduButton>
+							</div>
+						{/if}
 						<RichTextInput
 							bind:editor
 							bind:value={noteJson}
@@ -1468,6 +1512,15 @@
 				</div>
 			</div>
 		</div>
+	{/if}
+
+	{#if canImportIntoEditor && writingSession}
+		<EditorImportDialog
+			bind:show={showImportDialog}
+			sessionId={writingSession.id}
+			hasText={noteText.trim().length > 0}
+			onInsert={insertImportedText}
+		/>
 	{/if}
 
 	{#if isAssignment && assignment}

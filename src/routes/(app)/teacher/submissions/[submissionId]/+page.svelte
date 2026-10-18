@@ -82,7 +82,13 @@
 		if (item.event_type === 'source_operation') {
 			return {
 				meta: getWritingSourceLabel(item.source_type, t),
-				label: getEditorOperationLabel(item.op_type, t),
+				// 学生在编辑器里导入的文件或照片,记为外部粘贴,这里注明是导入的。
+				label:
+					item.import_kind === 'images'
+						? t('Imported text from images')
+						: item.import_kind === 'document'
+							? t('Imported text from a file')
+							: getEditorOperationLabel(item.op_type, t),
 				inserted_length: item.inserted_length ?? null
 			};
 		}
