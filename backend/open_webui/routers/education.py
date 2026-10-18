@@ -34,6 +34,7 @@ from open_webui.models.chat_messages import ChatMessages
 from open_webui.models.folders import FolderForm, Folders
 from open_webui.models.education import (
     AssignmentModel,
+    AssignmentModelParams,
     AssignmentCreateForm,
     AssignmentExtensionForm,
     AssignmentExtensionModel,
@@ -140,6 +141,16 @@ from open_webui.services.education.challenge import (
 )
 from open_webui.services.education.profile_snapshots import (
     build_student_profile,
+)
+from open_webui.services.education.ai_steps import (
+    CoachingChatThinkingPolicy,
+    CoachingThinking,
+    ModelParamsNotAllowed,
+    StepThinkingView,
+    describe_steps,
+    ensure_model_params_allowed,
+    get_thinking_policy,
+    resolve_coaching_thinking,
 )
 from open_webui.services.education.profile import PROFILE_METRIC_VERSION
 from open_webui.services.education.revision_items import (
@@ -916,6 +927,7 @@ async def create_assignment(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Assignment due time is required",
         )
+    await _ensure_model_params_allowed(form_data.model_params)
     classrooms = []
     for classroom_id in classroom_ids:
         classroom = Education.get_classroom_by_id(classroom_id, db=db)
@@ -1001,6 +1013,9 @@ async def update_assignment(
             status_code=status.HTTP_409_CONFLICT,
             detail="Task mode cannot change after students have started",
         )
+
+    if "model_params" in form_data.model_fields_set and form_data.model_params is not None:
+        await _ensure_model_params_allowed(form_data.model_params)
 
     next_score_max = form_data.score_max or assignment.score_max
     next_rubric = form_data.rubric_schema or assignment.rubric_schema
@@ -1411,6 +1426,17 @@ class AssignmentDefaultsResponse(BaseModel):
     coaching_style: CoachingStyle
     task_mode: TaskMode
     rubrics: dict[TaskMode, list[DefaultRubricCriterionItem]]
+    # 辅导对话的思考档位由谁定、管理员默认是哪档；作业表单据此决定显不显示思考设置。
+    thinking: CoachingChatThinkingPolicy
+
+
+async def _ensure_model_params_allowed(params: AssignmentModelParams) -> None:
+    try:
+        ensure_model_params_allowed(params, await get_thinking_policy())
+    except ModelParamsNotAllowed as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)
+        ) from error
 
 
 @router.get("/teacher/assignment-defaults", response_model=AssignmentDefaultsResponse)
@@ -1421,7 +1447,27 @@ async def get_teacher_assignment_defaults(user=Depends(get_verified_user)):
         "coaching_style": await Config.get("education.default_coaching_style"),
         "task_mode": await Config.get("education.default_task_mode"),
         "rubrics": await Config.get("education.default_rubrics"),
+        "thinking": (await get_thinking_policy()).coaching_chat,
     }
+
+
+class AssignmentAiSettingsResponse(BaseModel):
+    """作业页「AI 设置」卡：各步骤此刻对本作业生效的思考档位与来源。"""
+
+    steps: list[StepThinkingView]
+    coaching_thinking: CoachingThinking
+
+
+@router.get(
+    "/teacher/assignments/{assignment_id}/ai-settings",
+    response_model=AssignmentAiSettingsResponse,
+)
+async def get_teacher_assignment_ai_settings(
+    assignment: AssignmentModel = Depends(require_teacher_assignment),
+):
+    policy = await get_thinking_policy()
+    coaching = resolve_coaching_thinking(policy, assignment.model_params)
+    return {"steps": describe_steps(policy, coaching), "coaching_thinking": coaching}
 
 
 @router.get(
@@ -2220,6 +2266,7 @@ async def get_assignment_workspace(
             source_map=Education.get_provenance_segments(session.id, db=db),
             review=review_view,
             effective_due_at=effective_due_at,
+            can_switch_thinking=await _can_switch_thinking(assignment),
         )
 
     review_view, effective_due_at = _build_student_review_view(assignment, user.id, db)
@@ -2233,7 +2280,13 @@ async def get_assignment_workspace(
         source_map=[],
         review=review_view,
         effective_due_at=effective_due_at,
+        can_switch_thinking=await _can_switch_thinking(assignment),
     )
+
+
+async def _can_switch_thinking(assignment) -> bool:
+    policy = await get_thinking_policy()
+    return resolve_coaching_thinking(policy, assignment.model_params).students_choose
 
 
 @router.get("/me/writing/home", response_model=WritingHomeResponse)
@@ -3451,6 +3504,11 @@ async def submit_assignment(
         ),
         "task_mode": assignment.task_mode,
         "task_prompt": await _get_task_prompt(assignment.task_mode),
+        # 辅导对话的思考档位：管理员的下放方式与默认随时可改，这一轮按提交时生效的冻存。
+        # 学生可开关时每条回复实际用的档位另记在回复上（对话时间线的 thinking_level）。
+        "thinking": resolve_coaching_thinking(
+            await get_thinking_policy(), assignment.model_params
+        ).model_dump(),
     }
     # 质疑措辞同理，管理员随时可改，已交的这一轮不能跟着变。
     challenge_round_no = Education.resolve_next_submission_round_no(

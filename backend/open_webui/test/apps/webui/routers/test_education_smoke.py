@@ -4726,6 +4726,7 @@ def test_assignment_defaults_follow_instance_settings(education_client):
         "coaching_style": "balanced",
         "task_mode": "from_scratch",
         "rubrics": {"from_scratch": [], "revise_draft": []},
+        "thinking": {"control": "admin", "default": "model_default"},
     }
 
     revise_rubric = [{"label": "综述只写已有研究", "max_score": 40}, {"label": "出处与参考文献", "max_score": 60}]
@@ -4743,6 +4744,7 @@ def test_assignment_defaults_follow_instance_settings(education_client):
         "coaching_style": "socratic",
         "task_mode": "revise_draft",
         "rubrics": {"from_scratch": [], "revise_draft": revise_rubric},
+        "thinking": {"control": "admin", "default": "model_default"},
     }
 
     UserContext.current_user = student

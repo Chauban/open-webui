@@ -91,6 +91,7 @@ def test_fresh_database_upgrades_to_head(tmp_path, monkeypatch):
             "score_max",
             "rubric_schema",
             "reflection_questions",
+            "model_params",
         } <= assignment_columns
         review_columns = {
             column["name"] for column in schema.get_columns("submission_review")

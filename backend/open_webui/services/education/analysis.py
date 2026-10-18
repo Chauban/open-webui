@@ -1172,6 +1172,11 @@ def _order_chat_messages(messages: list[dict], chat_id: str) -> list[dict]:
     return sorted(messages, key=lambda item: (item.get("created_at") or 0, depth(item)))
 
 
+def _thinking_level(meta) -> Optional[str]:
+    """作业对话里这条回复实际用的思考档位，由聊天流水线记在回复上；其余消息为空。"""
+    return meta.get("thinking_level") if isinstance(meta, dict) else None
+
+
 async def get_prompt_timeline(session, db: Session) -> list[dict]:
     chat_ids: list[str] = []
 
@@ -1198,6 +1203,7 @@ async def get_prompt_timeline(session, db: Session) -> list[dict]:
                             "output": message.output,
                             "usage": message.usage,
                             "auto_started": _is_auto_started(message.meta),
+                            "thinking_level": _thinking_level(message.meta),
                         }
                         for message in chat_messages
                     ],
@@ -1220,6 +1226,7 @@ async def get_prompt_timeline(session, db: Session) -> list[dict]:
                         "output": message.get("output"),
                         "usage": message.get("usage"),
                         "auto_started": _is_auto_started(message.get("meta")),
+                        "thinking_level": _thinking_level(message.get("meta")),
                     }
                     for message in _get_chat_history_messages(chat)
                 ],

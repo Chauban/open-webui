@@ -138,8 +138,11 @@ from open_webui.models.access_grants import AccessGrants
 from open_webui.models.channels import Channels
 from open_webui.models.chats import ChatForm, Chats
 from open_webui.models.folders import Folders
+from open_webui.models.education import Education
 from open_webui.services.education.writing_access import ensure_writing_session_writable
+from open_webui.services.education.ai_steps import get_thinking_policy, resolve_coaching_thinking, thinking_params
 from open_webui.services.education.writing_context import get_folder_writing_session
+from open_webui.utils.thinking import THINKING_LEVEL_PARAM
 from open_webui.models.config import Config
 from open_webui.models.functions import Functions
 from open_webui.models.messages import Messages
@@ -1105,17 +1108,27 @@ async def chat_completion(
         if writing_session:
             ensure_writing_session_writable(writing_session)
 
-        # 作业写作区里学生不能改参数、加系统提示,无论权限怎么配:对话要按老师的作业说明和模型设定进行。
-        if client_request:
-            chat_overrides = (
-                NO_CHAT_OVERRIDES
-                if writing_session and writing_session.scope == 'assignment'
-                else await get_chat_overrides(user)
-            )
-            form_data = strip_chat_request_overrides(form_data, chat_overrides)
-
         # Read before the fallback below can rebind model to a different one.
         model_capabilities = ((model.get('info') or {}).get('meta') or {}).get('capabilities') or {}
+
+        # 作业写作区里学生不能改参数、加系统提示,无论权限怎么配:对话要按老师的作业说明和模型设定进行。
+        # 唯一的例外是思考档位:按管理员的下放方式与作业设置算出,学生只在允许时能把这一轮关掉。
+        writing_thinking_level = None
+        if client_request:
+            if writing_session and writing_session.scope == 'assignment':
+                student_thinking_choice = (form_data.get('params') or {}).get(THINKING_LEVEL_PARAM)
+                form_data = strip_chat_request_overrides(form_data, NO_CHAT_OVERRIDES)
+                writing_assignment = Education.get_assignment_by_id(writing_session.assignment_id)
+                coaching_thinking = resolve_coaching_thinking(
+                    await get_thinking_policy(), writing_assignment.model_params, student_thinking_choice
+                )
+                form_data['params'].update(thinking_params(coaching_thinking.level))
+                # 记在回复上给老师看;模型没有思考控制时档位不会发出,如实记成模型默认。
+                writing_thinking_level = (
+                    coaching_thinking.level if model_capabilities.get('reasoning') else 'model_default'
+                )
+            else:
+                form_data = strip_chat_request_overrides(form_data, await get_chat_overrides(user))
 
         # Model params: global defaults as base, per-model overrides win
         default_model_params = copy.deepcopy(await Config.get('models.default_params', {}) or {})
@@ -1335,6 +1348,8 @@ async def chat_completion(
                                 'model': target_model_id,
                                 'timestamp': int(time.time()),
                             }
+                            if writing_thinking_level is not None:
+                                assistant_message['meta'] = {'thinking_level': writing_thinking_level}
                             # Preserve the side-by-side column index so duplicate
                             # models don't collapse into one another on reload.
                             if entry.get('modelIdx') is not None:
@@ -1562,6 +1577,8 @@ async def chat_completion(
                                 'model': target_model_id,
                                 'timestamp': int(time.time()),
                             }
+                            if writing_thinking_level is not None:
+                                assistant_message['meta'] = {'thinking_level': writing_thinking_level}
                             # Preserve the side-by-side column index so duplicate
                             # models don't collapse into one another on reload.
                             if entry.get('modelIdx') is not None:

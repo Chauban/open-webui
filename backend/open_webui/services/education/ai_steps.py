@@ -13,13 +13,14 @@ from typing import Literal, Optional
 from pydantic import BaseModel, ConfigDict
 
 from open_webui.models.config import Config
+from open_webui.models.education import (
+    AssignmentModelParams,
+    ThinkingControl,
+    ThinkingSetting,
+)
 from open_webui.utils.chat import generate_chat_completion
 from open_webui.utils.thinking import THINKING_LEVEL_PARAM
 
-# model_default：不发档位，按模型自己的参数（含管理员在模型上保存的思考档位）。
-ThinkingSetting = Literal["model_default", "off", "low", "medium", "high"]
-# 辅导对话的思考档位由谁定：管理员 / 教师按作业 / 教师按作业并可交给学生开关。
-ThinkingControl = Literal["admin", "teacher", "student"]
 StepKey = Literal["coaching_chat", "first_read", "reader_check", "image_parsing", "class_insight"]
 # 步骤用哪个模型：学生在写作区选的对话模型 / 管理员指定的初稿图片识别模型 / 教师触发时选的模型。
 ModelSource = Literal["student_chat_model", "draft_image_model", "teacher_chat_model"]
@@ -90,6 +91,53 @@ async def call_step_model(
     return await generate_chat_completion(request, form_data=payload, user=user, bypass_filter=bypass_filter)
 
 
+class ModelParamsNotAllowed(ValueError):
+    pass
+
+
+def ensure_model_params_allowed(params: AssignmentModelParams, policy: EducationThinkingPolicy) -> None:
+    """教师只能设管理员下放了的部分：仅管理员时什么都不能设，交给学生开关要管理员允许。"""
+
+    control = policy.coaching_chat.control
+    if control == "admin" and params != AssignmentModelParams():
+        raise ModelParamsNotAllowed("Thinking for the coaching chat is set by the administrator")
+    if control == "teacher" and params.students_choose_thinking:
+        raise ModelParamsNotAllowed("The administrator has not allowed students to switch thinking")
+
+
+class CoachingThinking(BaseModel):
+    """一次辅导对话实际用的思考档位，以及它从哪来。"""
+
+    control: ThinkingControl
+    level: ThinkingSetting
+    # admin：管理员默认；teacher：本作业设的；student：学生这轮关掉了。
+    source: Literal["admin", "teacher", "student"]
+    students_choose: bool
+
+
+def resolve_coaching_thinking(
+    policy: EducationThinkingPolicy,
+    params: AssignmentModelParams,
+    student_choice: Optional[str] = None,
+) -> CoachingThinking:
+    """辅导对话的思考档位：按管理员此刻的下放方式解读作业设置。
+
+    管理员事后收回下放时，作业里存的设置不再生效，直接回到管理员默认。学生只能在允许时
+    把这一轮关掉（student_choice == "off"），其余值一律按作业设的档位。
+    """
+
+    control = policy.coaching_chat.control
+    default = policy.coaching_chat.default
+    if control == "admin":
+        return CoachingThinking(control=control, level=default, source="admin", students_choose=False)
+
+    level, source = (params.thinking, "teacher") if params.thinking else (default, "admin")
+    students_choose = control == "student" and params.students_choose_thinking
+    if students_choose and student_choice == "off":
+        return CoachingThinking(control=control, level="off", source="student", students_choose=True)
+    return CoachingThinking(control=control, level=level, source=source, students_choose=students_choose)
+
+
 class StepThinkingView(BaseModel):
     """管理员表与教师卡的一行：步骤、模型来源、由谁定、当前生效的档位。"""
 
@@ -99,13 +147,14 @@ class StepThinkingView(BaseModel):
     thinking: ThinkingSetting
 
 
-def describe_steps(policy: EducationThinkingPolicy, coaching: Optional[tuple[ThinkingControl, ThinkingSetting]] = None):
-    """按登记顺序列出各步骤；coaching 给出时用它替换辅导对话那一行（作业的实际生效值）。"""
+def describe_steps(policy: EducationThinkingPolicy, coaching: Optional[CoachingThinking] = None):
+    """按登记顺序列出各步骤；给出 coaching 时辅导对话那一行用作业的实际生效值。"""
 
     rows = []
     for step in AI_STEPS:
         if step.key == "coaching_chat":
-            control, thinking = coaching or (policy.coaching_chat.control, policy.coaching_chat.default)
+            control = coaching.control if coaching else policy.coaching_chat.control
+            thinking = coaching.level if coaching else policy.coaching_chat.default
         else:
             control, thinking = "admin", getattr(policy, step.key)
         rows.append(
