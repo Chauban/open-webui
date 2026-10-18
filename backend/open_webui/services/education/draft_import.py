@@ -17,6 +17,7 @@ from fastapi import HTTPException
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 from open_webui.services.education.writing_context import normalize_draft_paragraphs
+from open_webui.utils.retry import RETRY_DELAYS
 from open_webui.services.education.ai_steps import (
     StepModel,
     call_step_model,
@@ -45,7 +46,7 @@ _ACCEPTED_FORMATS = {"JPEG", "PNG", "WEBP"}
 _CONCURRENCY = 8
 # 单页遇到限流或服务端一时出错时自动重发:分别等 1、2、4 秒(各 ±25% 抖动,免得 8 路一起撞上
 # 限流后又同时重发),连首次最多 4 次;学生不用自己点重试。还不行就整份失败,不悄悄少一页。
-_RETRY_DELAYS = (1.0, 2.0, 4.0)
+_RETRY_DELAYS = RETRY_DELAYS
 # 值得重发的上游状态:请求超时、限流、5xx 与网关错误(含 Cloudflare 52x)、Anthropic 的 529 过载。
 # 连接失败、读超时在 openai 路由里统一包成 500,同样重发。
 _RETRYABLE_STATUS = {408, 425, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 529}

@@ -131,9 +131,9 @@ def test_resolve_step_model_prefers_the_admin_model_and_falls_back(monkeypatch):
         'reader_check', 'student-model', reader_check={'model': 'reader-model', 'thinking': 'low'}
     ) == StepModel(model_id='reader-model', fixed=True)
     # 指定的已被删掉:回落到学生选的
-    assert resolve(
-        'reader_check', 'student-model', reader_check={'model': 'gone', 'thinking': 'low'}
-    ) == StepModel(model_id='student-model', fixed=False)
+    assert resolve('reader_check', 'student-model', reader_check={'model': 'gone', 'thinking': 'low'}) == StepModel(
+        model_id='student-model', fixed=False
+    )
     # 图片识别没有回落
     assert resolve('image_parsing', 'student-model') is None
     assert resolve('image_parsing', image_parsing={'model': 'gone', 'thinking': 'off'}) is None
@@ -179,10 +179,22 @@ def test_call_step_model_sends_the_step_setting(monkeypatch):
     asyncio.run(call_step_model(None, None, 'reader_check', StepModel(model_id='m', fixed=False), messages))
     asyncio.run(call_step_model(None, None, 'image_parsing', StepModel(model_id='vision', fixed=True), messages))
 
-    assert sent[0] == ({'model': 'm', 'messages': messages, 'stream': False, 'thinking_level': 'high'}, False)
+    assert sent[0] == (
+        {
+            'model': 'm',
+            'messages': messages,
+            'stream': False,
+            'thinking_level': 'high',
+            'metadata': {'retry_transient': True},
+        },
+        False,
+    )
     assert 'thinking_level' not in sent[1][0]
     # 管理员指定的模型跳过模型访问控制
     assert sent[2][0]['thinking_level'] == 'off' and sent[2][1] is True
+    # 服务商一时出错时自动重发;图片识别逐页自己重发,不叠加
+    assert sent[1][0]['metadata'] == {'retry_transient': True}
+    assert sent[2][0]['metadata'] == {'retry_transient': False}
 
 
 def test_student_status_follows_default_and_student_group(monkeypatch):

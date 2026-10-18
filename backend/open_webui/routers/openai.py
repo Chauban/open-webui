@@ -64,6 +64,12 @@ from open_webui.utils.payload import (
     apply_model_params_to_body_openai,
     apply_system_prompt_to_body,
 )
+from open_webui.utils.retry import (
+    NON_STREAM_TIMEOUT,
+    RETRY_TRANSIENT_FLAG,
+    STREAM_TIMEOUT,
+    send_with_retry,
+)
 from open_webui.utils.session_pool import (
     cleanup_response,
     get_client_timeout,
@@ -1689,19 +1695,32 @@ async def generate_chat_completion(
     r = None
     streaming = False
     response = None
+    # 作业辅导对话与平台步骤:服务商一时出错(429、5xx、连接或超时)自动重发,学生不用自己点重试。
+    # 只在拿到状态码、还没往下游送任何内容之前重发;超时也收紧,不让学生干等几分钟。
+    retry_transient = bool((metadata or {}).get(RETRY_TRANSIENT_FLAG))
 
     try:
         session = await get_session()
 
-        r = await session.request(
-            method='POST',
-            url=request_url,
-            data=payload,
-            headers=headers,
-            cookies=cookies,
-            ssl=AIOHTTP_CLIENT_SESSION_SSL,
-            timeout=get_client_timeout(stream=is_streaming_request),
-        )
+        def send():
+            return session.request(
+                method='POST',
+                url=request_url,
+                data=payload,
+                headers=headers,
+                cookies=cookies,
+                ssl=AIOHTTP_CLIENT_SESSION_SSL,
+                timeout=(
+                    (STREAM_TIMEOUT if is_streaming_request else NON_STREAM_TIMEOUT)
+                    if retry_transient
+                    else get_client_timeout(stream=is_streaming_request)
+                ),
+            )
+
+        if retry_transient:
+            r = await send_with_retry(send, cleanup_response, label=f'chat completion {requested_model}')
+        else:
+            r = await send()
 
         # Check if response is SSE
         if 'text/event-stream' in r.headers.get('Content-Type', ''):

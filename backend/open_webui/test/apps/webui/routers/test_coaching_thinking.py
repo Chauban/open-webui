@@ -336,3 +336,30 @@ def test_reply_records_the_level_it_was_sent_with(education_client, monkeypatch)
     assert reply_meta({'reasoning': True}, 'off') == {'thinking_level': 'off'}
     # 模型没有思考控制时档位发不出去，如实记成模型默认
     assert reply_meta({}) == {'thinking_level': 'model_default'}
+
+
+def test_only_assignment_coaching_chats_ask_for_automatic_retries(education_client, monkeypatch):
+    """作业辅导对话带上重发标记,服务商一时出错由 OpenAI 兼容路由自动重发;普通对话不变。"""
+    webui_main, student, folder_id, _ = _assignment_chat(
+        education_client, monkeypatch, {'thinking': 'low', 'students_choose_thinking': True}, 'student'
+    )
+    flags = []
+
+    async def no_event(*args, **kwargs):
+        return None
+
+    async def capture(metadata, chat_id):
+        flags.append(metadata['retry_transient'])
+        raise HTTPException(status_code=418, detail='stop after the chat is saved')
+
+    monkeypatch.setattr(webui_main, 'publish_event', no_event)
+    monkeypatch.setattr(webui_main, 'emit_chat_list_event', capture)
+    for folder in (folder_id, None):
+        body = _chat_body(folder)
+        body['id'] = f'assistant-{uuid.uuid4()}'
+        if folder is None:
+            body.pop('folder_id')
+        with pytest.raises(HTTPException):
+            asyncio.run(webui_main.chat_completion(_chat_request({}), body, student, client_request=True))
+
+    assert flags == [True, False]

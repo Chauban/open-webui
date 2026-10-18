@@ -22,6 +22,7 @@ from open_webui.models.education import (
 )
 from open_webui.utils.chat import generate_chat_completion
 from open_webui.utils.models import get_all_models
+from open_webui.utils.retry import RETRY_TRANSIENT_FLAG
 from open_webui.utils.thinking import THINKING_LEVEL_PARAM
 
 log = logging.getLogger(__name__)
@@ -137,6 +138,8 @@ async def call_step_model(request, user, step: PlatformStepKey, model: StepModel
         "messages": messages,
         "stream": False,
         **thinking_params(getattr(policy, step).thinking),
+        # 服务商一时出错时由 OpenAI 兼容路由自动重发;图片识别逐页自己重发(draft_import),这里不叠加。
+        "metadata": {RETRY_TRANSIENT_FLAG: step != "image_parsing"},
     }
     return await generate_chat_completion(request, form_data=payload, user=user, bypass_filter=model.fixed)
 
