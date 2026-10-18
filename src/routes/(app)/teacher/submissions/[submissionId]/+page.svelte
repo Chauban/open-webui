@@ -9,7 +9,7 @@
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { get } from 'svelte/store';
-	import { config } from '$lib/stores';
+	import { config, models } from '$lib/stores';
 
 	import {
 		getSubmissionAnalysisSegmentDetail,
@@ -200,6 +200,16 @@
 	// 本轮辅导对话的思考档位(提交时冻存)。学生可开关时每条回复另记实际档位,时间线上逐条标出。
 	$: roundThinking = roundCoaching?.thinking ?? null;
 	$: showReplyThinking = Boolean(roundThinking?.students_choose);
+	// 本轮各平台步骤实际用的模型(提交时冻存);老师未必看得到管理员指定的模型,名称取不到就显示 id。
+	$: roundStepModels = [
+		{ label: 'First read', model: detail?.submission?.stats_json?.revision_items?.models?.first_read },
+		{ label: 'Follow-up review', model: detail?.submission?.stats_json?.revision_items?.models?.follow_up },
+		...(detail?.submission?.stats_json?.challenge?.models ?? []).map((model) => ({
+			label: 'AI reader check',
+			model
+		}))
+	].filter((item) => item.model);
+	const modelName = (id: string) => $models?.find((model) => model.id === id)?.name ?? id;
 	const THINKING_SOURCE_TEXT = {
 		admin: 'Administrator default',
 		teacher: 'Set for this assignment',
@@ -1465,6 +1475,22 @@
 														'Students could switch thinking off; each reply in the timeline shows what it used.'
 													)
 												: $i18n.t('Frozen at submission time; later setting changes do not change it.')}
+										</div>
+									</div>
+								{/if}
+
+								<!-- Models the platform steps actually used this round, frozen at submission time -->
+								{#if roundStepModels.length > 0}
+									<div class="rounded-2xl bg-gray-50 dark:bg-gray-800 px-4 py-4" data-testid="round-step-models">
+										<div class="mb-2 text-[11px] text-gray-400">
+											{$i18n.t('AI models used this round')}
+										</div>
+										<div class="flex flex-wrap gap-2">
+											{#each roundStepModels as item}
+												<span class="rounded-full border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-3 py-1 text-xs text-gray-700 dark:text-gray-300">
+													{$i18n.t(item.label)}: {modelName(item.model)}
+												</span>
+											{/each}
 										</div>
 									</div>
 								{/if}

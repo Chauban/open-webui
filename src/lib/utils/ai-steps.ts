@@ -5,7 +5,7 @@ import type {
 	ThinkingSetting
 } from '$lib/apis/education';
 
-// 管理员「AI 思考设置」表与教师作业页 AI 设置卡共用的文案。步骤本身由后端登记下发,
+// 管理员「AI 步骤设置」表与教师作业页 AI 设置卡共用的文案。步骤本身由后端登记下发,
 // 这里只管每个步骤怎么称呼、怎么解释。
 
 export const AI_STEP_TEXT: Record<AiStepKey, { title: string; hint: string; note?: string }> = {
