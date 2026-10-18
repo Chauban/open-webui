@@ -18,7 +18,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 
 from open_webui.models.config import Config
 from open_webui.services.education.writing_context import normalize_draft_paragraphs
-from open_webui.utils.chat import generate_chat_completion
+from open_webui.services.education.ai_steps import call_step_model
 from open_webui.utils.models import get_all_models
 
 log = logging.getLogger(__name__)
@@ -152,10 +152,9 @@ async def generate_transcription(request, user, model_id: str, messages: list[di
 
     识图模型是管理员为这项平台功能指定的,学生在聊天里未必有权用它,所以跳过模型访问控制。
     """
-    payload = {"model": model_id, "messages": messages, "stream": False}
     try:
-        response = await generate_chat_completion(
-            request, form_data=payload, user=user, bypass_filter=True
+        response = await call_step_model(
+            request, user, "image_parsing", model_id, messages, bypass_filter=True
         )
     except HTTPException as error:
         raise TranscriptionCallError(

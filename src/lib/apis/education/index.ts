@@ -189,6 +189,31 @@ export type CoachingStyle = 'socratic' | 'balanced' | 'hands_off';
 /** 作业形式:从零写作 / 修订初稿(学生先交课外写好的初稿,再和 AI 对话修改)。 */
 export type TaskMode = 'from_scratch' | 'revise_draft';
 
+/** 思考档位:model_default 不发档位,按模型自己的设定(含管理员保存在模型上的档位)。 */
+export type ThinkingSetting = 'model_default' | 'off' | 'low' | 'medium' | 'high';
+/** 辅导对话的思考档位由谁定:管理员 / 教师按作业 / 教师按作业并可交给学生开关。 */
+export type ThinkingControl = 'admin' | 'teacher' | 'student';
+export type AiStepKey =
+	| 'coaching_chat'
+	| 'first_read'
+	| 'reader_check'
+	| 'image_parsing'
+	| 'class_insight';
+export type AiStepModelSource = 'student_chat_model' | 'draft_image_model' | 'teacher_chat_model';
+/** 后端 services/education/ai_steps.py 的登记,管理员表与教师卡都按它生成。 */
+export type AiStep = {
+	key: AiStepKey;
+	model_source: AiStepModelSource;
+	teacher_controllable: boolean;
+};
+export type ThinkingPolicy = {
+	coaching_chat: { control: ThinkingControl; default: ThinkingSetting };
+	first_read: ThinkingSetting;
+	reader_check: ThinkingSetting;
+	image_parsing: ThinkingSetting;
+	class_insight: ThinkingSetting;
+};
+
 export const createAssignment = async (
 	token: string,
 	payload: {

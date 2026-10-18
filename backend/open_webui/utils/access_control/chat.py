@@ -5,11 +5,14 @@ chat.system_prompt 三个权限原先只是把面板藏起来，请求照样带�
 权限把用户不能设的部分去掉，对话请求和保存的用户设置都照此执行。
 """
 
+import copy
 from dataclasses import dataclass
 
 from fastapi import HTTPException, status
+from open_webui.config import DEFAULT_USER_PERMISSIONS
 from open_webui.models.config import Config
-from open_webui.utils.access_control import has_permission
+from open_webui.models.groups import Groups
+from open_webui.utils.access_control import fill_missing_permissions, has_permission
 
 # OpenAI 的 developer 消息与 system 一样充当系统提示。
 SYSTEM_PROMPT_ROLES = frozenset({'system', 'developer'})
@@ -77,6 +80,34 @@ async def get_chat_overrides(user) -> ChatOverrides:
         params=await has_permission(user.id, 'chat.params', default_permissions),
         system_prompt=await has_permission(user.id, 'chat.system_prompt', default_permissions),
     )
+
+
+async def get_group_chat_overrides(group_id: str) -> ChatOverrides:
+    """只属于这个组的成员能覆盖什么：与 has_permission 同一套规则——组里开了或默认权限开了都算开。
+
+    组权限只能往上加，所以管理员常以为在组里关掉就收回了；管理页据此如实显示。
+    """
+    group = await Groups.get_group_by_id(group_id)
+    group_permissions = (group.permissions if group else None) or {}
+    default_permissions = fill_missing_permissions(
+        copy.deepcopy(await Config.get('user.permissions') or {}), DEFAULT_USER_PERMISSIONS
+    )
+
+    def allowed(key: str) -> bool:
+        return any(_permission_value(permissions, key) for permissions in (group_permissions, default_permissions))
+
+    if not allowed('chat.controls'):
+        return NO_CHAT_OVERRIDES
+    return ChatOverrides(params=allowed('chat.params'), system_prompt=allowed('chat.system_prompt'))
+
+
+def _permission_value(permissions: dict, key: str) -> bool:
+    node = permissions
+    for part in key.split('.'):
+        if not isinstance(node, dict) or part not in node:
+            return False
+        node = node[part]
+    return node is True
 
 
 async def can_set_folder_system_prompt(user) -> bool:

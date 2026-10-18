@@ -168,7 +168,7 @@ async def ensure_revision_items(
         for _ in range(2):
             try:
                 raw = await challenge_service.generate_completion(
-                    request, user, model_id, messages
+                    request, user, model_id, messages, "first_read"
                 )
                 items = parse_diagnosis(raw, baseline, criteria)
                 break
@@ -286,7 +286,7 @@ async def ensure_follow_up(
         for _ in range(2):
             try:
                 raw = await challenge_service.generate_completion(
-                    request, user, model_id, messages
+                    request, user, model_id, messages, "first_read"
                 )
                 resolved, note, filled = parse_follow_up(raw, current_text, deferred_keys)
             except (ChallengeError, RevisionItemsError) as error:

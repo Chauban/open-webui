@@ -2773,6 +2773,15 @@ DEFAULT_EDUCATION_TASK_PROMPTS = {
 
 # 提交前质疑环节的两段措辞。这是与辅导助手相反的另一个角色：辅导助手负责帮，
 # 质疑读者只负责问。两边的口吻绝对不能互相渗透，否则学生分不清 AI 是帮手还是考官。
+# 教学各 AI 步骤的思考档位默认值。只有辅导对话可交给教师;图片识别默认关思考,转录用不上。
+DEFAULT_EDUCATION_THINKING = {
+    'coaching_chat': {'control': 'admin', 'default': 'model_default'},
+    'first_read': 'model_default',
+    'reader_check': 'model_default',
+    'image_parsing': 'off',
+    'class_insight': 'model_default',
+}
+
 DEFAULT_EDUCATION_CHALLENGE_PROMPTS = {
     'turn': """你是一个不同意作者观点的读者，不是写作助手。
 - 你的任务是指出这篇文章里说服不了你的地方，并向作者提问。你不提供修改建议，不提供可以粘贴进正文的句子，不替作者写任何一段话。
@@ -3201,6 +3210,8 @@ DEFAULT_CONFIG = {
     'education.challenge_prompts': DEFAULT_EDUCATION_CHALLENGE_PROMPTS,
     # 作业写作区「导入图片」用的识图模型(模型 id)。空=没选,学生端不提供图片导入。
     'education.draft_image_model': '',
+    # 教学各 AI 步骤的思考档位,结构与校验见 services/education/ai_steps.py。
+    'education.thinking': DEFAULT_EDUCATION_THINKING,
 }
 
 

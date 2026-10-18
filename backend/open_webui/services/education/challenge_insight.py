@@ -278,6 +278,7 @@ async def build_challenge_insight(
         user,
         model_id,
         build_insight_messages(system_prompt, assignment, items),
+        "class_insight",
     )
     categories = parse_insight(raw)
 

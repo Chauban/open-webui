@@ -5003,7 +5003,7 @@ def _fake_challenge_model(turn_text="你这一点说服不了我", closing=None,
         body = messages[1]["content"].split("【作者的文章】\n", 1)[1]
         return body.split("\n\n", 1)[0]
 
-    async def fake_generate(request, user, model_id, messages):
+    async def fake_generate(request, user, model_id, messages, step):
         calls.append({"model": model_id, "messages": messages})
         if '"stood"' in messages[0]["content"]:
             return json.dumps(
@@ -6807,7 +6807,7 @@ def _fake_diagnosis(payload):
     """替换模型调用:第一次通读只经过 challenge.generate_completion 这一个出口。"""
     calls = []
 
-    async def fake_generate(request, user, model_id, messages):
+    async def fake_generate(request, user, model_id, messages, step):
         calls.append({"model_id": model_id, "messages": messages})
         return json.dumps(payload, ensure_ascii=False)
 
@@ -7062,7 +7062,7 @@ def test_crashed_first_read_releases_the_claim(education_client):
     client, teacher, _, student, _, _ = education_client
     _, session_id = _revise_draft_with_baseline(client, teacher, student)
 
-    async def crash(request, user, model_id, messages):
+    async def crash(request, user, model_id, messages, step):
         raise RuntimeError("Model not found")
 
     original = education_challenge_module.generate_completion
@@ -7187,7 +7187,7 @@ def test_first_read_of_a_withdrawn_draft_is_dropped(education_client):
     new_text = "换过的初稿。" * 60
 
     # 通读还在等模型时,学生撤回初稿、交了另一份
-    async def fake_generate(request, user, model_id, messages):
+    async def fake_generate(request, user, model_id, messages, step):
         with SessionLocal() as db:
             Education.reset_draft_baseline(session_id, db=db)
             Education.set_draft_baseline(session_id, new_text, {"md": new_text}, db=db)
@@ -7895,21 +7895,22 @@ def test_prepare_draft_images_validates_every_image_before_any_model_call():
 
 @contextmanager
 def _fake_chat_completion(handler):
-    """替换 generate_chat_completion(转录出口之下那一层),连同上游状态的分类一起测;重发等待缩到毫秒。"""
+    """替换 call_step_model(转录出口之下那一层),连同上游状态的分类一起测;重发等待缩到毫秒。"""
     calls = []
 
-    async def fake(request, form_data, user, bypass_filter=False, **_):
-        page = form_data["messages"][-1]["content"][1]["image_url"]["url"]
+    async def fake(request, user, step, model_id, messages, bypass_filter=False):
+        assert step == "image_parsing" and bypass_filter
+        page = messages[-1]["content"][1]["image_url"]["url"]
         calls.append(page)
         return await handler(page, calls.count(page))
 
-    original = (draft_import_module.generate_chat_completion, draft_import_module._RETRY_DELAYS)
-    draft_import_module.generate_chat_completion = fake
+    original = (draft_import_module.call_step_model, draft_import_module._RETRY_DELAYS)
+    draft_import_module.call_step_model = fake
     draft_import_module._RETRY_DELAYS = (0.01, 0.02, 0.04)
     try:
         yield calls
     finally:
-        draft_import_module.generate_chat_completion, draft_import_module._RETRY_DELAYS = original
+        draft_import_module.call_step_model, draft_import_module._RETRY_DELAYS = original
 
 
 def _completion(text):

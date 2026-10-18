@@ -8,6 +8,9 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Switch from '$lib/components/common/Switch.svelte';
 	import Pencil from '$lib/components/icons/Pencil.svelte';
+	import EducationThinkingPolicy from './EducationThinkingPolicy.svelte';
+	import EducationStudentLimits from './EducationStudentLimits.svelte';
+	import type { AiStep, ThinkingPolicy } from '$lib/apis/education';
 
 	const i18n = getContext('i18n');
 
@@ -113,6 +116,10 @@
 	let enableCoachingStyles = true;
 	// 作业写作区「导入图片」用的识图模型;空=不提供图片导入。只列没有标明不能看图的模型。
 	let draftImageModel = '';
+	// 各 AI 步骤的思考档位;步骤登记与学生在作业外的权限状态由后端随配置一起给出,只读。
+	let thinkingPolicy: ThinkingPolicy | null = null;
+	let aiSteps: AiStep[] = [];
+	let studentOverrides = { params: true, system_prompt: true };
 	// Model 类型里 owned_by 不含 arena、capabilities 是 object,运行时两者都有,按宽类型读。
 	const canReadImages = (model) =>
 		(model?.owned_by as string) !== 'arena' &&
@@ -191,6 +198,9 @@
 			enableReturn = config.EDUCATION_ENABLE_RETURN;
 			enableCoachingStyles = config.EDUCATION_ENABLE_COACHING_STYLES;
 			draftImageModel = config.EDUCATION_DRAFT_IMAGE_MODEL ?? '';
+			thinkingPolicy = config.EDUCATION_THINKING;
+			aiSteps = config.EDUCATION_AI_STEPS;
+			studentOverrides = config.EDUCATION_STUDENT_CHAT_OVERRIDES;
 		} catch (error) {
 			loadFailed = true;
 			toast.error(`${error}`);
@@ -224,7 +234,8 @@
 	const persist = async (
 		next: Prompts,
 		nextAssignmentDefaults = assignmentDefaults,
-		nextRubrics = defaultRubrics
+		nextRubrics = defaultRubrics,
+		nextThinking = thinkingPolicy
 	) => {
 		saving = true;
 		try {
@@ -234,7 +245,8 @@
 				EDUCATION_DEFAULT_RUBRICS: nextRubrics,
 				EDUCATION_ENABLE_RETURN: enableReturn,
 				EDUCATION_ENABLE_COACHING_STYLES: enableCoachingStyles,
-				EDUCATION_DRAFT_IMAGE_MODEL: draftImageModel
+				EDUCATION_DRAFT_IMAGE_MODEL: draftImageModel,
+				EDUCATION_THINKING: nextThinking
 			});
 			prompts = read(config, 'configKey');
 			defaults = read(config, 'defaultsKey');
@@ -243,6 +255,9 @@
 			enableReturn = config.EDUCATION_ENABLE_RETURN;
 			enableCoachingStyles = config.EDUCATION_ENABLE_COACHING_STYLES;
 			draftImageModel = config.EDUCATION_DRAFT_IMAGE_MODEL ?? '';
+			thinkingPolicy = config.EDUCATION_THINKING;
+			aiSteps = config.EDUCATION_AI_STEPS;
+			studentOverrides = config.EDUCATION_STUDENT_CHAT_OVERRIDES;
 			// 学生端是否显示「导入图片」读的是 /api/config 的 features,跟着刷新。
 			await appConfig.set(await getBackendConfig());
 			editing = null;
@@ -492,6 +507,17 @@
 						</select>
 					</div>
 				</div>
+
+				{#if thinkingPolicy}
+					<EducationThinkingPolicy
+						policy={thinkingPolicy}
+						steps={aiSteps}
+						disabled={saving}
+						onChange={(next) => persist(prompts, assignmentDefaults, defaultRubrics, next)}
+					/>
+				{/if}
+
+				<EducationStudentLimits overrides={studentOverrides} />
 
 				{#each sections as section}
 					<div class="flex flex-col gap-4">

@@ -29,7 +29,7 @@ from open_webui.models.education import (
     RubricCriterion,
     RubricSchema,
 )
-from open_webui.utils.chat import generate_chat_completion
+from open_webui.services.education.ai_steps import PlatformStepKey, call_step_model
 from open_webui.utils.models import get_all_models
 
 log = logging.getLogger(__name__)
@@ -181,12 +181,14 @@ def build_closing_messages(
     ]
 
 
-async def generate_completion(request, user, model_id: str, messages: list[dict]) -> str:
+async def generate_completion(
+    request, user, model_id: str, messages: list[dict], step: PlatformStepKey
+) -> str:
     """单次非流式生成。
 
     这是本模块唯一的模型调用出口,测试通过替换它来隔离模型。质疑是核心教学交互,
     不走 task model 降级,直接用学生写作区当前选的模型;模型可见性与访问控制由
-    generate_chat_completion 自己校验。
+    generate_chat_completion 自己校验。第一次通读、班级论证归纳也借这个出口,各自写明步骤。
     """
 
     # 模型列表是进程内缓存,进程重启后要等有人请求 /api/models 才会填上;
@@ -194,8 +196,7 @@ async def generate_completion(request, user, model_id: str, messages: list[dict]
     if not request.app.state.MODELS:
         await get_all_models(request, user=user)
 
-    payload = {"model": model_id, "messages": messages, "stream": False}
-    response = await generate_chat_completion(request, form_data=payload, user=user)
+    response = await call_step_model(request, user, step, model_id, messages)
 
     if isinstance(response, JSONResponse):
         raise ChallengeError("Challenge generation failed")
@@ -314,7 +315,7 @@ async def generate_turn(
 
     last_error: Optional[ChallengeError] = None
     for attempt in range(2):
-        raw = await generate_completion(request, user, model_id, messages)
+        raw = await generate_completion(request, user, model_id, messages, "reader_check")
         try:
             return parse_turn(raw, draft_text)
         except ChallengeError as error:
@@ -674,6 +675,7 @@ async def submit_challenge_response(
             user,
             model_id,
             build_closing_messages(closing_prompt, assignment, turns),
+            "reader_check",
         )
         closing = parse_closing(raw, turns)
 
