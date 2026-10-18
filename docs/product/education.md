@@ -69,13 +69,14 @@ Right Write 基于 Open WebUI v0.11.2。前端使用 Svelte 5、SvelteKit 2、Ty
 
 - 统一思考参数 `thinking_level`（`off / low / medium / high`，不设为模型默认）在 `utils/thinking.py` 按连接翻译：连接设置的「思考格式」（`thinking_format`：`openai` 的 reasoning_effort、Responses 的 reasoning.effort、`anthropic` 的 budget_tokens、`qwen` 的 enable_thinking、`chat_template`、`thinking_type`、`openrouter`），没设时按地址识别。只有模型能力勾了「思考控制」（`capabilities.reasoning`，默认不勾）才翻译，否则丢弃，档位本身不会原样发给服务商。
 - `services/education/ai_steps.py` 登记教学的每处模型调用：`coaching_chat`、`first_read`（含补看）、`reader_check`、`image_parsing`、`class_insight`。平台步骤一律经 `call_step_model(step=…)` 发出，测试静态核对教学代码只在这里调用 `generate_chat_completion`，且每处调用写明登记过的步骤；新增调用必须先登记，管理员表与教师 AI 设置卡都按登记生成。
-- `education.thinking`：`coaching_chat: {control: admin|teacher|student, default}`，其余步骤各一个档位；默认全为模型默认，图片识别为关。只有辅导对话可下放；教师设置存 `assignment.model_params`（`{thinking, students_choose_thinking}`，迁移 `b3d5f7a9c1e4`），按此刻的下放方式解读，收回后不再生效。学生只能在允许时关闭当轮，不能调高。
+- `education.ai_steps`：`coaching_chat: {control: admin|teacher|student, default}`，其余平台步骤各 `{model, thinking}`；思考默认全为模型默认，图片识别为关。只有辅导对话可下放；教师设置存 `assignment.model_params`（`{thinking, students_choose_thinking}`，迁移 `b3d5f7a9c1e4`），按此刻的下放方式解读，收回后不再生效。学生只能在允许时关闭当轮，不能调高。
 - 冻结与留痕：`stats_json.coaching.thinking` 冻存提交时的 `{control, level, source, students_choose}`；作业对话的每条回复在 `meta.thinking_level` 记实际发出的档位。
-- 不为通读或试读固定专用模型（推迟）：这些步骤仍用学生所选的对话模型，管理员表与教师卡的「模型」一栏写明这一点。
+- 模型：`model` 为空时通读与补看、读者试读用学生在写作区选的模型，班级论证归纳用老师选的；图片识别必须指定（为空即不提供图片导入，原 `education.draft_image_model` 已由迁移 `c6e8a0b2d4f7` 并入）。辅导对话不设固定模型：学生能选哪些由模型访问控制决定。`resolve_step_model` 是唯一的解析入口：指定的模型还在就用它并跳过学生 / 老师的模型访问控制；已被删掉时记告警、回落到学生 / 老师的模型（图片识别无回落），管理员页按 `EDUCATION_AI_STEP_VIEWS` 标红。保存设置时只校验新选的模型（须存在，图片识别还须能看图），已失效的旧值不挡保存。
+- 实际用的模型：`writing_session.revision_items_model_id` / `revision_follow_up_model_id`、`challenge_turn.model_id`、`challenge_session.closing_model_id`、`challenge_insight.model_id`，图片导入写进编辑操作的 `metadata_json.model_id`；提交时冻进 `stats_json.revision_items.models`（`{first_read, follow_up}`）与 `stats_json.challenge.models`，批改页显示。
 
 ## Instance Configuration & Evidence
 
-- 管理员持久化配置：`education.default_task_mode`（默认 `from_scratch`）、`education.default_coaching_style`（默认 `balanced`）、`education.default_rubrics`（按作业形式分别配置）、`education.enable_coaching_styles`（默认开启）、`education.coaching_prompts`、`education.task_prompts`、`education.challenge_prompts`、`education.draft_image_model`（初稿图片识别模型，默认空=不提供图片导入）、`education.thinking`（各 AI 步骤的思考档位与辅导对话的下放方式，结构见下）。
+- 管理员持久化配置：`education.default_task_mode`（默认 `from_scratch`）、`education.default_coaching_style`（默认 `balanced`）、`education.default_rubrics`（按作业形式分别配置）、`education.enable_coaching_styles`（默认开启）、`education.coaching_prompts`、`education.task_prompts`、`education.challenge_prompts`、`education.ai_steps`（各 AI 步骤的模型与思考档位，含初稿图片识别模型，以及辅导对话思考的下放方式，结构见上）。
 - 教师新建作业经 `/api/v1/teacher/assignment-defaults` 获取实例默认值；不要把某个部署实例的课程设定写成所有实例的固定默认值。档位取值为 `socratic / balanced / hands_off`，关闭档位后只使用任务说明，不再注入档位提示词。
 - 画像事实证据不可变，算法结果与聚合结果保存为版本化投影；普通画像 GET 读取投影，不扫描原始历史或偷偷重算。改算法须提升 `PROFILE_METRIC_VERSION`，改证据 schema 须同步更新严格类型与迁移。
 - 当前初稿证据 schema 与指标版本为 `2026-10-01.1`；首轮过程指标从声明初稿算起，重交轮从上一轮终稿算起，不能把整份初稿计成一次大段突增。
