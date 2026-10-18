@@ -207,6 +207,11 @@ from open_webui.tasks import (
 )  # Import from tasks.py
 from open_webui.utils import logger
 from open_webui.utils.access_control import has_permission
+from open_webui.utils.access_control.chat import (
+    NO_CHAT_OVERRIDES,
+    get_chat_overrides,
+    strip_chat_request_overrides,
+)
 from open_webui.utils.access_control.folders import has_folder_write_access
 from open_webui.utils.actions import chat_action as chat_action_handler
 from open_webui.utils.asgi_middleware import AppHTTPMiddleware
@@ -1022,10 +1027,21 @@ async def _set_direct_model(request: Request, model_item: dict, user) -> None:
 
 @app.post('/api/chat/completions')
 @app.post('/api/v1/chat/completions')  # Experimental: Compatibility with OpenAI API
-async def chat_completion(
+async def chat_completion_endpoint(
     request: Request,
     form_data: dict,
     user=Depends(get_verified_user),
+):
+    return await chat_completion(request, form_data, user, client_request=True)
+
+
+# 频道、自动化、子代理、定时器经 CHAT_COMPLETION_HANDLER 直接调用,请求体由平台拼成(含平台写的系统提示);
+# 只有 client_request 的请求按用户权限去掉参数与系统提示。
+async def chat_completion(
+    request: Request,
+    form_data: dict,
+    user,
+    client_request: bool = False,
 ):
     if not request.app.state.MODELS:
         await get_all_models(request, user=user)
@@ -1077,6 +1093,25 @@ async def chat_completion(
         else:
             model = model_item
             await _set_direct_model(request, model, user)
+
+        # 写作区对话:定稿或过截止在创建聊天、保存消息之前就拒绝。
+        writing_chat_id = form_data.get('chat_id') or ''
+        writing_folder_id = (
+            await Chats.get_chat_folder_id(writing_chat_id, user.id) if is_saved_chat_id(writing_chat_id) else None
+        ) or form_data.get('folder_id')
+        writing_folder = await Folders.get_folder_by_id(writing_folder_id) if writing_folder_id else None
+        writing_session = get_folder_writing_session(writing_folder, user.id) if writing_folder else None
+        if writing_session:
+            ensure_writing_session_writable(writing_session)
+
+        # 作业写作区里学生不能改参数、加系统提示,无论权限怎么配:对话要按老师的作业说明和模型设定进行。
+        if client_request:
+            chat_overrides = (
+                NO_CHAT_OVERRIDES
+                if writing_session and writing_session.scope == 'assignment'
+                else await get_chat_overrides(user)
+            )
+            form_data = strip_chat_request_overrides(form_data, chat_overrides)
 
         # Read before the fallback below can rebind model to a different one.
         model_capabilities = ((model.get('info') or {}).get('meta') or {}).get('capabilities') or {}
@@ -1210,17 +1245,6 @@ async def chat_completion(
                 'tool_approval_mode': tool_approval_mode,
             },
         }
-
-        writing_folder_id = (
-            await Chats.get_chat_folder_id(chat_id, user.id)
-            if is_saved_chat_id(chat_id)
-            else None
-        ) or metadata.get('folder_id')
-        if writing_folder_id:
-            writing_folder = await Folders.get_folder_by_id(writing_folder_id)
-            writing_session = get_folder_writing_session(writing_folder, user.id) if writing_folder else None
-            if writing_session:
-                ensure_writing_session_writable(writing_session)
 
         if is_new_chat:
             metadata['chat_id'] = str(uuid4())
@@ -1970,7 +1994,7 @@ async def generate_messages(
     openai_payload = convert_anthropic_to_openai_payload(form_data, passthrough_params)
 
     # Route through the existing chat_completion handler
-    response = await chat_completion(request, openai_payload, user)
+    response = await chat_completion(request, openai_payload, user, client_request=True)
 
     # Convert response back to Anthropic format
     if isinstance(response, StreamingResponse):
