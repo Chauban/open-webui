@@ -1122,6 +1122,7 @@
 		autoSendPrefill={autoStartDiagnosis}
 		disableContextActions={false}
 		allowAssignmentWorkspaceChat={isAssignment}
+		lockModelOverrides={isAssignment}
 		showRightPanel={!narrowLayout}
 		rightPanelWidth={defaultPanelWidth}
 		rightPanelMinWidth={560}

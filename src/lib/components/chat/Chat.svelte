@@ -153,6 +153,7 @@
 	export let readOnlyHint = '';
 	export let disableContextActions = false;
 	export let allowAssignmentWorkspaceChat = false;
+	export let lockModelOverrides = false;
 	export let projectBaseUrl = '';
 	export let showRightPanel = false;
 	export let rightPanelWidth = 480;
@@ -4835,6 +4836,7 @@
 						{showMessage}
 						{eventTarget}
 						{codeInterpreterEnabled}
+						{lockModelOverrides}
 					/>
 				{/if}
 			</div>

@@ -47,6 +47,7 @@
 	export let modelId;
 
 	export let codeInterpreterEnabled = false;
+	export let lockModelOverrides = false;
 
 	let largeScreen = false;
 	let dragged = false;
@@ -297,7 +298,7 @@
 							{:else if activeTab === 'files' && codeInterpreterEnabled}
 								<PyodideFileNav />
 							{:else}
-								<Controls embed={true} {models} bind:chatFiles bind:params />
+								<Controls embed={true} {models} {lockModelOverrides} bind:chatFiles bind:params />
 							{/if}
 						</div>
 					</div>
@@ -425,7 +426,7 @@
 							{:else if activeTab === 'files' && codeInterpreterEnabled}
 								<PyodideFileNav overlay={dragged} />
 							{:else}
-								<Controls embed={true} {models} bind:chatFiles bind:params />
+								<Controls embed={true} {models} {lockModelOverrides} bind:chatFiles bind:params />
 							{/if}
 						</div>
 					</div>

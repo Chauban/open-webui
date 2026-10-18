@@ -1923,6 +1923,7 @@
 	"Imported automations successfully": "自动化任务导入成功",
 	"Imported notes successfully": "笔记导入成功",
 	"Importing...": "正在导入……",
+	"In assignment writing, the system prompt and model parameters follow your teacher’s instructions and the platform settings.": "作业写作区的系统提示和模型参数按老师的作业说明与平台设定，不能在这里调整。",
 	"In progress": "进行中",
 	"Inactive": "未激活",
 	"Include": "包括",

@@ -14,6 +14,8 @@
 	export let chatFiles = [];
 	export let params = {};
 	export let embed = false;
+	// RightWrite: 作业写作区里系统提示与参数由老师的作业说明和模型设定决定,服务端不用学生改的值,不显示这两栏。
+	export let lockModelOverrides = false;
 
 	// Persist collapsible section open/close state
 	const getOpen = (key: string, fallback = true): boolean => {
@@ -106,7 +108,13 @@
 				</Collapsible>
 			{/if}
 
-			{#if $user?.role === 'admin' || ($user?.permissions.chat?.system_prompt ?? true)}
+			{#if lockModelOverrides}
+				<div class="py-1 text-xs text-gray-500 dark:text-gray-400">
+					{$i18n.t(
+						'In assignment writing, the system prompt and model parameters follow your teacher’s instructions and the platform settings.'
+					)}
+				</div>
+			{:else if $user?.role === 'admin' || ($user?.permissions.chat?.system_prompt ?? true)}
 				<Collapsible
 					title={$i18n.t('System Prompt')}
 					bind:open={showSystemPrompt}
@@ -128,7 +136,7 @@
 				</Collapsible>
 			{/if}
 
-			{#if $user?.role === 'admin' || ($user?.permissions.chat?.params ?? true)}
+			{#if !lockModelOverrides && ($user?.role === 'admin' || ($user?.permissions.chat?.params ?? true))}
 				<Collapsible
 					title={$i18n.t('Advanced Params')}
 					bind:open={showAdvancedParams}
