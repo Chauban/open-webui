@@ -62,12 +62,20 @@ Right Write 基于 Open WebUI v0.11.2。前端使用 Svelte 5、SvelteKit 2、Ty
 - `WritingWorkspaceShell.svelte` 管理统一工作区；发送前等待正文保存（最多 5 秒，失败提示学生），后端从最近已保存正文注入每轮上下文及改动说明，不能依赖静态文件夹提示词或模型自发调用工具取得正文。
 - 教师批改和本次分析读取提交时冻结的 `stats_json.revision_items` 与 `stats_json.coaching`；初稿到终稿按句对比。“说改了但原句未动”只是核查提示，可能在别处作等效修改，不能自动判错。
 - 学生的任何对话都禁止读写记忆；作业对话还禁用检索聊天记录与记忆的内置工具。修改模型工具或聊天中间件时必须保持这些权限边界。
-- 模型参数与系统提示的覆盖由服务端执行（`utils/access_control/chat.py`）：`/api/chat/completions`、`/openai/chat/completions` 与 Anthropic 兼容的 `/api/v1/messages` 按 `chat.controls` 且 `chat.params` / `chat.system_prompt` 去掉请求里的参数（含顶层的 `temperature`、`thinking` 等，只留流水线字段和 `tool_approval_mode`）与 system / developer 消息。原样转发给服务商、无法逐项去除的接口（`/openai/responses`、默认关闭的 `/openai/{path}`）只对两样都能设的用户开放，其余 403；`/api/v1/messages` 遇原生 Anthropic 连接时，受限用户改走转换后的对话流水线。保存用户设置时同样去掉 `ui.params`、`ui.system`；文件夹系统提示按 `chat.system_prompt`。作业写作区的学生一律去掉，与权限无关。频道、自动化、子代理、定时器经 `CHAT_COMPLETION_HANDLER` 发出的请求由平台拼成，不经此去除。组权限按最宽松合并，要收回学生须在默认权限里关掉、再给教师组打开。
+- 模型参数与系统提示的覆盖由服务端执行（`utils/access_control/chat.py`）：`/api/chat/completions`、`/openai/chat/completions` 与 Anthropic 兼容的 `/api/v1/messages` 按 `chat.controls` 且 `chat.params` / `chat.system_prompt` 去掉请求里的参数（含顶层的 `temperature`、`thinking` 等，只留流水线字段和 `tool_approval_mode`）与 system / developer 消息。原样转发给服务商、无法逐项去除的接口（`/openai/responses`、默认关闭的 `/openai/{path}`）只对两样都能设的用户开放，其余 403；`/api/v1/messages` 遇原生 Anthropic 连接时，受限用户改走转换后的对话流水线。保存用户设置时同样去掉 `ui.params`、`ui.system`；文件夹系统提示按 `chat.system_prompt`。作业写作区的学生一律去掉，与权限无关；只有辅导对话的思考档位由服务端另行算出（见下）。频道、自动化、子代理、定时器经 `CHAT_COMPLETION_HANDLER` 发出的请求由平台拼成，不经此去除。组权限按最宽松合并，要收回学生须在默认权限里关掉、再给教师组打开。
 - 写作区文件夹（`assignment_writing` / `personal_writing`）只由教学路由建立和同步：文件夹接口拒绝建立这两种 mode、拒绝把普通文件夹改成这两种，已有写作区文件夹只接受 `meta.hidden_from_sidebar` 与 `data.model_ids` 的改动，其余 meta / data（关联的写作会话、老师的作业说明）一律 403。
+
+## AI Steps & Thinking
+
+- 统一思考参数 `thinking_level`（`off / low / medium / high`，不设为模型默认）在 `utils/thinking.py` 按连接翻译：连接设置的「思考格式」（`thinking_format`：`openai` 的 reasoning_effort、Responses 的 reasoning.effort、`anthropic` 的 budget_tokens、`qwen` 的 enable_thinking、`chat_template`、`thinking_type`、`openrouter`），没设时按地址识别。只有模型能力勾了「思考控制」（`capabilities.reasoning`，默认不勾）才翻译，否则丢弃，档位本身不会原样发给服务商。
+- `services/education/ai_steps.py` 登记教学的每处模型调用：`coaching_chat`、`first_read`（含补看）、`reader_check`、`image_parsing`、`class_insight`。平台步骤一律经 `call_step_model(step=…)` 发出，测试静态核对教学代码只在这里调用 `generate_chat_completion`，且每处调用写明登记过的步骤；新增调用必须先登记，管理员表与教师 AI 设置卡都按登记生成。
+- `education.thinking`：`coaching_chat: {control: admin|teacher|student, default}`，其余步骤各一个档位；默认全为模型默认，图片识别为关。只有辅导对话可下放；教师设置存 `assignment.model_params`（`{thinking, students_choose_thinking}`，迁移 `b3d5f7a9c1e4`），按此刻的下放方式解读，收回后不再生效。学生只能在允许时关闭当轮，不能调高。
+- 冻结与留痕：`stats_json.coaching.thinking` 冻存提交时的 `{control, level, source, students_choose}`；作业对话的每条回复在 `meta.thinking_level` 记实际发出的档位。
+- 不为通读或试读固定专用模型（推迟）：这些步骤仍用学生所选的对话模型，管理员表与教师卡的「模型」一栏写明这一点。
 
 ## Instance Configuration & Evidence
 
-- 管理员持久化配置：`education.default_task_mode`（默认 `from_scratch`）、`education.default_coaching_style`（默认 `balanced`）、`education.default_rubrics`（按作业形式分别配置）、`education.enable_coaching_styles`（默认开启）、`education.coaching_prompts`、`education.task_prompts`、`education.challenge_prompts`、`education.draft_image_model`（初稿图片识别模型，默认空=不提供图片导入）。
+- 管理员持久化配置：`education.default_task_mode`（默认 `from_scratch`）、`education.default_coaching_style`（默认 `balanced`）、`education.default_rubrics`（按作业形式分别配置）、`education.enable_coaching_styles`（默认开启）、`education.coaching_prompts`、`education.task_prompts`、`education.challenge_prompts`、`education.draft_image_model`（初稿图片识别模型，默认空=不提供图片导入）、`education.thinking`（各 AI 步骤的思考档位与辅导对话的下放方式，结构见下）。
 - 教师新建作业经 `/api/v1/teacher/assignment-defaults` 获取实例默认值；不要把某个部署实例的课程设定写成所有实例的固定默认值。档位取值为 `socratic / balanced / hands_off`，关闭档位后只使用任务说明，不再注入档位提示词。
 - 画像事实证据不可变，算法结果与聚合结果保存为版本化投影；普通画像 GET 读取投影，不扫描原始历史或偷偷重算。改算法须提升 `PROFILE_METRIC_VERSION`，改证据 schema 须同步更新严格类型与迁移。
 - 当前初稿证据 schema 与指标版本为 `2026-10-01.1`；首轮过程指标从声明初稿算起，重交轮从上一轮终稿算起，不能把整份初稿计成一次大段突增。
