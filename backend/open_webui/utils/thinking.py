@@ -6,7 +6,7 @@
 只有在模型能力里勾了「思考控制」（capabilities.reasoning）的模型才翻译，其余直接丢弃。
 """
 
-from typing import Literal, Optional
+from typing import Literal, NamedTuple, Optional
 from urllib.parse import urlparse
 
 THINKING_LEVEL_PARAM = 'thinking_level'
@@ -135,6 +135,54 @@ def apply_thinking_level(payload: dict, level: str, thinking_format: str, *, res
     else:
         raise ValueError(f'Unknown thinking format: {thinking_format}')
     return payload
+
+
+class FixedSamplingParam(NamedTuple):
+    """服务商固定死的采样参数:传别的值直接 400。models 为空表示该格式下所有模型。"""
+
+    param: str
+    allowed: float
+    models: tuple[str, ...] = ()
+
+
+# 只收实测返回 400 的(2026-10-18,见 docs/reference/thinking-params-test-results.md)。
+# 发送前按这张表去掉;管理员页的提示也读这张表(/openai/sampling-rules),两边不会说法不一。
+FIXED_SAMPLING_PARAMS: dict[str, tuple[FixedSamplingParam, ...]] = {
+    'kimi': (
+        # K2.6 与 K3:「invalid temperature: only 1 is allowed for this model」
+        FixedSamplingParam('temperature', 1.0),
+        # K2.6:「invalid top_p: only 0.95 is allowed for this model」;K3 未实测,不动
+        FixedSamplingParam('top_p', 0.95, ('kimi-k2.6',)),
+    ),
+}
+
+
+def fixed_sampling_params(thinking_format: str, model_id: Optional[str] = None) -> list[FixedSamplingParam]:
+    """该格式下固定死的采样参数;给出 model_id 时只留适用于这个模型的。"""
+    rules = FIXED_SAMPLING_PARAMS.get(thinking_format, ())
+    if model_id is None:
+        return list(rules)
+    model = model_id.lower()
+    return [rule for rule in rules if not rule.models or any(model.startswith(prefix) for prefix in rule.models)]
+
+
+def _is_allowed(value, allowed: float) -> bool:
+    try:
+        return float(value) == allowed
+    except (TypeError, ValueError):
+        return False
+
+
+def strip_fixed_sampling_params(payload: dict, thinking_format: str) -> tuple[dict, list[str]]:
+    """去掉服务商不接受的采样参数(值不等于它固定的那个),返回新的请求体和去掉的参数名。"""
+    dropped = [
+        rule.param
+        for rule in fixed_sampling_params(thinking_format, str(payload.get('model') or ''))
+        if rule.param in payload and not _is_allowed(payload[rule.param], rule.allowed)
+    ]
+    if not dropped:
+        return payload, []
+    return {key: value for key, value in payload.items() if key not in dropped}, dropped
 
 
 def model_supports_thinking_control(model_info) -> bool:

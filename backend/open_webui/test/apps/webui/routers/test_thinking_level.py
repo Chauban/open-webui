@@ -19,6 +19,8 @@ from open_webui.utils.thinking import (
     THINKING_BUDGET_TOKENS,
     apply_thinking_level,
     detect_thinking_format,
+    fixed_sampling_params,
+    strip_fixed_sampling_params,
 )
 
 
@@ -150,7 +152,9 @@ class _Sent(Exception):
     pass
 
 
-def _send_through_router(monkeypatch, *, saved_params, capabilities, url, api_config=None, body_extra=None):
+def _send_through_router(
+    monkeypatch, *, saved_params, capabilities, url, api_config=None, body_extra=None, model='qwen-plus'
+):
     """跑一遍 OpenAI 兼容路由，返回路由抛出的错误和截下的服务商请求体（没发出去时为 None）。"""
     sent = {}
 
@@ -188,10 +192,10 @@ def _send_through_router(monkeypatch, *, saved_params, capabilities, url, api_co
     monkeypatch.setattr(openai_router, 'get_headers_and_cookies', headers_and_cookies)
     monkeypatch.setattr(openai_router, 'get_session', fake_session)
     request = SimpleNamespace(
-        app=SimpleNamespace(state=SimpleNamespace(OPENAI_MODELS={'qwen-plus': {'urlIdx': 0}})),
+        app=SimpleNamespace(state=SimpleNamespace(OPENAI_MODELS={model: {'urlIdx': 0}})),
         state=SimpleNamespace(),
     )
-    body = {'model': 'qwen-plus', 'messages': [{'role': 'user', 'content': 'hi'}], **(body_extra or {})}
+    body = {'model': model, 'messages': [{'role': 'user', 'content': 'hi'}], **(body_extra or {})}
     user = SimpleNamespace(id='u-1', name='U', email='u@example.com', role='user')
     with pytest.raises(HTTPException) as error:
         asyncio.run(openai_router.generate_chat_completion(request, body, user))
@@ -242,3 +246,69 @@ def test_router_rejects_unknown_levels(monkeypatch):
         body_extra={'thinking_level': 'max'},
     )
     assert error.status_code == 400 and body is None
+
+
+def test_kimi_fixed_sampling_params_follow_the_tests():
+    """实测:K2.6、K3 的 temperature 只能是 1;K2.6 的 top_p 只能是 0.95。其他服务商不受影响。"""
+    assert [rule.param for rule in fixed_sampling_params('kimi', 'kimi-k2.6')] == ['temperature', 'top_p']
+    assert [rule.param for rule in fixed_sampling_params('kimi', 'kimi-k3')] == ['temperature']
+    assert [(rule.param, rule.models) for rule in fixed_sampling_params('kimi')] == [
+        ('temperature', ()),
+        ('top_p', ('kimi-k2.6',)),
+    ]
+    assert fixed_sampling_params('deepseek', 'deepseek-flash') == []
+
+
+def test_strip_only_drops_values_the_provider_rejects():
+    payload = {'model': 'kimi-k2.6', 'temperature': 0.3, 'top_p': 0.9, 'max_tokens': 100}
+    assert strip_fixed_sampling_params(payload, 'kimi') == (
+        {'model': 'kimi-k2.6', 'max_tokens': 100},
+        ['temperature', 'top_p'],
+    )
+    # 恰好是固定值的照发;K3 的 top_p 没实测过,不动
+    kept = {'model': 'kimi-k3', 'temperature': 1, 'top_p': 0.9}
+    assert strip_fixed_sampling_params(kept, 'kimi') == (kept, [])
+    other = {'model': 'deepseek-flash', 'temperature': 0.3}
+    assert strip_fixed_sampling_params(other, 'deepseek') == (other, [])
+
+
+def test_router_drops_kimi_sampling_params_before_sending(monkeypatch):
+    _, body = _send_through_router(
+        monkeypatch,
+        saved_params={'temperature': 0.3, 'top_p': 0.9},
+        capabilities={},
+        url='https://api.moonshot.cn/v1',
+        model='kimi-k2.6',
+    )
+    assert 'temperature' not in body and 'top_p' not in body
+
+
+def test_sampling_rules_endpoint_reads_the_same_table(monkeypatch):
+    async def model_by_id(model_id):
+        return SimpleNamespace(base_model_id='kimi-k2.6') if model_id == 'tutor' else None
+
+    async def connection(idx):
+        return 'https://api.moonshot.cn/v1', 'key', {}
+
+    monkeypatch.setattr(openai_router.Models, 'get_model_by_id', model_by_id)
+    monkeypatch.setattr(openai_router, 'get_openai_connection', connection)
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(OPENAI_MODELS={'kimi-k2.6': {'urlIdx': 3}, 'kimi-k3': {'urlIdx': 3}}))
+    )
+    rules = lambda **form: asyncio.run(  # noqa: E731
+        openai_router.get_sampling_rules(request, openai_router.SamplingRulesForm(**form), None)
+    )
+
+    # 自建模型按底模判断
+    assert rules(model_id='tutor') == {
+        'thinking_format': 'kimi',
+        'rules': [
+            {'param': 'temperature', 'allowed': 1.0, 'models': ()},
+            {'param': 'top_p', 'allowed': 0.95, 'models': ('kimi-k2.6',)},
+        ],
+    }
+    assert [rule['param'] for rule in rules(model_id='kimi-k3')['rules']] == ['temperature']
+    # 新建连接时按地址 / 手选的格式
+    assert rules(url='https://api.moonshot.ai/v1')['thinking_format'] == 'kimi'
+    assert rules(url='https://api.deepseek.com')['rules'] == []
+    assert rules(url='https://example.com/v1', thinking_format='kimi')['thinking_format'] == 'kimi'

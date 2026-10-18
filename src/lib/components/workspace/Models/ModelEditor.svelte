@@ -13,6 +13,7 @@
 	import { getVoices } from '$lib/apis/audio';
 
 	import AdvancedParams from '$lib/components/chat/Settings/Advanced/AdvancedParams.svelte';
+	import { loadSamplingRules, samplingNote, type SamplingRules } from '$lib/utils/sampling-rules';
 	import ModelSelector from '$lib/components/chat/ModelSelector/Selector.svelte';
 	import Tags from '$lib/components/common/Tags.svelte';
 	import Knowledge from '$lib/components/workspace/Models/Knowledge.svelte';
@@ -373,6 +374,19 @@
 		loading = false;
 		success = false;
 	};
+
+	// 服务商固定死的采样参数(如 Kimi 的 temperature):这里设了也会在发送时被去掉,当场提示。
+	// 规则来自后端发送时用的同一张表;按底模(自建模型)或模型 id 所在的连接判断。
+	let samplingRules: SamplingRules | null = null;
+	let samplingRulesFor: string | null = null;
+	$: samplingModelId = info.base_model_id || id;
+	$: if ($user?.role === 'admin' && samplingModelId && samplingModelId !== samplingRulesFor) {
+		samplingRulesFor = samplingModelId;
+		loadSamplingRules(localStorage.token, { model_id: samplingModelId }).then((rules) => {
+			if (samplingRulesFor === samplingModelId) samplingRules = rules;
+		});
+	}
+	$: samplingWarning = samplingNote(samplingRules, $i18n.t, params);
 
 	onMount(async () => {
 		await tools.set((await getTools(localStorage.token).catch(() => null)) ?? []);
@@ -872,6 +886,15 @@
 										{/if}
 									</button>
 								</div>
+
+								{#if samplingWarning}
+									<div
+										class="my-1 text-xs text-amber-600 dark:text-amber-500"
+										data-testid="sampling-warning"
+									>
+										{samplingWarning}
+									</div>
+								{/if}
 
 								{#if showAdvanced}
 									<div class="my-2">

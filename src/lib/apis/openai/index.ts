@@ -80,6 +80,24 @@ export const updateOpenAIConfig = async (token: string = '', config: OpenAIConfi
 	return res;
 };
 
+/** 某个模型 / 连接上服务商固定死的采样参数(发送时自动去掉),管理员页提示用。 */
+export const getSamplingRules = async (
+	token: string,
+	body: { model_id?: string; url?: string; thinking_format?: string }
+) => {
+	const res = await fetch(`${OPENAI_API_BASE_URL}/sampling-rules`, {
+		method: 'POST',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		},
+		body: JSON.stringify(body)
+	});
+	if (!res.ok) throw await res.json().catch(() => ({ detail: res.statusText }));
+	return res.json();
+};
+
 export const getOpenAIModelsDirect = async (url: string, key: string) => {
 	let error = null;
 

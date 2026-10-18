@@ -45,7 +45,9 @@ from open_webui.utils.thinking import (
     THINKING_LEVELS,
     apply_thinking_level,
     detect_thinking_format,
+    fixed_sampling_params,
     model_supports_thinking_control,
+    strip_fixed_sampling_params,
 )
 from open_webui.utils.access_control.chat import (
     ensure_raw_passthrough_allowed,
@@ -1473,6 +1475,36 @@ def convert_responses_result(response: dict) -> dict:
     }
 
 
+class SamplingRulesForm(BaseModel):
+    """给出 model_id 时按它所在的连接判断;否则按连接设置里的地址与思考格式(新建连接时还没有模型)。"""
+
+    model_id: Optional[str] = None
+    url: Optional[str] = None
+    thinking_format: Optional[str] = None
+
+
+@router.post('/sampling-rules')
+async def get_sampling_rules(request: Request, form_data: SamplingRulesForm, user=Depends(get_admin_user)):
+    """管理员页提示用:这个模型 / 连接上哪些采样参数会在发送时被去掉。与发送时去掉的是同一张表。"""
+    if form_data.model_id:
+        model_info = await Models.get_model_by_id(form_data.model_id)
+        model_id = model_info.base_model_id if model_info and model_info.base_model_id else form_data.model_id
+        models = request.app.state.OPENAI_MODELS
+        if not models or model_id not in models:
+            await get_all_models(request, user=user)
+            models = request.app.state.OPENAI_MODELS
+        model = models.get(model_id)
+        if not model or 'urlIdx' not in model:
+            return {'thinking_format': None, 'rules': []}
+        url, _, api_config = await get_openai_connection(model['urlIdx'])
+        thinking_format = detect_thinking_format(url, api_config)
+        rules = fixed_sampling_params(thinking_format, strip_provider_model_prefix(model_id, api_config.get('prefix_id')))
+    else:
+        thinking_format = detect_thinking_format(form_data.url or '', {'thinking_format': form_data.thinking_format})
+        rules = fixed_sampling_params(thinking_format)
+    return {'thinking_format': thinking_format, 'rules': [rule._asdict() for rule in rules]}
+
+
 @router.post('/chat/completions')
 async def generate_chat_completion_endpoint(
     request: Request,
@@ -1558,6 +1590,7 @@ async def generate_chat_completion(
     payload['model'] = strip_provider_model_prefix(payload['model'], prefix_id)
 
     # 统一思考档位按连接换成服务商字段;模型没勾「思考控制」就丢掉,不原样发出去。
+    thinking_format = detect_thinking_format(url, api_config)
     thinking_level = payload.pop(THINKING_LEVEL_PARAM, None)
     if thinking_level is not None and thinking_level not in THINKING_LEVELS:
         raise HTTPException(status_code=400, detail=f'Invalid {THINKING_LEVEL_PARAM}: {thinking_level}')
@@ -1565,9 +1598,13 @@ async def generate_chat_completion(
         payload = apply_thinking_level(
             payload,
             thinking_level,
-            detect_thinking_format(url, api_config),
+            thinking_format,
             responses_api=api_config.get('api_type') == 'responses',
         )
+    # 服务商固定死的采样参数(如 Kimi 的 temperature)传别的值会 400,发送前去掉;管理员页有提示。
+    payload, dropped_sampling = strip_fixed_sampling_params(payload, thinking_format)
+    if dropped_sampling:
+        log.info('Dropped %s for %s: fixed by the provider', ', '.join(dropped_sampling), payload['model'])
 
     # Add user info to the payload if the model is a pipeline
     if 'pipeline' in model and model.get('pipeline'):

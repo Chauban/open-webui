@@ -11,6 +11,7 @@
 	import PencilSolid from '$lib/components/icons/PencilSolid.svelte';
 	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
+	import { loadSamplingRules, samplingNote, type SamplingRules } from '$lib/utils/sampling-rules';
 	import Switch from '$lib/components/common/Switch.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import Tags from './common/Tags.svelte';
@@ -48,6 +49,21 @@
 	let apiType = ''; // '' = chat completions (default), 'responses' = Responses API
 	// 统一思考档位在这条连接上换成哪家的字段;'' = 按地址自动识别(认不出按 OpenAI 的 reasoning_effort)。
 	let thinkingFormat = '';
+	// 这条连接上服务商固定死、发送时会被去掉的采样参数(如 Kimi 的 temperature),按地址与思考格式查后端那张表。
+	let samplingRules: SamplingRules | null = null;
+	let samplingRulesKey = '';
+	$: samplingKey = `${url}|${thinkingFormat}`;
+	$: if (!direct && url && samplingKey !== samplingRulesKey) {
+		const key = samplingKey;
+		samplingRulesKey = key;
+		loadSamplingRules(localStorage.token, {
+			url,
+			...(thinkingFormat ? { thinking_format: thinkingFormat } : {})
+		}).then((rules) => {
+			if (samplingRulesKey === key) samplingRules = rules;
+		});
+	}
+	$: samplingConnectionNote = url ? samplingNote(samplingRules, $i18n.t) : null;
 
 	let headers = '';
 	let passthroughParams = '';
@@ -618,6 +634,14 @@
 										</select>
 									</div>
 								</div>
+								{#if samplingConnectionNote}
+									<div
+										class="mt-1 text-xs text-amber-600 dark:text-amber-500"
+										data-testid="connection-sampling-note"
+									>
+										{samplingConnectionNote}
+									</div>
+								{/if}
 							{/if}
 
 							{#if azure}
