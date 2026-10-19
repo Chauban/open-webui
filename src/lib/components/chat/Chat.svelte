@@ -4583,7 +4583,8 @@
 								<div class="pb-6 z-10">
 									<div class="text-xs text-gray-400 dark:text-gray-500 text-center">
 										{readOnly
-											? readOnlyHint || $i18n.t('This assignment conversation is read-only after submission.')
+											? readOnlyHint ||
+												$i18n.t('This assignment conversation is read-only after submission.')
 											: $i18n.t('Read only')}
 									</div>
 								</div>
@@ -4751,7 +4752,8 @@
 									<div
 										class="mx-auto max-w-xl rounded-3xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-6 py-5 text-center text-sm text-gray-500 dark:text-gray-400"
 									>
-										{readOnlyHint || $i18n.t('This assignment conversation is read-only after submission.')}
+										{readOnlyHint ||
+											$i18n.t('This assignment conversation is read-only after submission.')}
 									</div>
 								{:else}
 									<Placeholder
@@ -4801,7 +4803,12 @@
 												submitHandler(withSelectedText(e.detail));
 											}
 										}}
-									/>
+									>
+										<!-- 还没有消息时也要显示输入框上方的附加行(如作业写作区的「深度思考」开关) -->
+										<svelte:fragment slot="input-accessory"
+											><slot name="input-accessory" /></svelte:fragment
+										>
+									</Placeholder>
 								{/if}
 							</div>
 						{/if}

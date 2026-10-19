@@ -236,6 +236,7 @@
 
 			<div class="text-base font-normal @md:max-w-3xl w-full py-3 {atSelectedModel ? 'mt-2' : ''}">
 				{#if !($selectedFolder && folderReadOnly)}
+					<slot name="input-accessory" />
 					<MessageInput
 						bind:this={messageInput}
 						{history}
