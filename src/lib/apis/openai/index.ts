@@ -80,6 +80,24 @@ export const updateOpenAIConfig = async (token: string = '', config: OpenAIConfi
 	return res;
 };
 
+/** 某个模型 / 连接上服务商的注意事项(固定采样参数、思考档位限制、计费等),管理员页显示。 */
+export const getProviderQuirks = async (
+	token: string,
+	body: { model_id?: string; url?: string; thinking_format?: string }
+) => {
+	const res = await fetch(`${OPENAI_API_BASE_URL}/provider-quirks`, {
+		method: 'POST',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		},
+		body: JSON.stringify(body)
+	});
+	if (!res.ok) throw await res.json().catch(() => ({ detail: res.statusText }));
+	return res.json();
+};
+
 export const getOpenAIModelsDirect = async (url: string, key: string) => {
 	let error = null;
 

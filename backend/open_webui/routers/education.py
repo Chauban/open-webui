@@ -34,6 +34,7 @@ from open_webui.models.chat_messages import ChatMessages
 from open_webui.models.folders import FolderForm, Folders
 from open_webui.models.education import (
     AssignmentModel,
+    AssignmentModelParams,
     AssignmentCreateForm,
     AssignmentExtensionForm,
     AssignmentExtensionModel,
@@ -140,6 +141,17 @@ from open_webui.services.education.challenge import (
 )
 from open_webui.services.education.profile_snapshots import (
     build_student_profile,
+)
+from open_webui.services.education.ai_steps import (
+    CoachingChatPolicy,
+    CoachingThinking,
+    ModelParamsNotAllowed,
+    StepView,
+    available_models,
+    describe_steps,
+    ensure_model_params_allowed,
+    get_ai_step_policy,
+    resolve_coaching_thinking,
 )
 from open_webui.services.education.profile import PROFILE_METRIC_VERSION
 from open_webui.services.education.revision_items import (
@@ -916,6 +928,7 @@ async def create_assignment(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Assignment due time is required",
         )
+    await _ensure_model_params_allowed(form_data.model_params)
     classrooms = []
     for classroom_id in classroom_ids:
         classroom = Education.get_classroom_by_id(classroom_id, db=db)
@@ -1001,6 +1014,9 @@ async def update_assignment(
             status_code=status.HTTP_409_CONFLICT,
             detail="Task mode cannot change after students have started",
         )
+
+    if "model_params" in form_data.model_fields_set and form_data.model_params is not None:
+        await _ensure_model_params_allowed(form_data.model_params)
 
     next_score_max = form_data.score_max or assignment.score_max
     next_rubric = form_data.rubric_schema or assignment.rubric_schema
@@ -1411,6 +1427,17 @@ class AssignmentDefaultsResponse(BaseModel):
     coaching_style: CoachingStyle
     task_mode: TaskMode
     rubrics: dict[TaskMode, list[DefaultRubricCriterionItem]]
+    # 辅导对话的思考档位由谁定、管理员默认是哪档；作业表单据此决定显不显示思考设置。
+    thinking: CoachingChatPolicy
+
+
+async def _ensure_model_params_allowed(params: AssignmentModelParams) -> None:
+    try:
+        ensure_model_params_allowed(params, await get_ai_step_policy())
+    except ModelParamsNotAllowed as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)
+        ) from error
 
 
 @router.get("/teacher/assignment-defaults", response_model=AssignmentDefaultsResponse)
@@ -1421,6 +1448,31 @@ async def get_teacher_assignment_defaults(user=Depends(get_verified_user)):
         "coaching_style": await Config.get("education.default_coaching_style"),
         "task_mode": await Config.get("education.default_task_mode"),
         "rubrics": await Config.get("education.default_rubrics"),
+        "thinking": (await get_ai_step_policy()).coaching_chat,
+    }
+
+
+class AssignmentAiSettingsResponse(BaseModel):
+    """作业页「AI 设置」卡：各步骤此刻对本作业生效的模型、思考档位与来源。"""
+
+    steps: list[StepView]
+    coaching_thinking: CoachingThinking
+
+
+@router.get(
+    "/teacher/assignments/{assignment_id}/ai-settings",
+    response_model=AssignmentAiSettingsResponse,
+)
+async def get_teacher_assignment_ai_settings(
+    request: Request,
+    assignment: AssignmentModel = Depends(require_teacher_assignment),
+    user=Depends(get_verified_user),
+):
+    policy = await get_ai_step_policy()
+    coaching = resolve_coaching_thinking(policy, assignment.model_params)
+    return {
+        "steps": describe_steps(policy, await available_models(request, user), coaching),
+        "coaching_thinking": coaching,
     }
 
 
@@ -2220,6 +2272,7 @@ async def get_assignment_workspace(
             source_map=Education.get_provenance_segments(session.id, db=db),
             review=review_view,
             effective_due_at=effective_due_at,
+            can_switch_thinking=await _can_switch_thinking(assignment),
         )
 
     review_view, effective_due_at = _build_student_review_view(assignment, user.id, db)
@@ -2233,7 +2286,13 @@ async def get_assignment_workspace(
         source_map=[],
         review=review_view,
         effective_due_at=effective_due_at,
+        can_switch_thinking=await _can_switch_thinking(assignment),
     )
+
+
+async def _can_switch_thinking(assignment) -> bool:
+    policy = await get_ai_step_policy()
+    return resolve_coaching_thinking(policy, assignment.model_params).students_choose
 
 
 @router.get("/me/writing/home", response_model=WritingHomeResponse)
@@ -2704,7 +2763,7 @@ async def extract_import_images(
             detail="Upload at most 8 images at a time",
         )
     try:
-        model_id = await resolve_draft_image_model(request, user)
+        model = await resolve_draft_image_model(request, user)
         total = 0
         images = []
         for file in files:
@@ -2722,7 +2781,7 @@ async def extract_import_images(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(err)
         ) from err
     try:
-        pages = await transcribe_draft_images(request, user, model_id, image_urls)
+        pages = await transcribe_draft_images(request, user, model, image_urls)
     except DraftImageModelBusyError as err:
         # 已自动重发过几次,服务商仍在限流或过载。
         raise HTTPException(
@@ -2736,7 +2795,12 @@ async def extract_import_images(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(err)
         ) from err
-    return {"text": "\n".join(page for page in pages if page), "pages": pages}
+    # model_id 随导入记进编辑操作,老师看得到这段文字是哪个模型转录的。
+    return {
+        "text": "\n".join(page for page in pages if page),
+        "pages": pages,
+        "model_id": model.model_id,
+    }
 
 
 @router.post(
@@ -3451,6 +3515,11 @@ async def submit_assignment(
         ),
         "task_mode": assignment.task_mode,
         "task_prompt": await _get_task_prompt(assignment.task_mode),
+        # 辅导对话的思考档位：管理员的下放方式与默认随时可改，这一轮按提交时生效的冻存。
+        # 学生可开关时每条回复实际用的档位另记在回复上（对话时间线的 thinking_level）。
+        "thinking": resolve_coaching_thinking(
+            await get_ai_step_policy(), assignment.model_params
+        ).model_dump(),
     }
     # 质疑措辞同理，管理员随时可改，已交的这一轮不能跟着变。
     challenge_round_no = Education.resolve_next_submission_round_no(
@@ -3491,6 +3560,17 @@ async def submit_assignment(
             ),
             "turn_prompt": await _get_challenge_prompt("turn"),
             "closing_prompt": await _get_challenge_prompt("closing"),
+            # 这一轮试读实际用过的模型（各轮质疑与收尾，按出现先后去重）。
+            "models": list(
+                dict.fromkeys(
+                    model_id
+                    for model_id in [
+                        *(turn.model_id for turn in challenge_turns),
+                        challenge_session.closing_model_id,
+                    ]
+                    if model_id
+                )
+            ),
         }
     # 修改清单随这一轮冻存:学生之后再改处理方式(退回重交),已交的这一轮不跟着变。
     if assignment.task_mode == "revise_draft":
@@ -3499,6 +3579,11 @@ async def submit_assignment(
         else:
             stats["revision_items"] = {
                 "status": "ready",
+                # 第一次通读与补看实际用的模型（没补看过为空）。
+                "models": {
+                    "first_read": session.revision_items_model_id,
+                    "follow_up": session.revision_follow_up_model_id,
+                },
                 "items": build_revision_snapshot(
                     Education.set_revision_decisions(
                         session.id, revision_plan, commit=False, db=db

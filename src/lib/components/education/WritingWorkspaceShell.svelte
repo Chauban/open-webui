@@ -7,7 +7,7 @@
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
-	import { config, selectedFolder } from '$lib/stores';
+	import { config, models, selectedFolder } from '$lib/stores';
 
 	import RichTextInput from '$lib/components/common/RichTextInput.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
@@ -27,6 +27,7 @@
 	import RevisionList from '$lib/components/education/RevisionList.svelte';
 	import FirstReadProgress from '$lib/components/education/FirstReadProgress.svelte';
 	import FollowUpBar from '$lib/components/education/FollowUpBar.svelte';
+	import ThinkingSwitch from '$lib/components/education/ThinkingSwitch.svelte';
 	import EduActionMenu from '$lib/components/education/EduActionMenu.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { refreshChatList, refreshFolderChatLists } from '$lib/stores/chatList';
@@ -34,6 +35,7 @@
 	import { prepareAssistantContentForWriting } from '$lib/utils/writing-content';
 	import { importedTextToHtml, type ImportInfo } from '$lib/utils/text-import';
 	import { createSerializedSaveRunner } from '$lib/utils/save-coordinator';
+	import { thinkingSupportOf, thinksAlways } from '$lib/utils/thinking-support';
 	import {
 		buildReflectionAnswers,
 		getReflectionAnswersError,
@@ -94,6 +96,9 @@
 	let showChallenge = false;
 	let challengeDetail = null;
 	let selectedModelId = '';
+	// 老师允许时学生可以把辅导对话的思考关掉;只在所选模型支持思考控制时出现,否则开关没有效果。
+	let canSwitchThinking = false;
+	let thinkingOn = true;
 	let isSubmitted = false;
 	let titleSaving = false;
 	let isPastDue = false;
@@ -152,6 +157,17 @@
 	// 已批改即定稿:只有老师退回(review_status 变回 returned)才重新解锁。
 	$: isGraded = review?.review_status === 'reviewed';
 	$: isReadOnly = isAssignment ? isPastDue || isGraded : false;
+	// capabilities 在 Model 类型里是 object,运行时是各项能力的开关表,按宽类型读。
+	$: selectedModelThinks = Boolean(
+		(
+			($models ?? []).find((model) => model.id === selectedModelId)?.info?.meta?.capabilities as
+				| { reasoning?: boolean }
+				| undefined
+		)?.reasoning
+	);
+	$: showThinkingSwitch = isAssignment && canSwitchThinking && selectedModelThinks && !isReadOnly;
+	// 关不掉思考的模型:开关不可用(写明始终开着),也不发「关」;服务端同样会退到最低档。
+	$: thinkingAlwaysOn = thinksAlways(thinkingSupportOf($models, selectedModelId));
 	// 修订初稿作业:还没交初稿时只显示初稿步骤,编辑器、左侧对话和提交都锁着(后端同样拒绝)。
 	$: needsDraftBaseline =
 		isAssignment &&
@@ -233,14 +249,9 @@
 	let revisionTimer: ReturnType<typeof setTimeout> | null = null;
 	let revisionRunning = false;
 	$: hasRevisionList =
-		isAssignment &&
-		assignment?.task_mode === 'revise_draft' &&
-		!!writingSession?.draft_baseline_at;
+		isAssignment && assignment?.task_mode === 'revise_draft' && !!writingSession?.draft_baseline_at;
 	$: revisionCriteriaLabels = Object.fromEntries(
-		(assignment?.rubric_schema?.criteria ?? []).map((criterion) => [
-			criterion.key,
-			criterion.label
-		])
+		(assignment?.rubric_schema?.criteria ?? []).map((criterion) => [criterion.key, criterion.label])
 	);
 	// 还没开始对话时才要等通读;之前就聊过的会话照常对话,通读在后台补上。
 	$: awaitingFirstRead =
@@ -334,9 +345,12 @@
 			if (result.status === 'ready') {
 				followUpStatus = 'idle';
 				platformMessage = {
-					text: $i18n.t('I have fixed "{{blocking}}". Please go on with the items that were waiting.', {
-						blocking: blockingRevisionLabel
-					}),
+					text: $i18n.t(
+						'I have fixed "{{blocking}}". Please go on with the items that were waiting.',
+						{
+							blocking: blockingRevisionLabel
+						}
+					),
 					nonce: Date.now()
 				};
 			} else {
@@ -352,7 +366,8 @@
 		isAssignment &&
 		assignment?.task_mode === 'revise_draft' &&
 		Boolean(writingSession?.draft_baseline_at) &&
-		noteText.replace(/\s+/g, '') === (writingSession?.draft_baseline_text ?? '').replace(/\s+/g, '');
+		noteText.replace(/\s+/g, '') ===
+			(writingSession?.draft_baseline_text ?? '').replace(/\s+/g, '');
 
 	// 只有「要改」的必须交代;「可改进」的可填可不填。
 	const getRevisionError = () => {
@@ -361,9 +376,7 @@
 		if (mustAnswer.some((item) => !item.decision)) {
 			return 'Mark how you handled every item on the revision list';
 		}
-		if (
-			mustAnswer.some((item) => item.decision !== 'revised' && !(item.reason ?? '').trim())
-		) {
+		if (mustAnswer.some((item) => item.decision !== 'revised' && !(item.reason ?? '').trim())) {
 			return 'Explain the items you did not fully revise';
 		}
 		return null;
@@ -388,19 +401,19 @@
 		? $i18n.t('Submit your first draft on the right to unlock the AI chat.')
 		: followUpStatus === 'running'
 			? $i18n.t('Reading the items that were waiting. The AI goes on when it is done.')
-		: awaitingFirstRead
-			? revisionStatus === 'failed'
-				? $i18n.t('The first read-through did not finish. Try again on the right.')
-				: $i18n.t(
-						'Reading your draft against the rubric. The AI gives its first feedback when it is done.'
-					)
-		: !isReadOnly
-		? ''
-		: !currentChatId && !writingSession?.active_chat_id
-			? $i18n.t('No AI conversation for this assignment.')
-			: isGraded
-				? $i18n.t('Graded. The conversation is view-only.')
-				: $i18n.t('Past the deadline. The conversation is view-only.');
+			: awaitingFirstRead
+				? revisionStatus === 'failed'
+					? $i18n.t('The first read-through did not finish. Try again on the right.')
+					: $i18n.t(
+							'Reading your draft against the rubric. The AI gives its first feedback when it is done.'
+						)
+				: !isReadOnly
+					? ''
+					: !currentChatId && !writingSession?.active_chat_id
+						? $i18n.t('No AI conversation for this assignment.')
+						: isGraded
+							? $i18n.t('Graded. The conversation is view-only.')
+							: $i18n.t('Past the deadline. The conversation is view-only.');
 	// 进来时直接载入上次那段对话,不落在空白新对话上:
 	// - 定稿后左栏不能再开新对话,空着没有意义,学生用过 AI 就载入那次对话供回看;
 	// - 修订初稿作业写作中,首轮通读那段对话是改稿的主线,学生隔天回来在空白对话里接着问,
@@ -473,8 +486,7 @@
 			if (asksAiUsage) {
 				aiUsage = draft?.aiUsage === 'used' || draft?.aiUsage === 'none' ? draft.aiUsage : null;
 			}
-			reflectionDrafts =
-				draft?.answers && typeof draft.answers === 'object' ? draft.answers : {};
+			reflectionDrafts = draft?.answers && typeof draft.answers === 'object' ? draft.answers : {};
 		} catch (error) {
 			console.error(error);
 		}
@@ -799,8 +811,7 @@
 	// 修订初稿作业的导入在交初稿那一步;从零写作没有那一步,导入直接进编辑器。
 	// 导入的文字记为外部粘贴,并在操作里注明来自文件还是照片,老师在时间线上看得到。
 	let showImportDialog = false;
-	$: canImportIntoEditor =
-		isAssignment && assignment?.task_mode === 'from_scratch' && !isReadOnly;
+	$: canImportIntoEditor = isAssignment && assignment?.task_mode === 'from_scratch' && !isReadOnly;
 
 	const insertImportedText = (text: string, mode: 'insert' | 'replace', info: ImportInfo) => {
 		if (isReadOnly || !editor) return;
@@ -810,7 +821,11 @@
 			sourceType: 'external_paste',
 			sourceMessageId: null,
 			text,
-			metadata: { import_kind: info.kind, file_names: info.names.slice(0, 8) }
+			metadata: {
+				import_kind: info.kind,
+				file_names: info.names.slice(0, 8),
+				...(info.modelId ? { model_id: info.modelId } : {})
+			}
 		};
 		const chain = editor.chain().focus();
 		(mode === 'replace' ? chain.selectAll() : chain).insertContent(html).run();
@@ -1006,6 +1021,7 @@
 			assignment = workspace.assignment ?? null;
 			review = workspace.review ?? null;
 			effectiveDueAt = workspace.effective_due_at ?? null;
+			canSwitchThinking = workspace.can_switch_thinking ?? false;
 			writingSession = workspace.writing_session;
 			void refreshProcessSummary();
 			workspaceProject = workspace.project;
@@ -1122,12 +1138,21 @@
 		autoSendPrefill={autoStartDiagnosis}
 		disableContextActions={false}
 		allowAssignmentWorkspaceChat={isAssignment}
+		lockModelOverrides={isAssignment}
+		extraRequestParams={showThinkingSwitch && !thinkingAlwaysOn && !thinkingOn
+			? { thinking_level: 'off' }
+			: {}}
 		showRightPanel={!narrowLayout}
 		rightPanelWidth={defaultPanelWidth}
 		rightPanelMinWidth={560}
 		rightPanelMaxWidth={null}
 		rightPanelClassName="hidden lg:flex"
 	>
+		<svelte:fragment slot="input-accessory">
+			{#if showThinkingSwitch}
+				<ThinkingSwitch bind:on={thinkingOn} alwaysOn={thinkingAlwaysOn} />
+			{/if}
+		</svelte:fragment>
 		<div
 			slot="right-panel"
 			class="h-full w-full flex-col border-l border-gray-200 dark:border-gray-800 bg-stone-50 dark:bg-gray-900 lg:flex"
@@ -1136,203 +1161,213 @@
 				class="border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-5 py-4"
 			>
 				<div class="mx-auto w-full {WRITING_COLUMN}">
-				<div class="flex items-start justify-between gap-4">
-					<div class="min-w-0 flex-1">
-						{#if isAssignment}
-							<div class="text-base font-semibold text-gray-900 dark:text-gray-100">
-								{assignment?.title}
-							</div>
-							<!-- 写作中的说明交给下方的留痕告知,这里只在提交后说明还能做什么 -->
-							{#if isGraded || isPastDue || isSubmitted}
-								<div class="text-xs text-gray-500 dark:text-gray-400">
-									{#if isGraded}
-										<!-- 退回重写是管理员开关,关着时老师没有退回入口,别让学生去找老师要 -->
-										{$config?.features?.enable_education_return
-											? $i18n.t('Graded. Ask your teacher to return it if you need to revise.')
-											: $i18n.t('Graded. The assignment is now view-only.')}
-									{:else if isPastDue}
-										{$i18n.t('Submitted assignments stay available for review in read-only mode.')}
-									{:else}
-										{$i18n.t('Submitted. You can revise and resubmit before the deadline.')}
-									{/if}
+					<div class="flex items-start justify-between gap-4">
+						<div class="min-w-0 flex-1">
+							{#if isAssignment}
+								<div class="text-base font-semibold text-gray-900 dark:text-gray-100">
+									{assignment?.title}
 								</div>
-							{/if}
-							{#if effectiveDueAt && !isGraded}
-								<div class="mt-1 text-xs {dueColorClass}">
-									{#if !isResubmitDeadline && dueCountdown?.overdue}
-										{$i18n.t('Overdue')}
-									{:else}
-										{$i18n.t(dueLabelKey)}: {formattedDueAt}
-										{#if dueCountdown?.overdue}
-											· {$i18n.t('Overdue')}
-										{:else if dueCountdown}
-											· {$i18n.t(dueCountdown.labelKey, dueCountdown.params)}
+								<!-- 写作中的说明交给下方的留痕告知,这里只在提交后说明还能做什么 -->
+								{#if isGraded || isPastDue || isSubmitted}
+									<div class="text-xs text-gray-500 dark:text-gray-400">
+										{#if isGraded}
+											<!-- 退回重写是管理员开关,关着时老师没有退回入口,别让学生去找老师要 -->
+											{$config?.features?.enable_education_return
+												? $i18n.t('Graded. Ask your teacher to return it if you need to revise.')
+												: $i18n.t('Graded. The assignment is now view-only.')}
+										{:else if isPastDue}
+											{$i18n.t(
+												'Submitted assignments stay available for review in read-only mode.'
+											)}
+										{:else}
+											{$i18n.t('Submitted. You can revise and resubmit before the deadline.')}
 										{/if}
-									{/if}
+									</div>
+								{/if}
+								{#if effectiveDueAt && !isGraded}
+									<div class="mt-1 text-xs {dueColorClass}">
+										{#if !isResubmitDeadline && dueCountdown?.overdue}
+											{$i18n.t('Overdue')}
+										{:else}
+											{$i18n.t(dueLabelKey)}: {formattedDueAt}
+											{#if dueCountdown?.overdue}
+												· {$i18n.t('Overdue')}
+											{:else if dueCountdown}
+												· {$i18n.t(dueCountdown.labelKey, dueCountdown.params)}
+											{/if}
+										{/if}
+									</div>
+								{/if}
+							{:else}
+								<input
+									bind:value={noteTitle}
+									class="mt-1 w-full rounded-2xl border border-gray-200 dark:border-gray-800 px-3 py-2 text-sm font-semibold text-gray-900 dark:text-gray-100 outline-none"
+									placeholder={$i18n.t('Untitled Writing')}
+									on:blur={saveTitle}
+								/>
+								<div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+									{$i18n.t('Write freely. Autosaved.')}
 								</div>
 							{/if}
-						{:else}
-							<input
-								bind:value={noteTitle}
-								class="mt-1 w-full rounded-2xl border border-gray-200 dark:border-gray-800 px-3 py-2 text-sm font-semibold text-gray-900 dark:text-gray-100 outline-none"
-								placeholder={$i18n.t('Untitled Writing')}
-								on:blur={saveTitle}
-							/>
-							<div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-								{$i18n.t('Write freely. Autosaved.')}
-							</div>
-						{/if}
+						</div>
+						<div class="flex flex-wrap items-center justify-end gap-2">
+							{#if isGraded}
+								<div
+									class="rounded-full bg-emerald-100 px-3 py-1 text-xs text-emerald-700 dark:text-emerald-300"
+								>
+									{$i18n.t('Reviewed')}
+									{review?.score ?? ''}
+								</div>
+							{:else if isSubmitted}
+								<div
+									class="rounded-full bg-emerald-100 px-3 py-1 text-xs text-emerald-700 dark:text-emerald-300"
+								>
+									{$i18n.t('Submitted')}
+								</div>
+							{/if}
+							{#if isAssignment && review}
+								<button
+									class="rounded-full border border-gray-200 dark:border-gray-800 px-3 py-1 text-xs text-gray-600 dark:text-gray-400 hover:bg-stone-100 dark:hover:bg-gray-800"
+									on:click={() => (showSubmissionHistory = true)}
+								>
+									{$i18n.t('Submission History')}
+								</button>
+							{/if}
+							{#if !isReadOnly}
+								<div
+									class="rounded-full bg-stone-100 dark:bg-gray-800 px-3 py-1 text-xs text-gray-600 dark:text-gray-400"
+								>
+									{saveStatusDisplay}
+								</div>
+							{/if}
+							{#if canSubmitAssignment}
+								<EduButton
+									variant="primary"
+									on:click={() => {
+										loadReflectionDraft();
+										void openSubmitFlow();
+									}}
+								>
+									{$i18n.t(isSubmitted ? 'Resubmit Assignment' : 'Submit Assignment')}
+								</EduButton>
+							{/if}
+							{#if canWithdrawDraft}
+								<EduActionMenu items={withdrawDraftMenu} />
+							{/if}
+						</div>
 					</div>
-					<div class="flex flex-wrap items-center justify-end gap-2">
-						{#if isGraded}
-							<div
-								class="rounded-full bg-emerald-100 px-3 py-1 text-xs text-emerald-700 dark:text-emerald-300"
-							>
-								{$i18n.t('Reviewed')}
-								{review?.score ?? ''}
-							</div>
-						{:else if isSubmitted}
-							<div
-								class="rounded-full bg-emerald-100 px-3 py-1 text-xs text-emerald-700 dark:text-emerald-300"
-							>
-								{$i18n.t('Submitted')}
-							</div>
-						{/if}
-						{#if isAssignment && review}
-							<button
-								class="rounded-full border border-gray-200 dark:border-gray-800 px-3 py-1 text-xs text-gray-600 dark:text-gray-400 hover:bg-stone-100 dark:hover:bg-gray-800"
-								on:click={() => (showSubmissionHistory = true)}
-							>
-								{$i18n.t('Submission History')}
-							</button>
-						{/if}
-						{#if !isReadOnly}
-							<div
-								class="rounded-full bg-stone-100 dark:bg-gray-800 px-3 py-1 text-xs text-gray-600 dark:text-gray-400"
-							>
-								{saveStatusDisplay}
-							</div>
-						{/if}
-						{#if canSubmitAssignment}
-							<EduButton
-								variant="primary"
-								on:click={() => {
-									loadReflectionDraft();
-									void openSubmitFlow();
-								}}
-							>
-								{$i18n.t(isSubmitted ? 'Resubmit Assignment' : 'Submit Assignment')}
-							</EduButton>
-						{/if}
-						{#if canWithdrawDraft}
-							<EduActionMenu items={withdrawDraftMenu} />
-						{/if}
-					</div>
-				</div>
-				{#if lockedDetailsCollapsed}
-					<button
-						type="button"
-						class="mt-2 text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:underline"
-						on:click={() => (showLockedDetails = true)}
-					>
-						{challengeEnabled
-							? $i18n.t('Show assignment requirements and read-through notes')
-							: $i18n.t('Show assignment requirements')}
-					</button>
-				{:else}
-					{#if isAssignment}
-						<AssignmentBrief {assignment} />
-						<ChallengeChecklist
-							detail={challengeDetail}
-							onDetailChange={onChallengeDetailChange}
-							readonly={isReadOnly}
-						/>
-						{#if awaitingFirstRead}
-							<FirstReadProgress
-								status={revisionStatus}
-								criteria={Object.values(revisionCriteriaLabels)}
-								onRetry={() => refreshRevisionItems()}
-							/>
-						{/if}
-						{#if canFollowUp}
-							<FollowUpBar
-								status={followUpStatus}
-								blockingLabel={blockingRevisionLabel}
-								deferredLabels={deferredRevisionItems.map(
-									(item) => revisionCriteriaLabels[item.criterion_key] ?? item.criterion_key
-								)}
-								note={followUpNote}
-								onFollowUp={runFollowUp}
-							/>
-						{/if}
-					{/if}
-					<EduDataNotice {scope} collapsible class="mt-3" />
-					{#if isAssignment && isReadOnly}
+					{#if lockedDetailsCollapsed}
 						<button
 							type="button"
 							class="mt-2 text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:underline"
-							on:click={() => (showLockedDetails = false)}
+							on:click={() => (showLockedDetails = true)}
 						>
-							{$i18n.t('Collapse')}
+							{challengeEnabled
+								? $i18n.t('Show assignment requirements and read-through notes')
+								: $i18n.t('Show assignment requirements')}
 						</button>
+					{:else}
+						{#if isAssignment}
+							<AssignmentBrief {assignment} />
+							<ChallengeChecklist
+								detail={challengeDetail}
+								onDetailChange={onChallengeDetailChange}
+								readonly={isReadOnly}
+							/>
+							{#if awaitingFirstRead}
+								<FirstReadProgress
+									status={revisionStatus}
+									criteria={Object.values(revisionCriteriaLabels)}
+									onRetry={() => refreshRevisionItems()}
+								/>
+							{/if}
+							{#if canFollowUp}
+								<FollowUpBar
+									status={followUpStatus}
+									blockingLabel={blockingRevisionLabel}
+									deferredLabels={deferredRevisionItems.map(
+										(item) => revisionCriteriaLabels[item.criterion_key] ?? item.criterion_key
+									)}
+									note={followUpNote}
+									onFollowUp={runFollowUp}
+								/>
+							{/if}
+						{/if}
+						<EduDataNotice {scope} collapsible class="mt-3" />
+						{#if isAssignment && isReadOnly}
+							<button
+								type="button"
+								class="mt-2 text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:underline"
+								on:click={() => (showLockedDetails = false)}
+							>
+								{$i18n.t('Collapse')}
+							</button>
+						{/if}
 					{/if}
-				{/if}
 				</div>
 			</div>
-			<div class="min-h-0 flex-1 overflow-y-auto px-5 py-5 {needsDraftBaseline ? 'flex flex-col' : ''}">
-				<div class="mx-auto w-full {WRITING_COLUMN} {needsDraftBaseline ? 'flex flex-1 flex-col' : ''}">
-				{#if isAssignment && review}
-					<ReviewResultCard {review} {assignment} onRevise={null} />
-				{/if}
-				{#if showComposition}
-					<WritingComposition {sourceRuns} {clarificationAnsweredCount} />
-				{/if}
-				{#if needsDraftBaseline}
-					<DraftBaselineStep sessionId={writingSession.id} onSubmitted={onDraftBaselineSubmitted} />
-				{:else}
-					{#if canImportIntoEditor}
-						<div class="mb-2 flex justify-end">
-							<EduButton size="sm" on:click={() => (showImportDialog = true)}>
-								{$i18n.t('Import from file or images')}
-							</EduButton>
-						</div>
+			<div
+				class="min-h-0 flex-1 overflow-y-auto px-5 py-5 {needsDraftBaseline ? 'flex flex-col' : ''}"
+			>
+				<div
+					class="mx-auto w-full {WRITING_COLUMN} {needsDraftBaseline ? 'flex flex-1 flex-col' : ''}"
+				>
+					{#if isAssignment && review}
+						<ReviewResultCard {review} {assignment} onRevise={null} />
 					{/if}
-					<RichTextInput
-						bind:editor
-						bind:value={noteJson}
-						editable={!isReadOnly}
-						json={true}
-						placeholder={$i18n.t(
-							isAssignment ? 'Write the final assignment here.' : 'Start writing...'
-						)}
-						className="input-prose min-h-[70vh]"
-						onChange={handleContentChange}
-						on:paste={async (event) => {
-							const clipboardEvent = event?.detail?.event ?? event;
-							const payload =
-								clipboardEvent?.clipboardData?.getData('application/x-openwebui-ai-snippet+json') ??
-								'';
-							if (!payload) {
-								pendingSource = {
-									sourceType: 'external_paste',
-									sourceMessageId: null,
-									text: ''
-								};
-								return;
-							}
-							try {
-								const meta = JSON.parse(payload);
-								pendingSource = {
-									sourceType: meta.sourceType ?? 'ai_pasted',
-									sourceMessageId: meta.sourceMessageId ?? null,
-									text: meta.text ?? ''
-								};
-							} catch (error) {
-								console.error(error);
-							}
-						}}
-					/>
-				{/if}
+					{#if showComposition}
+						<WritingComposition {sourceRuns} {clarificationAnsweredCount} />
+					{/if}
+					{#if needsDraftBaseline}
+						<DraftBaselineStep
+							sessionId={writingSession.id}
+							onSubmitted={onDraftBaselineSubmitted}
+						/>
+					{:else}
+						{#if canImportIntoEditor}
+							<div class="mb-2 flex justify-end">
+								<EduButton size="sm" on:click={() => (showImportDialog = true)}>
+									{$i18n.t('Import from file or images')}
+								</EduButton>
+							</div>
+						{/if}
+						<RichTextInput
+							bind:editor
+							bind:value={noteJson}
+							editable={!isReadOnly}
+							json={true}
+							placeholder={$i18n.t(
+								isAssignment ? 'Write the final assignment here.' : 'Start writing...'
+							)}
+							className="input-prose min-h-[70vh]"
+							onChange={handleContentChange}
+							on:paste={async (event) => {
+								const clipboardEvent = event?.detail?.event ?? event;
+								const payload =
+									clipboardEvent?.clipboardData?.getData(
+										'application/x-openwebui-ai-snippet+json'
+									) ?? '';
+								if (!payload) {
+									pendingSource = {
+										sourceType: 'external_paste',
+										sourceMessageId: null,
+										text: ''
+									};
+									return;
+								}
+								try {
+									const meta = JSON.parse(payload);
+									pendingSource = {
+										sourceType: meta.sourceType ?? 'ai_pasted',
+										sourceMessageId: meta.sourceMessageId ?? null,
+										text: meta.text ?? ''
+									};
+								} catch (error) {
+									console.error(error);
+								}
+							}}
+						/>
+					{/if}
 				</div>
 			</div>
 		</div>
@@ -1456,7 +1491,11 @@
 						{/if}
 					{/if}
 				</div>
-				<div class="min-h-0 flex-1 overflow-y-auto px-5 py-5 {needsDraftBaseline ? 'flex flex-col' : ''}">
+				<div
+					class="min-h-0 flex-1 overflow-y-auto px-5 py-5 {needsDraftBaseline
+						? 'flex flex-col'
+						: ''}"
+				>
 					{#if isAssignment && review}
 						<ReviewResultCard {review} {assignment} onRevise={null} />
 					{/if}
@@ -1464,7 +1503,10 @@
 						<WritingComposition {sourceRuns} {clarificationAnsweredCount} />
 					{/if}
 					{#if needsDraftBaseline}
-						<DraftBaselineStep sessionId={writingSession.id} onSubmitted={onDraftBaselineSubmitted} />
+						<DraftBaselineStep
+							sessionId={writingSession.id}
+							onSubmitted={onDraftBaselineSubmitted}
+						/>
 					{:else}
 						{#if canImportIntoEditor}
 							<div class="mb-2 flex justify-end">
@@ -1486,8 +1528,9 @@
 							on:paste={async (event) => {
 								const clipboardEvent = event?.detail?.event ?? event;
 								const payload =
-									clipboardEvent?.clipboardData?.getData('application/x-openwebui-ai-snippet+json') ??
-									'';
+									clipboardEvent?.clipboardData?.getData(
+										'application/x-openwebui-ai-snippet+json'
+									) ?? '';
 								if (!payload) {
 									pendingSource = {
 										sourceType: 'external_paste',

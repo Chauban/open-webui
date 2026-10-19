@@ -13,6 +13,8 @@
 	import { getVoices } from '$lib/apis/audio';
 
 	import AdvancedParams from '$lib/components/chat/Settings/Advanced/AdvancedParams.svelte';
+	import { loadProviderQuirks, quirkTexts, type ProviderQuirks } from '$lib/utils/provider-quirks';
+	import ProviderQuirksPanel from '$lib/components/ProviderQuirksPanel.svelte';
 	import ModelSelector from '$lib/components/chat/ModelSelector/Selector.svelte';
 	import Tags from '$lib/components/common/Tags.svelte';
 	import Knowledge from '$lib/components/workspace/Models/Knowledge.svelte';
@@ -373,6 +375,19 @@
 		loading = false;
 		success = false;
 	};
+
+	// 服务商注意事项(固定采样参数、思考档位限制、计费等):按底模(自建模型)或模型 id 所在的连接查后端,
+	// 与发送时读同一批表;只有管理员看得到。
+	let providerQuirks: ProviderQuirks | null = null;
+	let providerQuirksFor: string | null = null;
+	$: quirksModelId = info.base_model_id || id;
+	$: if ($user?.role === 'admin' && quirksModelId && quirksModelId !== providerQuirksFor) {
+		providerQuirksFor = quirksModelId;
+		loadProviderQuirks(localStorage.token, { model_id: quirksModelId }).then((quirks) => {
+			if (providerQuirksFor === quirksModelId) providerQuirks = quirks;
+		});
+	}
+	$: modelQuirks = quirkTexts(providerQuirks, $i18n.t);
 
 	onMount(async () => {
 		await tools.set((await getTools(localStorage.token).catch(() => null)) ?? []);
@@ -967,6 +982,7 @@
 
 						<div class="my-3">
 							<Capabilities bind:capabilities />
+							<ProviderQuirksPanel notes={modelQuirks} testid="model-provider-quirks" />
 						</div>
 
 						{#if Object.keys(capabilities).filter((key) => capabilities[key]).length > 0}

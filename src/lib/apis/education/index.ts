@@ -1,3 +1,4 @@
+import type { ProviderQuirk } from '$lib/utils/provider-quirks';
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 import type {
 	EditorOperationType,
@@ -189,6 +190,70 @@ export type CoachingStyle = 'socratic' | 'balanced' | 'hands_off';
 /** 作业形式:从零写作 / 修订初稿(学生先交课外写好的初稿,再和 AI 对话修改)。 */
 export type TaskMode = 'from_scratch' | 'revise_draft';
 
+/** 思考档位:model_default 不发档位,按模型自己的设定(含管理员保存在模型上的档位)。 */
+export type ThinkingSetting = 'model_default' | 'off' | 'low' | 'medium' | 'high';
+/** 辅导对话的思考档位由谁定:管理员 / 教师按作业 / 教师按作业并可交给学生开关。 */
+export type ThinkingControl = 'admin' | 'teacher' | 'student';
+export type AiStepKey =
+	| 'coaching_chat'
+	| 'first_read'
+	| 'reader_check'
+	| 'image_parsing'
+	| 'class_insight';
+/** 管理员没给这一步指定模型时用谁的;admin_model 表示必须指定(图片识别)。 */
+export type AiStepModelSource = 'student_chat_model' | 'teacher_chat_model' | 'admin_model';
+/** 后端 services/education/ai_steps.py 的登记,管理员表与教师卡都按它生成。 */
+export type AiStep = {
+	key: AiStepKey;
+	model_source: AiStepModelSource;
+	model_configurable: boolean;
+	teacher_controllable: boolean;
+};
+/** 教师按作业设的辅导对话参数;thinking 为 null 沿用管理员默认。 */
+export type AssignmentModelParams = {
+	thinking: ThinkingSetting | null;
+	students_choose_thinking: boolean;
+};
+/** 一次辅导对话实际用的思考档位与来源(admin 管理员默认 / teacher 作业设定 / student 学生关掉)。 */
+export type CoachingThinking = {
+	control: ThinkingControl;
+	level: ThinkingSetting;
+	source: 'admin' | 'teacher' | 'student';
+	students_choose: boolean;
+};
+/**
+ * 管理员表与教师卡的一行。model_id 是管理员为这一步指定的模型(没指定为 null);
+ * model_available 为 false 时它已被删掉,这一步回落到 model_source(图片识别则不可用)。
+ */
+export type AiStepView = {
+	key: AiStepKey;
+	model_source: AiStepModelSource;
+	model_id: string | null;
+	model_name: string | null;
+	model_available: boolean;
+	control: ThinkingControl;
+	thinking: ThinkingSetting;
+	/** 所选模型的思考格式(服务商),与所选模型和档位要提醒管理员的事(后端 utils/provider_quirks.py)。 */
+	thinking_format: string | null;
+	quirks: ProviderQuirk[];
+};
+/** 平台步骤的设置:model 为 null 时按 model_source(图片识别为 null 即不提供图片导入)。 */
+export type PlatformStepPolicy = { model: string | null; thinking: ThinkingSetting };
+/** 服务商一时出错时自动重发的一处;admin_toggle 为假的始终重发(后端 ai_steps.py 的 RETRY_SCOPES)。 */
+export type RetryScope = {
+	key: 'assignment_chat' | 'platform_steps' | 'personal_writing';
+	admin_toggle: boolean;
+};
+/** 管理员能开关的那几处,各一项。 */
+export type AutoRetryPolicy = { personal_writing: boolean };
+export type AiStepPolicy = {
+	coaching_chat: { control: ThinkingControl; default: ThinkingSetting };
+	first_read: PlatformStepPolicy;
+	reader_check: PlatformStepPolicy;
+	image_parsing: PlatformStepPolicy;
+	class_insight: PlatformStepPolicy;
+};
+
 export const createAssignment = async (
 	token: string,
 	payload: {
@@ -206,6 +271,7 @@ export const createAssignment = async (
 		rubric_schema: {
 			criteria: Array<{ key: string; label: string; max_score: number }>;
 		};
+		model_params?: AssignmentModelParams;
 	}
 ) => {
 	return fetch(`${WEBUI_API_BASE_URL}/assignments`, {
@@ -231,8 +297,20 @@ export const getTeacherAssignmentDefaults = async (
 	coaching_style: CoachingStyle;
 	task_mode: TaskMode;
 	rubrics: Record<TaskMode, Array<{ label: string; max_score: number }>>;
+	thinking: { control: ThinkingControl; default: ThinkingSetting };
 }> => {
 	return fetch(`${WEBUI_API_BASE_URL}/teacher/assignment-defaults`, {
+		method: 'GET',
+		headers: withAuth(token)
+	}).then(handleJson);
+};
+
+/** 作业页「AI 设置」卡:各步骤此刻对本作业生效的思考档位与来源。 */
+export const getTeacherAssignmentAiSettings = async (
+	token: string,
+	assignmentId: string
+): Promise<{ steps: AiStepView[]; coaching_thinking: CoachingThinking }> => {
+	return fetch(`${WEBUI_API_BASE_URL}/teacher/assignments/${assignmentId}/ai-settings`, {
 		method: 'GET',
 		headers: withAuth(token)
 	}).then(handleJson);
@@ -320,6 +398,7 @@ export const updateAssignment = async (
 		rubric_schema?: {
 			criteria: Array<{ key: string; label: string; max_score: number }>;
 		};
+		model_params?: AssignmentModelParams;
 	}
 ) => {
 	return fetch(`${WEBUI_API_BASE_URL}/assignments/${assignmentId}`, {
@@ -529,7 +608,7 @@ export const extractImportImages = async (token: string, sessionId: string, file
 		method: 'POST',
 		headers: { Accept: 'application/json', authorization: `Bearer ${token}` },
 		body
-	}).then(handleJson) as Promise<{ text: string; pages: string[] }>;
+	}).then(handleJson) as Promise<{ text: string; pages: string[]; model_id: string }>;
 };
 
 export const createEditorOperations = async (

@@ -48,6 +48,10 @@ COACHING_STYLES = ("socratic", "balanced", "hands_off")
 # 初稿,冻结为基线,再和 AI 对话修改;结构上没有质疑式读者(对话本身就是诊断与追问)。
 # 每段形式各对应一段管理员可改写的任务说明(config 的 education.task_prompts)。
 TaskMode = Literal["from_scratch", "revise_draft"]
+# 思考档位：model_default 不发档位，按模型自己的设定。步骤与下放规则见 services/education/ai_steps.py。
+ThinkingSetting = Literal["model_default", "off", "low", "medium", "high"]
+# 辅导对话的思考档位由谁定：管理员 / 教师按作业 / 教师按作业并可交给学生开关。
+ThinkingControl = Literal["admin", "teacher", "student"]
 TASK_MODES = ("from_scratch", "revise_draft")
 # 初稿最短字数(去掉空白后的字符数)。
 DRAFT_BASELINE_MIN_CHARS = 200
@@ -124,6 +128,8 @@ class Assignment(Base):
     challenge_focus_keys = Column(JSONField, nullable=False, default=list)
     reflection_questions = Column(JSONField, nullable=False, default=list)
     rubric_schema = Column(JSONField, nullable=False)
+    # 教师按作业设的模型参数（目前只有辅导对话的思考档位），结构见 AssignmentModelParams。
+    model_params = Column(JSONField, nullable=False, default=dict)
     created_at = Column(BigInteger, nullable=False)
     updated_at = Column(BigInteger, nullable=False)
 
@@ -218,6 +224,9 @@ class WritingSession(Base):
     # 修改清单:整理完成的时间(0 条也记),以及整理进行中的占位。
     revision_items_generated_at = Column(BigInteger, nullable=True)
     revision_items_claimed_at = Column(BigInteger, nullable=True)
+    # 第一次通读、补看实际用的模型(按 AI 步骤设置解析后的),提交时冻进本轮记录。
+    revision_items_model_id = Column(Text, nullable=True)
+    revision_follow_up_model_id = Column(Text, nullable=True)
     created_at = Column(BigInteger, nullable=False)
     updated_at = Column(BigInteger, nullable=False)
 
@@ -420,6 +429,8 @@ class ChallengeSession(Base):
     planned_rounds = Column(Integer, nullable=False)
     status = Column(Text, nullable=False, default="in_progress")
     closing_summary_json = Column(JSONField, nullable=True)
+    # 写收尾清单实际用的模型。
+    closing_model_id = Column(Text, nullable=True)
     checklist_state_json = Column(JSONField, nullable=True)
     # 教师退回意见的原文，发起这一轮时冻下来。评语可以事后被改，已开始的这轮不跟着变。
     followup_comment = Column(Text, nullable=True)
@@ -454,6 +465,8 @@ class ChallengeTurn(Base):
     quoted_span = Column(Text, nullable=False)
     response_text = Column(Text, nullable=True)
     responded_at = Column(BigInteger, nullable=True)
+    # 生成这一轮质疑实际用的模型。
+    model_id = Column(Text, nullable=True)
     created_at = Column(BigInteger, nullable=False)
 
 
@@ -478,6 +491,8 @@ class ChallengeInsight(Base):
     input_hash = Column(Text, nullable=False)
     categories_json = Column(JSONField, nullable=False)
     sample_size = Column(Integer, nullable=False)
+    # 归纳这一份实际用的模型。
+    model_id = Column(Text, nullable=True)
     created_at = Column(BigInteger, nullable=False)
 
 
@@ -1077,6 +1092,25 @@ def build_reflection_record(
     return ReflectionRecord(items=items)
 
 
+class AssignmentModelParams(BaseModel):
+    """教师按作业设的辅导对话参数；只在管理员下放后才可设，见 ai_steps.ensure_model_params_allowed。
+
+    thinking 为空表示沿用管理员给辅导对话设的默认档位。交给学生开关时，thinking 是学生「开」
+    的那一档，必须写明且不能是关——否则开和关一样。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    thinking: Optional[ThinkingSetting] = None
+    students_choose_thinking: bool = False
+
+    @model_validator(mode="after")
+    def validate_student_choice(self):
+        if self.students_choose_thinking and self.thinking in (None, "off"):
+            raise ValueError("Pick the thinking level students switch on")
+        return self
+
+
 class AssignmentModel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -1094,6 +1128,7 @@ class AssignmentModel(BaseModel):
     challenge_focus_keys: list[str] = Field(default_factory=list)
     reflection_questions: list[ReflectionQuestion] = Field(default_factory=list)
     rubric_schema: RubricSchema
+    model_params: AssignmentModelParams
     created_at: int
     updated_at: int
 
@@ -1169,6 +1204,7 @@ class ChallengeTurnModel(BaseModel):
     quoted_span: str
     response_text: Optional[str] = None
     responded_at: Optional[int] = None
+    model_id: Optional[str] = None
     created_at: int
 
 
@@ -1186,6 +1222,7 @@ class ChallengeSessionModel(BaseModel):
     status: ChallengeStatus
     followup_comment: Optional[str] = None
     closing_summary_json: Optional[ChallengeClosing] = None
+    closing_model_id: Optional[str] = None
     checklist_state_json: Optional[dict] = None
     started_at: int
     ended_at: Optional[int] = None
@@ -1220,6 +1257,7 @@ class ChallengeInsightModel(BaseModel):
     input_hash: str
     categories_json: dict
     sample_size: int
+    model_id: Optional[str] = None
     created_at: int
 
 
@@ -1231,6 +1269,7 @@ class ChallengeInsightResponse(BaseModel):
     below_threshold: bool = False
     threshold: int = 0
     generated_at: Optional[int] = None
+    model_id: Optional[str] = None
 
 
 class ChallengeInsightForm(BaseModel):
@@ -1305,6 +1344,8 @@ class WritingSessionModel(BaseModel):
     draft_baseline_text: Optional[str] = None
     draft_baseline_at: Optional[int] = None
     revision_items_generated_at: Optional[int] = None
+    revision_items_model_id: Optional[str] = None
+    revision_follow_up_model_id: Optional[str] = None
     created_at: int
     updated_at: int
 
@@ -1474,6 +1515,7 @@ class AssignmentCreateForm(BaseModel):
     challenge_focus_keys: list[str] = Field(default_factory=list)
     reflection_questions: list[ReflectionQuestion] = Field(default_factory=list)
     rubric_schema: RubricSchema
+    model_params: AssignmentModelParams = Field(default_factory=AssignmentModelParams)
 
     @model_validator(mode="after")
     def validate_reflection_config(self):
@@ -1516,6 +1558,7 @@ class AssignmentUpdateForm(BaseModel):
     challenge_focus_keys: Optional[list[str]] = None
     reflection_questions: Optional[list[ReflectionQuestion]] = None
     rubric_schema: Optional[RubricSchema] = None
+    model_params: Optional[AssignmentModelParams] = None
 
     @model_validator(mode="after")
     def validate_updated_reflection_questions(self):
@@ -1568,6 +1611,8 @@ class AssignmentWorkspaceResponse(BaseModel):
     source_map: list[ProvenanceSegmentModel] = Field(default_factory=list)
     review: Optional[dict] = None
     effective_due_at: Optional[int] = None
+    # 老师把辅导对话的思考交给学生开关时为真；学生端据此显示「深度思考」开关。
+    can_switch_thinking: bool = False
 
 
 class WritingProcessSummaryResponse(BaseModel):
@@ -2989,6 +3034,10 @@ class EducationTable:
                 if form_data.task_mode not in TASK_MODES:
                     raise ValueError("Invalid assignment task mode")
                 assignment.task_mode = form_data.task_mode
+            if "model_params" in form_data.model_fields_set:
+                if form_data.model_params is None:
+                    raise ValueError("Model params are required")
+                assignment.model_params = form_data.model_params.model_dump()
             validate_task_mode_challenge(
                 assignment.task_mode,
                 bool(assignment.challenge_enabled),
@@ -3041,6 +3090,7 @@ class EducationTable:
                     question.model_dump() for question in form_data.reflection_questions
                 ],
                 rubric_schema=form_data.rubric_schema.model_dump(),
+                model_params=form_data.model_params.model_dump(),
                 created_at=now,
                 updated_at=now,
             )
@@ -3589,6 +3639,7 @@ class EducationTable:
         session_id: str,
         baseline_text: str,
         items: list[dict],
+        model_id: str,
         db: Optional[Session] = None,
     ) -> Optional[list[RevisionItemModel]]:
         """落库通读结论并标记通读完成。只成功一次;已通读过就原样返回已有的。
@@ -3609,6 +3660,7 @@ class EducationTable:
                     {
                         WritingSession.revision_items_generated_at: now,
                         WritingSession.revision_items_claimed_at: None,
+                        WritingSession.revision_items_model_id: model_id,
                     },
                     synchronize_session=False,
                 )
@@ -3677,7 +3729,7 @@ class EducationTable:
             db.commit()
 
     def apply_revision_follow_up(
-        self, session_id: str, items: list[dict], db: Optional[Session] = None
+        self, session_id: str, items: list[dict], model_id: str, db: Optional[Session] = None
     ) -> list[RevisionItemModel]:
         """补看通过:给暂缓的几项补上结论,并记下那一项已确认改到位。
 
@@ -3705,7 +3757,14 @@ class EducationTable:
                     if row.is_blocking:
                         row.follow_up_at = now
             db.query(WritingSession).filter(WritingSession.id == session_id).update(
-                {WritingSession.revision_items_claimed_at: None},
+                {
+                    WritingSession.revision_items_claimed_at: None,
+                    **(
+                        {WritingSession.revision_follow_up_model_id: model_id}
+                        if deferred
+                        else {}
+                    ),
+                },
                 synchronize_session=False,
             )
             db.commit()
@@ -4322,6 +4381,7 @@ class EducationTable:
         input_hash: str,
         categories_json: dict,
         sample_size: int,
+        model_id: str,
         commit: bool = True,
         db: Optional[Session] = None,
     ) -> ChallengeInsightModel:
@@ -4338,6 +4398,7 @@ class EducationTable:
                     input_hash=input_hash,
                     categories_json=categories_json,
                     sample_size=sample_size,
+                    model_id=model_id,
                     created_at=int(time.time()),
                 )
                 db.add(insight)
@@ -4345,6 +4406,7 @@ class EducationTable:
                 insight.input_hash = input_hash
                 insight.categories_json = categories_json
                 insight.sample_size = sample_size
+                insight.model_id = model_id
                 insight.created_at = int(time.time())
             if commit:
                 db.commit()
@@ -4441,6 +4503,7 @@ class EducationTable:
         focus_key: str,
         challenge_text: str,
         quoted_span: str,
+        model_id: str,
         commit: bool = True,
         db: Optional[Session] = None,
     ) -> ChallengeTurnModel:
@@ -4454,6 +4517,7 @@ class EducationTable:
                 quoted_span=quoted_span,
                 response_text=None,
                 responded_at=None,
+                model_id=model_id,
                 created_at=int(time.time()),
             )
             db.add(turn)
@@ -4496,6 +4560,7 @@ class EducationTable:
         self,
         challenge_session_id: str,
         closing: ChallengeClosing,
+        closing_model_id: Optional[str],
         commit: bool = True,
         db: Optional[Session] = None,
     ) -> Optional[ChallengeSessionModel]:
@@ -4505,6 +4570,7 @@ class EducationTable:
                 return None
             session.status = "completed"
             session.closing_summary_json = closing.model_dump()
+            session.closing_model_id = closing_model_id
             session.ended_at = int(time.time())
             if commit:
                 db.commit()

@@ -39,7 +39,7 @@
 		reasoning_tags: null,
 		seed: null,
 		temperature: null,
-		reasoning_effort: null,
+		thinking_level: null,
 		logit_bias: null,
 		frequency_penalty: null,
 		presence_penalty: null,
@@ -61,7 +61,6 @@
 		use_mlock: null,
 		num_thread: null,
 		num_gpu: null,
-		think: null,
 		format: null,
 		keep_alive: null
 	};
@@ -78,7 +77,7 @@
 				seed: (params.seed !== null ? params.seed : undefined) ?? undefined,
 				stop: params.stop ? params.stop.split(',').filter((e) => e) : undefined,
 				temperature: params.temperature !== null ? params.temperature : undefined,
-				reasoning_effort: params.reasoning_effort !== null ? params.reasoning_effort : undefined,
+				thinking_level: params.thinking_level !== null ? params.thinking_level : undefined,
 				logit_bias: params.logit_bias !== null ? params.logit_bias : undefined,
 				frequency_penalty: params.frequency_penalty !== null ? params.frequency_penalty : undefined,
 				presence_penalty: params.presence_penalty !== null ? params.presence_penalty : undefined,
@@ -99,7 +98,6 @@
 				use_mlock: params.use_mlock !== null ? params.use_mlock : undefined,
 				num_thread: params.num_thread !== null ? params.num_thread : undefined,
 				num_gpu: params.num_gpu !== null ? params.num_gpu : undefined,
-				think: params.think !== null ? params.think : undefined,
 				keep_alive: params.keep_alive !== null ? params.keep_alive : undefined,
 				format: params.format !== null ? params.format : undefined,
 				...(params.custom_params && Object.keys(params.custom_params).length > 0

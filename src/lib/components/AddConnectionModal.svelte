@@ -11,6 +11,8 @@
 	import PencilSolid from '$lib/components/icons/PencilSolid.svelte';
 	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
+	import { loadProviderQuirks, quirkTexts, type ProviderQuirks } from '$lib/utils/provider-quirks';
+	import ProviderQuirksPanel from '$lib/components/ProviderQuirksPanel.svelte';
 	import Switch from '$lib/components/common/Switch.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import Tags from './common/Tags.svelte';
@@ -46,6 +48,23 @@
 	let enable = true;
 	let apiVersion = '';
 	let apiType = ''; // '' = chat completions (default), 'responses' = Responses API
+	// 统一思考档位在这条连接上换成哪家的字段;'' = 按地址自动识别(认不出按 OpenAI 的 reasoning_effort)。
+	let thinkingFormat = '';
+	// 这条连接上服务商的注意事项(固定采样参数、思考档位限制、计费等),按地址与思考格式查后端,与发送时读同一批表。
+	let providerQuirks: ProviderQuirks | null = null;
+	let providerQuirksKey = '';
+	$: quirksKey = `${url}|${thinkingFormat}`;
+	$: if (!direct && url && quirksKey !== providerQuirksKey) {
+		const key = quirksKey;
+		providerQuirksKey = key;
+		loadProviderQuirks(localStorage.token, {
+			url,
+			...(thinkingFormat ? { thinking_format: thinkingFormat } : {})
+		}).then((quirks) => {
+			if (providerQuirksKey === key) providerQuirks = quirks;
+		});
+	}
+	$: connectionQuirks = url ? quirkTexts(providerQuirks, $i18n.t) : [];
 
 	let headers = '';
 	let passthroughParams = '';
@@ -198,7 +217,8 @@
 				...(provider ? { provider } : {}),
 				...(azure ? { azure: true } : {}),
 				...(azure ? { api_version: apiVersion } : {}),
-				...(apiType ? { api_type: apiType } : {})
+				...(apiType ? { api_type: apiType } : {}),
+				...(thinkingFormat ? { thinking_format: thinkingFormat } : {})
 			}
 		};
 
@@ -239,6 +259,7 @@
 			provider = connection.config?.provider ?? (connection.config?.azure ? 'azure' : '');
 			apiVersion = connection.config?.api_version ?? '';
 			apiType = connection.config?.api_type ?? '';
+			thinkingFormat = connection.config?.thinking_format ?? '';
 		}
 	};
 
@@ -453,6 +474,11 @@
 							</div>
 						{/if}
 
+						<!-- 服务商注意事项放在「高级」外面:按地址自动识别时也看得到,不必先展开。 -->
+						{#if !direct}
+							<ProviderQuirksPanel notes={connectionQuirks} testid="connection-provider-quirks" />
+						{/if}
+
 						<div class="flex items-center justify-between">
 							<button
 								type="button"
@@ -579,6 +605,38 @@
 											<option value="llama.cpp">{$i18n.t('llama.cpp')}</option>
 											<option value="lmstudio">{$i18n.t('LM Studio')}</option>
 											<option value="litellm">{$i18n.t('LiteLLM')}</option>
+										</select>
+									</div>
+								</div>
+
+								<div class="flex flex-row justify-between items-center w-full mt-2">
+									<Tooltip
+										content={$i18n.t(
+											'How the thinking setting (off / low / medium / high) is sent to this provider. Auto picks it from the URL and falls back to reasoning_effort. Only applies to models with the Thinking control capability.'
+										)}
+										placement="top-start"
+									>
+										<label for="thinking-format-select" class="mb-0.5 text-xs text-gray-500"
+											>{$i18n.t('Thinking format')}</label
+										>
+									</Tooltip>
+
+									<div>
+										<select
+											id="thinking-format-select"
+											bind:value={thinkingFormat}
+											class="text-xs text-gray-700 dark:text-gray-300 bg-transparent outline-hidden"
+										>
+											<option value="">{$i18n.t('Auto')}</option>
+											<option value="openai">reasoning_effort (OpenAI)</option>
+											<option value="anthropic">thinking.budget_tokens (Anthropic)</option>
+											<option value="deepseek">DeepSeek</option>
+											<option value="kimi">Kimi (Moonshot)</option>
+											<option value="zhipu">GLM (Zhipu / Z.ai)</option>
+											<option value="doubao">Doubao (Volcengine Ark)</option>
+											<option value="qwen">Qwen (DashScope / Model Studio)</option>
+											<option value="chat_template">chat_template_kwargs (vLLM / SGLang)</option>
+											<option value="openrouter">reasoning (OpenRouter)</option>
 										</select>
 									</div>
 								</div>

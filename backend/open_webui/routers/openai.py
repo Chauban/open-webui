@@ -40,6 +40,20 @@ from open_webui.models.groups import Groups
 from open_webui.models.models import Models
 from open_webui.models.users import UserModel
 from open_webui.utils.access_control import check_model_access, has_connection_access, has_permission
+from open_webui.utils.thinking import (
+    THINKING_LEVEL_PARAM,
+    THINKING_LEVELS,
+    apply_thinking_level,
+    detect_thinking_format,
+    model_supports_thinking_control,
+    strip_fixed_sampling_params,
+    thinking_support,
+)
+from open_webui.utils.access_control.chat import (
+    ensure_raw_passthrough_allowed,
+    get_chat_overrides,
+    strip_chat_request_overrides,
+)
 from open_webui.utils.anthropic import ANTHROPIC_VERSION, get_anthropic_models, is_anthropic_url
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.headers import get_custom_headers, include_user_info_headers
@@ -49,6 +63,14 @@ from open_webui.utils.model_ids import strip_provider_model_prefix
 from open_webui.utils.payload import (
     apply_model_params_to_body_openai,
     apply_system_prompt_to_body,
+)
+from open_webui.utils.provider_quirks import provider_quirks
+from open_webui.utils.retry import (
+    ONE_SHOT_RETRY,
+    RETRY_TRANSIENT_FLAG,
+    STREAM_RETRY,
+    read_ahead,
+    send_with_retry,
 )
 from open_webui.utils.session_pool import (
     cleanup_response,
@@ -824,6 +846,7 @@ async def get_all_models(request: Request, user: UserModel) -> dict[str, list]:
                 base_url = api_base_urls[idx]
                 hostname = urlparse(base_url).hostname if base_url else None
                 api_config = api_configs.get(str(idx), api_configs.get(base_url, {}))
+                thinking_format = detect_thinking_format(base_url, api_config)
 
                 for model in model_list:
                     model_id = model.get('id') or model.get('name')
@@ -842,6 +865,11 @@ async def get_all_models(request: Request, user: UserModel) -> dict[str, list]:
                             'connection_type': model.get('connection_type', 'external'),
                             'provider': provider,
                             'urlIdx': idx,
+                            # 这个模型的思考格式、在思考上能做什么(只有开 / 关等),界面据此提示;与发送时的翻译读同一张表。
+                            'thinking_format': thinking_format,
+                            'thinking_support': thinking_support(
+                                thinking_format, strip_provider_model_prefix(model_id, api_config.get('prefix_id'))
+                            )._asdict(),
                         }
 
                         loaded = get_provider_model_loaded_state(
@@ -1461,11 +1489,51 @@ def convert_responses_result(response: dict) -> dict:
     }
 
 
+class ProviderQuirksForm(BaseModel):
+    """给出 model_id 时按它所在的连接、针对这个模型;否则按连接设置里的地址与思考格式列整家(新建连接时还没有模型)。"""
+
+    model_id: Optional[str] = None
+    url: Optional[str] = None
+    thinking_format: Optional[str] = None
+
+
+@router.post('/provider-quirks')
+async def get_provider_quirks(request: Request, form_data: ProviderQuirksForm, user=Depends(get_admin_user)):
+    """管理员页的服务商注意事项:与发送时读的是同一批表(utils/provider_quirks.py)。"""
+    if form_data.model_id:
+        model_info = await Models.get_model_by_id(form_data.model_id)
+        model_id = model_info.base_model_id if model_info and model_info.base_model_id else form_data.model_id
+        models = request.app.state.OPENAI_MODELS
+        if not models or model_id not in models:
+            await get_all_models(request, user=user)
+            models = request.app.state.OPENAI_MODELS
+        model = models.get(model_id)
+        if not model or 'urlIdx' not in model:
+            return {'thinking_format': None, 'quirks': []}
+        url, _, api_config = await get_openai_connection(model['urlIdx'])
+        thinking_format = detect_thinking_format(url, api_config)
+        support = thinking_support(thinking_format, strip_provider_model_prefix(model_id, api_config.get('prefix_id')))
+        return {'thinking_format': thinking_format, 'quirks': provider_quirks(thinking_format, support)}
+    thinking_format = detect_thinking_format(form_data.url or '', {'thinking_format': form_data.thinking_format})
+    return {'thinking_format': thinking_format, 'quirks': provider_quirks(thinking_format)}
+
+
 @router.post('/chat/completions')
-async def generate_chat_completion(
+async def generate_chat_completion_endpoint(
     request: Request,
     form_data: dict,
     user=Depends(get_verified_user),
+):
+    return await generate_chat_completion(
+        request, strip_chat_request_overrides(form_data, await get_chat_overrides(user)), user
+    )
+
+
+# 平台内部经 utils/chat.py 直接调用;请求体是 /api/chat/completions 已按权限处理过的,或由平台拼成。
+async def generate_chat_completion(
+    request: Request,
+    form_data: dict,
+    user,
 ):
     if not await Config.get('openai.enable'):
         raise HTTPException(status_code=503, detail='OpenAI API is disabled')
@@ -1533,6 +1601,23 @@ async def generate_chat_completion(
 
     prefix_id = api_config.get('prefix_id', None)
     payload['model'] = strip_provider_model_prefix(payload['model'], prefix_id)
+
+    # 统一思考档位按连接换成服务商字段;模型没勾「思考控制」就丢掉,不原样发出去。
+    thinking_format = detect_thinking_format(url, api_config)
+    thinking_level = payload.pop(THINKING_LEVEL_PARAM, None)
+    if thinking_level is not None and thinking_level not in THINKING_LEVELS:
+        raise HTTPException(status_code=400, detail=f'Invalid {THINKING_LEVEL_PARAM}: {thinking_level}')
+    if thinking_level and model_supports_thinking_control(model_info):
+        payload = apply_thinking_level(
+            payload,
+            thinking_level,
+            thinking_format,
+            responses_api=api_config.get('api_type') == 'responses',
+        )
+    # 服务商固定死的采样参数(如 Kimi 的 temperature)传别的值会 400,发送前去掉;管理员页有提示。
+    payload, dropped_sampling = strip_fixed_sampling_params(payload, thinking_format)
+    if dropped_sampling:
+        log.info('Dropped %s for %s: fixed by the provider', ', '.join(dropped_sampling), payload['model'])
 
     # Add user info to the payload if the model is a pipeline
     if 'pipeline' in model and model.get('pipeline'):
@@ -1617,19 +1702,43 @@ async def generate_chat_completion(
     r = None
     streaming = False
     response = None
+    # 作业辅导对话与平台步骤:服务商一时出错(429、5xx、连接或超时)自动重发,学生不用自己点重试。
+    # 只在还没往下游送任何内容之前重发:一次性的读完响应体、流式的读到第一段才算发成;超时也收紧。
+    retry_transient = bool((metadata or {}).get(RETRY_TRANSIENT_FLAG))
+    budget = STREAM_RETRY if is_streaming_request else ONE_SHOT_RETRY
+    head = b''
 
     try:
         session = await get_session()
 
-        r = await session.request(
-            method='POST',
-            url=request_url,
-            data=payload,
-            headers=headers,
-            cookies=cookies,
-            ssl=AIOHTTP_CLIENT_SESSION_SSL,
-            timeout=get_client_timeout(stream=is_streaming_request),
-        )
+        async def send():
+            nonlocal head
+            response = await session.request(
+                method='POST',
+                url=request_url,
+                data=payload,
+                headers=headers,
+                cookies=cookies,
+                ssl=AIOHTTP_CLIENT_SESSION_SSL,
+                timeout=budget.timeout if retry_transient else get_client_timeout(stream=is_streaming_request),
+            )
+            if not retry_transient or response.status >= 400:
+                return response
+            try:
+                head = await read_ahead(
+                    response, stream='text/event-stream' in response.headers.get('Content-Type', '')
+                )
+            except BaseException:
+                await cleanup_response(response)
+                raise
+            return response
+
+        if retry_transient:
+            r = await send_with_retry(
+                send, cleanup_response, label=f'chat completion {requested_model}', deadline=budget.deadline
+            )
+        else:
+            r = await send()
 
         # Check if response is SSE
         if 'text/event-stream' in r.headers.get('Content-Type', ''):
@@ -1674,7 +1783,7 @@ async def generate_chat_completion(
 
             streaming = True
             return StreamingResponse(
-                stream_wrapper(r),
+                stream_wrapper(r, head=head),
                 status_code=r.status,
                 headers=_clean_proxy_headers(r.headers),
             )
@@ -1854,6 +1963,7 @@ async def responses(
     Forward requests to the OpenAI Responses API endpoint.
     Routes to the correct upstream backend based on the model field.
     """
+    await ensure_raw_passthrough_allowed(user)
     payload = form_data.model_dump(exclude_none=True)
     is_streaming_request = bool(payload.get('stream', False))
 
@@ -1967,6 +2077,7 @@ async def proxy(path: str, request: Request, user=Depends(get_verified_user)):
             status_code=status.HTTP_403_FORBIDDEN,
             detail='Direct API passthrough is disabled. Set ENABLE_OPENAI_API_PASSTHROUGH=True to enable.',
         )
+    await ensure_raw_passthrough_allowed(user)
 
     body = await request.body()
 

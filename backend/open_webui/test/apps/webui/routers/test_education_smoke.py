@@ -52,7 +52,9 @@ from open_webui.models.education import (
     WritingSession,
     WritingVersion,
 )
+from open_webui.config import DEFAULT_EDUCATION_AI_STEPS
 from open_webui.models.config import Config
+from open_webui.services.education.ai_steps import StepModel
 from open_webui.models.folders import Folder, FolderForm, FolderUpdateForm, Folders
 from open_webui.models.groups import Group, GroupMember
 from open_webui.models.notes import Note
@@ -2785,6 +2787,7 @@ def test_reviewed_first_read_can_still_read_existing_items(education_client):
                 }
                 for key in ('ideas', 'structure', 'evidence')
             ],
+            'test-model',
             db=db,
         )
     submitted = client.post(f'/api/v1/assignments/{assignment["id"]}/submit', json=_submit_body(session_id, _DRAFT_MD))
@@ -4726,6 +4729,7 @@ def test_assignment_defaults_follow_instance_settings(education_client):
         "coaching_style": "balanced",
         "task_mode": "from_scratch",
         "rubrics": {"from_scratch": [], "revise_draft": []},
+        "thinking": {"control": "admin", "default": "model_default"},
     }
 
     revise_rubric = [{"label": "综述只写已有研究", "max_score": 40}, {"label": "出处与参考文献", "max_score": 60}]
@@ -4743,6 +4747,7 @@ def test_assignment_defaults_follow_instance_settings(education_client):
         "coaching_style": "socratic",
         "task_mode": "revise_draft",
         "rubrics": {"from_scratch": [], "revise_draft": revise_rubric},
+        "thinking": {"control": "admin", "default": "model_default"},
     }
 
     UserContext.current_user = student
@@ -5003,8 +5008,8 @@ def _fake_challenge_model(turn_text="你这一点说服不了我", closing=None,
         body = messages[1]["content"].split("【作者的文章】\n", 1)[1]
         return body.split("\n\n", 1)[0]
 
-    async def fake_generate(request, user, model_id, messages):
-        calls.append({"model": model_id, "messages": messages})
+    async def fake_generate(request, user, model, messages, step):
+        calls.append({"model": model.model_id, "messages": messages})
         if '"stood"' in messages[0]["content"]:
             return json.dumps(
                 closing or {"stood": [], "unresolved": []}, ensure_ascii=False
@@ -6807,8 +6812,8 @@ def _fake_diagnosis(payload):
     """替换模型调用:第一次通读只经过 challenge.generate_completion 这一个出口。"""
     calls = []
 
-    async def fake_generate(request, user, model_id, messages):
-        calls.append({"model_id": model_id, "messages": messages})
+    async def fake_generate(request, user, model, messages, step):
+        calls.append({"model_id": model.model_id, "messages": messages})
         return json.dumps(payload, ensure_ascii=False)
 
     original = education_challenge_module.generate_completion
@@ -7062,7 +7067,7 @@ def test_crashed_first_read_releases_the_claim(education_client):
     client, teacher, _, student, _, _ = education_client
     _, session_id = _revise_draft_with_baseline(client, teacher, student)
 
-    async def crash(request, user, model_id, messages):
+    async def crash(request, user, model, messages, step):
         raise RuntimeError("Model not found")
 
     original = education_challenge_module.generate_completion
@@ -7187,7 +7192,7 @@ def test_first_read_of_a_withdrawn_draft_is_dropped(education_client):
     new_text = "换过的初稿。" * 60
 
     # 通读还在等模型时,学生撤回初稿、交了另一份
-    async def fake_generate(request, user, model_id, messages):
+    async def fake_generate(request, user, model, messages, step):
         with SessionLocal() as db:
             Education.reset_draft_baseline(session_id, db=db)
             Education.set_draft_baseline(session_id, new_text, {"md": new_text}, db=db)
@@ -7538,14 +7543,31 @@ def _dominant_channel(image_url):
     return "rgb"[pixel.index(max(pixel))]
 
 
+_VISION_STEP_MODEL = StepModel(model_id="vision-model", fixed=True)
+
+
+def _set_image_model(model_id):
+    """图片识别的模型在 AI 步骤设置里;空串表示没选,不提供图片导入。"""
+    asyncio.run(
+        Config.upsert(
+            {
+                "education.ai_steps": {
+                    **DEFAULT_EDUCATION_AI_STEPS,
+                    "image_parsing": {"model": model_id or None, "thinking": "off"},
+                }
+            }
+        )
+    )
+
+
 @contextmanager
 def _fake_transcription(by_channel=None, error=None):
     """替换模型调用:图片导入只经过 draft_import.generate_transcription 这一个出口。"""
     calls = []
 
-    async def fake_generate(request, user, model_id, messages):
+    async def fake_generate(request, user, model, messages):
         image_url = messages[-1]["content"][1]["image_url"]["url"]
-        calls.append({"model_id": model_id, "messages": messages, "image_url": image_url})
+        calls.append({"model_id": model.model_id, "messages": messages, "image_url": image_url})
         if error is not None:
             raise error
         return (by_channel or {}).get(_dominant_channel(image_url), "")
@@ -7560,7 +7582,7 @@ def _fake_transcription(by_channel=None, error=None):
 
 def test_text_import_is_only_for_the_assignment_student_while_writable(education_client):
     client, teacher, _, student, outsider, SessionLocal = education_client
-    asyncio.run(Config.upsert({"education.draft_image_model": "vision-model"}))
+    _set_image_model("vision-model")
     client.app.state.MODELS = _VISION_MODELS
     assignment, session_id, submission_id = _setup_submitted_assignment(
         client, teacher, student
@@ -7576,7 +7598,7 @@ def test_text_import_is_only_for_the_assignment_student_while_writable(education
     with _fake_transcription({"r": "照片里的字。"}):
         res = client.post(image_url, files=[("files", ("p.png", _png_bytes("red"), "image/png"))])
     assert res.status_code == 200, res.text
-    assert res.json() == {"text": "照片里的字。", "pages": ["照片里的字。"]}
+    assert res.json() == {"text": "照片里的字。", "pages": ["照片里的字。"], "model_id": "vision-model"}
 
     # 别人都不行:任课老师、同学、管理员(图片导入要调模型,只算学生自己的)
     admin = teacher.model_copy(update={"id": "admin-1", "role": "admin"})
@@ -7642,7 +7664,7 @@ def test_draft_image_import_needs_an_admin_chosen_vision_model(education_client)
         ("gone-model", "The image parsing model is not available. Ask your administrator to check the setting."),
         ("text-only", "The image parsing model cannot read images. Ask your administrator to choose another model."),
     ]:
-        asyncio.run(Config.upsert({"education.draft_image_model": model_id}))
+        _set_image_model(model_id)
         with _fake_transcription({"r": "不该调到模型。"}) as calls:
             res = client.post(url, files=files)
         assert res.status_code == 400, res.text
@@ -7654,7 +7676,7 @@ def test_draft_images_are_transcribed_in_page_order_without_freezing_baseline(
     education_client,
 ):
     client, teacher, _, student, _, SessionLocal = education_client
-    asyncio.run(Config.upsert({"education.draft_image_model": "vision-model"}))
+    _set_image_model("vision-model")
     client.app.state.MODELS = _VISION_MODELS
     _, session_id = _setup_revise_draft_assignment(client, teacher, student)
     url = f"/api/v1/writing-sessions/{session_id}/import/images"
@@ -7678,6 +7700,7 @@ def test_draft_images_are_transcribed_in_page_order_without_freezing_baseline(
     assert res.json() == {
         "text": "第一页第一段，\n第一页第二段。\n第二页接着写。",
         "pages": ["第一页第一段，\n第一页第二段。", "", "第二页接着写。"],
+        "model_id": "vision-model",
     }
     assert len(calls) == 3
     assert {call["model_id"] for call in calls} == {"vision-model"}
@@ -7701,7 +7724,7 @@ def test_draft_images_are_transcribed_in_page_order_without_freezing_baseline(
 
 def test_draft_image_import_validates_files_and_model_failures(education_client):
     client, teacher, _, student, _, _ = education_client
-    asyncio.run(Config.upsert({"education.draft_image_model": "vision-model"}))
+    _set_image_model("vision-model")
     client.app.state.MODELS = _VISION_MODELS
     _, session_id = _setup_revise_draft_assignment(client, teacher, student)
     url = f"/api/v1/writing-sessions/{session_id}/import/images"
@@ -7817,36 +7840,75 @@ def test_revision_overview_and_first_read_distribution():
     assert build_first_read_distribution(from_scratch, submissions, {}) is None
 
 
-def test_admin_sets_the_draft_image_model_in_education_settings(education_client):
+def test_admin_picks_step_models_in_education_settings(education_client):
     from open_webui.routers.configs import router as configs_router
 
     client, teacher, _, _, _, _ = education_client
     app = FastAPI()
     app.include_router(configs_router, prefix="/api/v1/configs")
+    app.state.MODELS = {**_VISION_MODELS, "reader-model": {"id": "reader-model", "name": "Reader"}}
     admin = teacher.model_copy(update={"id": "admin-1", "role": "admin"})
     app.dependency_overrides[get_admin_user] = lambda: admin
     configs_client = TestClient(app)
 
     settings = configs_client.get("/api/v1/configs/education").json()
-    assert settings["EDUCATION_DRAFT_IMAGE_MODEL"] == ""
+    assert settings["EDUCATION_AI_STEP_SETTINGS"]["image_parsing"] == {"model": None, "thinking": "off"}
+    form = {key: value for key, value in settings.items() if not key.endswith("_DEFAULTS")}
 
-    form = {
-        key: value
-        for key, value in settings.items()
-        if not key.endswith("_DEFAULTS")
-    }
-    res = configs_client.post(
-        "/api/v1/configs/education",
-        json={**form, "EDUCATION_DRAFT_IMAGE_MODEL": "  vision-model "},
+    def save(**steps):
+        return configs_client.post(
+            "/api/v1/configs/education",
+            json={**form, "EDUCATION_AI_STEP_SETTINGS": {**form["EDUCATION_AI_STEP_SETTINGS"], **steps}},
+        )
+
+    # 图片识别的模型要能看图;选的模型都必须存在
+    assert save(image_parsing={"model": "text-only", "thinking": "off"}).status_code == 400
+    assert save(reader_check={"model": "no-such-model", "thinking": "low"}).status_code == 400
+    res = save(
+        image_parsing={"model": "vision-model", "thinking": "off"},
+        reader_check={"model": "reader-model", "thinking": "low"},
     )
     assert res.status_code == 200, res.text
-    assert res.json()["EDUCATION_DRAFT_IMAGE_MODEL"] == "vision-model"
-    assert asyncio.run(Config.get("education.draft_image_model")) == "vision-model"
+    stored = asyncio.run(Config.get("education.ai_steps"))
+    assert stored["image_parsing"]["model"] == "vision-model"
+    assert stored["reader_check"] == {"model": "reader-model", "thinking": "low"}
+    views = {view["key"]: view for view in res.json()["EDUCATION_AI_STEP_VIEWS"]}
+    assert (views["reader_check"]["model_name"], views["reader_check"]["model_available"]) == ("Reader", True)
+
+    # 选过的模型后来被删掉:管理员页标出不可用,保存别的设置不受影响
+    del app.state.MODELS["reader-model"]
+    form = {
+        key: value
+        for key, value in configs_client.get("/api/v1/configs/education").json().items()
+        if not key.endswith("_DEFAULTS")
+    }
+    views = {view["key"]: view for view in form["EDUCATION_AI_STEP_VIEWS"]}
+    assert views["reader_check"]["model_available"] is False
+    assert configs_client.post(
+        "/api/v1/configs/education", json={**form, "EDUCATION_ENABLE_RETURN": False}
+    ).status_code == 200
+
+    # 自动重发:设置页按登记的几处生成,个人写作默认关,管理员可打开
+    assert [(scope["key"], scope["admin_toggle"]) for scope in form["EDUCATION_RETRY_SCOPES"]] == [
+        ("assignment_chat", False),
+        ("platform_steps", False),
+        ("personal_writing", True),
+    ]
+    assert form["EDUCATION_AUTO_RETRY"] == {"personal_writing": False}
+    # 测试里的模型不在默认开着思考的服务商,「模型默认」说明只剩通用的第一句
+    assert form["EDUCATION_MODEL_DEFAULT_MEANING"] == []
+    res = configs_client.post(
+        "/api/v1/configs/education", json={**form, "EDUCATION_AUTO_RETRY": {"personal_writing": True}}
+    )
+    assert res.status_code == 200, res.text
+    assert asyncio.run(Config.get("education.auto_retry")) == {"personal_writing": True}
+    assert configs_client.post(
+        "/api/v1/configs/education", json={**form, "EDUCATION_AUTO_RETRY": {"personal_writing": True, "chat": True}}
+    ).status_code == 422
 
     # 表单是整份提交,漏了这一项说明前端还是旧版本,直接拒绝而不是悄悄清空
-    form.pop("EDUCATION_DRAFT_IMAGE_MODEL")
-    res = configs_client.post("/api/v1/configs/education", json=form)
-    assert res.status_code == 422, res.text
+    form.pop("EDUCATION_AI_STEP_SETTINGS")
+    assert configs_client.post("/api/v1/configs/education", json=form).status_code == 422
     configs_client.close()
 
 
@@ -7855,7 +7917,7 @@ def test_draft_images_are_transcribed_concurrently_with_a_small_limit():
     in_flight = 0
     peak = 0
 
-    async def fake_generate(request, user, model_id, messages):
+    async def fake_generate(request, user, model, messages):
         nonlocal in_flight, peak
         page = messages[-1]["content"][1]["image_url"]["url"]
         in_flight += 1
@@ -7871,7 +7933,7 @@ def test_draft_images_are_transcribed_concurrently_with_a_small_limit():
         started = time.perf_counter()
         pages = asyncio.run(
             draft_import_module.transcribe_draft_images(
-                None, None, "vision-model", [str(page) for page in range(1, 11)]
+                None, None, _VISION_STEP_MODEL, [str(page) for page in range(1, 11)]
             )
         )
         elapsed = time.perf_counter() - started
@@ -7895,21 +7957,23 @@ def test_prepare_draft_images_validates_every_image_before_any_model_call():
 
 @contextmanager
 def _fake_chat_completion(handler):
-    """替换 generate_chat_completion(转录出口之下那一层),连同上游状态的分类一起测;重发等待缩到毫秒。"""
+    """替换 call_step_model(转录出口之下那一层),连同上游状态的分类一起测;重发等待缩到毫秒。"""
     calls = []
 
-    async def fake(request, form_data, user, bypass_filter=False, **_):
-        page = form_data["messages"][-1]["content"][1]["image_url"]["url"]
+    async def fake(request, user, step, model, messages):
+        # 识图模型是管理员指定的,跳过学生的模型访问控制
+        assert step == "image_parsing" and model.fixed
+        page = messages[-1]["content"][1]["image_url"]["url"]
         calls.append(page)
         return await handler(page, calls.count(page))
 
-    original = (draft_import_module.generate_chat_completion, draft_import_module._RETRY_DELAYS)
-    draft_import_module.generate_chat_completion = fake
+    original = (draft_import_module.call_step_model, draft_import_module._RETRY_DELAYS)
+    draft_import_module.call_step_model = fake
     draft_import_module._RETRY_DELAYS = (0.01, 0.02, 0.04)
     try:
         yield calls
     finally:
-        draft_import_module.generate_chat_completion, draft_import_module._RETRY_DELAYS = original
+        draft_import_module.call_step_model, draft_import_module._RETRY_DELAYS = original
 
 
 def _completion(text):
@@ -7918,7 +7982,7 @@ def _completion(text):
 
 def _transcribe(pages):
     return asyncio.run(
-        draft_import_module.transcribe_draft_images(None, None, "vision-model", pages)
+        draft_import_module.transcribe_draft_images(None, None, _VISION_STEP_MODEL, pages)
     )
 
 
@@ -7987,7 +8051,7 @@ def test_image_import_reports_busy_after_retries(education_client):
     from fastapi.responses import JSONResponse
 
     client, teacher, _, student, _, _ = education_client
-    asyncio.run(Config.upsert({"education.draft_image_model": "vision-model"}))
+    _set_image_model("vision-model")
     client.app.state.MODELS = _VISION_MODELS
     _, session_id = _setup_revise_draft_assignment(client, teacher, student)
 

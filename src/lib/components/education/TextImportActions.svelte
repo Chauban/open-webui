@@ -47,11 +47,14 @@
 	const run = async (kind: ImportInfo['kind'], files: File[]) => {
 		reading = kind;
 		try {
-			const result =
-				kind === 'images'
-					? await extractImportImages(localStorage.token, sessionId, files)
-					: await extractImportDocument(localStorage.token, sessionId, files[0]);
-			onImported(result.text, { kind, names: files.map((file) => file.name) });
+			const names = files.map((file) => file.name);
+			if (kind === 'images') {
+				const result = await extractImportImages(localStorage.token, sessionId, files);
+				onImported(result.text, { kind, names, modelId: result.model_id });
+			} else {
+				const result = await extractImportDocument(localStorage.token, sessionId, files[0]);
+				onImported(result.text, { kind, names });
+			}
 		} catch (error) {
 			toast.error(resolveErrorMessage(error, t));
 		} finally {
@@ -82,6 +85,7 @@
 			const scans = pages.filter((page) => page.kind === 'scan');
 			const hasText = pages.some((page) => page.kind === 'text' && page.lines.length > 0);
 			let transcribed: string[] = [];
+			let modelId: string | undefined;
 			if (scans.length > 0 && !imageImportEnabled) {
 				if (!hasText) {
 					toast.error(
@@ -114,8 +118,9 @@
 					return;
 				}
 				reading = 'images';
-				transcribed = (await extractImportImages(localStorage.token, sessionId, images as File[]))
-					.pages;
+				const result = await extractImportImages(localStorage.token, sessionId, images as File[]);
+				transcribed = result.pages;
+				modelId = result.model_id;
 			}
 			let scanIndex = 0;
 			const built: PdfPage[] = [];
@@ -135,7 +140,7 @@
 			onImported(text, {
 				kind: usedImages ? 'images' : 'document',
 				names: [file.name],
-				...(usedImages ? { scannedPages: scans.length } : {})
+				...(usedImages ? { scannedPages: scans.length, modelId } : {})
 			});
 		} catch (error) {
 			toast.error(resolveErrorMessage(error, t));

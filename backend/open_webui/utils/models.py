@@ -44,9 +44,7 @@ async def get_all_base_models(request: Request, user: UserModel = None):
     openai_task = fetch_openai_models(request, user) if config.get('openai.enable') else asyncio.sleep(0, result=[])
     function_task = get_function_models(request)
 
-    openai_models, function_models = await asyncio.gather(
-        openai_task, function_task
-    )
+    openai_models, function_models = await asyncio.gather(openai_task, function_task)
 
     return function_models + openai_models
 
@@ -212,6 +210,11 @@ async def get_all_models(request, refresh: bool = False, user: UserModel = None)
                 **({'pipe': pipe} if pipe is not None else {}),
                 **({'provider': base_model.get('provider')} if base_model and base_model.get('provider') else {}),
                 **({'loaded': base_model.get('loaded')} if base_model and base_model.get('loaded') is not None else {}),
+                **{
+                    key: base_model[key]
+                    for key in ('thinking_format', 'thinking_support')
+                    if base_model and base_model.get(key)
+                },
             }
 
             info = custom_model.model_dump()

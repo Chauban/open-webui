@@ -121,7 +121,9 @@ export const DEFAULT_CAPABILITIES = {
 	status_updates: true,
 	usage: undefined,
 	memory: true,
-	builtin_tools: true
+	builtin_tools: true,
+	// 思考控制要服务商支持,由管理员按模型确认后勾选。
+	reasoning: false
 };
 
 // 承载教学身份的两个权限组。身份本身在「编辑用户」的教学身份下拉里改,

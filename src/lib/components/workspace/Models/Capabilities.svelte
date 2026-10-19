@@ -57,6 +57,12 @@
 			label: $i18n.t('Memory'),
 			description: $i18n.t('Inject stored memories into conversation context')
 		},
+		reasoning: {
+			label: $i18n.t('Thinking control'),
+			description: $i18n.t(
+				'Model accepts the thinking setting (off / low / medium / high). Check only when the provider supports it; the connection decides the request format.'
+			)
+		},
 		builtin_tools: {
 			label: $i18n.t('Builtin Tools'),
 			description: $i18n.t(

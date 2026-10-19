@@ -8,6 +8,17 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Switch from '$lib/components/common/Switch.svelte';
 	import Pencil from '$lib/components/icons/Pencil.svelte';
+	import EducationAiStepSettings from './EducationAiStepSettings.svelte';
+	import EducationAutoRetrySettings from './EducationAutoRetrySettings.svelte';
+	import type { ModelDefaultGroup } from '$lib/utils/provider-quirks';
+	import EducationStudentLimits from './EducationStudentLimits.svelte';
+	import type {
+		AiStep,
+		AiStepPolicy,
+		AiStepView,
+		AutoRetryPolicy,
+		RetryScope
+	} from '$lib/apis/education';
 
 	const i18n = getContext('i18n');
 
@@ -111,15 +122,15 @@
 	let enableReturn = false;
 	// 作业能否选辅导风格;关掉后作业表单不显示档位,对话也不附档位提示词。
 	let enableCoachingStyles = true;
-	// 作业写作区「导入图片」用的识图模型;空=不提供图片导入。只列没有标明不能看图的模型。
-	let draftImageModel = '';
-	// Model 类型里 owned_by 不含 arena、capabilities 是 object,运行时两者都有,按宽类型读。
-	const canReadImages = (model) =>
-		(model?.owned_by as string) !== 'arena' &&
-		(model?.info?.meta?.capabilities as { vision?: boolean } | undefined)?.vision !== false;
-	$: visionModels = ($models ?? []).filter(canReadImages);
-	$: draftImageModelMissing =
-		!!draftImageModel && !visionModels.some((model) => model.id === draftImageModel);
+	// 各 AI 步骤的模型与思考档位(作业写作区「导入图片」的识图模型也在其中)。步骤登记、各行指定的
+	// 模型还在不在、学生在作业外的权限状态由后端随配置一起给出,只读。
+	let aiStepPolicy: AiStepPolicy | null = null;
+	let aiSteps: AiStep[] = [];
+	let aiStepViews: AiStepView[] = [];
+	let autoRetry: AutoRetryPolicy | null = null;
+	let retryScopes: RetryScope[] = [];
+	let modelDefaultMeaning: ModelDefaultGroup[] = [];
+	let studentOverrides = { params: true, system_prompt: true };
 	let editing: { section: SectionKey; key: string } | null = null;
 	let draft = '';
 
@@ -190,7 +201,13 @@
 			defaultRubrics = readRubrics(config);
 			enableReturn = config.EDUCATION_ENABLE_RETURN;
 			enableCoachingStyles = config.EDUCATION_ENABLE_COACHING_STYLES;
-			draftImageModel = config.EDUCATION_DRAFT_IMAGE_MODEL ?? '';
+			aiStepPolicy = config.EDUCATION_AI_STEP_SETTINGS;
+			aiSteps = config.EDUCATION_AI_STEPS;
+			aiStepViews = config.EDUCATION_AI_STEP_VIEWS;
+			autoRetry = config.EDUCATION_AUTO_RETRY;
+			retryScopes = config.EDUCATION_RETRY_SCOPES;
+			modelDefaultMeaning = config.EDUCATION_MODEL_DEFAULT_MEANING;
+			studentOverrides = config.EDUCATION_STUDENT_CHAT_OVERRIDES;
 		} catch (error) {
 			loadFailed = true;
 			toast.error(`${error}`);
@@ -224,7 +241,9 @@
 	const persist = async (
 		next: Prompts,
 		nextAssignmentDefaults = assignmentDefaults,
-		nextRubrics = defaultRubrics
+		nextRubrics = defaultRubrics,
+		nextAiSteps = aiStepPolicy,
+		nextAutoRetry = autoRetry
 	) => {
 		saving = true;
 		try {
@@ -234,7 +253,8 @@
 				EDUCATION_DEFAULT_RUBRICS: nextRubrics,
 				EDUCATION_ENABLE_RETURN: enableReturn,
 				EDUCATION_ENABLE_COACHING_STYLES: enableCoachingStyles,
-				EDUCATION_DRAFT_IMAGE_MODEL: draftImageModel
+				EDUCATION_AI_STEP_SETTINGS: nextAiSteps,
+				EDUCATION_AUTO_RETRY: nextAutoRetry
 			});
 			prompts = read(config, 'configKey');
 			defaults = read(config, 'defaultsKey');
@@ -242,7 +262,13 @@
 			defaultRubrics = readRubrics(config);
 			enableReturn = config.EDUCATION_ENABLE_RETURN;
 			enableCoachingStyles = config.EDUCATION_ENABLE_COACHING_STYLES;
-			draftImageModel = config.EDUCATION_DRAFT_IMAGE_MODEL ?? '';
+			aiStepPolicy = config.EDUCATION_AI_STEP_SETTINGS;
+			aiSteps = config.EDUCATION_AI_STEPS;
+			aiStepViews = config.EDUCATION_AI_STEP_VIEWS;
+			autoRetry = config.EDUCATION_AUTO_RETRY;
+			retryScopes = config.EDUCATION_RETRY_SCOPES;
+			modelDefaultMeaning = config.EDUCATION_MODEL_DEFAULT_MEANING;
+			studentOverrides = config.EDUCATION_STUDENT_CHAT_OVERRIDES;
 			// 学生端是否显示「导入图片」读的是 /api/config 的 features,跟着刷新。
 			await appConfig.set(await getBackendConfig());
 			editing = null;
@@ -256,8 +282,7 @@
 		}
 	};
 
-	const save = () =>
-		persist(editing ? withValue(editing.section, editing.key, draft) : prompts);
+	const save = () => persist(editing ? withValue(editing.section, editing.key, draft) : prompts);
 
 	const restoreDefault = (section: SectionKey, key: string) =>
 		persist(withValue(section, key, defaults[section][key]));
@@ -325,7 +350,9 @@
 						</div>
 						{#each sections[0].items as item}
 							{@const mode = item.key}
-							<div class="rounded-xl border border-gray-100/50 px-3 py-2.5 dark:border-white/[0.04]">
+							<div
+								class="rounded-xl border border-gray-100/50 px-3 py-2.5 dark:border-white/[0.04]"
+							>
 								<div class="flex items-start justify-between gap-2">
 									<div class="text-xs text-gray-700 dark:text-gray-300">{$i18n.t(item.title)}</div>
 									{#if rubricEditing !== mode}
@@ -357,7 +384,9 @@
 									<div class="mt-2 flex flex-col gap-1.5">
 										{#each rubricDraft as row, index}
 											<div class="flex items-center gap-2">
-												<span class="w-4 text-right text-[0.6875rem] text-gray-400">{index + 1}</span>
+												<span class="w-4 text-right text-[0.6875rem] text-gray-400"
+													>{index + 1}</span
+												>
 												<input
 													class="min-w-0 flex-1 rounded-lg border border-gray-100/50 bg-gray-50/40 px-2 py-1 text-xs text-gray-700 outline-hidden focus:border-blue-400 dark:border-white/[0.04] dark:bg-white/[0.03] dark:text-gray-300"
 													placeholder={$i18n.t('Criterion name')}
@@ -385,7 +414,8 @@
 													<button
 														class="text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
 														type="button"
-														on:click={() => (rubricDraft = [...rubricDraft, { label: '', max_score: '' }])}
+														on:click={() =>
+															(rubricDraft = [...rubricDraft, { label: '', max_score: '' }])}
 													>
 														+ {$i18n.t('Add criterion')}
 													</button>
@@ -453,45 +483,30 @@
 						</div>
 						<Switch bind:state={enableCoachingStyles} on:change={() => persist(prompts)} />
 					</div>
-
-					<div class="flex items-start justify-between gap-4">
-						<div class="min-w-0">
-							<div class="text-xs font-medium text-gray-700 dark:text-gray-300">
-								{$i18n.t('Draft image parsing model')}
-							</div>
-							<p class="mt-0.5 text-[0.6875rem] text-gray-400 dark:text-gray-600">
-								{$i18n.t(
-									'Students can import photos of a handwritten or printed draft; this model transcribes them into text for the student to check. Pick a model that can read images; a fast model without step-by-step reasoning keeps the wait short, since most of the time goes into writing out the text. Students do not need access to it in chat. When none is chosen, image import is turned off.'
-								)}
-							</p>
-							{#if draftImageModelMissing}
-								<p class="mt-0.5 text-[0.6875rem] text-rose-500">
-									{$i18n.t(
-										'The chosen model is no longer available. Image import will fail until you pick another one.'
-									)}
-								</p>
-							{/if}
-						</div>
-						<select
-							class="w-48 shrink-0 rounded-lg bg-transparent px-2 py-1 text-xs text-gray-700 outline-hidden dark:text-gray-300"
-							value={draftImageModel}
-							disabled={saving}
-							data-testid="draft-image-model-select"
-							on:change={(event) => {
-								draftImageModel = event.currentTarget.value;
-								persist(prompts);
-							}}
-						>
-							<option value="">{$i18n.t('Off (no image import)')}</option>
-							{#if draftImageModelMissing}
-								<option value={draftImageModel}>{draftImageModel}</option>
-							{/if}
-							{#each visionModels as model}
-								<option value={model.id}>{model.name ?? model.id}</option>
-							{/each}
-						</select>
-					</div>
 				</div>
+
+				{#if aiStepPolicy}
+					<EducationAiStepSettings
+						policy={aiStepPolicy}
+						steps={aiSteps}
+						views={aiStepViews}
+						{modelDefaultMeaning}
+						models={$models ?? []}
+						disabled={saving}
+						onChange={(next) => persist(prompts, assignmentDefaults, defaultRubrics, next)}
+					/>
+				{/if}
+
+				{#if autoRetry}
+					<EducationAutoRetrySettings
+						scopes={retryScopes}
+						policy={autoRetry}
+						onChange={(next) =>
+							persist(prompts, assignmentDefaults, defaultRubrics, aiStepPolicy, next)}
+					/>
+				{/if}
+
+				<EducationStudentLimits overrides={studentOverrides} />
 
 				{#each sections as section}
 					<div class="flex flex-col gap-4">

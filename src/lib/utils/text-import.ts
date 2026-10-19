@@ -11,8 +11,14 @@ export const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 export const IMAGE_TOTAL_MAX_BYTES = 30 * 1024 * 1024;
 
 export type ImportKind = 'document' | 'images';
-// scannedPages:读 PDF 时有几页扫描页交给了识图模型(kind 因此是 images)。
-export type ImportInfo = { kind: ImportKind; names: string[]; scannedPages?: number };
+// scannedPages:读 PDF 时有几页扫描页交给了识图模型(kind 因此是 images);
+// modelId:转录这些图片实际用的模型,随导入记进编辑操作。
+export type ImportInfo = {
+	kind: ImportKind;
+	names: string[];
+	scannedPages?: number;
+	modelId?: string;
+};
 
 const IMAGE_NAME = /\.(jpe?g|png|webp|heic|heif)$/i;
 

@@ -25,7 +25,7 @@
 		seed: null,
 		stop: null,
 		temperature: null,
-		reasoning_effort: null,
+		thinking_level: null,
 		logit_bias: null,
 		max_tokens: null,
 		top_k: null,
@@ -41,7 +41,6 @@
 		repeat_penalty: null,
 		use_mmap: null,
 		use_mlock: null,
-		think: null,
 		format: null,
 		keep_alive: null,
 		num_keep: null,
@@ -469,45 +468,31 @@
 	<div class=" py-0.5 w-full justify-between">
 		<Tooltip
 			content={$i18n.t(
-				'Constrains effort on reasoning for reasoning models. Only applicable to reasoning models from specific providers that support reasoning effort.'
+				'Turns step-by-step thinking off or sets how much the model thinks. Sent in the format chosen on the connection; ignored by models without the Thinking control capability.'
 			)}
 			placement="top-start"
 			className="inline-tooltip"
 		>
 			<div class="flex w-full justify-between">
-				<div class=" self-center text-xs">
-					{$i18n.t('Reasoning Effort')}
-				</div>
-				<button
-					class="p-1 px-3 text-xs flex rounded-sm transition shrink-0 outline-hidden"
-					type="button"
-					on:click={() => {
-						params.reasoning_effort = (params?.reasoning_effort ?? null) === null ? 'medium' : null;
+				<label for="thinking-level-select" class=" self-center text-xs">
+					{$i18n.t('Thinking')}
+				</label>
+				<select
+					id="thinking-level-select"
+					class="p-1 px-3 text-xs rounded-sm bg-transparent outline-hidden text-right"
+					value={params?.thinking_level ?? ''}
+					on:change={(event) => {
+						params.thinking_level = event.currentTarget.value || null;
 					}}
 				>
-					{#if (params?.reasoning_effort ?? null) === null}
-						<span class="ml-2 self-center"> {$i18n.t('Default')} </span>
-					{:else}
-						<span class="ml-2 self-center"> {$i18n.t('Custom')} </span>
-					{/if}
-				</button>
+					<option value="">{$i18n.t('Default')}</option>
+					<option value="off">{$i18n.t('Off')}</option>
+					<option value="low">{$i18n.t('Low')}</option>
+					<option value="medium">{$i18n.t('Medium')}</option>
+					<option value="high">{$i18n.t('High')}</option>
+				</select>
 			</div>
 		</Tooltip>
-
-		{#if (params?.reasoning_effort ?? null) !== null}
-			<div class="flex mt-0.5 space-x-2">
-				<div class=" flex-1">
-					<input
-						class="text-sm w-full bg-transparent outline-hidden outline-none"
-						type="text"
-						aria-label={$i18n.t('Reasoning Effort')}
-						placeholder={$i18n.t('Enter reasoning effort')}
-						bind:value={params.reasoning_effort}
-						autocomplete="off"
-					/>
-				</div>
-			</div>
-		{/if}
 	</div>
 
 	<div class=" py-0.5 w-full justify-between">

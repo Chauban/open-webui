@@ -49,6 +49,7 @@ from open_webui.models.knowledge import Knowledges
 from open_webui.models.models import Models
 from open_webui.models.tools import Tools
 from open_webui.utils.access_control import get_permissions, has_permission
+from open_webui.utils.access_control.chat import get_chat_overrides, strip_settings_overrides
 from open_webui.utils.auth import (
     get_admin_user,
     get_password_hash,
@@ -577,6 +578,12 @@ async def update_user_settings_by_session_user(
         updated_user_settings.pop('notifications', None)
         if isinstance(ui_notifications, dict):
             ui_notifications.pop('webhook_url', None)
+
+    # 默认参数与默认系统提示会随每次对话发出,不能设的不存。
+    if isinstance(updated_user_settings.get('ui'), dict):
+        updated_user_settings['ui'] = strip_settings_overrides(
+            updated_user_settings['ui'], await get_chat_overrides(user)
+        )
 
     default_interface_settings = await Config.get('ui.default_interface_settings')
     ui_settings = updated_user_settings.get('ui')

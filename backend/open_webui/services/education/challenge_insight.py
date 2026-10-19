@@ -24,6 +24,7 @@ from open_webui.models.education import (
 # challenge.generate_completion 一个，测试靠替换它来隔离模型。直接把名字绑过来
 # 会绕开那个出口，这里就成了第二个出口。
 from open_webui.services.education import challenge as challenge_module
+from open_webui.services.education.ai_steps import resolve_step_model
 from open_webui.services.education.challenge import (
     ChallengeError,
     get_challenge_prompt,
@@ -267,17 +268,22 @@ async def build_challenge_insight(
             sample_size=cached.sample_size,
             threshold=CHALLENGE_INSIGHT_MIN_STUDENTS,
             generated_at=cached.created_at,
+            model_id=cached.model_id,
         )
 
     system_prompt = await get_challenge_prompt("insight")
     if not system_prompt:
         raise ChallengeError("Challenge insight prompt is not configured")
 
+    model = await resolve_step_model(request, user, "class_insight", model_id)
+    if model is None:
+        raise ChallengeError("Choose a model before summarizing")
     raw = await challenge_module.generate_completion(
         request,
         user,
-        model_id,
+        model,
         build_insight_messages(system_prompt, assignment, items),
+        "class_insight",
     )
     categories = parse_insight(raw)
 
@@ -286,6 +292,7 @@ async def build_challenge_insight(
         input_hash,
         {"categories": [category.model_dump() for category in categories]},
         completed,
+        model.model_id,
         db=db,
     )
     return ChallengeInsightResponse(
@@ -293,4 +300,5 @@ async def build_challenge_insight(
         sample_size=completed,
         threshold=CHALLENGE_INSIGHT_MIN_STUDENTS,
         generated_at=stored.created_at,
+        model_id=stored.model_id,
     )

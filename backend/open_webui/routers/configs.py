@@ -16,6 +16,23 @@ from open_webui.env import AIOHTTP_CLIENT_SESSION_SSL, AIOHTTP_CLIENT_TIMEOUT
 from open_webui.events import EVENTS, publish_event
 from open_webui.models.config import Config
 from open_webui.models.education import CoachingStyle, TaskMode
+from open_webui.services.education.ai_steps import (
+    AI_STEPS,
+    RETRY_SCOPES,
+    AiStep,
+    AutoRetryPolicy,
+    EducationAiStepPolicy,
+    RetryScope,
+    StepModelNotAllowed,
+    StepView,
+    available_models,
+    describe_steps,
+    ensure_step_models_valid,
+    get_ai_step_policy,
+)
+from open_webui.services.education.identity import STUDENT_GROUP_ID
+from open_webui.utils.provider_quirks import model_default_meaning
+from open_webui.utils.access_control.chat import get_group_chat_overrides
 from open_webui.models.oauth_sessions import OAuthSessions
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.headers import bearer_auth_header, get_custom_headers
@@ -37,7 +54,7 @@ from open_webui.utils.tools import (
     set_terminal_servers,
     set_tool_servers,
 )
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 router = APIRouter()
 
@@ -80,7 +97,8 @@ EDUCATION_CONFIG_KEYS = {
     'EDUCATION_ENABLE_RETURN': 'education.enable_return',
     'EDUCATION_ENABLE_COACHING_STYLES': 'education.enable_coaching_styles',
     'EDUCATION_CHALLENGE_PROMPTS': 'education.challenge_prompts',
-    'EDUCATION_DRAFT_IMAGE_MODEL': 'education.draft_image_model',
+    'EDUCATION_AI_STEP_SETTINGS': 'education.ai_steps',
+    'EDUCATION_AUTO_RETRY': 'education.auto_retry',
 }
 SUBAGENTS_CONFIG_KEYS = {
     'ENABLE_SUBAGENTS': 'subagents.enable',
@@ -852,32 +870,59 @@ class EducationConfigForm(BaseModel):
     EDUCATION_DEFAULT_RUBRICS: EducationDefaultRubricsForm
     EDUCATION_ENABLE_RETURN: bool
     EDUCATION_ENABLE_COACHING_STYLES: bool
-    # 作业写作区「导入图片」用的识图模型 id;空串表示不提供图片导入。
-    EDUCATION_DRAFT_IMAGE_MODEL: str = Field(max_length=256)
+    # 各 AI 步骤的模型与思考档位(含图片识别模型)、辅导对话思考的下放方式,见 services/education/ai_steps.py。
+    EDUCATION_AI_STEP_SETTINGS: EducationAiStepPolicy
+    # 服务商一时出错时自动重发里管理员能开关的几处(个人写作),见 ai_steps.py 的 RETRY_SCOPES。
+    EDUCATION_AUTO_RETRY: AutoRetryPolicy
 
-    @field_validator('EDUCATION_DRAFT_IMAGE_MODEL', mode='before')
-    @classmethod
-    def strip_draft_image_model(cls, value):
-        return value.strip() if isinstance(value, str) else value
+
+class StudentChatOverridesView(BaseModel):
+    params: bool
+    system_prompt: bool
 
 
 class EducationConfigResponse(EducationConfigForm):
-    """保存过的值会永久盖过代码默认值，所以把内置默认一起送出去，面板才能提供「恢复默认」。"""
+    """保存过的值会永久盖过代码默认值，所以把内置默认一起送出去，面板才能提供「恢复默认」。
+
+    另附只读信息：AI 步骤登记（设置表按它生成）、自动重发的几处（哪些始终重发、哪些由管理员开关）、各步骤指定的模型此刻还在不在（不在的标红并回落），
+    以及只在学生组里的成员此刻在个人写作、普通对话里能否改参数与系统提示（按默认权限与学生组权限算）。
+    """
 
     EDUCATION_COACHING_PROMPT_DEFAULTS: EducationCoachingPromptsForm
     EDUCATION_TASK_PROMPT_DEFAULTS: EducationTaskPromptsForm
+    EDUCATION_AI_STEPS: list[AiStep]
+    EDUCATION_AI_STEP_VIEWS: list[StepView]
+    EDUCATION_RETRY_SCOPES: list[RetryScope]
+    # 「模型默认」对目前接入的模型意味着什么(utils/provider_quirks.py),AI 步骤设置里的说明按它写。
+    EDUCATION_MODEL_DEFAULT_MEANING: list[dict]
+    EDUCATION_STUDENT_CHAT_OVERRIDES: StudentChatOverridesView
 
 
-async def get_education_config_values() -> dict:
+async def get_education_config_values(request: Request, user) -> dict:
     values = await get_config_values(EDUCATION_CONFIG_KEYS)
     values['EDUCATION_COACHING_PROMPT_DEFAULTS'] = DEFAULT_EDUCATION_COACHING_PROMPTS
     values['EDUCATION_TASK_PROMPT_DEFAULTS'] = DEFAULT_EDUCATION_TASK_PROMPTS
+    values['EDUCATION_AI_STEPS'] = list(AI_STEPS)
+    values['EDUCATION_RETRY_SCOPES'] = list(RETRY_SCOPES)
+    models = await available_models(request, user)
+    values['EDUCATION_AI_STEP_VIEWS'] = describe_steps(
+        EducationAiStepPolicy.model_validate(values['EDUCATION_AI_STEP_SETTINGS']), models
+    )
+    # 只看连接上的底模;自建模型随底模,不重复列。
+    values['EDUCATION_MODEL_DEFAULT_MEANING'] = model_default_meaning(
+        model for model in models.values() if not (model.get('info') or {}).get('base_model_id')
+    )
+    student_overrides = await get_group_chat_overrides(STUDENT_GROUP_ID)
+    values['EDUCATION_STUDENT_CHAT_OVERRIDES'] = {
+        'params': student_overrides.params,
+        'system_prompt': student_overrides.system_prompt,
+    }
     return values
 
 
 @router.get('/education', response_model=EducationConfigResponse)
-async def get_education_config(user=Depends(get_admin_user)):
-    return await get_education_config_values()
+async def get_education_config(request: Request, user=Depends(get_admin_user)):
+    return await get_education_config_values(request, user)
 
 
 @router.post('/education', response_model=EducationConfigResponse)
@@ -886,8 +931,16 @@ async def set_education_config(
     form_data: EducationConfigForm,
     user=Depends(get_admin_user),
 ):
+    try:
+        ensure_step_models_valid(
+            form_data.EDUCATION_AI_STEP_SETTINGS,
+            await get_ai_step_policy(),
+            await available_models(request, user),
+        )
+    except StepModelNotAllowed as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
     await Config.upsert(config_updates(form_data.model_dump(), EDUCATION_CONFIG_KEYS))
-    values = await get_education_config_values()
+    values = await get_education_config_values(request, user)
     await publish_event(
         request,
         EVENTS.CONFIG_UPDATED,

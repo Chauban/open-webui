@@ -46,6 +46,7 @@ from open_webui.utils.access_control import has_permission
 from open_webui.utils.access_control import (
     filter_allowed_access_grants,
 )
+from open_webui.utils.access_control.chat import can_set_folder_system_prompt
 from open_webui.utils.access_control.files import can_read_all_folder_files, get_accessible_folder_files
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.tasks import has_active_tasks
@@ -69,6 +70,49 @@ def _get_folder_mode(meta: Optional[dict]) -> Optional[str]:
 def _allows_duplicate_folder_name(folder, incoming_meta: Optional[dict] = None) -> bool:
     mode = _get_folder_mode(incoming_meta) or _get_folder_mode(getattr(folder, "meta", None))
     return mode in WRITING_PROJECT_MODES
+
+
+# 写作区文件夹由教学路由建立并按作业或写作会话同步(meta 关联写作会话,系统提示是老师的作业说明),
+# 客户端只能改这两处界面状态。名称每次打开写作区都按作业或标题重写,不在此拦:侧栏可能带着旧名。
+WRITING_PROJECT_CLIENT_KEYS = {"meta": {"hidden_from_sidebar"}, "data": {"model_ids"}}
+WRITING_PROJECT_MANAGED = "Writing projects are managed by the platform."
+
+
+def _changed_keys(current: Optional[dict], incoming: Optional[dict]) -> set[str]:
+    current = current or {}
+    return {key for key, value in (incoming or {}).items() if current.get(key) != value}
+
+
+def _ensure_writing_project_untouched(folder, form_data: FolderUpdateForm) -> None:
+    if _get_folder_mode(folder.meta) not in WRITING_PROJECT_MODES:
+        if _get_folder_mode(form_data.meta) in WRITING_PROJECT_MODES:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=WRITING_PROJECT_MANAGED,
+            )
+        return
+
+    if (
+        _changed_keys(folder.meta, form_data.meta) - WRITING_PROJECT_CLIENT_KEYS["meta"]
+        or _changed_keys(folder.data, form_data.data) - WRITING_PROJECT_CLIENT_KEYS["data"]
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=WRITING_PROJECT_MANAGED,
+        )
+
+
+async def _ensure_folder_system_prompt_allowed(user, current: Optional[dict], incoming: Optional[dict]) -> None:
+    # 文件夹弹窗没有这一栏时也会带空串,空串与没有提示视为相同。
+    if not incoming or "system_prompt" not in incoming:
+        return
+    if (incoming["system_prompt"] or "") != ((current or {}).get("system_prompt") or "") and not (
+        await can_set_folder_system_prompt(user)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+        )
 
 
 from open_webui.utils.access_control.folders import has_folder_access as _has_folder_access
@@ -199,6 +243,12 @@ async def create_folder(
     db: AsyncSession = Depends(get_async_session),
 ):
     await check_folders_permission(request, user, db=db)
+    if _get_folder_mode(form_data.meta) in WRITING_PROJECT_MODES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=WRITING_PROJECT_MANAGED,
+        )
+    await _ensure_folder_system_prompt_allowed(user, None, form_data.data)
     folder = await Folders.get_folder_by_parent_id_and_user_id_and_name(
         form_data.parent_id, user.id, form_data.name, db=db
     )
@@ -381,6 +431,8 @@ async def update_folder_name_by_id(
             )
 
     if folder:
+        _ensure_writing_project_untouched(folder, form_data)
+        await _ensure_folder_system_prompt_allowed(user, folder.data, form_data.data)
         if form_data.name is not None:
             if not _allows_duplicate_folder_name(folder, form_data.meta):
                 # Check if folder with same name exists

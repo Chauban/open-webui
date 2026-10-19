@@ -91,6 +91,7 @@ def test_fresh_database_upgrades_to_head(tmp_path, monkeypatch):
             "score_max",
             "rubric_schema",
             "reflection_questions",
+            "model_params",
         } <= assignment_columns
         review_columns = {
             column["name"] for column in schema.get_columns("submission_review")
@@ -489,5 +490,62 @@ def test_task_mode_defaults_and_revise_draft_forbids_challenge(tmp_path, monkeyp
                         ),
                         values,
                     )
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("stored", "expected_model"), [('"vision-x"', "vision-x"), ('""', None)]
+)
+def test_image_parsing_model_moves_into_ai_step_settings(
+    tmp_path, monkeypatch, stored, expected_model
+):
+    """原来单独的识图模型并入 education.ai_steps;没选过(空串)的不建新键,仍是不提供图片导入。"""
+    import json
+
+    backend_dir = Path(__file__).resolve().parents[5]
+    database_url = f"sqlite:///{(tmp_path / 'ai-steps.db').as_posix()}"
+    _set_database_url(monkeypatch, database_url)
+    config = _alembic_config(backend_dir)
+    command.upgrade(config, "b3d5f7a9c1e4")
+
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            for key, value in (
+                ("education.draft_image_model", stored),
+                ("education.thinking", '{"first_read": "off"}'),
+            ):
+                connection.exec_driver_sql(
+                    "INSERT INTO config (key, value, updated_at) VALUES (?, ?, 1)",
+                    (key, value),
+                )
+        command.upgrade(config, "head")
+
+        with engine.connect() as connection:
+            rows = dict(
+                connection.exec_driver_sql("SELECT key, value FROM config").fetchall()
+            )
+        assert "education.draft_image_model" not in rows
+        assert "education.thinking" not in rows
+        if expected_model is None:
+            assert "education.ai_steps" not in rows
+        else:
+            steps = json.loads(rows["education.ai_steps"])
+            assert steps["image_parsing"] == {"model": expected_model, "thinking": "off"}
+            assert steps["first_read"] == {"model": None, "thinking": "model_default"}
+
+        schema = inspect(engine)
+        assert {"revision_items_model_id", "revision_follow_up_model_id"} <= {
+            column["name"] for column in schema.get_columns("writing_session")
+        }
+        for table_name, column_name in (
+            ("challenge_turn", "model_id"),
+            ("challenge_session", "closing_model_id"),
+            ("challenge_insight", "model_id"),
+        ):
+            assert column_name in {
+                column["name"] for column in schema.get_columns(table_name)
+            }
     finally:
         engine.dispose()
