@@ -138,48 +138,42 @@ def apply_thinking_level(payload: dict, level: str, thinking_format: str, *, res
 
 
 class FixedSamplingParam(NamedTuple):
-    """服务商固定死的采样参数:传别的值直接 400。models 为空表示该格式下所有模型。"""
+    """服务商固定死的采样参数:只接受一个值,传别的直接 400。
+
+    allowed_without_thinking:关掉思考时只接受的值与开着时不同的写在这里。
+    """
 
     param: str
     allowed: float
-    models: tuple[str, ...] = ()
+    allowed_without_thinking: Optional[float] = None
 
 
-# 只收实测返回 400 的(2026-10-18,见 docs/reference/thinking-params-test-results.md)。
+# 只收实测返回 400 的(2026-10-18、10-19,见 docs/reference/thinking-params-test-results.md)。
 # 发送前按这张表去掉;管理员页的提示也读这张表(/openai/sampling-rules),两边不会说法不一。
 FIXED_SAMPLING_PARAMS: dict[str, tuple[FixedSamplingParam, ...]] = {
     'kimi': (
-        # K2.6 与 K3:「invalid temperature: only 1 is allowed for this model」
-        FixedSamplingParam('temperature', 1.0),
-        # K2.6:「invalid top_p: only 0.95 is allowed for this model」;K3 未实测,不动
-        FixedSamplingParam('top_p', 0.95, ('kimi-k2.6',)),
+        # K2.6、K3:开着思考「only 1 is allowed」,关掉思考「only 0.6 is allowed」
+        FixedSamplingParam('temperature', 1.0, allowed_without_thinking=0.6),
+        # 以下 K2.6、K3 都是「only <值> is allowed for this model」
+        FixedSamplingParam('top_p', 0.95),
+        FixedSamplingParam('n', 1),
+        FixedSamplingParam('presence_penalty', 0),
+        FixedSamplingParam('frequency_penalty', 0),
     ),
 }
 
 
-def fixed_sampling_params(thinking_format: str, model_id: Optional[str] = None) -> list[FixedSamplingParam]:
-    """该格式下固定死的采样参数;给出 model_id 时只留适用于这个模型的。"""
-    rules = FIXED_SAMPLING_PARAMS.get(thinking_format, ())
-    if model_id is None:
-        return list(rules)
-    model = model_id.lower()
-    return [rule for rule in rules if not rule.models or any(model.startswith(prefix) for prefix in rule.models)]
-
-
-def _is_allowed(value, allowed: float) -> bool:
-    try:
-        return float(value) == allowed
-    except (TypeError, ValueError):
-        return False
+def fixed_sampling_params(thinking_format: str) -> list[FixedSamplingParam]:
+    """该格式下固定死的采样参数(实测 K2.6、K3 一样,不分模型)。"""
+    return list(FIXED_SAMPLING_PARAMS.get(thinking_format, ()))
 
 
 def strip_fixed_sampling_params(payload: dict, thinking_format: str) -> tuple[dict, list[str]]:
-    """去掉服务商不接受的采样参数(值不等于它固定的那个),返回新的请求体和去掉的参数名。"""
-    dropped = [
-        rule.param
-        for rule in fixed_sampling_params(thinking_format, str(payload.get('model') or ''))
-        if rule.param in payload and not _is_allowed(payload[rule.param], rule.allowed)
-    ]
+    """去掉服务商固定死的采样参数,返回新的请求体和去掉的参数名。
+
+    值固定,传了也改不了什么;而 temperature 能接受的值还随思考开关变,恰好等于某个值的也不发,由服务商取它自己的。
+    """
+    dropped = [rule.param for rule in fixed_sampling_params(thinking_format) if rule.param in payload]
     if not dropped:
         return payload, []
     return {key: value for key, value in payload.items() if key not in dropped}, dropped

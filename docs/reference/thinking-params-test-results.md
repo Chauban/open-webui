@@ -22,7 +22,7 @@
 2. **K3 可以关思考，与参考文档不符**。参考文档说 K3 不接受 `thinking` 字段，实测传 `{"type":"disabled"}` 返回 200，也没有思考内容。K3 接受 `reasoning_effort` 的 minimal、low、medium、high。
 3. **GLM-5.3 系列（5.3、5.3-flash、5.3-flashx）关不掉思考**。原来的翻译在「关」时发 `thinking.type=disabled`，三个模型都返回 400（code 1210：「该模型始终思考，不支持关闭思考；请使用 low、high 或 max。」），学生关掉思考的那一轮会直接报错。`reasoning_effort=medium` 也返回 400，报错原文同样是 1210。修正后，「关」退到 `reasoning_effort=low`；实测 low 几乎不思考（0–2 个推理 token）。
 4. **DeepSeek 原来只发开 / 关**，low、medium、high 三档发出的请求完全一样。DeepSeek 接受 `reasoning_effort` 的 low、medium、high（medium 由服务端归到 high）。修正后各档分别发 low、high、max。
-5. **Kimi 不接受改采样参数**。K2.6、K3 传 `temperature=0.3` 都返回 400（「only 1 is allowed」），K2.6 传 `top_p=0.9` 也返回 400（「only 0.95 is allowed」）。管理员如果在 Kimi 模型上设了温度，每次请求都会失败；现在发送前会自动去掉，见文末。
+5. **Kimi 不接受改采样参数**。K2.6、K3 传 `temperature=0.3` 都返回 400（「only 1 is allowed」），K2.6 传 `top_p=0.9` 也返回 400（「only 0.95 is allowed」）。10-19 补测：两个模型的 `top_p`（只能 0.95）、`n`（只能 1）、`presence_penalty` 与 `frequency_penalty`（只能 0）都固定；关掉思考时 `temperature` 只能 0.6，传 1 也 400。管理员如果在 Kimi 模型上设了这些参数，每次请求都会失败；现在发送前一律去掉，见下文「Kimi 的固定采样参数」。
 6. **DeepSeek 旧模型名还能用**：`deepseek-chat` 不思考，`deepseek-reasoner` 思考，都返回 200。
 7. **看图**：`deepseek-flash`、`glm-5.3-flash`、`kimi-k2.6`、`kimi-k3` 都正确认出了图里的黑色方块。修正后的「关」同样适用于看图请求。
 8. **偶发错误**：`deepseek-flash` 有一次读超时（180 秒），`glm-5.3-flash` 有一次 500（「网络错误」，用了 90 秒）。同样的请求各重发 3 次都返回 200，属于服务商偶发故障，与翻译无关。现在辅导对话与平台步骤都会自动重发，见文末。
@@ -156,9 +156,30 @@
 | `kimi-k3` | effort medium | `{"reasoning_effort": "medium"}` | 200 | 18 |
 
 
+#### Kimi 的固定采样参数（2026-10-19 补测）
+
+同样只读取现网 Kimi 连接的 Key，每条一句「1+1等于几？只回答数字。」、`max_tokens` 300，共 20 次调用、897 tokens。没写思考的是默认（开着思考）。
+
+| 场景 | `kimi-k2.6` | `kimi-k3` |
+|---|---|---|
+| `n=2` | 400：invalid n: only 1 is allowed for this model | 400：同左 |
+| `n=1` | 200 | 200 |
+| `presence_penalty=0.5` | 400：invalid presence_penalty: only 0 is allowed for this model | 400：同左 |
+| `presence_penalty=0` | 200 | 200 |
+| `frequency_penalty=0.5` | 400：invalid frequency_penalty: only 0 is allowed for this model | 400：同左 |
+| `frequency_penalty=0` | 200 | 200 |
+| `top_p=0.9` | 400（10-18） | 400：invalid top_p: only 0.95 is allowed for this model |
+| `top_p=0.95` | — | 200 |
+| `top_p=1.0` | — | 400：同上 |
+| 关思考 + `temperature=1` | 400：invalid temperature: only 0.6 is allowed for this model | 400：同左 |
+| 关思考 + `temperature=0.6` | 200 | 200 |
+| 关思考 + `top_p=0.95` | 200 | — |
+
+结论：这五个参数在 K2.6、K3 上都只接受一个值，而 `temperature` 的值还随思考开关变（开 1、关 0.6；参考文档说 K3 固定 1.0，与实测不符）。所以 `kimi` 格式发送前一律去掉这五个参数，不管值是多少，由服务商取它自己的值。
+
 ## 仍待处理
 
-- **Kimi 的采样参数（已处理）**：`kimi` 格式发送前去掉实测会 400 的值：`temperature` ≠ 1（K2.6、K3），`top_p` ≠ 0.95（K2.6）。规则表在 `utils/thinking.py` 的 `FIXED_SAMPLING_PARAMS`；管理员在模型编辑页设了这类参数、或在连接设置里选到 Kimi 时会看到同一张表生成的提示。`n`、`presence_penalty`、`frequency_penalty` 和 K3 的 `top_p` 参考文档说也是固定的，但没有实测，暂不去掉。
+- **Kimi 的采样参数（已处理）**：`kimi` 格式发送前一律去掉 `temperature`、`top_p`、`n`、`presence_penalty`、`frequency_penalty`（K2.6、K3 实测都只接受一个值，见上文）。规则表在 `utils/thinking.py` 的 `FIXED_SAMPLING_PARAMS`；管理员在模型编辑页设了这类参数、或在连接设置里选到 Kimi 时会看到同一张表生成的提示。K2.7 等现网没有的 Kimi 模型没测，按同一张表处理。
 - **K2.6 的思考力度**：K2.6 收到 `reasoning_effort` 不报错，但看不出有没有生效（同一档位多次之间推理 token 在 41–92 之间波动）。可以认为 K2.6 只有开 / 关两档。
 - **GLM-4.7、GLM-4.5V 等关不掉思考的老型号**：无法降档，「关」等于默认。现网没有这些模型，未实测。
 - **Kimi K2.7-Code** 始终思考，`thinking.type=disabled` 预计会报错（参考文档）；现网没有这个模型，未实测。

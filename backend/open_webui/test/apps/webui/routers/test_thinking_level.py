@@ -248,39 +248,54 @@ def test_router_rejects_unknown_levels(monkeypatch):
     assert error.status_code == 400 and body is None
 
 
+KIMI_RULES = [
+    {'param': 'temperature', 'allowed': 1.0, 'allowed_without_thinking': 0.6},
+    {'param': 'top_p', 'allowed': 0.95, 'allowed_without_thinking': None},
+    {'param': 'n', 'allowed': 1, 'allowed_without_thinking': None},
+    {'param': 'presence_penalty', 'allowed': 0, 'allowed_without_thinking': None},
+    {'param': 'frequency_penalty', 'allowed': 0, 'allowed_without_thinking': None},
+]
+
+
 def test_kimi_fixed_sampling_params_follow_the_tests():
-    """实测:K2.6、K3 的 temperature 只能是 1;K2.6 的 top_p 只能是 0.95。其他服务商不受影响。"""
-    assert [rule.param for rule in fixed_sampling_params('kimi', 'kimi-k2.6')] == ['temperature', 'top_p']
-    assert [rule.param for rule in fixed_sampling_params('kimi', 'kimi-k3')] == ['temperature']
-    assert [(rule.param, rule.models) for rule in fixed_sampling_params('kimi')] == [
-        ('temperature', ()),
-        ('top_p', ('kimi-k2.6',)),
-    ]
-    assert fixed_sampling_params('deepseek', 'deepseek-flash') == []
+    """实测(K2.6、K3 一样):temperature 开思考只能 1、关思考只能 0.6;top_p 只能 0.95;n 只能 1;两个 penalty 只能 0。"""
+    assert [rule._asdict() for rule in fixed_sampling_params('kimi')] == KIMI_RULES
+    assert fixed_sampling_params('deepseek') == []
 
 
-def test_strip_only_drops_values_the_provider_rejects():
-    payload = {'model': 'kimi-k2.6', 'temperature': 0.3, 'top_p': 0.9, 'max_tokens': 100}
+def test_strip_drops_every_fixed_param_on_kimi():
+    payload = {
+        'model': 'kimi-k2.6',
+        'temperature': 0.3,
+        'top_p': 0.9,
+        'n': 2,
+        'presence_penalty': 0.5,
+        'frequency_penalty': 0.5,
+        'max_tokens': 100,
+    }
     assert strip_fixed_sampling_params(payload, 'kimi') == (
         {'model': 'kimi-k2.6', 'max_tokens': 100},
+        ['temperature', 'top_p', 'n', 'presence_penalty', 'frequency_penalty'],
+    )
+    # 恰好等于开思考时的值也不发:关掉思考时 temperature=1 同样 400(只能 0.6)
+    off = {'model': 'kimi-k3', 'thinking': {'type': 'disabled'}, 'temperature': 1, 'top_p': 0.95}
+    assert strip_fixed_sampling_params(off, 'kimi') == (
+        {'model': 'kimi-k3', 'thinking': {'type': 'disabled'}},
         ['temperature', 'top_p'],
     )
-    # 恰好是固定值的照发;K3 的 top_p 没实测过,不动
-    kept = {'model': 'kimi-k3', 'temperature': 1, 'top_p': 0.9}
-    assert strip_fixed_sampling_params(kept, 'kimi') == (kept, [])
-    other = {'model': 'deepseek-flash', 'temperature': 0.3}
+    other = {'model': 'deepseek-flash', 'temperature': 0.3, 'n': 2}
     assert strip_fixed_sampling_params(other, 'deepseek') == (other, [])
 
 
 def test_router_drops_kimi_sampling_params_before_sending(monkeypatch):
     _, body = _send_through_router(
         monkeypatch,
-        saved_params={'temperature': 0.3, 'top_p': 0.9},
+        saved_params={'temperature': 0.3, 'top_p': 0.9, 'frequency_penalty': 0.5},
         capabilities={},
         url='https://api.moonshot.cn/v1',
         model='kimi-k2.6',
     )
-    assert 'temperature' not in body and 'top_p' not in body
+    assert not {'temperature', 'top_p', 'frequency_penalty'} & set(body)
 
 
 def test_sampling_rules_endpoint_reads_the_same_table(monkeypatch):
@@ -300,14 +315,8 @@ def test_sampling_rules_endpoint_reads_the_same_table(monkeypatch):
     )
 
     # 自建模型按底模判断
-    assert rules(model_id='tutor') == {
-        'thinking_format': 'kimi',
-        'rules': [
-            {'param': 'temperature', 'allowed': 1.0, 'models': ()},
-            {'param': 'top_p', 'allowed': 0.95, 'models': ('kimi-k2.6',)},
-        ],
-    }
-    assert [rule['param'] for rule in rules(model_id='kimi-k3')['rules']] == ['temperature']
+    assert rules(model_id='tutor') == {'thinking_format': 'kimi', 'rules': KIMI_RULES}
+    assert rules(model_id='kimi-k3')['rules'] == KIMI_RULES
     # 新建连接时按地址 / 手选的格式
     assert rules(url='https://api.moonshot.ai/v1')['thinking_format'] == 'kimi'
     assert rules(url='https://api.deepseek.com')['rules'] == []

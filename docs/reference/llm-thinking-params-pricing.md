@@ -120,7 +120,7 @@ ON（低档）：
 | `kimi-k2.7-code` / `kimi-k2.7-code-highspeed` | 不用传；显式传只能是 `{"type":"enabled","keep":"all"}`，传 disabled 会报错 | 始终思考 | ❌ |
 | `kimi-k3` | **不能传 `thinking`**，改用顶层 `reasoning_effort: "low"\|"high"\|"max"` | 始终思考，`max` | ❌ |
 
-- ⚠️ **重要的坑**：Kimi 的 `temperature`、`top_p`、`n`、`presence_penalty`、`frequency_penalty` 都是**固定值，传其他值会报错**（K2.6：思考时 temperature=1.0，不思考时 0.6；K3 / K2.7 固定 1.0）。如果 RightWrite 或 Open WebUI 的模型参数里给 Kimi 配了 temperature，请求会失败，必须保证不发这些字段。
+- ⚠️ **重要的坑**：Kimi 的 `temperature`、`top_p`、`n`、`presence_penalty`、`frequency_penalty` 都是**固定值，传其他值会报错**（K2.6：思考时 temperature=1.0，不思考时 0.6；K3 / K2.7 固定 1.0）。2026-10-19 实测 K3 关思考时也只能 0.6，见 [实测结果](thinking-params-test-results.md)。如果 RightWrite 或 Open WebUI 的模型参数里给 Kimi 配了 temperature，请求会失败，必须保证不发这些字段。
 - K3 中途换 effort 会让前缀缓存失效。官方建议一次会话里固定一个档位。
 - K2.6 / K3 多轮对话时，要把完整的 assistant message（包括 `reasoning_content`）原样传回去。
 

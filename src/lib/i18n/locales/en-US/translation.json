@@ -4150,7 +4150,7 @@
 	"{{model}} download has been canceled": "",
 	"{{name}} submitted {{title}}": "{{name}} submitted {{title}}",
 	"{{param}} (only {{allowed}})": "",
-	"{{param}} (only {{allowed}}, {{models}})": "",
+	"{{param}} (only {{allowed}}; {{without}} with thinking off)": "",
 	"{{provider}} does not accept custom {{params}}; they are removed automatically when sending.": "",
 	"{{user}}'s Chats": "",
 	"{{webUIName}} Backend Required": "",

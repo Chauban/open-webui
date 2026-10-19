@@ -1505,13 +1505,12 @@ async def get_sampling_rules(request: Request, form_data: SamplingRulesForm, use
             return {'thinking_format': None, 'rules': []}
         url, _, api_config = await get_openai_connection(model['urlIdx'])
         thinking_format = detect_thinking_format(url, api_config)
-        rules = fixed_sampling_params(
-            thinking_format, strip_provider_model_prefix(model_id, api_config.get('prefix_id'))
-        )
     else:
         thinking_format = detect_thinking_format(form_data.url or '', {'thinking_format': form_data.thinking_format})
-        rules = fixed_sampling_params(thinking_format)
-    return {'thinking_format': thinking_format, 'rules': [rule._asdict() for rule in rules]}
+    return {
+        'thinking_format': thinking_format,
+        'rules': [rule._asdict() for rule in fixed_sampling_params(thinking_format)],
+    }
 
 
 @router.post('/chat/completions')

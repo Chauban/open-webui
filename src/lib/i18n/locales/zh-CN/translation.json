@@ -4075,7 +4075,7 @@
 	"{{model}} download has been canceled": "已取消模型 {{model}} 的下载",
 	"{{name}} submitted {{title}}": "{{name}} 提交了《{{title}}》",
 	"{{param}} (only {{allowed}})": "{{param}}（只能为 {{allowed}}）",
-	"{{param}} (only {{allowed}}, {{models}})": "{{param}}（只能为 {{allowed}}，仅 {{models}}）",
+	"{{param}} (only {{allowed}}; {{without}} with thinking off)": "{{param}}（只能为 {{allowed}}，关思考时只能为 {{without}}）",
 	"{{provider}} does not accept custom {{params}}; they are removed automatically when sending.": "{{provider}} 不支持自定义 {{params}}，发送时会自动去掉。",
 	"{{user}}'s Chats": "{{user}} 的对话记录",
 	"{{webUIName}} Backend Required": "{{webUIName}} 需要后端服务",
