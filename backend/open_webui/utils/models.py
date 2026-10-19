@@ -210,11 +210,11 @@ async def get_all_models(request, refresh: bool = False, user: UserModel = None)
                 **({'pipe': pipe} if pipe is not None else {}),
                 **({'provider': base_model.get('provider')} if base_model and base_model.get('provider') else {}),
                 **({'loaded': base_model.get('loaded')} if base_model and base_model.get('loaded') is not None else {}),
-                **(
-                    {'thinking_support': base_model['thinking_support']}
-                    if base_model and base_model.get('thinking_support')
-                    else {}
-                ),
+                **{
+                    key: base_model[key]
+                    for key in ('thinking_format', 'thinking_support')
+                    if base_model and base_model.get(key)
+                },
             }
 
             info = custom_model.model_dump()

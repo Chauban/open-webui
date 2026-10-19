@@ -71,7 +71,8 @@ test('每个平台步骤一行:模型与思考各一个下拉,通读那行带试
 		expect(screen.getByTestId(`ai-step-row-${key}`)).toBeTruthy();
 	}
 	expect(screen.getByText(/turning thinking off here led to clearly more missed/)).toBeTruthy();
-	expect(screen.getAllByRole('option', { name: 'Model default (recommended)' }).length).toBe(1);
+	// 通读推荐「低」:关掉思考漏判多,「高」或模型默认可能超过读超时
+	expect(screen.getAllByRole('option', { name: 'Low (recommended)' }).length).toBe(1);
 
 	// 不指定时的说法按步骤:通读跟学生、归纳跟老师、图片识别即关闭导入;竞技场模型不列
 	expect(optionLabels('Model for First read and follow-up review')).toEqual([
@@ -156,19 +157,41 @@ test('作业外的学生权限按后端算出的结果如实显示', () => {
 	).toBeTruthy();
 });
 
-test('选到只有开 / 关的模型时,那一行写明各档都只是开着', () => {
-	render_({ policy: { ...POLICY, reader_check: { model: 'kimi-k2.6', thinking: 'high' } } });
+test('每一行下面写出后端按所选模型与档位算好的注意事项', () => {
+	const views: AiStepView[] = [
+		{
+			key: 'first_read',
+			model_source: 'student_chat_model',
+			model_id: 'glm-5.3',
+			model_name: 'GLM-5.3',
+			model_available: true,
+			control: 'admin',
+			thinking: 'high',
+			thinking_format: 'zhipu',
+			quirks: [
+				{ kind: 'cannot_turn_off', models: ['this'] },
+				{ kind: 'slow_step', models: [], seconds: 90 }
+			]
+		},
+		{
+			key: 'coaching_chat',
+			model_source: 'student_chat_model',
+			model_id: null,
+			model_name: null,
+			model_available: true,
+			control: 'admin',
+			thinking: 'model_default',
+			thinking_format: null,
+			quirks: [{ kind: 'model_default_thinks', models: [], formats: ['deepseek', 'kimi'] }]
+		}
+	];
+	render_({ policy: { ...POLICY, first_read: { model: 'glm-5.3', thinking: 'high' } }, views });
 
-	expect(screen.getByTestId('ai-step-thinking-note-reader_check').textContent).toContain(
-		'only turns thinking on or off'
+	const firstRead = screen.getByTestId('ai-step-quirks-first_read').textContent ?? '';
+	expect(firstRead).toContain('This model: thinking cannot be turned off');
+	expect(firstRead).toContain('longer than the 90-second timeout; Low is recommended');
+	expect(screen.getByTestId('ai-step-quirks-coaching_chat').textContent).toContain(
+		'Model default means thinking is on for DeepSeek, Kimi'
 	);
-	expect(screen.queryByTestId('ai-step-thinking-note-first_read')).toBeNull();
-});
-
-test('选到关不掉思考的模型时,那一行写明「关」会退到最低档', () => {
-	render_({ policy: { ...POLICY, first_read: { model: 'glm-5.3', thinking: 'off' } } });
-
-	expect(screen.getByTestId('ai-step-thinking-note-first_read').textContent).toContain(
-		'cannot turn thinking off'
-	);
+	expect(screen.queryByTestId('ai-step-quirks-reader_check')).toBeNull();
 });

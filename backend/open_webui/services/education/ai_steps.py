@@ -21,9 +21,10 @@ from open_webui.models.education import (
     ThinkingSetting,
 )
 from open_webui.utils.chat import generate_chat_completion
+from open_webui.utils.provider_quirks import step_quirks
 from open_webui.utils.models import get_all_models
 from open_webui.utils.retry import RETRY_TRANSIENT_FLAG
-from open_webui.utils.thinking import THINKING_LEVEL_PARAM
+from open_webui.utils.thinking import THINKING_LEVEL_PARAM, ThinkingSupport
 
 log = logging.getLogger(__name__)
 
@@ -277,6 +278,9 @@ class StepView(BaseModel):
     model_available: bool = True
     control: ThinkingControl
     thinking: ThinkingSetting
+    # 所选模型的思考格式（服务商），以及所选模型与档位要提醒管理员的事（utils/provider_quirks.py）。
+    thinking_format: Optional[str] = None
+    quirks: list[dict] = []
 
 
 def describe_steps(
@@ -294,6 +298,9 @@ def describe_steps(
             step_policy = getattr(policy, step.key)
             control, thinking, model_id = "admin", step_policy.thinking, step_policy.model
         model = models.get(model_id) if model_id else None
+        support = (model or {}).get("thinking_support")
+        thinking_format = (model or {}).get("thinking_format")
+        quirks = step_quirks(step.key, thinking, thinking_format, ThinkingSupport(**support) if support else None)
         rows.append(
             StepView(
                 key=step.key,
@@ -303,6 +310,8 @@ def describe_steps(
                 model_available=model_id is None or model is not None,
                 control=control,
                 thinking=thinking,
+                thinking_format=thinking_format,
+                quirks=quirks,
             )
         )
     return rows

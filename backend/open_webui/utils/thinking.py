@@ -35,8 +35,17 @@ THINKING_BUDGET_TOKENS = {'low': 1024, 'medium': 4096, 'high': 16384}
 ANTHROPIC_ANSWER_TOKENS = 8192
 
 # 只有 low / high / max 三档的服务商（DeepSeek、Kimi K3、GLM-5.2+）：medium 落到 high，high 用满 max。
-# 2026-10-18 实测见 docs/reference/thinking-params-test-results.md。
+# 2026-10-18 实测见 docs/reference/thinking-params-test-results.md（GLM 传 medium 返回 400）。
 _THREE_LEVEL_EFFORT = {'low': 'low', 'medium': 'high', 'high': 'max'}
+# 各格式按档位发的 reasoning_effort；与档位名不同的映射会写进管理员页的服务商注意事项。
+EFFORT_BY_LEVEL: dict[str, dict[str, str]] = {
+    'deepseek': _THREE_LEVEL_EFFORT,
+    'kimi': _THREE_LEVEL_EFFORT,
+    'zhipu': _THREE_LEVEL_EFFORT,
+    'doubao': {'low': 'low', 'medium': 'medium', 'high': 'high'},
+}
+# 不设档位（模型默认）时也开着思考的服务商（现网实测 DeepSeek、Kimi、GLM-5.x 默认都思考）。
+THINKS_BY_DEFAULT: tuple[str, ...] = ('deepseek', 'kimi', 'zhipu')
 
 
 class ThinkingSupport(NamedTuple):
@@ -152,25 +161,25 @@ def apply_thinking_level(payload: dict, level: str, thinking_format: str, *, res
     elif thinking_format == 'deepseek':
         payload['thinking'] = {'type': 'enabled' if enabled else 'disabled'}
         if enabled:
-            payload['reasoning_effort'] = _THREE_LEVEL_EFFORT[level]
+            payload['reasoning_effort'] = EFFORT_BY_LEVEL[thinking_format][level]
     elif thinking_format == 'kimi':
         # K2.6 与 K3 都认 thinking.type=disabled。K3 按 reasoning_effort 分档，不发 thinking.type=enabled
         # （按文档 K3 不接受它）；K2.6 只有开 / 关，各档都发 thinking.type=enabled（实测 200）。
         if not enabled:
             payload['thinking'] = {'type': 'disabled'}
         elif support.graded:
-            payload['reasoning_effort'] = _THREE_LEVEL_EFFORT[level]
+            payload['reasoning_effort'] = EFFORT_BY_LEVEL[thinking_format][level]
         else:
             payload['thinking'] = {'type': 'enabled'}
     elif thinking_format == 'zhipu':
         payload['thinking'] = {'type': 'enabled' if enabled else 'disabled'}
         if enabled and support.graded:
-            payload['reasoning_effort'] = _THREE_LEVEL_EFFORT[level]
+            payload['reasoning_effort'] = EFFORT_BY_LEVEL[thinking_format][level]
     elif thinking_format == 'doubao':
         # 关思考时 reasoning_effort 只能是 minimal，干脆不发。
         payload['thinking'] = {'type': 'enabled' if enabled else 'disabled'}
         if enabled:
-            payload['reasoning_effort'] = level
+            payload['reasoning_effort'] = EFFORT_BY_LEVEL[thinking_format][level]
     elif thinking_format == 'qwen':
         payload['enable_thinking'] = enabled
         # 高档不设预算，用模型自己的思维链上限。
@@ -197,7 +206,7 @@ class FixedSamplingParam(NamedTuple):
 
 
 # 只收实测返回 400 的(2026-10-18、10-19,见 docs/reference/thinking-params-test-results.md)。
-# 发送前按这张表去掉;管理员页的提示也读这张表(/openai/sampling-rules),两边不会说法不一。
+# 发送前按这张表去掉;管理员页的服务商注意事项也读这张表(/openai/provider-quirks),两边不会说法不一。
 FIXED_SAMPLING_PARAMS: dict[str, tuple[FixedSamplingParam, ...]] = {
     'kimi': (
         # K2.6、K3:开着思考「only 1 is allowed」,关掉思考「only 0.6 is allowed」

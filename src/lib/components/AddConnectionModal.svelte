@@ -11,7 +11,8 @@
 	import PencilSolid from '$lib/components/icons/PencilSolid.svelte';
 	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import { loadSamplingRules, samplingNote, type SamplingRules } from '$lib/utils/sampling-rules';
+	import { loadProviderQuirks, quirkTexts, type ProviderQuirks } from '$lib/utils/provider-quirks';
+	import ProviderQuirksPanel from '$lib/components/ProviderQuirksPanel.svelte';
 	import Switch from '$lib/components/common/Switch.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import Tags from './common/Tags.svelte';
@@ -49,21 +50,21 @@
 	let apiType = ''; // '' = chat completions (default), 'responses' = Responses API
 	// 统一思考档位在这条连接上换成哪家的字段;'' = 按地址自动识别(认不出按 OpenAI 的 reasoning_effort)。
 	let thinkingFormat = '';
-	// 这条连接上服务商固定死、发送时会被去掉的采样参数(如 Kimi 的 temperature),按地址与思考格式查后端那张表。
-	let samplingRules: SamplingRules | null = null;
-	let samplingRulesKey = '';
-	$: samplingKey = `${url}|${thinkingFormat}`;
-	$: if (!direct && url && samplingKey !== samplingRulesKey) {
-		const key = samplingKey;
-		samplingRulesKey = key;
-		loadSamplingRules(localStorage.token, {
+	// 这条连接上服务商的注意事项(固定采样参数、思考档位限制、计费等),按地址与思考格式查后端,与发送时读同一批表。
+	let providerQuirks: ProviderQuirks | null = null;
+	let providerQuirksKey = '';
+	$: quirksKey = `${url}|${thinkingFormat}`;
+	$: if (!direct && url && quirksKey !== providerQuirksKey) {
+		const key = quirksKey;
+		providerQuirksKey = key;
+		loadProviderQuirks(localStorage.token, {
 			url,
 			...(thinkingFormat ? { thinking_format: thinkingFormat } : {})
-		}).then((rules) => {
-			if (samplingRulesKey === key) samplingRules = rules;
+		}).then((quirks) => {
+			if (providerQuirksKey === key) providerQuirks = quirks;
 		});
 	}
-	$: samplingConnectionNote = url ? samplingNote(samplingRules, $i18n.t) : null;
+	$: connectionQuirks = url ? quirkTexts(providerQuirks, $i18n.t) : [];
 
 	let headers = '';
 	let passthroughParams = '';
@@ -634,14 +635,7 @@
 										</select>
 									</div>
 								</div>
-								{#if samplingConnectionNote}
-									<div
-										class="mt-1 text-xs text-amber-600 dark:text-amber-500"
-										data-testid="connection-sampling-note"
-									>
-										{samplingConnectionNote}
-									</div>
-								{/if}
+								<ProviderQuirksPanel notes={connectionQuirks} testid="connection-provider-quirks" />
 							{/if}
 
 							{#if azure}

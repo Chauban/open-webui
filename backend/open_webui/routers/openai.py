@@ -45,7 +45,6 @@ from open_webui.utils.thinking import (
     THINKING_LEVELS,
     apply_thinking_level,
     detect_thinking_format,
-    fixed_sampling_params,
     model_supports_thinking_control,
     strip_fixed_sampling_params,
     thinking_support,
@@ -65,6 +64,7 @@ from open_webui.utils.payload import (
     apply_model_params_to_body_openai,
     apply_system_prompt_to_body,
 )
+from open_webui.utils.provider_quirks import provider_quirks
 from open_webui.utils.retry import (
     ONE_SHOT_RETRY,
     RETRY_TRANSIENT_FLAG,
@@ -865,7 +865,8 @@ async def get_all_models(request: Request, user: UserModel) -> dict[str, list]:
                             'connection_type': model.get('connection_type', 'external'),
                             'provider': provider,
                             'urlIdx': idx,
-                            # 这个模型在思考上能做什么(只有开 / 关等),界面据此提示;与发送时的翻译读同一张表。
+                            # 这个模型的思考格式、在思考上能做什么(只有开 / 关等),界面据此提示;与发送时的翻译读同一张表。
+                            'thinking_format': thinking_format,
                             'thinking_support': thinking_support(
                                 thinking_format, strip_provider_model_prefix(model_id, api_config.get('prefix_id'))
                             )._asdict(),
@@ -1488,17 +1489,17 @@ def convert_responses_result(response: dict) -> dict:
     }
 
 
-class SamplingRulesForm(BaseModel):
-    """给出 model_id 时按它所在的连接判断;否则按连接设置里的地址与思考格式(新建连接时还没有模型)。"""
+class ProviderQuirksForm(BaseModel):
+    """给出 model_id 时按它所在的连接、针对这个模型;否则按连接设置里的地址与思考格式列整家(新建连接时还没有模型)。"""
 
     model_id: Optional[str] = None
     url: Optional[str] = None
     thinking_format: Optional[str] = None
 
 
-@router.post('/sampling-rules')
-async def get_sampling_rules(request: Request, form_data: SamplingRulesForm, user=Depends(get_admin_user)):
-    """管理员页提示用:这个模型 / 连接上哪些采样参数会在发送时被去掉。与发送时去掉的是同一张表。"""
+@router.post('/provider-quirks')
+async def get_provider_quirks(request: Request, form_data: ProviderQuirksForm, user=Depends(get_admin_user)):
+    """管理员页的服务商注意事项:与发送时读的是同一批表(utils/provider_quirks.py)。"""
     if form_data.model_id:
         model_info = await Models.get_model_by_id(form_data.model_id)
         model_id = model_info.base_model_id if model_info and model_info.base_model_id else form_data.model_id
@@ -1508,15 +1509,13 @@ async def get_sampling_rules(request: Request, form_data: SamplingRulesForm, use
             models = request.app.state.OPENAI_MODELS
         model = models.get(model_id)
         if not model or 'urlIdx' not in model:
-            return {'thinking_format': None, 'rules': []}
+            return {'thinking_format': None, 'quirks': []}
         url, _, api_config = await get_openai_connection(model['urlIdx'])
         thinking_format = detect_thinking_format(url, api_config)
-    else:
-        thinking_format = detect_thinking_format(form_data.url or '', {'thinking_format': form_data.thinking_format})
-    return {
-        'thinking_format': thinking_format,
-        'rules': [rule._asdict() for rule in fixed_sampling_params(thinking_format)],
-    }
+        support = thinking_support(thinking_format, strip_provider_model_prefix(model_id, api_config.get('prefix_id')))
+        return {'thinking_format': thinking_format, 'quirks': provider_quirks(thinking_format, support)}
+    thinking_format = detect_thinking_format(form_data.url or '', {'thinking_format': form_data.thinking_format})
+    return {'thinking_format': thinking_format, 'quirks': provider_quirks(thinking_format)}
 
 
 @router.post('/chat/completions')

@@ -21,11 +21,9 @@
 		THINKING_SETTINGS,
 		THINKING_SETTING_TEXT
 	} from '$lib/utils/ai-steps';
-	import {
-		thinkingSupportNote,
-		thinkingSupportOf,
-		type ThinkingSupport
-	} from '$lib/utils/thinking-support';
+	import { quirkText } from '$lib/utils/provider-quirks';
+	import type { ThinkingSupport } from '$lib/utils/thinking-support';
+	import ProviderQuirksPanel from '$lib/components/ProviderQuirksPanel.svelte';
 
 	const i18n: Writable<i18nType> = getContext('i18n');
 
@@ -68,10 +66,20 @@
 		return viewsByKey[key]?.model_available === false || !models.some((item) => item.id === model);
 	};
 
+	// 通读推荐「低」:关掉思考漏判明显增多,「高」或模型默认又可能超过一次性回复的读超时。
 	const settingLabel = (key: AiStepKey, setting: ThinkingSetting) =>
-		key === 'first_read' && setting === 'model_default'
-			? $i18n.t('Model default (recommended)')
+		key === 'first_read' && setting === 'low'
+			? $i18n.t('Low (recommended)')
 			: $i18n.t(THINKING_SETTING_TEXT[setting]);
+
+	// 后端按所选模型与档位算好的注意事项(随每次保存刷新),写成话放在这一行下面。
+	// 写成响应式声明:views 或语言变了,模板里的调用跟着重算。
+	$: stepNotes = (key: AiStepKey) => {
+		const view = viewsByKey[key];
+		return (view?.quirks ?? [])
+			.map((quirk) => quirkText(quirk, view?.thinking_format ?? null, $i18n.t))
+			.filter((text): text is string => Boolean(text));
+	};
 
 	const setStep = (key: PlatformStepKey, change: Partial<PlatformStepPolicy>) =>
 		onChange({ ...policy, [key]: { ...policy[key], ...change } });
@@ -113,6 +121,11 @@
 							'The only step a teacher can set; when it is left to teachers, the default below applies until they choose.'
 						)}
 					</p>
+					<ProviderQuirksPanel
+						notes={stepNotes('coaching_chat')}
+						testid="ai-step-quirks-coaching_chat"
+						compact
+					/>
 				</div>
 				<div class="flex flex-wrap items-center justify-end gap-2">
 					<select
@@ -144,10 +157,6 @@
 		{/if}
 
 		{#each platformSteps as step (step.key)}
-			{@const supportNote = thinkingSupportNote(
-				thinkingSupportOf(models, policy[step.key].model),
-				$i18n.t
-			)}
 			<div class="flex flex-col gap-2 py-2" data-testid={`ai-step-row-${step.key}`}>
 				<div class="min-w-0">
 					<div class="text-xs text-gray-700 dark:text-gray-300">
@@ -170,14 +179,11 @@
 							{$i18n.t(MISSING_MODEL_TEXT[step.model_source])}
 						</p>
 					{/if}
-					{#if supportNote}
-						<p
-							class="mt-0.5 text-[0.6875rem] text-amber-600 dark:text-amber-500"
-							data-testid={`ai-step-thinking-note-${step.key}`}
-						>
-							{supportNote}
-						</p>
-					{/if}
+					<ProviderQuirksPanel
+						notes={stepNotes(step.key)}
+						testid={`ai-step-quirks-${step.key}`}
+						compact
+					/>
 				</div>
 				<div class="flex flex-wrap items-center justify-end gap-2">
 					<select

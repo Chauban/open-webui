@@ -144,6 +144,11 @@ def test_model_list_carries_thinking_support(monkeypatch):
 
     models = asyncio.run(openai_router.get_all_models.__wrapped__(request, None))['data']
 
+    assert {model['id']: model['thinking_format'] for model in models} == {
+        'moon.kimi-k2.6': 'kimi',
+        'moon.kimi-k3': 'kimi',
+        'deepseek-flash': 'deepseek',
+    }
     assert {model['id']: model['thinking_support'] for model in models} == {
         'moon.kimi-k2.6': {'can_turn_off': True, 'graded': False},
         'moon.kimi-k3': {'can_turn_off': True, 'graded': True},
@@ -371,7 +376,7 @@ def test_router_drops_kimi_sampling_params_before_sending(monkeypatch):
     assert not {'temperature', 'top_p', 'frequency_penalty'} & set(body)
 
 
-def test_sampling_rules_endpoint_reads_the_same_table(monkeypatch):
+def test_provider_quirks_endpoint_reads_the_same_tables(monkeypatch):
     async def model_by_id(model_id):
         return SimpleNamespace(base_model_id='kimi-k2.6') if model_id == 'tutor' else None
 
@@ -383,14 +388,18 @@ def test_sampling_rules_endpoint_reads_the_same_table(monkeypatch):
     request = SimpleNamespace(
         app=SimpleNamespace(state=SimpleNamespace(OPENAI_MODELS={'kimi-k2.6': {'urlIdx': 3}, 'kimi-k3': {'urlIdx': 3}}))
     )
-    rules = lambda **form: asyncio.run(  # noqa: E731
-        openai_router.get_sampling_rules(request, openai_router.SamplingRulesForm(**form), None)
+    quirks = lambda **form: asyncio.run(  # noqa: E731
+        openai_router.get_provider_quirks(request, openai_router.ProviderQuirksForm(**form), None)
     )
+    kinds = lambda result: [quirk['kind'] for quirk in result['quirks']]  # noqa: E731
 
-    # 自建模型按底模判断
-    assert rules(model_id='tutor') == {'thinking_format': 'kimi', 'rules': KIMI_RULES}
-    assert rules(model_id='kimi-k3')['rules'] == KIMI_RULES
-    # 新建连接时按地址 / 手选的格式
-    assert rules(url='https://api.moonshot.ai/v1')['thinking_format'] == 'kimi'
-    assert rules(url='https://api.deepseek.com')['rules'] == []
-    assert rules(url='https://example.com/v1', thinking_format='kimi')['thinking_format'] == 'kimi'
+    # 自建模型按底模判断:K2.6 只分开关,不提档位映射;K3 分档,提 medium → high
+    tutor = quirks(model_id='tutor')
+    assert tutor['thinking_format'] == 'kimi'
+    assert tutor['quirks'][0] == {'kind': 'fixed_sampling', 'models': [], 'params': KIMI_RULES}
+    assert kinds(tutor) == ['fixed_sampling', 'on_off_only', 'thinks_by_default']
+    assert kinds(quirks(model_id='kimi-k3')) == ['fixed_sampling', 'effort_mapping', 'thinks_by_default']
+    # 新建连接时按地址 / 手选的格式列整家
+    assert quirks(url='https://api.moonshot.ai/v1')['thinking_format'] == 'kimi'
+    assert kinds(quirks(url='https://api.deepseek.com')) == ['effort_mapping', 'thinks_by_default', 'peak_pricing']
+    assert quirks(url='https://example.com/v1', thinking_format='kimi')['thinking_format'] == 'kimi'

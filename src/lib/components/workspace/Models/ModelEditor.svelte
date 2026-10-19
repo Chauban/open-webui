@@ -13,8 +13,8 @@
 	import { getVoices } from '$lib/apis/audio';
 
 	import AdvancedParams from '$lib/components/chat/Settings/Advanced/AdvancedParams.svelte';
-	import { loadSamplingRules, samplingNote, type SamplingRules } from '$lib/utils/sampling-rules';
-	import { thinkingSupportNote, thinkingSupportOf } from '$lib/utils/thinking-support';
+	import { loadProviderQuirks, quirkTexts, type ProviderQuirks } from '$lib/utils/provider-quirks';
+	import ProviderQuirksPanel from '$lib/components/ProviderQuirksPanel.svelte';
 	import ModelSelector from '$lib/components/chat/ModelSelector/Selector.svelte';
 	import Tags from '$lib/components/common/Tags.svelte';
 	import Knowledge from '$lib/components/workspace/Models/Knowledge.svelte';
@@ -376,22 +376,18 @@
 		success = false;
 	};
 
-	// 服务商固定死的采样参数(如 Kimi 的 temperature):这里设了也会在发送时被去掉,当场提示。
-	// 规则来自后端发送时用的同一张表;按底模(自建模型)或模型 id 所在的连接判断。
-	let samplingRules: SamplingRules | null = null;
-	let samplingRulesFor: string | null = null;
-	$: samplingModelId = info.base_model_id || id;
-	$: if ($user?.role === 'admin' && samplingModelId && samplingModelId !== samplingRulesFor) {
-		samplingRulesFor = samplingModelId;
-		loadSamplingRules(localStorage.token, { model_id: samplingModelId }).then((rules) => {
-			if (samplingRulesFor === samplingModelId) samplingRules = rules;
+	// 服务商注意事项(固定采样参数、思考档位限制、计费等):按底模(自建模型)或模型 id 所在的连接查后端,
+	// 与发送时读同一批表;只有管理员看得到。
+	let providerQuirks: ProviderQuirks | null = null;
+	let providerQuirksFor: string | null = null;
+	$: quirksModelId = info.base_model_id || id;
+	$: if ($user?.role === 'admin' && quirksModelId && quirksModelId !== providerQuirksFor) {
+		providerQuirksFor = quirksModelId;
+		loadProviderQuirks(localStorage.token, { model_id: quirksModelId }).then((quirks) => {
+			if (providerQuirksFor === quirksModelId) providerQuirks = quirks;
 		});
 	}
-	$: samplingWarning = samplingNote(samplingRules, $i18n.t, params);
-	// 底模只有开 / 关等限制时,勾了思考控制就在能力下面提示(与发送时的翻译读同一张表)。
-	$: thinkingNote = capabilities?.reasoning
-		? thinkingSupportNote(thinkingSupportOf($models, samplingModelId), $i18n.t)
-		: null;
+	$: modelQuirks = quirkTexts(providerQuirks, $i18n.t);
 
 	onMount(async () => {
 		await tools.set((await getTools(localStorage.token).catch(() => null)) ?? []);
@@ -892,15 +888,6 @@
 									</button>
 								</div>
 
-								{#if samplingWarning}
-									<div
-										class="my-1 text-xs text-amber-600 dark:text-amber-500"
-										data-testid="sampling-warning"
-									>
-										{samplingWarning}
-									</div>
-								{/if}
-
 								{#if showAdvanced}
 									<div class="my-2">
 										<AdvancedParams admin={true} custom={true} layout="grid" bind:params />
@@ -995,14 +982,7 @@
 
 						<div class="my-3">
 							<Capabilities bind:capabilities />
-							{#if thinkingNote}
-								<div
-									class="mt-1 text-xs text-amber-600 dark:text-amber-500"
-									data-testid="thinking-support-note"
-								>
-									{thinkingNote}
-								</div>
-							{/if}
+							<ProviderQuirksPanel notes={modelQuirks} testid="model-provider-quirks" />
 						</div>
 
 						{#if Object.keys(capabilities).filter((key) => capabilities[key]).length > 0}

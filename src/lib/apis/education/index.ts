@@ -1,3 +1,4 @@
+import type { ProviderQuirk } from '$lib/utils/provider-quirks';
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 import type {
 	EditorOperationType,
@@ -232,6 +233,9 @@ export type AiStepView = {
 	model_available: boolean;
 	control: ThinkingControl;
 	thinking: ThinkingSetting;
+	/** 所选模型的思考格式(服务商),与所选模型和档位要提醒管理员的事(后端 utils/provider_quirks.py)。 */
+	thinking_format: string | null;
+	quirks: ProviderQuirk[];
 };
 /** 平台步骤的设置:model 为 null 时按 model_source(图片识别为 null 即不提供图片导入)。 */
 export type PlatformStepPolicy = { model: string | null; thinking: ThinkingSetting };

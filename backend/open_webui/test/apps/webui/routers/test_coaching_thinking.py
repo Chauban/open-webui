@@ -175,6 +175,8 @@ def test_ai_settings_card_shows_what_applies_now(education_client):
         'model_available': True,
         'control': 'teacher',
         'thinking': 'off',
+        'thinking_format': None,
+        'quirks': [],
     }
     # 管理员指定的模型连同名称显示;指定的已被删掉时标出,这一步回落到学生选的模型
     assert (rows['class_insight']['model_name'], rows['class_insight']['model_available']) == ('Insight', True)
