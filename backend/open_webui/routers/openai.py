@@ -65,9 +65,10 @@ from open_webui.utils.payload import (
     apply_system_prompt_to_body,
 )
 from open_webui.utils.retry import (
-    NON_STREAM_TIMEOUT,
+    ONE_SHOT_RETRY,
     RETRY_TRANSIENT_FLAG,
-    STREAM_TIMEOUT,
+    STREAM_RETRY,
+    read_ahead,
     send_with_retry,
 )
 from open_webui.utils.session_pool import (
@@ -1504,7 +1505,9 @@ async def get_sampling_rules(request: Request, form_data: SamplingRulesForm, use
             return {'thinking_format': None, 'rules': []}
         url, _, api_config = await get_openai_connection(model['urlIdx'])
         thinking_format = detect_thinking_format(url, api_config)
-        rules = fixed_sampling_params(thinking_format, strip_provider_model_prefix(model_id, api_config.get('prefix_id')))
+        rules = fixed_sampling_params(
+            thinking_format, strip_provider_model_prefix(model_id, api_config.get('prefix_id'))
+        )
     else:
         thinking_format = detect_thinking_format(form_data.url or '', {'thinking_format': form_data.thinking_format})
         rules = fixed_sampling_params(thinking_format)
@@ -1696,29 +1699,40 @@ async def generate_chat_completion(
     streaming = False
     response = None
     # 作业辅导对话与平台步骤:服务商一时出错(429、5xx、连接或超时)自动重发,学生不用自己点重试。
-    # 只在拿到状态码、还没往下游送任何内容之前重发;超时也收紧,不让学生干等几分钟。
+    # 只在还没往下游送任何内容之前重发:一次性的读完响应体、流式的读到第一段才算发成;超时也收紧。
     retry_transient = bool((metadata or {}).get(RETRY_TRANSIENT_FLAG))
+    budget = STREAM_RETRY if is_streaming_request else ONE_SHOT_RETRY
+    head = b''
 
     try:
         session = await get_session()
 
-        def send():
-            return session.request(
+        async def send():
+            nonlocal head
+            response = await session.request(
                 method='POST',
                 url=request_url,
                 data=payload,
                 headers=headers,
                 cookies=cookies,
                 ssl=AIOHTTP_CLIENT_SESSION_SSL,
-                timeout=(
-                    (STREAM_TIMEOUT if is_streaming_request else NON_STREAM_TIMEOUT)
-                    if retry_transient
-                    else get_client_timeout(stream=is_streaming_request)
-                ),
+                timeout=budget.timeout if retry_transient else get_client_timeout(stream=is_streaming_request),
             )
+            if not retry_transient or response.status >= 400:
+                return response
+            try:
+                head = await read_ahead(
+                    response, stream='text/event-stream' in response.headers.get('Content-Type', '')
+                )
+            except BaseException:
+                await cleanup_response(response)
+                raise
+            return response
 
         if retry_transient:
-            r = await send_with_retry(send, cleanup_response, label=f'chat completion {requested_model}')
+            r = await send_with_retry(
+                send, cleanup_response, label=f'chat completion {requested_model}', deadline=budget.deadline
+            )
         else:
             r = await send()
 
@@ -1765,7 +1779,7 @@ async def generate_chat_completion(
 
             streaming = True
             return StreamingResponse(
-                stream_wrapper(r),
+                stream_wrapper(r, head=head),
                 status_code=r.status,
                 headers=_clean_proxy_headers(r.headers),
             )

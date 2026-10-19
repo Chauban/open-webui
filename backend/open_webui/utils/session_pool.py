@@ -116,7 +116,25 @@ async def cleanup_response(
                 await result
 
 
-async def stream_wrapper(response, session=None, passthrough=False):
+class _PrefixedContent:
+    """A response body that yields ``head`` (already read off the stream) before the rest."""
+
+    def __init__(self, head: bytes, content: aiohttp.StreamReader):
+        self.head = head
+        self.content = content
+
+    async def iter_any(self):
+        yield self.head
+        async for data in self.content.iter_any():
+            yield data
+
+    async def iter_chunks(self):
+        yield self.head, False
+        async for item in self.content.iter_chunks():
+            yield item
+
+
+async def stream_wrapper(response, session=None, passthrough=False, head=b''):
     """Wrap a stream to ensure cleanup happens even if streaming is interrupted.
 
     This is more reliable than BackgroundTask which may not run if the client
@@ -125,12 +143,16 @@ async def stream_wrapper(response, session=None, passthrough=False):
     ``passthrough=True`` yields raw network chunks (iter_any) instead of
     lines: byte-identical output without a buffer scan, slice and copy per
     line. Only for streams no internal consumer parses line-by-line.
+
+    ``head`` is the start of the body the caller already read off the stream
+    (see ``utils.retry.read_ahead``); it is sent first.
     """
     try:
+        content = _PrefixedContent(head, response.content) if head else response.content
         if passthrough:
-            stream = response.content.iter_any()
+            stream = content.iter_any()
         else:
-            stream = stream_chunks_handler(response.content)
+            stream = stream_chunks_handler(content)
         async for chunk in stream:
             yield chunk
     finally:
