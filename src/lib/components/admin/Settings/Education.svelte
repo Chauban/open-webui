@@ -9,8 +9,15 @@
 	import Switch from '$lib/components/common/Switch.svelte';
 	import Pencil from '$lib/components/icons/Pencil.svelte';
 	import EducationAiStepSettings from './EducationAiStepSettings.svelte';
+	import EducationAutoRetrySettings from './EducationAutoRetrySettings.svelte';
 	import EducationStudentLimits from './EducationStudentLimits.svelte';
-	import type { AiStep, AiStepPolicy, AiStepView } from '$lib/apis/education';
+	import type {
+		AiStep,
+		AiStepPolicy,
+		AiStepView,
+		AutoRetryPolicy,
+		RetryScope
+	} from '$lib/apis/education';
 
 	const i18n = getContext('i18n');
 
@@ -119,6 +126,8 @@
 	let aiStepPolicy: AiStepPolicy | null = null;
 	let aiSteps: AiStep[] = [];
 	let aiStepViews: AiStepView[] = [];
+	let autoRetry: AutoRetryPolicy | null = null;
+	let retryScopes: RetryScope[] = [];
 	let studentOverrides = { params: true, system_prompt: true };
 	let editing: { section: SectionKey; key: string } | null = null;
 	let draft = '';
@@ -193,6 +202,8 @@
 			aiStepPolicy = config.EDUCATION_AI_STEP_SETTINGS;
 			aiSteps = config.EDUCATION_AI_STEPS;
 			aiStepViews = config.EDUCATION_AI_STEP_VIEWS;
+			autoRetry = config.EDUCATION_AUTO_RETRY;
+			retryScopes = config.EDUCATION_RETRY_SCOPES;
 			studentOverrides = config.EDUCATION_STUDENT_CHAT_OVERRIDES;
 		} catch (error) {
 			loadFailed = true;
@@ -228,7 +239,8 @@
 		next: Prompts,
 		nextAssignmentDefaults = assignmentDefaults,
 		nextRubrics = defaultRubrics,
-		nextAiSteps = aiStepPolicy
+		nextAiSteps = aiStepPolicy,
+		nextAutoRetry = autoRetry
 	) => {
 		saving = true;
 		try {
@@ -238,7 +250,8 @@
 				EDUCATION_DEFAULT_RUBRICS: nextRubrics,
 				EDUCATION_ENABLE_RETURN: enableReturn,
 				EDUCATION_ENABLE_COACHING_STYLES: enableCoachingStyles,
-				EDUCATION_AI_STEP_SETTINGS: nextAiSteps
+				EDUCATION_AI_STEP_SETTINGS: nextAiSteps,
+				EDUCATION_AUTO_RETRY: nextAutoRetry
 			});
 			prompts = read(config, 'configKey');
 			defaults = read(config, 'defaultsKey');
@@ -249,6 +262,8 @@
 			aiStepPolicy = config.EDUCATION_AI_STEP_SETTINGS;
 			aiSteps = config.EDUCATION_AI_STEPS;
 			aiStepViews = config.EDUCATION_AI_STEP_VIEWS;
+			autoRetry = config.EDUCATION_AUTO_RETRY;
+			retryScopes = config.EDUCATION_RETRY_SCOPES;
 			studentOverrides = config.EDUCATION_STUDENT_CHAT_OVERRIDES;
 			// 学生端是否显示「导入图片」读的是 /api/config 的 features,跟着刷新。
 			await appConfig.set(await getBackendConfig());
@@ -263,8 +278,7 @@
 		}
 	};
 
-	const save = () =>
-		persist(editing ? withValue(editing.section, editing.key, draft) : prompts);
+	const save = () => persist(editing ? withValue(editing.section, editing.key, draft) : prompts);
 
 	const restoreDefault = (section: SectionKey, key: string) =>
 		persist(withValue(section, key, defaults[section][key]));
@@ -332,7 +346,9 @@
 						</div>
 						{#each sections[0].items as item}
 							{@const mode = item.key}
-							<div class="rounded-xl border border-gray-100/50 px-3 py-2.5 dark:border-white/[0.04]">
+							<div
+								class="rounded-xl border border-gray-100/50 px-3 py-2.5 dark:border-white/[0.04]"
+							>
 								<div class="flex items-start justify-between gap-2">
 									<div class="text-xs text-gray-700 dark:text-gray-300">{$i18n.t(item.title)}</div>
 									{#if rubricEditing !== mode}
@@ -364,7 +380,9 @@
 									<div class="mt-2 flex flex-col gap-1.5">
 										{#each rubricDraft as row, index}
 											<div class="flex items-center gap-2">
-												<span class="w-4 text-right text-[0.6875rem] text-gray-400">{index + 1}</span>
+												<span class="w-4 text-right text-[0.6875rem] text-gray-400"
+													>{index + 1}</span
+												>
 												<input
 													class="min-w-0 flex-1 rounded-lg border border-gray-100/50 bg-gray-50/40 px-2 py-1 text-xs text-gray-700 outline-hidden focus:border-blue-400 dark:border-white/[0.04] dark:bg-white/[0.03] dark:text-gray-300"
 													placeholder={$i18n.t('Criterion name')}
@@ -392,7 +410,8 @@
 													<button
 														class="text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
 														type="button"
-														on:click={() => (rubricDraft = [...rubricDraft, { label: '', max_score: '' }])}
+														on:click={() =>
+															(rubricDraft = [...rubricDraft, { label: '', max_score: '' }])}
 													>
 														+ {$i18n.t('Add criterion')}
 													</button>
@@ -470,6 +489,15 @@
 						models={$models ?? []}
 						disabled={saving}
 						onChange={(next) => persist(prompts, assignmentDefaults, defaultRubrics, next)}
+					/>
+				{/if}
+
+				{#if autoRetry}
+					<EducationAutoRetrySettings
+						scopes={retryScopes}
+						policy={autoRetry}
+						onChange={(next) =>
+							persist(prompts, assignmentDefaults, defaultRubrics, aiStepPolicy, next)}
 					/>
 				{/if}
 

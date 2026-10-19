@@ -2784,6 +2784,10 @@ DEFAULT_EDUCATION_AI_STEPS = {
     'class_insight': {'model': None, 'thinking': 'model_default'},
 }
 
+# 管理员能开关的自动重发(服务商一时出错时),结构见 services/education/ai_steps.py 的 RETRY_SCOPES。
+# 作业辅导对话与平台步骤始终重发;个人写作默认不重发。
+DEFAULT_EDUCATION_AUTO_RETRY = {'personal_writing': False}
+
 DEFAULT_EDUCATION_CHALLENGE_PROMPTS = {
     'turn': """你是一个不同意作者观点的读者，不是写作助手。
 - 你的任务是指出这篇文章里说服不了你的地方，并向作者提问。你不提供修改建议，不提供可以粘贴进正文的句子，不替作者写任何一段话。
@@ -3212,6 +3216,7 @@ DEFAULT_CONFIG = {
     'education.challenge_prompts': DEFAULT_EDUCATION_CHALLENGE_PROMPTS,
     # 教学各 AI 步骤的模型与思考档位(含作业写作区「导入图片」用的识图模型)。
     'education.ai_steps': DEFAULT_EDUCATION_AI_STEPS,
+    'education.auto_retry': DEFAULT_EDUCATION_AUTO_RETRY,
 }
 
 

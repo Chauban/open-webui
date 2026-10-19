@@ -18,8 +18,11 @@ from open_webui.models.config import Config
 from open_webui.models.education import CoachingStyle, TaskMode
 from open_webui.services.education.ai_steps import (
     AI_STEPS,
+    RETRY_SCOPES,
     AiStep,
+    AutoRetryPolicy,
     EducationAiStepPolicy,
+    RetryScope,
     StepModelNotAllowed,
     StepView,
     available_models,
@@ -94,6 +97,7 @@ EDUCATION_CONFIG_KEYS = {
     'EDUCATION_ENABLE_COACHING_STYLES': 'education.enable_coaching_styles',
     'EDUCATION_CHALLENGE_PROMPTS': 'education.challenge_prompts',
     'EDUCATION_AI_STEP_SETTINGS': 'education.ai_steps',
+    'EDUCATION_AUTO_RETRY': 'education.auto_retry',
 }
 SUBAGENTS_CONFIG_KEYS = {
     'ENABLE_SUBAGENTS': 'subagents.enable',
@@ -867,6 +871,8 @@ class EducationConfigForm(BaseModel):
     EDUCATION_ENABLE_COACHING_STYLES: bool
     # 各 AI 步骤的模型与思考档位(含图片识别模型)、辅导对话思考的下放方式,见 services/education/ai_steps.py。
     EDUCATION_AI_STEP_SETTINGS: EducationAiStepPolicy
+    # 服务商一时出错时自动重发里管理员能开关的几处(个人写作),见 ai_steps.py 的 RETRY_SCOPES。
+    EDUCATION_AUTO_RETRY: AutoRetryPolicy
 
 
 class StudentChatOverridesView(BaseModel):
@@ -877,7 +883,7 @@ class StudentChatOverridesView(BaseModel):
 class EducationConfigResponse(EducationConfigForm):
     """保存过的值会永久盖过代码默认值，所以把内置默认一起送出去，面板才能提供「恢复默认」。
 
-    另附只读信息：AI 步骤登记（设置表按它生成）、各步骤指定的模型此刻还在不在（不在的标红并回落），
+    另附只读信息：AI 步骤登记（设置表按它生成）、自动重发的几处（哪些始终重发、哪些由管理员开关）、各步骤指定的模型此刻还在不在（不在的标红并回落），
     以及只在学生组里的成员此刻在个人写作、普通对话里能否改参数与系统提示（按默认权限与学生组权限算）。
     """
 
@@ -885,6 +891,7 @@ class EducationConfigResponse(EducationConfigForm):
     EDUCATION_TASK_PROMPT_DEFAULTS: EducationTaskPromptsForm
     EDUCATION_AI_STEPS: list[AiStep]
     EDUCATION_AI_STEP_VIEWS: list[StepView]
+    EDUCATION_RETRY_SCOPES: list[RetryScope]
     EDUCATION_STUDENT_CHAT_OVERRIDES: StudentChatOverridesView
 
 
@@ -893,6 +900,7 @@ async def get_education_config_values(request: Request, user) -> dict:
     values['EDUCATION_COACHING_PROMPT_DEFAULTS'] = DEFAULT_EDUCATION_COACHING_PROMPTS
     values['EDUCATION_TASK_PROMPT_DEFAULTS'] = DEFAULT_EDUCATION_TASK_PROMPTS
     values['EDUCATION_AI_STEPS'] = list(AI_STEPS)
+    values['EDUCATION_RETRY_SCOPES'] = list(RETRY_SCOPES)
     values['EDUCATION_AI_STEP_VIEWS'] = describe_steps(
         EducationAiStepPolicy.model_validate(values['EDUCATION_AI_STEP_SETTINGS']),
         await available_models(request, user),

@@ -140,7 +140,12 @@ from open_webui.models.chats import ChatForm, Chats
 from open_webui.models.folders import Folders
 from open_webui.models.education import Education
 from open_webui.services.education.writing_access import ensure_writing_session_writable
-from open_webui.services.education.ai_steps import get_ai_step_policy, resolve_coaching_thinking, thinking_params
+from open_webui.services.education.ai_steps import (
+    get_ai_step_policy,
+    resolve_coaching_thinking,
+    thinking_params,
+    writing_chat_retries,
+)
 from open_webui.services.education.writing_context import get_folder_writing_session
 from open_webui.utils.retry import RETRY_TRANSIENT_FLAG
 from open_webui.utils.thinking import THINKING_LEVEL_PARAM, ThinkingSupport, effective_thinking_level
@@ -1243,8 +1248,9 @@ async def chat_completion(
             'assistant_message_id': form_data.pop('assistant_message_id', None),
             'session_id': form_data.pop('session_id', None),
             'automation_id': automation_id,
-            # 作业辅导对话:服务商一时出错时 OpenAI 兼容路由自动重发(utils/retry.py)。
-            RETRY_TRANSIENT_FLAG: bool(writing_session and writing_session.scope == 'assignment'),
+            # 写作区辅导对话:服务商一时出错时 OpenAI 兼容路由自动重发(utils/retry.py);
+            # 作业的始终重发,个人写作按管理员设置(ai_steps.py 的 RETRY_SCOPES)。
+            RETRY_TRANSIENT_FLAG: await writing_chat_retries(writing_session.scope if writing_session else None),
             'folder_id': form_data.pop('folder_id', None),
             'filter_ids': form_data.pop('filter_ids', []),
             'tool_ids': form_data.get('tool_ids', None),

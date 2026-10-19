@@ -58,6 +58,54 @@ AI_STEPS: tuple[AiStep, ...] = (
 AI_STEPS_BY_KEY = {step.key: step for step in AI_STEPS}
 
 
+RetryScopeKey = Literal["assignment_chat", "platform_steps", "personal_writing"]
+
+
+class RetryScope(BaseModel):
+    """一处在服务商一时出错（429、5xx、连接或超时）时自动重发的模型调用，见 utils/retry.py。
+
+    admin_toggle 为假的始终重发；为真的由管理员在「写作辅导」设置里开关（education.auto_retry）。
+    """
+
+    key: RetryScopeKey
+    admin_toggle: bool
+
+
+# 管理员设置页的「自动重发」按这张表生成，发请求时是否重发也读这张表，两边不会说法不一。
+RETRY_SCOPES: tuple[RetryScope, ...] = (
+    RetryScope(key="assignment_chat", admin_toggle=False),
+    # call_step_model 发出的通读与补看、读者试读、班级归纳；图片识别按页自己重发，不在这里。
+    RetryScope(key="platform_steps", admin_toggle=False),
+    # 个人写作的辅导对话：不是作业，默认不重发，管理员可打开。
+    RetryScope(key="personal_writing", admin_toggle=True),
+)
+RETRY_SCOPES_BY_KEY = {scope.key: scope for scope in RETRY_SCOPES}
+# 写作会话的 scope → 它的辅导对话属于哪一处
+_CHAT_RETRY_SCOPE = {"assignment": "assignment_chat", "personal": "personal_writing"}
+
+
+class AutoRetryPolicy(BaseModel):
+    """管理员能开关的那几处（RETRY_SCOPES 里 admin_toggle 为真的），各一项。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    personal_writing: bool
+
+
+async def get_auto_retry_policy() -> AutoRetryPolicy:
+    return AutoRetryPolicy.model_validate(await Config.get("education.auto_retry"))
+
+
+async def writing_chat_retries(session_scope: Optional[str]) -> bool:
+    """写作区辅导对话要不要自动重发：作业的始终重发，个人写作看管理员设置；不在写作区的普通对话不重发。"""
+    key = _CHAT_RETRY_SCOPE.get(session_scope or "")
+    if key is None:
+        return False
+    if not RETRY_SCOPES_BY_KEY[key].admin_toggle:
+        return True
+    return getattr(await get_auto_retry_policy(), key)
+
+
 class CoachingChatPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

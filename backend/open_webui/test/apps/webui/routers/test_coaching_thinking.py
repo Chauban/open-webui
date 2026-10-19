@@ -20,6 +20,8 @@ from open_webui.models.chats import Chat
 from open_webui.models.config import Config
 from open_webui.models.education import AssignmentModelParams, Submission
 from open_webui.services.education.ai_steps import (
+    RETRY_SCOPES,
+    AutoRetryPolicy,
     EducationAiStepPolicy,
     ModelParamsNotAllowed,
     ensure_model_params_allowed,
@@ -348,11 +350,16 @@ def test_reply_records_the_level_it_was_sent_with(education_client, monkeypatch)
     }
 
 
-def test_only_assignment_coaching_chats_ask_for_automatic_retries(education_client, monkeypatch):
-    """作业辅导对话带上重发标记,服务商一时出错由 OpenAI 兼容路由自动重发;普通对话不变。"""
-    webui_main, student, folder_id, _ = _assignment_chat(
+def test_coaching_chat_retries_follow_the_retry_scopes(education_client, monkeypatch):
+    """作业辅导对话始终带重发标记;个人写作默认不带,管理员打开后带;不在写作区的普通对话不带。"""
+    webui_main, student, assignment_folder, _ = _assignment_chat(
         education_client, monkeypatch, {'thinking': 'low', 'students_choose_thinking': True}, 'student'
     )
+    client = education_client[0]
+    UserContext.current_user = student
+    personal = client.post('/api/v1/me/writing/personal', json={'title': '随笔'})
+    assert personal.status_code == 200, personal.text
+    personal_folder = personal.json()['project']['id']
     flags = []
 
     async def no_event(*args, **kwargs):
@@ -364,12 +371,22 @@ def test_only_assignment_coaching_chats_ask_for_automatic_retries(education_clie
 
     monkeypatch.setattr(webui_main, 'publish_event', no_event)
     monkeypatch.setattr(webui_main, 'emit_chat_list_event', capture)
-    for folder in (folder_id, None):
+
+    def retries(folder):
         body = _chat_body(folder)
         body['id'] = f'assistant-{uuid.uuid4()}'
         if folder is None:
             body.pop('folder_id')
         with pytest.raises(HTTPException):
             asyncio.run(webui_main.chat_completion(_chat_request({}), body, student, client_request=True))
+        return flags[-1]
 
-    assert flags == [True, False]
+    assert [retries(assignment_folder), retries(personal_folder), retries(None)] == [True, False, False]
+    asyncio.run(Config.upsert({'education.auto_retry': {'personal_writing': True}}))
+    assert [retries(assignment_folder), retries(personal_folder), retries(None)] == [True, True, False]
+
+
+def test_admin_toggles_are_exactly_the_policy_fields():
+    """设置页按 RETRY_SCOPES 生成开关,保存的设置每个开关正好一项,两边对得上。"""
+    assert [scope.key for scope in RETRY_SCOPES if scope.admin_toggle] == list(AutoRetryPolicy.model_fields)
+    assert {scope.key for scope in RETRY_SCOPES if not scope.admin_toggle} == {'assignment_chat', 'platform_steps'}

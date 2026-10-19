@@ -235,6 +235,13 @@ export type AiStepView = {
 };
 /** 平台步骤的设置:model 为 null 时按 model_source(图片识别为 null 即不提供图片导入)。 */
 export type PlatformStepPolicy = { model: string | null; thinking: ThinkingSetting };
+/** 服务商一时出错时自动重发的一处;admin_toggle 为假的始终重发(后端 ai_steps.py 的 RETRY_SCOPES)。 */
+export type RetryScope = {
+	key: 'assignment_chat' | 'platform_steps' | 'personal_writing';
+	admin_toggle: boolean;
+};
+/** 管理员能开关的那几处,各一项。 */
+export type AutoRetryPolicy = { personal_writing: boolean };
 export type AiStepPolicy = {
 	coaching_chat: { control: ThinkingControl; default: ThinkingSetting };
 	first_read: PlatformStepPolicy;

@@ -7888,6 +7888,22 @@ def test_admin_picks_step_models_in_education_settings(education_client):
         "/api/v1/configs/education", json={**form, "EDUCATION_ENABLE_RETURN": False}
     ).status_code == 200
 
+    # 自动重发:设置页按登记的几处生成,个人写作默认关,管理员可打开
+    assert [(scope["key"], scope["admin_toggle"]) for scope in form["EDUCATION_RETRY_SCOPES"]] == [
+        ("assignment_chat", False),
+        ("platform_steps", False),
+        ("personal_writing", True),
+    ]
+    assert form["EDUCATION_AUTO_RETRY"] == {"personal_writing": False}
+    res = configs_client.post(
+        "/api/v1/configs/education", json={**form, "EDUCATION_AUTO_RETRY": {"personal_writing": True}}
+    )
+    assert res.status_code == 200, res.text
+    assert asyncio.run(Config.get("education.auto_retry")) == {"personal_writing": True}
+    assert configs_client.post(
+        "/api/v1/configs/education", json={**form, "EDUCATION_AUTO_RETRY": {"personal_writing": True, "chat": True}}
+    ).status_code == 422
+
     # 表单是整份提交,漏了这一项说明前端还是旧版本,直接拒绝而不是悄悄清空
     form.pop("EDUCATION_AI_STEP_SETTINGS")
     assert configs_client.post("/api/v1/configs/education", json=form).status_code == 422

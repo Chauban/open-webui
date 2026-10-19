@@ -1,6 +1,7 @@
 import type {
 	AiStepKey,
 	AiStepModelSource,
+	RetryScope,
 	ThinkingControl,
 	ThinkingSetting
 } from '$lib/apis/education';
@@ -70,4 +71,20 @@ export const THINKING_CONTROL_TEXT: Record<ThinkingControl, string> = {
 	admin: 'Admin only',
 	teacher: 'Teacher, per assignment',
 	student: 'Teacher, may open to students'
+};
+
+/** 管理员「自动重发」各行的称呼与说明;行本身由后端登记(RETRY_SCOPES)下发。 */
+export const RETRY_SCOPE_TEXT: Record<RetryScope['key'], { title: string; hint: string }> = {
+	assignment_chat: {
+		title: 'Assignment coaching chat',
+		hint: 'The chat in an assignment writing workspace.'
+	},
+	platform_steps: {
+		title: 'First read, AI reader check and class argument summary',
+		hint: 'Draft image parsing retries each page on its own.'
+	},
+	personal_writing: {
+		title: 'Personal writing coaching chat',
+		hint: 'The chat in a student’s own writing outside assignments. Off by default.'
+	}
 };
