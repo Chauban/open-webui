@@ -38,10 +38,41 @@ ANTHROPIC_ANSWER_TOKENS = 8192
 # 2026-10-18 实测见 docs/reference/thinking-params-test-results.md。
 _THREE_LEVEL_EFFORT = {'low': 'low', 'medium': 'high', 'high': 'max'}
 
+
+class ThinkingSupport(NamedTuple):
+    """一个模型在思考上能做什么。graded 为假时只有开 / 关，low / medium / high 都只是开着。"""
+
+    graded: bool = True
+
+
+# 各格式里与默认（能分档）不同的模型，按模型 id 前缀先匹配先用，空前缀兜住该格式其余型号。
+# 发送时的翻译（apply_thinking_level）和界面（模型列表里每个模型带的 thinking_support）都读这张表。
+MODEL_THINKING_SUPPORT: dict[str, tuple[tuple[str, ThinkingSupport], ...]] = {
+    'kimi': (
+        # 实测：收到 reasoning_effort 不报错，但看不出有没有生效（同档推理 token 41–92 之间波动），只当开 / 关。
+        ('kimi-k2.6', ThinkingSupport(graded=False)),
+    ),
+    'zhipu': (
+        ('glm-5.3', ThinkingSupport()),
+        ('glm-5.2', ThinkingSupport()),
+        # 更早的型号不收 reasoning_effort，只认 thinking.type 开 / 关。
+        ('', ThinkingSupport(graded=False)),
+    ),
+    # 只有 enable_thinking 一个开关。
+    'chat_template': (('', ThinkingSupport(graded=False)),),
+}
+
+
+def thinking_support(thinking_format: str, model_id: Optional[str]) -> ThinkingSupport:
+    model = (model_id or '').lower()
+    for prefix, support in MODEL_THINKING_SUPPORT.get(thinking_format, ()):
+        if model.startswith(prefix):
+            return support
+    return ThinkingSupport()
+
+
 # 智谱：这些型号始终思考，传 thinking.type=disabled 会 400（code 1210）；关不掉时退到最低档。
 _ZHIPU_ALWAYS_THINKING = ('glm-5.3', 'glm-4.7', 'glm-4.5v')
-# 智谱：只有 GLM-5.2 及以上接受 reasoning_effort。
-_ZHIPU_EFFORT_MODELS = ('glm-5.3', 'glm-5.2')
 
 # 按主机名后缀认服务商（主机名等于它或以「.它」结尾）。
 _FORMAT_BY_HOST = (
@@ -81,6 +112,7 @@ def apply_thinking_level(payload: dict, level: str, thinking_format: str, *, res
     if level not in THINKING_LEVELS:
         raise ValueError(f'Unknown thinking level: {level}')
     payload = dict(payload)
+    support = thinking_support(thinking_format, payload.get('model'))
     enabled = level != 'off'
 
     if thinking_format == 'openai':
@@ -106,17 +138,18 @@ def apply_thinking_level(payload: dict, level: str, thinking_format: str, *, res
         if enabled:
             payload['reasoning_effort'] = _THREE_LEVEL_EFFORT[level]
     elif thinking_format == 'kimi':
-        # K2.6 与 K3 都认 thinking.type=disabled；K3 按 reasoning_effort 分档，K2.6 不分档、忽略这个字段。
-        # 不发 thinking.type=enabled：思考本来就默认开着，K3 按文档不接受它。
-        if enabled:
+        # K2.6 与 K3 都认 thinking.type=disabled。K3 按 reasoning_effort 分档，不发 thinking.type=enabled
+        # （按文档 K3 不接受它）；K2.6 只有开 / 关，各档都发 thinking.type=enabled（实测 200）。
+        if not enabled:
+            payload['thinking'] = {'type': 'disabled'}
+        elif support.graded:
             payload['reasoning_effort'] = _THREE_LEVEL_EFFORT[level]
         else:
-            payload['thinking'] = {'type': 'disabled'}
+            payload['thinking'] = {'type': 'enabled'}
     elif thinking_format == 'zhipu':
         always_thinking = _model_matches(payload, _ZHIPU_ALWAYS_THINKING)
-        takes_effort = _model_matches(payload, _ZHIPU_EFFORT_MODELS)
         payload['thinking'] = {'type': 'enabled' if enabled or always_thinking else 'disabled'}
-        if takes_effort and (enabled or always_thinking):
+        if support.graded and (enabled or always_thinking):
             payload['reasoning_effort'] = _THREE_LEVEL_EFFORT['low' if not enabled else level]
     elif thinking_format == 'doubao':
         # 关思考时 reasoning_effort 只能是 minimal，干脆不发。

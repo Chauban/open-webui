@@ -14,6 +14,7 @@
 
 	import AdvancedParams from '$lib/components/chat/Settings/Advanced/AdvancedParams.svelte';
 	import { loadSamplingRules, samplingNote, type SamplingRules } from '$lib/utils/sampling-rules';
+	import { thinkingSupportNote, thinkingSupportOf } from '$lib/utils/thinking-support';
 	import ModelSelector from '$lib/components/chat/ModelSelector/Selector.svelte';
 	import Tags from '$lib/components/common/Tags.svelte';
 	import Knowledge from '$lib/components/workspace/Models/Knowledge.svelte';
@@ -387,6 +388,10 @@
 		});
 	}
 	$: samplingWarning = samplingNote(samplingRules, $i18n.t, params);
+	// 底模只有开 / 关等限制时,勾了思考控制就在能力下面提示(与发送时的翻译读同一张表)。
+	$: thinkingNote = capabilities?.reasoning
+		? thinkingSupportNote(thinkingSupportOf($models, samplingModelId), $i18n.t)
+		: null;
 
 	onMount(async () => {
 		await tools.set((await getTools(localStorage.token).catch(() => null)) ?? []);
@@ -990,6 +995,14 @@
 
 						<div class="my-3">
 							<Capabilities bind:capabilities />
+							{#if thinkingNote}
+								<div
+									class="mt-1 text-xs text-amber-600 dark:text-amber-500"
+									data-testid="thinking-support-note"
+								>
+									{thinkingNote}
+								</div>
+							{/if}
 						</div>
 
 						{#if Object.keys(capabilities).filter((key) => capabilities[key]).length > 0}

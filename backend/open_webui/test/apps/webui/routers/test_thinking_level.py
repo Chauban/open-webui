@@ -21,6 +21,7 @@ from open_webui.utils.thinking import (
     detect_thinking_format,
     fixed_sampling_params,
     strip_fixed_sampling_params,
+    thinking_support,
 )
 
 
@@ -89,12 +90,62 @@ def test_deepseek_turns_thinking_off_and_maps_three_efforts():
 
 
 def test_kimi_disables_with_thinking_type_and_levels_with_effort():
-    """实测:K2.6 不理 reasoning_effort、只认 thinking.type=disabled;K3 两样都认。不发 enabled。"""
-    assert _levels('kimi') == {
-        'off': {'thinking': {'type': 'disabled'}},
-        'low': {'reasoning_effort': 'low'},
-        'medium': {'reasoning_effort': 'high'},
-        'high': {'reasoning_effort': 'max'},
+    """实测:K3 认 thinking.type=disabled,按 reasoning_effort 分档;不发 enabled。"""
+    assert _levels('kimi', 'kimi-k3') == {
+        'off': {'model': 'kimi-k3', 'thinking': {'type': 'disabled'}},
+        'low': {'model': 'kimi-k3', 'reasoning_effort': 'low'},
+        'medium': {'model': 'kimi-k3', 'reasoning_effort': 'high'},
+        'high': {'model': 'kimi-k3', 'reasoning_effort': 'max'},
+    }
+
+
+def test_kimi_k26_only_turns_thinking_on_or_off():
+    """实测:K2.6 收 reasoning_effort 不报错但看不出效果;各档都发 thinking.type=enabled(实测 200)。"""
+    assert thinking_support('kimi', 'kimi-k2.6').graded is False
+    assert _levels('kimi', 'kimi-k2.6') == {
+        'off': {'model': 'kimi-k2.6', 'thinking': {'type': 'disabled'}},
+        'low': {'model': 'kimi-k2.6', 'thinking': {'type': 'enabled'}},
+        'medium': {'model': 'kimi-k2.6', 'thinking': {'type': 'enabled'}},
+        'high': {'model': 'kimi-k2.6', 'thinking': {'type': 'enabled'}},
+    }
+
+
+def test_thinking_support_table():
+    assert thinking_support('kimi', 'kimi-k3').graded is True
+    assert thinking_support('zhipu', 'glm-5.3-flash').graded is True
+    assert thinking_support('zhipu', 'glm-4.6').graded is False
+    assert thinking_support('chat_template', 'qwen3-8b').graded is False
+    assert thinking_support('deepseek', 'deepseek-flash').graded is True
+    assert thinking_support('openai', None).graded is True
+
+
+def test_model_list_carries_thinking_support(monkeypatch):
+    """模型列表里每个模型带着同一张表算出的 thinking_support,界面据此提示;前缀 id 按去掉前缀后的判断。"""
+
+    async def runtime_config():
+        return (
+            True,
+            ['https://api.moonshot.cn/v1', 'https://api.deepseek.com'],
+            ['k1', 'k2'],
+            {'0': {'prefix_id': 'moon'}},
+        )
+
+    async def responses(request, user=None):
+        return [
+            {'data': [{'id': 'moon.kimi-k2.6'}, {'id': 'moon.kimi-k3'}]},
+            {'data': [{'id': 'deepseek-flash'}]},
+        ]
+
+    monkeypatch.setattr(openai_router, 'get_openai_runtime_config', runtime_config)
+    monkeypatch.setattr(openai_router, 'get_all_models_responses', responses)
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()))
+
+    models = asyncio.run(openai_router.get_all_models.__wrapped__(request, None))['data']
+
+    assert {model['id']: model['thinking_support'] for model in models} == {
+        'moon.kimi-k2.6': {'graded': False},
+        'moon.kimi-k3': {'graded': True},
+        'deepseek-flash': {'graded': True},
     }
 
 

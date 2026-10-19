@@ -4152,6 +4152,7 @@
 	"{{param}} (only {{allowed}})": "",
 	"{{param}} (only {{allowed}}; {{without}} with thinking off)": "",
 	"{{provider}} does not accept custom {{params}}; they are removed automatically when sending.": "",
+	"This model only turns thinking on or off: Low, Medium and High all just turn it on.": "",
 	"{{user}}'s Chats": "",
 	"{{webUIName}} Backend Required": "",
 	"AI Coaching Style": "",

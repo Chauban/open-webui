@@ -32,14 +32,15 @@
 | 统一档位 | `deepseek` | `kimi` | `zhipu`（GLM-5.3 系列） | `zhipu`（GLM-5.2） | `zhipu`（更早型号） | `doubao` | `qwen` |
 |---|---|---|---|---|---|---|---|
 | off | `thinking.type=disabled` | `thinking.type=disabled` | `enabled` + `reasoning_effort=low`（关不掉，退到最低档） | `thinking.type=disabled` | `disabled`（GLM-4.7、4.5V 关不掉，发 `enabled`） | `thinking.type=disabled` | `enable_thinking=false` |
-| low | `enabled` + `low` | `reasoning_effort=low` | `enabled` + `low` | `enabled` + `low` | `enabled` | `enabled` + `low` | `true` + `thinking_budget=1024` |
-| medium | `enabled` + `high` | `reasoning_effort=high` | `enabled` + `high` | `enabled` + `high` | `enabled` | `enabled` + `medium` | `true` + `thinking_budget=4096` |
-| high | `enabled` + `max` | `reasoning_effort=max` | `enabled` + `max` | `enabled` + `max` | `enabled` | `enabled` + `high` | `true`，不设预算 |
+| low | `enabled` + `low` | K3：`reasoning_effort=low`；K2.6：`thinking.type=enabled` | `enabled` + `low` | `enabled` + `low` | `enabled` | `enabled` + `low` | `true` + `thinking_budget=1024` |
+| medium | `enabled` + `high` | K3：`reasoning_effort=high`；K2.6：同上 | `enabled` + `high` | `enabled` + `high` | `enabled` | `enabled` + `medium` | `true` + `thinking_budget=4096` |
+| high | `enabled` + `max` | K3：`reasoning_effort=max`；K2.6：同上 | `enabled` + `max` | `enabled` + `max` | `enabled` | `enabled` + `high` | `true`，不设预算 |
 | model_default | 不发 | 不发 | 不发 | 不发 | 不发 | 不发 | 不发 |
 
 - 自动识别改为按主机名后缀匹配。新增 `moonshot.cn` / `moonshot.ai` → `kimi`，`z.ai` → `zhipu`，`maas.aliyuncs.com` / `dashscope-intl.aliyuncs.com` → `qwen`；原来合在一起的 `thinking_type` 格式拆成 `deepseek`、`zhipu`、`doubao`。
 - 豆包、千问没有接入现网，没有实测。映射按参考文档 §4.2、§5.2 写：豆包关思考时 `reasoning_effort` 只能填 minimal，所以干脆不发；千问高档不设预算。
-- Kimi 开思考时不发 `thinking.type=enabled`：思考默认就是开的，参考文档也说 K3 不接受这个值（本次只验证了 disabled）。
+- Kimi K3 开思考时不发 `thinking.type=enabled`：思考默认就是开的，参考文档也说 K3 不接受这个值（本次只验证了 disabled）。K2.6 只有开 / 关（2026-10-19 起）：低、中、高都发 `thinking.type=enabled`（实测 200），不发 `reasoning_effort`。
+- 哪些模型只有开 / 关，写在 `utils/thinking.py` 的 `MODEL_THINKING_SUPPORT`；发送时的翻译和界面（模型列表里每个模型带的 `thinking_support`，管理员在模型编辑页勾了思考控制、或在 AI 步骤设置里选到这类模型时会看到提示）读同一张表。
 
 ## 逐档结果
 
@@ -180,7 +181,7 @@
 ## 仍待处理
 
 - **Kimi 的采样参数（已处理）**：`kimi` 格式发送前一律去掉 `temperature`、`top_p`、`n`、`presence_penalty`、`frequency_penalty`（K2.6、K3 实测都只接受一个值，见上文）。规则表在 `utils/thinking.py` 的 `FIXED_SAMPLING_PARAMS`；管理员在模型编辑页设了这类参数、或在连接设置里选到 Kimi 时会看到同一张表生成的提示。K2.7 等现网没有的 Kimi 模型没测，按同一张表处理。
-- **K2.6 的思考力度**：K2.6 收到 `reasoning_effort` 不报错，但看不出有没有生效（同一档位多次之间推理 token 在 41–92 之间波动）。可以认为 K2.6 只有开 / 关两档。
+- **K2.6 的思考力度（已处理）**：K2.6 收到 `reasoning_effort` 不报错，但看不出有没有生效（同一档位多次之间推理 token 在 41–92 之间波动）。现在按只有开 / 关处理：低、中、高都只发 `thinking.type=enabled`，管理员界面写明。
 - **GLM-4.7、GLM-4.5V 等关不掉思考的老型号**：无法降档，「关」等于默认。现网没有这些模型，未实测。
 - **Kimi K2.7-Code** 始终思考，`thinking.type=disabled` 预计会报错（参考文档）；现网没有这个模型，未实测。
 - **偶发故障（已处理）**：作业辅导对话和通读、试读、班级归纳等平台步骤现在自动重发（`utils/retry.py`）：遇 429、5xx、连接失败或超时，按 1、2、4 秒（±25% 抖动）最多发 4 次，只在回复开始往下送之前重发：一次性回复读完响应体、流式回复读到第一段才算发成，所以等响应体或等第一段超时也会重发。流式回复第一段及此后两段之间最多等 45 秒，过 60 秒不再开始新的一次（一直等不来约 90 秒报错）；一次性回复最多等 90 秒，过 120 秒不再开始新的一次（约 180 秒报错）。两者超时后都还能再发一次。图片识别仍按页自己重发，两者不叠加。

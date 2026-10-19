@@ -21,6 +21,11 @@
 		THINKING_SETTINGS,
 		THINKING_SETTING_TEXT
 	} from '$lib/utils/ai-steps';
+	import {
+		thinkingSupportNote,
+		thinkingSupportOf,
+		type ThinkingSupport
+	} from '$lib/utils/thinking-support';
 
 	const i18n: Writable<i18nType> = getContext('i18n');
 
@@ -31,7 +36,13 @@
 	/** 后端算的每行现状:指定的模型还在不在。 */
 	export let views: AiStepView[] = [];
 	/** 可选的模型(管理员看到的全部模型)。 */
-	export let models: Array<{ id: string; name?: string; owned_by?: string; info?: any }> = [];
+	export let models: Array<{
+		id: string;
+		name?: string;
+		owned_by?: string;
+		info?: any;
+		thinking_support?: ThinkingSupport | null;
+	}> = [];
 	export let disabled = false;
 	export let onChange: (policy: AiStepPolicy) => void = () => {};
 
@@ -133,6 +144,10 @@
 		{/if}
 
 		{#each platformSteps as step (step.key)}
+			{@const supportNote = thinkingSupportNote(
+				thinkingSupportOf(models, policy[step.key].model),
+				$i18n.t
+			)}
 			<div class="flex flex-col gap-2 py-2" data-testid={`ai-step-row-${step.key}`}>
 				<div class="min-w-0">
 					<div class="text-xs text-gray-700 dark:text-gray-300">
@@ -153,6 +168,14 @@
 							data-testid={`ai-step-missing-${step.key}`}
 						>
 							{$i18n.t(MISSING_MODEL_TEXT[step.model_source])}
+						</p>
+					{/if}
+					{#if supportNote}
+						<p
+							class="mt-0.5 text-[0.6875rem] text-amber-600 dark:text-amber-500"
+							data-testid={`ai-step-thinking-note-${step.key}`}
+						>
+							{supportNote}
 						</p>
 					{/if}
 				</div>

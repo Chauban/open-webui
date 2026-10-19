@@ -48,6 +48,7 @@ from open_webui.utils.thinking import (
     fixed_sampling_params,
     model_supports_thinking_control,
     strip_fixed_sampling_params,
+    thinking_support,
 )
 from open_webui.utils.access_control.chat import (
     ensure_raw_passthrough_allowed,
@@ -845,6 +846,7 @@ async def get_all_models(request: Request, user: UserModel) -> dict[str, list]:
                 base_url = api_base_urls[idx]
                 hostname = urlparse(base_url).hostname if base_url else None
                 api_config = api_configs.get(str(idx), api_configs.get(base_url, {}))
+                thinking_format = detect_thinking_format(base_url, api_config)
 
                 for model in model_list:
                     model_id = model.get('id') or model.get('name')
@@ -863,6 +865,10 @@ async def get_all_models(request: Request, user: UserModel) -> dict[str, list]:
                             'connection_type': model.get('connection_type', 'external'),
                             'provider': provider,
                             'urlIdx': idx,
+                            # 这个模型在思考上能做什么(只有开 / 关等),界面据此提示;与发送时的翻译读同一张表。
+                            'thinking_support': thinking_support(
+                                thinking_format, strip_provider_model_prefix(model_id, api_config.get('prefix_id'))
+                            )._asdict(),
                         }
 
                         loaded = get_provider_model_loaded_state(

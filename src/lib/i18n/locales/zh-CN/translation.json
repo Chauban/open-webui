@@ -4077,6 +4077,7 @@
 	"{{param}} (only {{allowed}})": "{{param}}（只能为 {{allowed}}）",
 	"{{param}} (only {{allowed}}; {{without}} with thinking off)": "{{param}}（只能为 {{allowed}}，关思考时只能为 {{without}}）",
 	"{{provider}} does not accept custom {{params}}; they are removed automatically when sending.": "{{provider}} 不支持自定义 {{params}}，发送时会自动去掉。",
+	"This model only turns thinking on or off: Low, Medium and High all just turn it on.": "这个模型只能开或关思考：低、中、高都只是开着。",
 	"{{user}}'s Chats": "{{user}} 的对话记录",
 	"{{webUIName}} Backend Required": "{{webUIName}} 需要后端服务",
 	"{{ratio}}% of the latest draft was written during the final 24 hours before the deadline or later.": "最近一次稿件有 {{ratio}}% 的内容写于截止前 24 小时内或截止后。",

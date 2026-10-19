@@ -3,6 +3,7 @@
 import asyncio
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 BACKEND_ROOT = Path(__file__).resolve().parents[5]
 if str(BACKEND_ROOT) not in sys.path:
@@ -117,3 +118,32 @@ def test_deleted_admin_model_falls_back_to_the_student_pick(education_client):
     _set_step_models(first_read='deleted-model')
 
     assert _first_read_model(client, teacher, student, SessionLocal)[:2] == ('test-model', 'test-model')
+
+
+def test_custom_models_inherit_thinking_support(education_client):
+    """作业里学生用的多是工作区自建模型:它带上底模的 thinking_support,学生端开关与管理员提示才对得上。"""
+    from open_webui.models.models import ModelForm, ModelMeta, ModelParams, Models
+    from open_webui.utils.models import get_all_models
+
+    client, teacher, *_ = education_client
+    asyncio.run(
+        Models.insert_new_model(
+            ModelForm(id='tutor', base_model_id='kimi-k2.6', name='Tutor', meta=ModelMeta(), params=ModelParams()),
+            teacher.id,
+        )
+    )
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                BASE_MODELS=[
+                    {'id': 'kimi-k2.6', 'name': 'Kimi K2.6', 'owned_by': 'openai', 'thinking_support': {'graded': False}}
+                ],
+                redis=None,
+                MODELS={},
+            )
+        )
+    )
+
+    models = {model['id']: model for model in asyncio.run(get_all_models(request, user=teacher))}
+
+    assert models['tutor']['thinking_support'] == {'graded': False}
