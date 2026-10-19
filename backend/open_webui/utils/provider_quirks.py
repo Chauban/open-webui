@@ -78,6 +78,14 @@ def provider_quirks(thinking_format: str, support: Optional[ThinkingSupport] = N
     return quirks
 
 
+# 只在某些档位下才相干的条目：选了「关」还提「中按 high 发」只会让人糊涂。
+_LEVEL_SPECIFIC = {'thinks_by_default': ('model_default',), 'effort_mapping': ('medium', 'high')}
+
+
+def _relevant_to_level(kind: str, thinking: str) -> bool:
+    return thinking in _LEVEL_SPECIFIC.get(kind, (thinking,))
+
+
 def step_quirks(
     step: str, thinking: str, thinking_format: Optional[str], support: Optional[ThinkingSupport]
 ) -> list[dict]:
@@ -85,7 +93,11 @@ def step_quirks(
 
     thinking_format 为空表示没指定模型（跟学生 / 老师选的），只能按可能接入的服务商笼统提醒。
     """
-    quirks = provider_quirks(thinking_format, support) if thinking_format else []
+    quirks = [
+        quirk
+        for quirk in (provider_quirks(thinking_format, support) if thinking_format else [])
+        if _relevant_to_level(quirk['kind'], thinking)
+    ]
     if thinking == 'model_default':
         if thinking_format is None:
             quirks.append({'kind': 'model_default_thinks', 'models': [], 'formats': list(THINKS_BY_DEFAULT)})

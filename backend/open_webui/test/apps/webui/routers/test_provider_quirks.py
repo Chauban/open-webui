@@ -80,3 +80,15 @@ def test_step_notes_follow_the_chosen_model_and_level():
     chosen = _by_kind(step_quirks('reader_check', 'model_default', 'kimi', thinking_support('kimi', 'kimi-k2.6')))
     assert {'fixed_sampling', 'on_off_only', 'thinks_by_default'} <= set(chosen)
     assert 'model_default_thinks' not in chosen
+
+
+def test_step_notes_only_mention_what_applies_to_the_chosen_level():
+    k3 = thinking_support('kimi', 'kimi-k3')
+    kinds = lambda thinking: [quirk['kind'] for quirk in step_quirks('image_parsing', thinking, 'kimi', k3)]  # noqa: E731
+    # 关思考:不提档位映射,也不提「模型默认即开着思考」
+    assert kinds('off') == ['fixed_sampling']
+    assert kinds('high') == ['fixed_sampling', 'effort_mapping']
+    assert kinds('model_default') == ['fixed_sampling', 'thinks_by_default']
+    # 模型本身的限制与选哪个档位无关,照常提
+    glm = thinking_support('zhipu', 'glm-5.3')
+    assert [quirk['kind'] for quirk in step_quirks('reader_check', 'low', 'zhipu', glm)] == ['cannot_turn_off']
