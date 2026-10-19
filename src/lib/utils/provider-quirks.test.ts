@@ -87,6 +87,27 @@ describe('provider quirks', () => {
 		expect(note).toBe(
 			'Model default = no thinking parameter is sent; the provider decides.For the models connected now it usually means thinking is on: DeepSeek: high; kimi-k2.6: on; kimi-k3 thinks by default; glm-5.3 series always thinks; the provider does not publish the exact level.'
 		);
+		// 中文里系列与动词之间不留空格,拉丁字母与汉字之间照常留
+		const zh = ((key: string, options?: Record<string, unknown>) =>
+			Object.entries(options ?? {}).reduce(
+				(text, [name, value]) => text.replace(`{{${name}}}`, String(value)),
+				(
+					{
+						'{{model}} series': '{{model}} 系列',
+						'{{models}} always thinks': '{{models}} 始终思考',
+						'{{models}} thinks by default': '{{models}} 默认思考'
+					} as Record<string, string>
+				)[key] ?? key
+			)) as never;
+		expect(
+			modelDefaultNote(
+				[
+					{ outcome: 'default_on', models: [{ label: 'kimi-k3', series: false }] },
+					{ outcome: 'always', models: [{ label: 'glm-5.3', series: true }] }
+				],
+				zh
+			)
+		).toContain('kimi-k3 默认思考; glm-5.3 系列始终思考');
 		// 只有公开了档位的服务商时不提「未公开」
 		expect(
 			modelDefaultNote([{ outcome: 'effort', format: 'deepseek', effort: 'high' }], t)

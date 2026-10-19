@@ -152,12 +152,14 @@ export const modelDefaultNote = (groups: ModelDefaultGroup[] | null | undefined,
 	if (groups.some((group) => group.outcome === 'default_on' || group.outcome === 'always')) {
 		parts.push(t('the provider does not publish the exact level'));
 	}
-	return `${definition}${t(
+	const note = `${definition}${t(
 		'For the models connected now it usually means thinking is on: {{details}}.',
 		{
 			details: parts.join(t('; '))
 		}
 	)}`;
+	// 拼出来的中文里两个汉字之间不留空格(「glm-5.3 系列 始终思考」→「glm-5.3 系列始终思考」),英文不受影响。
+	return note.replace(/([一-鿿]) (?=[一-鿿])/g, '$1');
 };
 
 /** 读不到(非管理员、模型不在连接里)时当作没有注意事项,不挡编辑。 */
