@@ -61,10 +61,13 @@ def provider_quirks(thinking_format: str, support: Optional[ThinkingSupport] = N
         for kind, models in by_kind.items():
             quirks.append({'kind': kind, 'models': [] if models == ['*'] and len(rows) == 1 else models})
         if mapping:
-            # 有不分档的兜底型号时，映射只对单列出来、能分档的型号成立。
+            # 映射只对能分档的型号成立：兜底型号不分档时只列单列出来、能分档的；
+            # 兜底能分档但有单列的不分档型号时写「其余型号」，不说成整家。
             graded = [prefix for prefix, row in rows if prefix and row.graded]
             fallback_flat = any(not prefix and not row.graded for prefix, row in rows)
-            quirks.append({'kind': 'effort_mapping', 'models': graded if fallback_flat else [], 'mapping': mapping})
+            listed_flat = any(prefix and not row.graded for prefix, row in rows)
+            models = graded if fallback_flat else ['*'] if listed_flat else []
+            quirks.append({'kind': 'effort_mapping', 'models': models, 'mapping': mapping})
     else:
         kind = _thinking_quirk(support)
         if kind:

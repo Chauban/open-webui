@@ -24,12 +24,14 @@ def test_kimi_connection_lists_every_fixed_value_and_model_limit():
     assert (params['n']['allowed'], params['top_p']['allowed'], params['presence_penalty']['allowed']) == (1, 0.95, 0)
     assert quirks['on_off_only']['models'] == ['kimi-k2.6']
     assert quirks['always_thinking']['models'] == ['kimi-k2.7-code']
-    # K3 等其余型号分三档:中按 high、高按 max
+    # K3 等其余型号分三档:中按 high、高按 max;K2.6、K2.7-Code 单列,所以写「其余型号」而不是整家
     assert quirks['effort_mapping'] == {
         'kind': 'effort_mapping',
-        'models': [],
+        'models': ['*'],
         'mapping': {'medium': 'high', 'high': 'max'},
     }
+    # DeepSeek 没有单列的型号,映射对整家成立
+    assert _by_kind(provider_quirks('deepseek'))['effort_mapping']['models'] == []
     assert 'thinks_by_default' in quirks
 
 
