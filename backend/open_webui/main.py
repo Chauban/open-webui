@@ -143,7 +143,7 @@ from open_webui.services.education.writing_access import ensure_writing_session_
 from open_webui.services.education.ai_steps import get_ai_step_policy, resolve_coaching_thinking, thinking_params
 from open_webui.services.education.writing_context import get_folder_writing_session
 from open_webui.utils.retry import RETRY_TRANSIENT_FLAG
-from open_webui.utils.thinking import THINKING_LEVEL_PARAM
+from open_webui.utils.thinking import THINKING_LEVEL_PARAM, ThinkingSupport, effective_thinking_level
 from open_webui.models.config import Config
 from open_webui.models.functions import Functions
 from open_webui.models.messages import Messages
@@ -1124,9 +1124,14 @@ async def chat_completion(
                     await get_ai_step_policy(), writing_assignment.model_params, student_thinking_choice
                 )
                 form_data['params'].update(thinking_params(coaching_thinking.level))
-                # 记在回复上给老师看;模型没有思考控制时档位不会发出,如实记成模型默认。
+                # 记在回复上给老师看,按实际生效的记:模型没有思考控制时档位不会发出,记成模型默认;
+                # 关不掉思考的模型上「关」退到了最低档(utils/thinking.py 的 MODEL_THINKING_SUPPORT)。
                 writing_thinking_level = (
-                    coaching_thinking.level if model_capabilities.get('reasoning') else 'model_default'
+                    effective_thinking_level(
+                        coaching_thinking.level, ThinkingSupport(**(model.get('thinking_support') or {}))
+                    )
+                    if model_capabilities.get('reasoning')
+                    else 'model_default'
                 )
             else:
                 form_data = strip_chat_request_overrides(form_data, await get_chat_overrides(user))

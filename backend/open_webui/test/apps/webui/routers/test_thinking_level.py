@@ -20,6 +20,8 @@ from open_webui.utils.thinking import (
     apply_thinking_level,
     detect_thinking_format,
     fixed_sampling_params,
+    ThinkingSupport,
+    effective_thinking_level,
     strip_fixed_sampling_params,
     thinking_support,
 )
@@ -112,7 +114,7 @@ def test_kimi_k26_only_turns_thinking_on_or_off():
 
 def test_thinking_support_table():
     assert thinking_support('kimi', 'kimi-k3').graded is True
-    assert thinking_support('zhipu', 'glm-5.3-flash').graded is True
+    assert thinking_support('zhipu', 'glm-5.3-flash') == ThinkingSupport(can_turn_off=False, graded=True)
     assert thinking_support('zhipu', 'glm-4.6').graded is False
     assert thinking_support('chat_template', 'qwen3-8b').graded is False
     assert thinking_support('deepseek', 'deepseek-flash').graded is True
@@ -143,9 +145,9 @@ def test_model_list_carries_thinking_support(monkeypatch):
     models = asyncio.run(openai_router.get_all_models.__wrapped__(request, None))['data']
 
     assert {model['id']: model['thinking_support'] for model in models} == {
-        'moon.kimi-k2.6': {'graded': False},
-        'moon.kimi-k3': {'graded': True},
-        'deepseek-flash': {'graded': True},
+        'moon.kimi-k2.6': {'can_turn_off': True, 'graded': False},
+        'moon.kimi-k3': {'can_turn_off': True, 'graded': True},
+        'deepseek-flash': {'can_turn_off': True, 'graded': True},
     }
 
 
@@ -164,15 +166,35 @@ def test_zhipu_never_disables_always_thinking_models():
         'thinking': {'type': 'disabled'},
     }
     assert apply_thinking_level({'model': 'glm-5.2'}, 'low', 'zhipu')['reasoning_effort'] == 'low'
-    # 更早的型号只有开 / 关,不发 effort;始终思考的老型号关不掉也没法降档
+    # 更早的型号只有开 / 关,不发 effort
     assert apply_thinking_level({'model': 'glm-4.6'}, 'high', 'zhipu') == {
         'model': 'glm-4.6',
         'thinking': {'type': 'enabled'},
     }
-    assert apply_thinking_level({'model': 'glm-4.7'}, 'off', 'zhipu') == {
-        'model': 'glm-4.7',
-        'thinking': {'type': 'enabled'},
-    }
+
+
+@pytest.mark.parametrize(
+    ('thinking_format', 'model'),
+    [('zhipu', 'glm-4.7'), ('zhipu', 'glm-4.5v'), ('kimi', 'kimi-k2.7-code'), ('kimi', 'kimi-k2.7-code-highspeed')],
+)
+def test_always_thinking_models_without_levels_get_nothing(thinking_format, model):
+    """始终思考又没有档位:没什么可调,各档都按模型默认、什么也不发,从不发会 400 的 disabled。"""
+    support = thinking_support(thinking_format, model)
+    assert (support.can_turn_off, support.graded) == (False, False)
+    assert set(map(str, _levels(thinking_format, model).values())) == {str({'model': model})}
+
+
+def test_effective_level():
+    always_graded = ThinkingSupport(can_turn_off=False)
+    always_flat = ThinkingSupport(can_turn_off=False, graded=False)
+    assert [effective_thinking_level(level, always_graded) for level in ('off', 'low', 'high', 'model_default')] == [
+        'low',
+        'low',
+        'high',
+        'model_default',
+    ]
+    assert {effective_thinking_level(level, always_flat) for level in ('off', 'low', 'high')} == {'model_default'}
+    assert effective_thinking_level('off', ThinkingSupport()) == 'off'
 
 
 def test_doubao_and_qwen_follow_their_docs():

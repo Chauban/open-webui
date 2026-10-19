@@ -8,6 +8,8 @@
 	// 老师把辅导对话的思考交给学生开关时,输入框上方的一行。开 = 老师设的档位,关 = 不思考直接答;
 	// 每条回复实际用的档位由服务端记下,老师批改时看得到。
 	export let on = true;
+	/** 学生选的模型关不掉思考(utils/thinking.py 的 MODEL_THINKING_SUPPORT):不给开关,写明始终开着。 */
+	export let alwaysOn = false;
 </script>
 
 <div
@@ -21,5 +23,9 @@
 	>
 		{$i18n.t('Deep thinking')}
 	</span>
-	<Switch bind:state={on} ariaLabel={$i18n.t('Deep thinking')} />
+	{#if alwaysOn}
+		<span data-testid="thinking-always-on">{$i18n.t('Always on for this model')}</span>
+	{:else}
+		<Switch bind:state={on} ariaLabel={$i18n.t('Deep thinking')} />
+	{/if}
 </div>

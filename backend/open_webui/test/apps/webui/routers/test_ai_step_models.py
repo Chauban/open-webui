@@ -71,9 +71,7 @@ def test_reader_check_uses_the_admin_model_and_freezes_it(education_client):
 
 
 _ALL_OK = {
-    'items': [
-        {'key': key, 'status': 'ok', 'finding': '', 'quote': ''} for key in ('ideas', 'structure', 'evidence')
-    ]
+    'items': [{'key': key, 'status': 'ok', 'finding': '', 'quote': ''} for key in ('ideas', 'structure', 'evidence')]
 }
 
 
@@ -136,7 +134,12 @@ def test_custom_models_inherit_thinking_support(education_client):
         app=SimpleNamespace(
             state=SimpleNamespace(
                 BASE_MODELS=[
-                    {'id': 'kimi-k2.6', 'name': 'Kimi K2.6', 'owned_by': 'openai', 'thinking_support': {'graded': False}}
+                    {
+                        'id': 'kimi-k2.6',
+                        'name': 'Kimi K2.6',
+                        'owned_by': 'openai',
+                        'thinking_support': {'can_turn_off': True, 'graded': False},
+                    }
                 ],
                 redis=None,
                 MODELS={},
@@ -146,4 +149,4 @@ def test_custom_models_inherit_thinking_support(education_client):
 
     models = {model['id']: model for model in asyncio.run(get_all_models(request, user=teacher))}
 
-    assert models['tutor']['thinking_support'] == {'graded': False}
+    assert models['tutor']['thinking_support'] == {'can_turn_off': True, 'graded': False}

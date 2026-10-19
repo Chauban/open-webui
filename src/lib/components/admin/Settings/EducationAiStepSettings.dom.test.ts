@@ -40,10 +40,16 @@ const MODELS = [
 	{ id: 'text-only', name: 'Text only', info: { meta: { capabilities: { vision: false } } } },
 	{ id: 'arena-model', name: 'Arena', owned_by: 'arena' },
 	{
+		id: 'glm-5.3',
+		name: 'GLM-5.3',
+		info: { meta: { capabilities: { vision: false } } },
+		thinking_support: { can_turn_off: false, graded: true }
+	},
+	{
 		id: 'kimi-k2.6',
 		name: 'Kimi K2.6',
 		info: { meta: { capabilities: { vision: false } } },
-		thinking_support: { graded: false }
+		thinking_support: { can_turn_off: true, graded: false }
 	}
 ];
 
@@ -72,6 +78,7 @@ test('每个平台步骤一行:模型与思考各一个下拉,通读那行带试
 		'Follow the student’s selected model',
 		'Vision',
 		'Text only',
+		'GLM-5.3',
 		'Kimi K2.6'
 	]);
 	expect(optionLabels('Model for Class argument summary')[0]).toBe(
@@ -156,4 +163,12 @@ test('选到只有开 / 关的模型时,那一行写明各档都只是开着', (
 		'only turns thinking on or off'
 	);
 	expect(screen.queryByTestId('ai-step-thinking-note-first_read')).toBeNull();
+});
+
+test('选到关不掉思考的模型时,那一行写明「关」会退到最低档', () => {
+	render_({ policy: { ...POLICY, first_read: { model: 'glm-5.3', thinking: 'off' } } });
+
+	expect(screen.getByTestId('ai-step-thinking-note-first_read').textContent).toContain(
+		'cannot turn thinking off'
+	);
 });
