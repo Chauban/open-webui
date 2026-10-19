@@ -131,7 +131,9 @@ test('指定的模型被删掉时标红说明回落方式,原值仍保留在下�
 			model_name: 'gone-model',
 			model_available: false,
 			control: 'admin',
-			thinking: 'model_default'
+			thinking: 'model_default',
+			thinking_format: null,
+			quirks: []
 		}
 	];
 	render_({ policy: { ...POLICY, reader_check: { model: 'gone-model', thinking: 'low' } }, views });
