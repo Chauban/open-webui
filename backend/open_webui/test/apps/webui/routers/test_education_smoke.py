@@ -7895,6 +7895,8 @@ def test_admin_picks_step_models_in_education_settings(education_client):
         ("personal_writing", True),
     ]
     assert form["EDUCATION_AUTO_RETRY"] == {"personal_writing": False}
+    # 测试里的模型不在默认开着思考的服务商,「模型默认」说明只剩通用的第一句
+    assert form["EDUCATION_MODEL_DEFAULT_MEANING"] == []
     res = configs_client.post(
         "/api/v1/configs/education", json={**form, "EDUCATION_AUTO_RETRY": {"personal_writing": True}}
     )

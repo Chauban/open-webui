@@ -7,7 +7,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[5]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
-from open_webui.utils.provider_quirks import provider_quirks, step_quirks
+from open_webui.utils.provider_quirks import model_default_meaning, provider_quirks, step_quirks
 from open_webui.utils.retry import ONE_SHOT_RETRY
 from open_webui.utils.thinking import FIXED_SAMPLING_PARAMS, ThinkingSupport, thinking_support
 
@@ -94,3 +94,39 @@ def test_step_notes_only_mention_what_applies_to_the_chosen_level():
     # 模型本身的限制与选哪个档位无关,照常提
     glm = thinking_support('zhipu', 'glm-5.3')
     assert [quirk['kind'] for quirk in step_quirks('reader_check', 'low', 'zhipu', glm)] == ['cannot_turn_off']
+
+
+def _model(model_id, thinking_format):
+    support = thinking_support(thinking_format, model_id)._asdict() if thinking_format else None
+    return {'id': model_id, 'thinking_format': thinking_format, 'thinking_support': support}
+
+
+def test_model_default_meaning_follows_the_connected_models():
+    """「模型默认」的说明按现网这批模型生成:DeepSeek 公开了 high,K2.6 只分开关,K3 默认思考,GLM-5.3 系列关不掉。"""
+    models = [
+        _model('deepseek-flash', 'deepseek'),
+        _model('deepseek-v4-pro', 'deepseek'),
+        _model('glm-5.3', 'zhipu'),
+        _model('glm-5.3-flash', 'zhipu'),
+        _model('glm-5.3-flashx', 'zhipu'),
+        _model('kimi-k2.6', 'kimi'),
+        _model('kimi-k3', 'kimi'),
+        # 不默认开着思考的服务商、不是 OpenAI 兼容连接的模型都不列
+        _model('doubao-seed-1-6', 'doubao'),
+        {'id': 'arena-model'},
+    ]
+    assert model_default_meaning(models) == [
+        {'outcome': 'effort', 'format': 'deepseek', 'effort': 'high'},
+        {'outcome': 'on', 'models': [{'label': 'kimi-k2.6', 'series': False}]},
+        {'outcome': 'default_on', 'models': [{'label': 'kimi-k3', 'series': False}]},
+        {'outcome': 'always', 'models': [{'label': 'glm-5.3', 'series': True}]},
+    ]
+    # 只接了 glm-5.3 一个型号时写型号本身
+    assert model_default_meaning([_model('glm-5.3', 'zhipu')]) == [
+        {'outcome': 'always', 'models': [{'label': 'glm-5.3', 'series': False}]}
+    ]
+    # 只接了 GLM-5.3-Flash 时按系列写
+    assert model_default_meaning([_model('glm-5.3-flash', 'zhipu')]) == [
+        {'outcome': 'always', 'models': [{'label': 'glm-5.3', 'series': True}]}
+    ]
+    assert model_default_meaning([]) == []

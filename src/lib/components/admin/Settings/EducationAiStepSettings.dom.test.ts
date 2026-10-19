@@ -71,8 +71,11 @@ test('每个平台步骤一行:模型与思考各一个下拉,通读那行带试
 		expect(screen.getByTestId(`ai-step-row-${key}`)).toBeTruthy();
 	}
 	expect(screen.getByText(/turning thinking off here led to clearly more missed/)).toBeTruthy();
-	// 通读推荐「低」:关掉思考漏判多,「高」或模型默认可能超过读超时
-	expect(screen.getAllByRole('option', { name: 'Low (recommended)' }).length).toBe(1);
+	// 不标「推荐」;「模型默认」在表头说明
+	expect(screen.queryAllByRole('option', { name: /recommended/ })).toEqual([]);
+	expect(screen.getByTestId('model-default-note').textContent).toContain(
+		'Model default = no thinking parameter is sent; the provider decides.'
+	);
 
 	// 不指定时的说法按步骤:通读跟学生、归纳跟老师、图片识别即关闭导入;竞技场模型不列
 	expect(optionLabels('Model for First read and follow-up review')).toEqual([
@@ -196,4 +199,18 @@ test('每一行下面写出后端按所选模型与档位算好的注意事项',
 		'Model default means thinking is on for DeepSeek, Kimi'
 	);
 	expect(screen.queryByTestId('ai-step-quirks-reader_check')).toBeNull();
+});
+
+test('「模型默认」的说明按后端算出的接入模型分组写', () => {
+	render_({
+		modelDefaultMeaning: [
+			{ outcome: 'effort', format: 'deepseek', effort: 'high' },
+			{ outcome: 'on', models: [{ label: 'kimi-k2.6', series: false }] },
+			{ outcome: 'always', models: [{ label: 'glm-5.3', series: true }] }
+		]
+	});
+
+	expect(screen.getByTestId('model-default-note').textContent?.trim()).toBe(
+		'Model default = no thinking parameter is sent; the provider decides.For the models connected now it usually means thinking is on: DeepSeek: high; kimi-k2.6: on; glm-5.3 series always thinks; the provider does not publish the exact level.'
+	);
 });

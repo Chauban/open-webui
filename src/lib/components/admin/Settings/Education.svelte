@@ -10,6 +10,7 @@
 	import Pencil from '$lib/components/icons/Pencil.svelte';
 	import EducationAiStepSettings from './EducationAiStepSettings.svelte';
 	import EducationAutoRetrySettings from './EducationAutoRetrySettings.svelte';
+	import type { ModelDefaultGroup } from '$lib/utils/provider-quirks';
 	import EducationStudentLimits from './EducationStudentLimits.svelte';
 	import type {
 		AiStep,
@@ -128,6 +129,7 @@
 	let aiStepViews: AiStepView[] = [];
 	let autoRetry: AutoRetryPolicy | null = null;
 	let retryScopes: RetryScope[] = [];
+	let modelDefaultMeaning: ModelDefaultGroup[] = [];
 	let studentOverrides = { params: true, system_prompt: true };
 	let editing: { section: SectionKey; key: string } | null = null;
 	let draft = '';
@@ -204,6 +206,7 @@
 			aiStepViews = config.EDUCATION_AI_STEP_VIEWS;
 			autoRetry = config.EDUCATION_AUTO_RETRY;
 			retryScopes = config.EDUCATION_RETRY_SCOPES;
+			modelDefaultMeaning = config.EDUCATION_MODEL_DEFAULT_MEANING;
 			studentOverrides = config.EDUCATION_STUDENT_CHAT_OVERRIDES;
 		} catch (error) {
 			loadFailed = true;
@@ -264,6 +267,7 @@
 			aiStepViews = config.EDUCATION_AI_STEP_VIEWS;
 			autoRetry = config.EDUCATION_AUTO_RETRY;
 			retryScopes = config.EDUCATION_RETRY_SCOPES;
+			modelDefaultMeaning = config.EDUCATION_MODEL_DEFAULT_MEANING;
 			studentOverrides = config.EDUCATION_STUDENT_CHAT_OVERRIDES;
 			// 学生端是否显示「导入图片」读的是 /api/config 的 features,跟着刷新。
 			await appConfig.set(await getBackendConfig());
@@ -486,6 +490,7 @@
 						policy={aiStepPolicy}
 						steps={aiSteps}
 						views={aiStepViews}
+						{modelDefaultMeaning}
 						models={$models ?? []}
 						disabled={saving}
 						onChange={(next) => persist(prompts, assignmentDefaults, defaultRubrics, next)}

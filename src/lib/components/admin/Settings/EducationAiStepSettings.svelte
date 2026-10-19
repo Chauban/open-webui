@@ -21,7 +21,7 @@
 		THINKING_SETTINGS,
 		THINKING_SETTING_TEXT
 	} from '$lib/utils/ai-steps';
-	import { quirkText } from '$lib/utils/provider-quirks';
+	import { modelDefaultNote, quirkText, type ModelDefaultGroup } from '$lib/utils/provider-quirks';
 	import type { ThinkingSupport } from '$lib/utils/thinking-support';
 	import ProviderQuirksPanel from '$lib/components/ProviderQuirksPanel.svelte';
 
@@ -41,6 +41,8 @@
 		info?: any;
 		thinking_support?: ThinkingSupport | null;
 	}> = [];
+	/** 「模型默认」对目前接入的模型意味着什么(后端按接入的模型与能力表算出)。 */
+	export let modelDefaultMeaning: ModelDefaultGroup[] = [];
 	export let disabled = false;
 	export let onChange: (policy: AiStepPolicy) => void = () => {};
 
@@ -66,11 +68,7 @@
 		return viewsByKey[key]?.model_available === false || !models.some((item) => item.id === model);
 	};
 
-	// 通读推荐「低」:关掉思考漏判明显增多,「高」或模型默认又可能超过一次性回复的读超时。
-	const settingLabel = (key: AiStepKey, setting: ThinkingSetting) =>
-		key === 'first_read' && setting === 'low'
-			? $i18n.t('Low (recommended)')
-			: $i18n.t(THINKING_SETTING_TEXT[setting]);
+	const settingLabel = (setting: ThinkingSetting) => $i18n.t(THINKING_SETTING_TEXT[setting]);
 
 	// 后端按所选模型与档位算好的注意事项(随每次保存刷新),写成话放在这一行下面。
 	// 写成响应式声明:views 或语言变了,模板里的调用跟着重算。
@@ -101,6 +99,13 @@
 			{$i18n.t(
 				'Which model each AI step uses and how much it thinks before answering. A model you pick here is used even if students or teachers cannot use it in chat. Models without the Thinking control capability always use their own default.'
 			)}
+		</p>
+		<!-- 每一行都能选「模型默认」,在表头说清它是什么 -->
+		<p
+			class="mt-1 text-[0.6875rem] text-gray-500 dark:text-gray-400"
+			data-testid="model-default-note"
+		>
+			{modelDefaultNote(modelDefaultMeaning, $i18n.t)}
 		</p>
 	</div>
 
@@ -149,7 +154,7 @@
 							setCoaching({ default: event.currentTarget.value as ThinkingSetting })}
 					>
 						{#each THINKING_SETTINGS as setting}
-							<option value={setting}>{settingLabel('coaching_chat', setting)}</option>
+							<option value={setting}>{settingLabel(setting)}</option>
 						{/each}
 					</select>
 				</div>
@@ -212,7 +217,7 @@
 							setStep(step.key, { thinking: event.currentTarget.value as ThinkingSetting })}
 					>
 						{#each THINKING_SETTINGS as setting}
-							<option value={setting}>{settingLabel(step.key, setting)}</option>
+							<option value={setting}>{settingLabel(setting)}</option>
 						{/each}
 					</select>
 				</div>

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('$lib/apis/openai', () => ({ getProviderQuirks: vi.fn() }));
 
-import { quirkText, quirkTexts, type ProviderQuirk } from './provider-quirks';
+import { modelDefaultNote, quirkText, quirkTexts, type ProviderQuirk } from './provider-quirks';
 
 const t = ((key: string, options?: Record<string, unknown>) =>
 	Object.entries(options ?? {}).reduce(
@@ -69,5 +69,27 @@ describe('provider quirks', () => {
 			'90-second timeout; Low is recommended'
 		);
 		expect(quirkTexts(null, t)).toEqual([]);
+	});
+
+	it('explains Model default from the connected-model groups', () => {
+		expect(modelDefaultNote([], t)).toBe(
+			'Model default = no thinking parameter is sent; the provider decides.'
+		);
+		const note = modelDefaultNote(
+			[
+				{ outcome: 'effort', format: 'deepseek', effort: 'high' },
+				{ outcome: 'on', models: [{ label: 'kimi-k2.6', series: false }] },
+				{ outcome: 'default_on', models: [{ label: 'kimi-k3', series: false }] },
+				{ outcome: 'always', models: [{ label: 'glm-5.3', series: true }] }
+			],
+			t
+		);
+		expect(note).toBe(
+			'Model default = no thinking parameter is sent; the provider decides.For the models connected now it usually means thinking is on: DeepSeek: high; kimi-k2.6: on; kimi-k3 thinks by default; glm-5.3 series always thinks; the provider does not publish the exact level.'
+		);
+		// 只有公开了档位的服务商时不提「未公开」
+		expect(
+			modelDefaultNote([{ outcome: 'effort', format: 'deepseek', effort: 'high' }], t)
+		).not.toContain('does not publish');
 	});
 });

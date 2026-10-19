@@ -5,7 +5,7 @@
 每条是一个结构化条目，界面按 kind 写成中文。
 """
 
-from typing import Optional
+from typing import Iterable, Optional
 
 from open_webui.utils.retry import ONE_SHOT_RETRY
 from open_webui.utils.thinking import (
@@ -25,6 +25,9 @@ PROVIDER_FACTS: dict[str, tuple[str, ...]] = {
     # 开着思考时不支持 JSON mode / 结构化输出。
     'qwen': ('json_mode',),
 }
+
+# 服务商公开过的「不发思考参数时」的默认档位；没列的服务商没有公开（DeepSeek 文档：默认开，effort=high）。
+PUBLISHED_DEFAULT_EFFORT: dict[str, str] = {'deepseek': 'high'}
 
 # 「模型默认」或「高」时第一次通读可能超过一次性回复的读超时。
 SLOW_STEPS = ('first_read',)
@@ -107,3 +110,46 @@ def step_quirks(
     if step in SLOW_STEPS and thinking in ('model_default', 'high'):
         quirks.append({'kind': 'slow_step', 'models': [], 'seconds': int(ONE_SHOT_RETRY.timeout.sock_read)})
     return quirks
+
+
+def _model_label(thinking_format: str, model_id: str) -> tuple[str, bool]:
+    """按能力表里匹配到的型号前缀归组（如 glm-5.3、glm-5.3-flash → glm-5.3 系列）；没单列的按模型 id。"""
+    model = model_id.lower()
+    for prefix, _ in MODEL_THINKING_SUPPORT.get(thinking_format, ()):
+        if prefix and prefix in model:
+            return prefix, model != prefix
+    return model_id, False
+
+
+def model_default_meaning(models: Iterable[dict]) -> list[dict]:
+    """「模型默认」（不发思考参数）对目前接入的模型意味着什么，给管理员页的说明用。
+
+    只看默认开着思考的服务商（THINKS_BY_DEFAULT），按结果分组，组内是型号标签：
+    effort —— 服务商公开了默认档位（PUBLISHED_DEFAULT_EFFORT），按整家写；
+    on —— 只分开关的型号，默认开；always —— 关不掉思考的型号；default_on —— 其余默认思考、档位未公开的型号。
+    """
+    groups: dict[tuple, dict] = {}
+    for model in models:
+        thinking_format = model.get('thinking_format')
+        support = model.get('thinking_support')
+        if thinking_format not in THINKS_BY_DEFAULT or not support:
+            continue
+        if thinking_format in PUBLISHED_DEFAULT_EFFORT:
+            key = ('effort', thinking_format)
+            groups.setdefault(
+                key,
+                {'outcome': 'effort', 'format': thinking_format, 'effort': PUBLISHED_DEFAULT_EFFORT[thinking_format]},
+            )
+            continue
+        support = ThinkingSupport(**support)
+        outcome = 'always' if not support.can_turn_off else 'default_on' if support.graded else 'on'
+        group = groups.setdefault(('models', outcome), {'outcome': outcome, 'models': []})
+        label, series = _model_label(thinking_format, str(model.get('id') or ''))
+        entry = next((item for item in group['models'] if item['label'] == label), None)
+        if entry is None:
+            group['models'].append({'label': label, 'series': series})
+        else:
+            # 同一前缀下接了不止一个型号（glm-5.3 与 glm-5.3-flash），按系列写
+            entry['series'] = entry['series'] or series
+    order = {'effort': 0, 'on': 1, 'default_on': 2, 'always': 3}
+    return sorted(groups.values(), key=lambda group: order[group['outcome']])

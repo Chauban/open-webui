@@ -31,6 +31,7 @@ from open_webui.services.education.ai_steps import (
     get_ai_step_policy,
 )
 from open_webui.services.education.identity import STUDENT_GROUP_ID
+from open_webui.utils.provider_quirks import model_default_meaning
 from open_webui.utils.access_control.chat import get_group_chat_overrides
 from open_webui.models.oauth_sessions import OAuthSessions
 from open_webui.utils.auth import get_admin_user, get_verified_user
@@ -892,6 +893,8 @@ class EducationConfigResponse(EducationConfigForm):
     EDUCATION_AI_STEPS: list[AiStep]
     EDUCATION_AI_STEP_VIEWS: list[StepView]
     EDUCATION_RETRY_SCOPES: list[RetryScope]
+    # 「模型默认」对目前接入的模型意味着什么(utils/provider_quirks.py),AI 步骤设置里的说明按它写。
+    EDUCATION_MODEL_DEFAULT_MEANING: list[dict]
     EDUCATION_STUDENT_CHAT_OVERRIDES: StudentChatOverridesView
 
 
@@ -901,9 +904,13 @@ async def get_education_config_values(request: Request, user) -> dict:
     values['EDUCATION_TASK_PROMPT_DEFAULTS'] = DEFAULT_EDUCATION_TASK_PROMPTS
     values['EDUCATION_AI_STEPS'] = list(AI_STEPS)
     values['EDUCATION_RETRY_SCOPES'] = list(RETRY_SCOPES)
+    models = await available_models(request, user)
     values['EDUCATION_AI_STEP_VIEWS'] = describe_steps(
-        EducationAiStepPolicy.model_validate(values['EDUCATION_AI_STEP_SETTINGS']),
-        await available_models(request, user),
+        EducationAiStepPolicy.model_validate(values['EDUCATION_AI_STEP_SETTINGS']), models
+    )
+    # 只看连接上的底模;自建模型随底模,不重复列。
+    values['EDUCATION_MODEL_DEFAULT_MEANING'] = model_default_meaning(
+        model for model in models.values() if not (model.get('info') or {}).get('base_model_id')
     )
     student_overrides = await get_group_chat_overrides(STUDENT_GROUP_ID)
     values['EDUCATION_STUDENT_CHAT_OVERRIDES'] = {

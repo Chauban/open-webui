@@ -122,6 +122,44 @@ export const quirkTexts = (quirks: ProviderQuirks | null, t: Translate): string[
 		.map((quirk) => quirkText(quirk, quirks?.thinking_format ?? null, t))
 		.filter((text): text is string => Boolean(text));
 
+export type ModelDefaultGroup =
+	| { outcome: 'effort'; format: string; effort: string }
+	| { outcome: 'on' | 'default_on' | 'always'; models: { label: string; series: boolean }[] };
+
+/**
+ * 「模型默认」的说明:第一句是定义;后半句按后端从目前接入的模型与能力表算出的分组(model_default_meaning)写,
+ * 接入的模型变了说法跟着变。
+ */
+export const modelDefaultNote = (groups: ModelDefaultGroup[] | null | undefined, t: Translate) => {
+	const definition = t('Model default = no thinking parameter is sent; the provider decides.');
+	if (!groups || groups.length === 0) return definition;
+	const names = (models: { label: string; series: boolean }[]) =>
+		models
+			.map((model) => (model.series ? t('{{model}} series', { model: model.label }) : model.label))
+			.join(t(', '));
+	const parts = groups.map((group) =>
+		group.outcome === 'effort'
+			? t('{{provider}}: {{effort}}', {
+					provider: providerLabel(group.format, t),
+					effort: group.effort
+				})
+			: group.outcome === 'on'
+				? t('{{models}}: on', { models: names(group.models) })
+				: group.outcome === 'default_on'
+					? t('{{models}} thinks by default', { models: names(group.models) })
+					: t('{{models}} always thinks', { models: names(group.models) })
+	);
+	if (groups.some((group) => group.outcome === 'default_on' || group.outcome === 'always')) {
+		parts.push(t('the provider does not publish the exact level'));
+	}
+	return `${definition}${t(
+		'For the models connected now it usually means thinking is on: {{details}}.',
+		{
+			details: parts.join(t('; '))
+		}
+	)}`;
+};
+
 /** 读不到(非管理员、模型不在连接里)时当作没有注意事项,不挡编辑。 */
 export const loadProviderQuirks = async (
 	token: string,
