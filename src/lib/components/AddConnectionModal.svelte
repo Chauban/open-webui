@@ -474,6 +474,11 @@
 							</div>
 						{/if}
 
+						<!-- 服务商注意事项放在「高级」外面:按地址自动识别时也看得到,不必先展开。 -->
+						{#if !direct}
+							<ProviderQuirksPanel notes={connectionQuirks} testid="connection-provider-quirks" />
+						{/if}
+
 						<div class="flex items-center justify-between">
 							<button
 								type="button"
@@ -635,7 +640,6 @@
 										</select>
 									</div>
 								</div>
-								<ProviderQuirksPanel notes={connectionQuirks} testid="connection-provider-quirks" />
 							{/if}
 
 							{#if azure}
