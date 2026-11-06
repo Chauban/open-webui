@@ -20,6 +20,7 @@ from open_webui.utils.auth import get_current_user
 def lesson(tmp_path, monkeypatch):
     (tmp_path / 'index.html').write_text('<h1>Lesson</h1>', encoding='utf-8')
     (tmp_path / '案例.mp4').write_bytes(b'0123456789')
+    (tmp_path / 'lesson-image-1.webp').write_bytes(b'RIFF-test-image')
     (tmp_path / 'private.txt').write_text('not published', encoding='utf-8')
     monkeypatch.setattr(courseware, 'COURSEWARE_DIR', str(tmp_path))
     app = FastAPI()
@@ -28,7 +29,7 @@ def lesson(tmp_path, monkeypatch):
         yield client, app
 
 
-@pytest.mark.parametrize('path', ['/', '/content/index.html', '/content/案例.mp4'])
+@pytest.mark.parametrize('path', ['/', '/content/index.html', '/content/案例.mp4', '/content/lesson-image-1.webp'])
 def test_anonymous_cannot_read_any_courseware(lesson, path):
     client, _ = lesson
     assert client.get('/api/v1/courseware' + path).status_code == 401
@@ -43,6 +44,9 @@ def test_all_active_roles_can_read_html_and_seek_video(lesson, role):
     assert page.status_code == 200
     assert page.headers['content-type'].startswith('text/html')
     assert page.headers['cache-control'] == 'private, no-store'
+    image = client.get('/api/v1/courseware/content/lesson-image-1.webp')
+    assert image.status_code == 200
+    assert image.headers['content-type'] == 'image/webp'
     video = client.get('/api/v1/courseware/content/案例.mp4', headers={'Range': 'bytes=2-5'})
     assert video.status_code == 206
     assert video.content == b'2345'

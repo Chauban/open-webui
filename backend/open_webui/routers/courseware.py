@@ -10,6 +10,7 @@ from open_webui.utils.auth import get_verified_user
 
 COURSEWARE_DIR = os.environ.get('COURSEWARE_DIR', '').strip()
 router = APIRouter(dependencies=[Depends(get_verified_user)])
+MEDIA_TYPES = {'.mp4': 'video/mp4', '.webp': 'image/webp', '.png': 'image/png'}
 
 
 def is_enabled() -> bool:
@@ -28,7 +29,7 @@ async def get_courseware_file(filename: str):
     if not is_enabled():
         raise HTTPException(status_code=404, detail='Courseware is not available')
 
-    # This lesson is a flat directory: one HTML document and its MP4 videos.
+    # This lesson is a flat directory: HTML, videos and separately loaded images.
     # Do not expose publishing logs, manifests, arbitrary files, or symlink targets.
     root = Path(COURSEWARE_DIR).resolve()
     path = (root / filename).resolve()
@@ -36,7 +37,7 @@ async def get_courseware_file(filename: str):
         '/' in filename
         or '\\' in filename
         or path.parent != root
-        or not (filename == 'index.html' or path.suffix.lower() == '.mp4')
+        or not (filename == 'index.html' or path.suffix.lower() in MEDIA_TYPES)
         or not path.is_file()
     ):
         raise HTTPException(status_code=404, detail='File not found')
@@ -50,6 +51,6 @@ async def get_courseware_file(filename: str):
     }
     return FileResponse(
         path,
-        media_type='text/html' if filename == 'index.html' else 'video/mp4',
+        media_type='text/html' if filename == 'index.html' else MEDIA_TYPES[path.suffix.lower()],
         headers=headers,
     )
