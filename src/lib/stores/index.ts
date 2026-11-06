@@ -304,6 +304,7 @@ type Config = {
 	default_pinned_models?: string | null;
 	default_prompt_suggestions: PromptSuggestion[];
 	features: {
+		enable_courseware?: boolean;
 		auth: boolean;
 		auth_trusted_header: boolean;
 		enable_api_keys: boolean;
