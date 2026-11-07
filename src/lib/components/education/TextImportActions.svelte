@@ -250,7 +250,7 @@
 		</p>
 	{:else if reading === 'images'}
 		<p class="text-xs text-sky-600 dark:text-sky-400" role="status">
-			{$i18n.t('The AI is transcribing your images. This can take up to a minute.')}
+			{$i18n.t('The AI is transcribing your images. Please wait a moment.')}
 		</p>
 	{/if}
 </div>

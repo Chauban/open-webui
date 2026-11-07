@@ -1744,11 +1744,9 @@
 							<div class="space-y-4 p-5">
 								<!-- 修订初稿作业:第一次通读的逐项结论与学生的处理 -->
 								{#if isReviseDraft}
-									<RevisionReadings
-										records={detail.submission.stats_json?.revision_readings ?? []}
-										currentText={detail.final_version?.note_snapshot_text ?? ''}
-										readonly
-									/>
+									{#each detail.submission.stats_json?.revision_readings ?? [] as record (record.id)}
+										<RevisionReadings {record} readonly />
+									{/each}
 									<RevisionItemsReview
 										sheet={detail?.submission?.stats_json?.revision_items ?? null}
 										{criteriaLabels}

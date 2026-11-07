@@ -2,7 +2,12 @@
 	import { v4 as uuidv4 } from 'uuid';
 	import { toast } from 'svelte-sonner';
 	import { readableChatError } from '$lib/utils/chat-error';
-	import { appendDiscussionPrompt } from '$lib/utils/revision-conversation';
+	import {
+		hasDraftChanges,
+		lastReadDraft,
+		revisionReviewPrompt
+	} from '$lib/utils/revision-conversation';
+	import type { RevisionReading, ReadingPurpose } from '$lib/apis/education';
 
 	import { getContext, onDestroy, onMount, tick } from 'svelte';
 	import { fade } from 'svelte/transition';
@@ -238,23 +243,64 @@
 		void sendPlatformMessage(platformMessage);
 	}
 
-	// 教学阅读作为对话开场展示；只预填学生明确选择的引用，绝不自动发送。
-	export let showConversationIntro = false;
+	// Revision workspaces share one chronological message list and the same composer.
+	export let revisionMode = false;
 	export let reserveWorkspaceActions = false;
-	export const revealReading = async () => {
-		await tick();
-		messagesContainerElement?.scrollTo({ top: 0, behavior: 'instant' });
-	};
-	export let composeRequest: { text: string; nonce: number } | null = null;
-	let composedNonce = 0;
-	const composeDiscussion = async (request: { text: string; nonce: number }) => {
-		composedNonce = request.nonce;
-		await tick();
-		if (readOnly || !(await waitFor(() => !!messageInput && !!document.getElementById('chat-input'), 30))) return;
-		await messageInput.setText(appendDiscussionPrompt(prompt, request.text));
-		messageInput.focus();
-	};
-	$: if (composeRequest && composeRequest.nonce !== composedNonce) void composeDiscussion(composeRequest);
+	export let revisionReadings: RevisionReading[] = [];
+	export let readingBusy = false;
+	export let onRetryReading: (purpose: ReadingPurpose) => void = () => {};
+	export let revisionDraftText = '';
+	export let revisionBaselineText = '';
+	let sendingRevision = false;
+	$: revisionReplyPending =
+		history.currentId &&
+		history.messages[history.currentId]?.role === 'assistant' &&
+		!history.messages[history.currentId]?.done;
+	$: reviewedDraft = lastReadDraft(
+		createMessagesList(history, history.currentId),
+		revisionReadings,
+		revisionBaselineText
+	);
+	$: draftChanged = revisionMode && hasDraftChanges(revisionDraftText, reviewedDraft);
+	$: revisionAction =
+		draftChanged && !readOnly
+			? {
+					label: prompt.trim() ? '发送说明，请看修改' : '改好了，请看看',
+					disabled:
+						sendingRevision ||
+						revisionReplyPending ||
+						generating ||
+						readingBusy ||
+						files.length > 0,
+					onClick: async () => {
+						if (
+							sendingRevision ||
+							revisionReplyPending ||
+							generating ||
+							readOnly ||
+							readingBusy ||
+							files.length > 0
+						)
+							return;
+						sendingRevision = true;
+						try {
+							await submitHandler(
+								revisionReviewPrompt(prompt, $i18n.t('我修改了稿件，请看看这次修改。')),
+								{
+									messageMeta: {
+										revision_review_requested: true,
+										...(!prompt.trim() ? { auto_started: true } : {})
+									}
+								}
+							);
+						} catch (error) {
+							toast.error(readableChatError(error, $i18n.t));
+						} finally {
+							sendingRevision = false;
+						}
+					}
+				}
+			: null;
 
 	// The workspace clears chatIdProp to start a fresh conversation in place;
 	// upstream only reacts to a non-empty chatIdProp.
@@ -2534,6 +2580,7 @@
 					}
 				}
 
+				history = history;
 				await tick();
 
 				return true;
@@ -2902,7 +2949,7 @@
 		history = history;
 	};
 
-	const chatCompletionEventHandler = async (data, message, chatId) => {
+	const chatCompletionEventHandler = async (data, message, completedChatId) => {
 		const { id, done, choices, content, output, sources, selected_model_id, error, usage } = data;
 
 		// Store raw OR-aligned output items from backend
@@ -2965,6 +3012,20 @@
 
 		if (done) {
 			message.done = true;
+			if (revisionMode && completedChatId && !error) {
+				await getChatById(localStorage.token, completedChatId)
+					.then((saved) => {
+						const context = saved?.chat?.history?.messages?.[message.id]?.meta?.education_context;
+						if ($chatId === completedChatId && context && history.messages[message.id]) {
+							history.messages[message.id].meta = {
+								...history.messages[message.id].meta,
+								education_context: context
+							};
+							history = history;
+						}
+					})
+					.catch(() => {});
+			}
 			const visibleContent =
 				getOutputText(message?.output) || removeAllDetails(message?.content ?? '');
 
@@ -2999,14 +3060,14 @@
 			// (outlet filters, chat save, title gen, follow-ups, tags)
 			// without blocking the user from sending new messages.
 			chatCompletedHandler(
-				chatId,
+				completedChatId,
 				message.model,
 				message.id,
 				createMessagesList(history, message.id)
 			);
 
 			// Process next queued request if any
-			await processNextInQueue(chatId);
+			await processNextInQueue(completedChatId);
 		}
 
 		console.log(data);
@@ -3208,7 +3269,7 @@
 		prompt = '';
 	};
 
-	const submitHandler = async (userPrompt, { _raw = false } = {}) => {
+	const submitHandler = async (userPrompt, { _raw = false, messageMeta = undefined } = {}) => {
 		console.log('submitHandler', userPrompt, $chatId);
 
 		const _selectedModels = selectedModels.map((modelId) =>
@@ -3338,14 +3399,21 @@
 			}
 		}
 
+		try {
+			await beforeSend?.();
+		} catch (error) {
+			toast.error(readableChatError(error, $i18n.t));
+			return;
+		}
 		// Clear input and submit
+		clearDraft(getDraftChatId());
 		messageInput?.setText('');
 		prompt = '';
 		const _files = structuredClone(files);
 		files = [];
 		messageInput?.setText('');
 
-		await submitPrompt(userPrompt, _files);
+		await submitPrompt(userPrompt, _files, { meta: messageMeta });
 	};
 
 	const sendMessage = async (
@@ -4512,8 +4580,13 @@
 							}}
 						/>
 					{/if}
-					<div id="chat-pane" class="flex min-h-0 flex-col flex-auto z-10 w-full @container overflow-auto {reserveWorkspaceActions ? 'pb-20' : ''}">
-						{#if showConversationIntro || ($settings?.landingPageMode === 'chat' && !$selectedFolder) || createMessagesList(history, history.currentId).length > 0}
+					<div
+						id="chat-pane"
+						class="flex min-h-0 flex-col flex-auto z-10 w-full @container overflow-auto {reserveWorkspaceActions
+							? 'pb-20'
+							: ''}"
+					>
+						{#if revisionMode || ($settings?.landingPageMode === 'chat' && !$selectedFolder) || createMessagesList(history, history.currentId).length > 0}
 							<div
 								class=" pb-2.5 flex flex-col justify-between w-full flex-auto overflow-auto h-0 max-w-full z-10 scrollbar-hidden"
 								id="messages-container"
@@ -4525,10 +4598,13 @@
 									isNearTop = messagesContainerElement.scrollTop <= 100;
 								}}
 							>
-								<div class="w-full flex flex-col {showConversationIntro ? '' : 'h-full'}">
-									{#if showConversationIntro}<slot name="conversation-intro" hasMessages={createMessagesList(history, history.currentId).length > 0} />{/if}
-									{#if !showConversationIntro || createMessagesList(history, history.currentId).length > 0}
+								<div class="w-full flex flex-col {revisionMode ? '' : 'h-full'}">
 									<Messages
+										{revisionMode}
+										{revisionReadings}
+										{readingBusy}
+										{onRetryReading}
+										messagesCount={revisionMode ? null : 8}
 										bind:this={messagesRef}
 										chatId={$chatId}
 										user={chatOwner ?? $user}
@@ -4544,7 +4620,11 @@
 										}}
 										bind:selectedModels
 										{atSelectedModel}
-										className={showConversationIntro ? 'flex pt-4' : embedded ? 'h-full flex pt-4' : 'h-full flex pt-18'}
+										className={revisionMode
+											? 'flex pt-4'
+											: embedded
+												? 'h-full flex pt-4'
+												: 'h-full flex pt-18'}
 										{sendMessage}
 										{showMessage}
 										{submitMessage}
@@ -4556,12 +4636,11 @@
 										{onToolCallResolved}
 										allowDelete={!(generating || taskIds?.length)}
 										forkHandler={handleForkChat}
-										topPadding={!embedded && !showConversationIntro}
+										topPadding={!embedded && !revisionMode}
 										bottomPadding={files.length > 0}
 										{onSelect}
 										{onInsertToNote}
 									/>
-									{/if}
 								</div>
 							</div>
 
@@ -4581,6 +4660,7 @@
 								>
 									<slot name="input-accessory" />
 									<MessageInput
+										{revisionAction}
 										bind:this={messageInput}
 										{history}
 										{taskIds}
@@ -4630,7 +4710,6 @@
 											showChatVariablesModal = true;
 										}}
 										on:submit={async (e) => {
-											clearDraft(getDraftChatId());
 											if (e.detail || files.length > 0) {
 												await tick();
 

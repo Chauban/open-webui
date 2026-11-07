@@ -1,4 +1,8 @@
 {
+	"改好了，请看看": "改好了，请看看",
+	"发送说明，请看修改": "发送说明，请看修改",
+	"我修改了稿件，请看看这次修改。": "我修改了稿件，请看看这次修改。",
+	"稿件尚未保存成功，请稍后再发送。输入的消息已保留。": "稿件尚未保存成功，请稍后再发送。输入的消息已保留。",
 	"返回对话": "返回对话",
 	"AI 写作伙伴": "AI 写作伙伴",
 	"先聊聊你的初稿": "先聊聊你的初稿",
@@ -220,7 +224,7 @@
 	"Read {{name}}; {{count}} scanned page(s) were transcribed by AI. Check the text carefully.": "已读取 {{name}}，其中 {{count}} 页扫描页由 AI 转录，请仔细核对文字。",
 	"Reading images...": "正在识别图片…",
 	"Import one document at a time. Several files only work for images.": "文档一次只能导入一个；多选只适用于图片。",
-	"The AI is transcribing your images. This can take up to a minute.": "AI 正在逐字转录图片，可能需要一分钟左右。",
+	"The AI is transcribing your images. Please wait a moment.": "AI 正在逐字转录图片，请稍候。",
 	"Images: photos or scans of a handwritten or printed draft (JPG, PNG or WebP), up to 8 at a time, read in file-name order. The AI only transcribes, so check the text carefully.": "图片：手写稿或打印稿的照片、扫描件（JPG、PNG 或 WebP），一次最多 8 张，按文件名顺序识别。AI 只做转录，请仔细核对文字。",
 	"Image import is not available: your administrator has not chosen an image parsing model.": "暂不能从图片导入：管理员还没有选择识图模型。",
 	"Read the text from {{count}} image(s). Check it against your draft before confirming.": "已从 {{count}} 张图片识别出文字，请对照原稿核对后再确认。",

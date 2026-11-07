@@ -4,7 +4,6 @@
 		retainApplicableReflectionDrafts
 	} from '$lib/utils/reflection-questions';
 	import { isRevision } from '$lib/utils/task-types';
-	import RevisionReadings from './RevisionReadings.svelte';
 	import {
 		getRevisionReadings,
 		requestRevisionReading,
@@ -229,7 +228,6 @@
 		// 重新加载完之前开场白会被当成新对话自动发出去,留下一段没有初稿的空对话。
 		if (revisionTimer) clearTimeout(revisionTimer);
 		revisionTimer = null;
-		composeRequest = null;
 		await goto(projectBaseUrl, { replaceState: true });
 		await load();
 		withdrawingDraft = false;
@@ -241,9 +239,6 @@
 	let readings: RevisionReading[] = [];
 	let readingBusy = false;
 	let revisionTimer: ReturnType<typeof setTimeout> | null = null;
-	let composeRequest: { text: string; nonce: number } | null = null;
-	let composeNonce = 0;
-	let workspaceChat: Chat;
 	$: hasRevisionCoaching =
 		isAssignment && isRevision(assignment?.task_mode) && !!writingSession?.draft_baseline_at;
 	const runReading = async (purpose: ReadingPurpose) => {
@@ -253,7 +248,6 @@
 			return;
 		}
 		readingBusy = true;
-		void workspaceChat?.revealReading();
 		const baseline = writingSession.draft_baseline_at;
 		try {
 			if (purpose !== 'first_read') await flushDraftBeforeChat();
@@ -285,10 +279,6 @@
 			}
 			await runReading('first_read');
 		}
-	};
-	const discussReading = (text: string) => {
-		showMobileDraft = false;
-		composeRequest = { text, nonce: ++composeNonce };
 	};
 	$: sameAsDraft =
 		isAssignment &&
@@ -592,11 +582,10 @@
 
 	// 发给 AI 之前把防抖窗口里还没存的正文立即存掉：后端每轮注入的是最近一次保存的正文，
 	// 并按保存时间判断学生在 AI 上次回复之后改没改稿。
-	// 最多等 5 秒：断网时保存要重试十几秒，不能让发送一直卡着。没存上照常发，
-	// AI 看到的是上一次存成功的稿子，提示学生一声，免得他以为 AI 没看他的修改。
+	// 最多等 5 秒；未保存成功就保留消息并停止发送，不能让 AI 把旧稿当成新改稿。
 	const FLUSH_BEFORE_CHAT_TIMEOUT_MS = 5000;
 	const flushDraftBeforeChat = async () => {
-		if (!autoSaveTimer && !saving && unsavedOperations.length === 0) return;
+		if (!autoSaveTimer && !saving && !hasUnsavedFailure && unsavedOperations.length === 0) return;
 		if (autoSaveTimer) {
 			clearTimeout(autoSaveTimer);
 			autoSaveTimer = null;
@@ -608,9 +597,7 @@
 			)
 		]);
 		if (!saved) {
-			toast.warning(
-				$i18n.t('Your latest edits are not saved yet, so the AI is reading the last saved version.')
-			);
+			throw new Error($i18n.t('稿件尚未保存成功，请稍后再发送。输入的消息已保留。'));
 		}
 	};
 
@@ -1027,7 +1014,6 @@
 		编辑器根节点带 min-w-full,会盖掉 prose 自带的 65ch 上限,只能在外面限宽。
 	-->
 	<Chat
-		bind:this={workspaceChat}
 		chatIdProp={currentChatId}
 		{projectBaseUrl}
 		responseInsertHandler={isReadOnly || isRevision(assignment?.task_mode)
@@ -1040,8 +1026,12 @@
 		allowFollowUps={!isRevision(assignment?.task_mode)}
 		responseInsertLabel={'Insert to Writing'}
 		readOnly={isReadOnly || needsDraftBaseline}
-		{composeRequest}
-		showConversationIntro={hasRevisionCoaching}
+		revisionMode={hasRevisionCoaching}
+		revisionReadings={readings}
+		{readingBusy}
+		onRetryReading={runReading}
+		revisionDraftText={noteText}
+		revisionBaselineText={writingSession?.draft_baseline_text ?? ''}
 		reserveWorkspaceActions={narrowLayout}
 		readOnlyHint={chatReadOnlyHint}
 		disableContextActions={false}
@@ -1056,11 +1046,6 @@
 		rightPanelMaxWidth={null}
 		rightPanelClassName="hidden lg:flex"
 	>
-		<svelte:fragment slot="conversation-intro" let:hasMessages>
-			<RevisionReadings records={readings} currentText={noteText} readonly={isReadOnly} busy={readingBusy}
-				{hasMessages} onRead={runReading} onDiscuss={discussReading}
-				onEdit={() => { if (narrowLayout) showMobileDraft = true; else editor?.commands.focus(); }} />
-		</svelte:fragment>
 		<svelte:fragment slot="input-accessory">
 			{#if showThinkingSwitch}
 				<ThinkingSwitch bind:on={thinkingOn} alwaysOn={thinkingAlwaysOn} />
@@ -1071,7 +1056,9 @@
 			class="h-full w-full flex-col border-l border-gray-200 dark:border-gray-800 bg-stone-50 dark:bg-gray-900 lg:flex"
 		>
 			<div
-				class="shrink-0 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-5 py-4 {needsDraftBaseline ? 'max-h-[40%] overflow-y-auto' : ''}"
+				class="shrink-0 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-5 py-4 {needsDraftBaseline
+					? 'max-h-[40%] overflow-y-auto'
+					: ''}"
 			>
 				<div class="mx-auto w-full {WRITING_COLUMN}">
 					<div class="flex items-start justify-between gap-4">
@@ -1183,7 +1170,9 @@
 						{#if isAssignment}
 							<AssignmentBrief {assignment} />
 							{#if hasRevisionCoaching && !isReadOnly && !isSubmitted}
-								<p class="mt-2 text-xs leading-relaxed text-gray-500">{$i18n.t('初稿已保存，还未交作业。你可以边聊边改，完成后点击「提交作业」。')}</p>
+								<p class="mt-2 text-xs leading-relaxed text-gray-500">
+									{$i18n.t('初稿已保存，还未交作业。你可以边聊边改，完成后点击「提交作业」。')}
+								</p>
 							{/if}
 							<ChallengeChecklist
 								detail={challengeDetail}
@@ -1205,10 +1194,14 @@
 				</div>
 			</div>
 			<div
-				class="min-h-0 flex-1 overflow-y-auto px-5 py-5 {needsDraftBaseline ? 'flex flex-col !overflow-hidden' : ''}"
+				class="min-h-0 flex-1 overflow-y-auto px-5 py-5 {needsDraftBaseline
+					? 'flex flex-col !overflow-hidden'
+					: ''}"
 			>
 				<div
-					class="mx-auto w-full {WRITING_COLUMN} {needsDraftBaseline ? 'flex min-h-0 flex-1 flex-col' : ''}"
+					class="mx-auto w-full {WRITING_COLUMN} {needsDraftBaseline
+						? 'flex min-h-0 flex-1 flex-col'
+						: ''}"
 				>
 					{#if isAssignment && review}
 						<ReviewResultCard {review} {assignment} onRevise={null} />
@@ -1237,7 +1230,7 @@
 							placeholder={$i18n.t(
 								isAssignment ? 'Write the final assignment here.' : 'Start writing...'
 							)}
-							className="input-prose min-h-[70vh]"
+							className="input-prose min-h-[70vh] [&>.tiptap]:min-h-[inherit]"
 							onChange={handleContentChange}
 							on:paste={async (event) => {
 								const clipboardEvent = event?.detail?.event ?? event;
@@ -1317,7 +1310,9 @@
 				on:click|stopPropagation
 			>
 				<div
-					class="shrink-0 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-5 py-4 {needsDraftBaseline ? 'max-h-[40%] overflow-y-auto' : ''}"
+					class="shrink-0 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-5 py-4 {needsDraftBaseline
+						? 'max-h-[40%] overflow-y-auto'
+						: ''}"
 				>
 					<div class="flex items-start justify-between gap-4">
 						<div class="min-w-0 flex-1">
@@ -1329,7 +1324,15 @@
 							</div>
 						</div>
 						{#if canSubmitAssignment}
-							<EduButton size="sm" variant="primary" on:click={() => { showMobileDraft = false; loadReflectionDraft(); void openSubmitFlow(); }}>
+							<EduButton
+								size="sm"
+								variant="primary"
+								on:click={() => {
+									showMobileDraft = false;
+									loadReflectionDraft();
+									void openSubmitFlow();
+								}}
+							>
 								{$i18n.t(isSubmitted ? 'Resubmit Assignment' : 'Submit Assignment')}
 							</EduButton>
 						{/if}
@@ -1359,7 +1362,9 @@
 						{#if isAssignment}
 							<AssignmentBrief {assignment} />
 							{#if hasRevisionCoaching && !isReadOnly && !isSubmitted}
-								<p class="mt-2 text-xs leading-relaxed text-gray-500">{$i18n.t('初稿已保存，还未交作业。你可以边聊边改，完成后点击「提交作业」。')}</p>
+								<p class="mt-2 text-xs leading-relaxed text-gray-500">
+									{$i18n.t('初稿已保存，还未交作业。你可以边聊边改，完成后点击「提交作业」。')}
+								</p>
 							{/if}
 							<ChallengeChecklist
 								detail={challengeDetail}
@@ -1411,7 +1416,7 @@
 							placeholder={$i18n.t(
 								isAssignment ? 'Write the final assignment here.' : 'Start writing...'
 							)}
-							className="input-prose min-h-[60vh]"
+							className="input-prose min-h-[60vh] [&>.tiptap]:min-h-[inherit]"
 							onChange={handleContentChange}
 							on:paste={async (event) => {
 								const clipboardEvent = event?.detail?.event ?? event;

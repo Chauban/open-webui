@@ -14,6 +14,13 @@
 	import Spinner from '../common/Spinner.svelte';
 
 	import ChatPlaceholder from './ChatPlaceholder.svelte';
+	import RevisionReadings from '$lib/components/education/RevisionReadings.svelte';
+	import { revisionTimeline } from '$lib/utils/revision-conversation';
+	import type { RevisionReading, ReadingPurpose } from '$lib/apis/education';
+	export let revisionMode = false;
+	export let revisionReadings: RevisionReading[] = [];
+	export let readingBusy = false;
+	export let onRetryReading: (purpose: ReadingPurpose) => void = () => {};
 
 	const i18n = getContext('i18n');
 
@@ -23,7 +30,7 @@
 	export let user = $_user;
 
 	export let prompt;
-	export let history = {};
+	export let history: any = {};
 	export let selectedModels;
 	export let atSelectedModel;
 
@@ -143,6 +150,7 @@
 	};
 
 	$: handleHistoryChange(history.currentId, history.messages);
+	$: timeline = revisionTimeline(messages, revisionReadings);
 
 	$: if (autoScroll && bottomPadding) {
 		(async () => {
@@ -525,14 +533,14 @@
 </script>
 
 <div class={className}>
-	{#if Object.keys(history?.messages ?? {}).length == 0}
+	{#if !revisionMode && Object.keys(history?.messages ?? {}).length == 0}
 		<ChatPlaceholder modelIds={selectedModels} {atSelectedModel} {onSelect} />
 	{:else}
 		<div class="w-full pt-2">
 			{#key chatId}
 				<section class="w-full" aria-labelledby="chat-conversation">
 					<h2 class="sr-only" id="chat-conversation">{$i18n.t('Chat Conversation')}</h2>
-					{#if messages.at(0)?.parentId !== null}
+					{#if messages.length > 0 && messagesCount !== null && messages.at(0)?.parentId !== null}
 						<Loader
 							on:visible={(e) => {
 								console.log('visible');
@@ -548,43 +556,59 @@
 						</Loader>
 					{/if}
 					<ul role="log" aria-live="polite" aria-relevant="additions" aria-atomic="false">
-						{#each messages as message, messageIdx (message.id)}
-							<Message
-								{chatId}
-								bind:history
-								{selectedModels}
-								messageId={message.id}
-								idx={messageIdx}
-								{user}
-								{setInputText}
-								{gotoMessage}
-								{showPreviousMessage}
-								{showNextMessage}
-								{updateChat}
-								{editMessage}
-								{deleteMessage}
-								{rateMessage}
-								{actionMessage}
-								{saveMessage}
-								{submitMessage}
-								{regenerateResponse}
-								{continueResponse}
-								{mergeResponses}
-								{addMessages}
-								{onToolCallResolved}
-								{forkHandler}
-								{allowDelete}
-								{responseInsertHandler}
-								{responseCopyHandler}
-								{responseInsertLabel}
-								{triggerScroll}
-								{readOnly}
-								{compactPreview}
-								{editCodeBlock}
-								{topPadding}
-								{onInsertToNote}
-							/>
+						{#each timeline as row (row.key)}
+							{#if row.kind === 'reading'}
+								<li>
+									<RevisionReadings
+										record={row.reading}
+										readonly={readOnly}
+										busy={readingBusy}
+										onRetry={onRetryReading}
+									/>
+								</li>
+							{:else}
+								{@const message = row.message}
+								{@const messageIdx = row.index}
+								<Message
+									{chatId}
+									bind:history
+									{selectedModels}
+									messageId={message.id}
+									idx={messageIdx}
+									{user}
+									{setInputText}
+									{gotoMessage}
+									{showPreviousMessage}
+									{showNextMessage}
+									{updateChat}
+									{editMessage}
+									{deleteMessage}
+									{rateMessage}
+									{actionMessage}
+									{saveMessage}
+									{submitMessage}
+									{regenerateResponse}
+									{continueResponse}
+									{mergeResponses}
+									{addMessages}
+									{onToolCallResolved}
+									{forkHandler}
+									{allowDelete}
+									{responseInsertHandler}
+									{responseCopyHandler}
+									{responseInsertLabel}
+									{triggerScroll}
+									{readOnly}
+									{compactPreview}
+									{editCodeBlock}
+									{topPadding}
+									{onInsertToNote}
+								/>
+							{/if}
 						{/each}
+						{#if revisionMode && revisionReadings.length === 0}<li>
+								<RevisionReadings busy={readingBusy} readonly={readOnly} onRetry={onRetryReading} />
+							</li>{/if}
 					</ul>
 				</section>
 				<div class="pb-18" />

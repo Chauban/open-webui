@@ -1,4 +1,8 @@
 {
+	"改好了，请看看": "I have revised it — please take a look",
+	"发送说明，请看修改": "Send my explanation and review the changes",
+	"我修改了稿件，请看看这次修改。": "I have revised my draft. Please review these changes.",
+	"稿件尚未保存成功，请稍后再发送。输入的消息已保留。": "Your draft has not been saved yet. Please try sending again shortly. Your message is kept.",
 	"返回对话": "Back to conversation",
 	"AI 写作伙伴": "AI writing partner",
 	"先聊聊你的初稿": "Let's talk about your draft",
@@ -220,7 +224,7 @@
 	"Read {{name}}; {{count}} scanned page(s) were transcribed by AI. Check the text carefully.": "",
 	"Reading images...": "",
 	"Import one document at a time. Several files only work for images.": "",
-	"The AI is transcribing your images. This can take up to a minute.": "",
+	"The AI is transcribing your images. Please wait a moment.": "",
 	"Images: photos or scans of a handwritten or printed draft (JPG, PNG or WebP), up to 8 at a time, read in file-name order. The AI only transcribes, so check the text carefully.": "",
 	"Image import is not available: your administrator has not chosen an image parsing model.": "",
 	"Read the text from {{count}} image(s). Check it against your draft before confirming.": "",

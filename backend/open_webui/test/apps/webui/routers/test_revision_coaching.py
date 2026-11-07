@@ -465,3 +465,39 @@ def test_submission_waits_for_async_writer_without_blocking_loop(education_clien
                         await asyncio.gather(request, return_exceptions=True)
 
     asyncio.run(exercise())
+
+
+def test_comparison_draft_uses_latest_conversation_snapshot():
+    from open_webui.services.education.revision_reading import comparison_draft
+
+    records = [{'created_at': 10, 'source_text': 'initial draft'}]
+    assert comparison_draft({'called_at': 20, 'source_text': 'second draft'}, records, 'baseline') == 'second draft'
+    assert comparison_draft({'called_at': 20, 'source_text': ''}, records, 'baseline') == ''
+    assert comparison_draft({'called_at': 5, 'source_text': 'old draft'}, records, 'baseline') == 'initial draft'
+    assert comparison_draft(None, [], 'baseline') == 'baseline'
+
+
+def test_comparison_context_distinguishes_current_draft_from_reference():
+    from open_webui.services.education.revision_reading import comparison_context
+
+    prompt = comparison_context('old sentence', 'new sentence')
+    assert '与上次稿件不同' in prompt
+    assert prompt.index('旧稿，仅作比较') < prompt.index('old sentence')
+    assert prompt.index('当前稿】') < prompt.index('new sentence')
+    assert '没有新改动' in comparison_context('same', 'same')
+    assert '当前正文为空' in comparison_context('old', '')
+
+
+def test_current_draft_attachment_does_not_rewrite_student_messages():
+    from open_webui.services.education.revision_reading import attach_current_revision_draft
+
+    messages = [{'role': 'assistant', 'content': 'old quote'}, {'role': 'user', 'content': 'my explanation'}]
+    result = attach_current_revision_draft(messages, 'new draft')
+    assert messages[-1]['content'] == 'my explanation'
+    assert result[-1]['content'].startswith('my explanation')
+    assert 'new draft' in result[-1]['content']
+    multimodal = [{'role': 'user', 'content': [{'type': 'text', 'text': 'question'}]}]
+    attached = attach_current_revision_draft(multimodal, '')
+    assert len(multimodal[0]['content']) == 1
+    assert len(attached[0]['content']) == 2
+    assert '""' in attached[0]['content'][-1]['text']

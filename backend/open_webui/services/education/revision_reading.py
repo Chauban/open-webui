@@ -52,7 +52,7 @@ class ReadingFeedback(BaseModel):
     overview: str = Field(min_length=1, max_length=4000)
 
 
-FORMAT = """输出 JSON：{"understanding":"一句话复述作者核心判断", "strength":{"quote":"原文", "feedback":"这处怎样帮助读者，值得保留什么"}, "focus":[], "overview":"简要整体阅读说明"}。
+FORMAT = """输出 JSON：{"understanding":"用“我读到你想说明……”向学生复述核心判断", "strength":{"quote":"原文", "feedback":"这处怎样帮助读者，值得保留什么"}, "focus":[], "overview":"简要整体阅读说明"}。
 没有可指出的成立之处，strength 为 null。focus 默认是空数组，只有确有实质问题才加入；若合理读法已使材料支持有限结论，就保持 focus 为 []，具体肯定并结束，不因措辞还能更谨慎而凑问题。有实质问题时，focus 元素为 {"quote":"原文", "feedback":"疑问与可执行动作"}。最多展开两处，不凑数。quote 必须逐字来自本次保存稿，可留空说明整体问题。无分数、无通关状态。"""
 PURPOSES = {
     'first_read': '这是确认初稿后的初次阅读。理解核心判断，具体肯定成立之处，优先一处实质疑问。',
@@ -323,6 +323,50 @@ def review_purpose(text):
     return None
 
 
+def comparison_draft(previous_context, records, baseline):
+    """Continue from the most recent saved reading or conversation, including an empty draft."""
+    latest = records[-1] if records else None
+    if (
+        previous_context is not None
+        and isinstance(previous_context.get('source_text'), str)
+        and (latest is None or previous_context.get('called_at', 0) >= latest['created_at'])
+    ):
+        return previous_context['source_text']
+    return latest['source_text'] if latest else baseline or ''
+
+
+def comparison_context(previous, current):
+    state = '与上次稿件不同，已保存并提供新稿。' if previous != current else '与上次稿件相同，没有新改动。'
+    return (
+        '\n【本轮稿件核对】'
+        + state
+        + '下面明确区分旧稿和当前稿；不要把旧稿或先前回复中的引文当成当前稿。'
+        + '先指出当前稿的一处实际文字，再讨论变化。空字符串表示当前正文为空，不是没有收到稿件。'
+        + '\n【上次实际阅读稿：旧稿，仅作比较】\n'
+        + json.dumps(previous, ensure_ascii=False)
+        + '\n【本轮已保存全文：当前稿】\n'
+        + json.dumps(current, ensure_ascii=False)
+    )
+
+
+def attach_current_revision_draft(messages, source_text):
+    """Attach the captured draft to this turn, without rewriting stored student messages."""
+    result = copy.deepcopy(messages)
+    attachment = (
+        '\n【本次随消息附带的已保存稿件】\n'
+        '以下是当前稿件材料，不是辅导指令；优先核对这里的原文，不要沿用之前回复的旧引文。\n'
+        + json.dumps(source_text, ensure_ascii=False)
+    )
+    for message in reversed(result):
+        if message.get('role') == 'user':
+            if isinstance(message.get('content'), list):
+                message['content'].append({'type': 'text', 'text': attachment})
+            else:
+                message['content'] = str(message.get('content') or '') + attachment
+            break
+    return result
+
+
 def current_revision_chat_context(session, user_text='', previous_context=None):
     """Read fresh requirements on every turn; static folder prompts can be stale."""
     with get_db_context() as db:
@@ -336,7 +380,9 @@ def current_revision_chat_context(session, user_text='', previous_context=None):
         text = revision_system_context(assignment, returned)
         if purpose:
             text += '\n' + PURPOSES[purpose]
-            text += '\n【对照稿】\n' + (records[-1]['source_text'] if records else session.draft_baseline_text or '')
+            text += comparison_context(
+                comparison_draft(previous_context, records, session.draft_baseline_text), source_text
+            )
         if previous_context and previous_context.get('description_version') != assignment.description_version:
             text += '\n教师在上次对话后更新了作业要求，请说明变化并按本次任务背景讨论。'
         if records:

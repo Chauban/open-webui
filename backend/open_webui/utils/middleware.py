@@ -81,7 +81,7 @@ from open_webui.tasks import clear_response_stream, save_response_stream
 from open_webui.utils.access_control import has_connection_access, has_permission
 from open_webui.utils.access_control.files import get_owner_accessible_folder_files
 from open_webui.utils.access_control.folders import has_folder_access
-from open_webui.services.education.revision_reading import current_revision_chat_context
+from open_webui.services.education.revision_reading import current_revision_chat_context, attach_current_revision_draft
 from open_webui.services.education.task_types import is_revision
 from open_webui.models.education import Education
 from open_webui.services.education.writing_access import (
@@ -2637,6 +2637,11 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                 ),
                 form_data.get('messages', []),
                 append=True,
+            )
+
+        if metadata.get('education_context') is not None:
+            form_data['messages'] = attach_current_revision_draft(
+                form_data['messages'], metadata['education_context']['source_text']
             )
 
     # Model "Knowledge" handling
