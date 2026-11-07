@@ -1,4 +1,7 @@
 {
+	"Courseware": "课程课件",
+	"Back to Right Write": "返回 Right Write",
+	"Courseware is not available": "课件暂未开放",
 	"\"{{blocking}}\" is not fixed yet.": "「{{blocking}}」还没改到位。",
 	"A model without thinking control answers with its own default.": "不支持思考控制的模型按自己的默认回答。",
 	"A teacher’s setting only reaches the coaching chat; the other steps always follow this table, so their results stay comparable across classes.": "老师的设置只作用于辅导对话；其余步骤始终按本表，各班结果才可比。",

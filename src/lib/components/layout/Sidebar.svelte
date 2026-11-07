@@ -1,4 +1,5 @@
 <script lang="ts">
+	import CoursewareLink from './CoursewareLink.svelte';
 	import { toast } from 'svelte-sonner';
 	import { v4 as uuidv4 } from 'uuid';
 	import Sortable from 'sortablejs';
@@ -1146,6 +1147,8 @@
 						</Tooltip>
 					</div>
 
+					<CoursewareLink collapsed />
+
 					{#each pinnedItems as itemId (itemId)}
 						{@const meta = getMenuItemMeta(itemId)}
 						{#if meta && isMenuItemVisible(itemId)}
@@ -1400,6 +1403,8 @@
 								<HotkeyHint name="search" className=" hover-reveal " />
 							</button>
 						</div>
+
+						<CoursewareLink />
 
 						<div id="pinned-menu-items-list">
 							{#each pinnedItems as itemId (itemId)}

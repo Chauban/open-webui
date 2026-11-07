@@ -164,6 +164,7 @@ from open_webui.routers import (
     channels,
     chats,
     configs,
+    courseware,
     evaluations,
     files,
     folders,
@@ -848,6 +849,7 @@ app.include_router(skills.router, prefix='/api/v1/skills', tags=['skills'])
 app.include_router(memories.router, prefix='/api/v1/memories', tags=['memories'])
 app.include_router(folders.router, prefix='/api/v1/folders', tags=['folders'])
 app.include_router(groups.router, prefix='/api/v1/groups', tags=['groups'])
+app.include_router(courseware.router, prefix='/api/v1/courseware', tags=['courseware'])
 app.include_router(files.router, prefix='/api/v1/files', tags=['files'])
 app.include_router(functions.router, prefix='/api/v1/functions', tags=['functions'])
 app.include_router(evaluations.router, prefix='/api/v1/evaluations', tags=['evaluations'])
@@ -2341,6 +2343,7 @@ async def get_app_config(request: Request):
                     'enable_calendar': config.get('calendar.enable'),
                     'enable_automations': config.get('automations.enable'),
                     'enable_notes': config.get('notes.enable'),
+                    'enable_courseware': courseware.is_enabled(),
                     'enable_context_compaction': config.get('chat.context_compaction.enable'),
                     'enable_tool_permissions': config.get('chat.tool_permissions.enable'),
                     'enable_web_search': config.get('web.search.enable'),
