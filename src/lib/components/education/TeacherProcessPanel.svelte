@@ -272,14 +272,21 @@
 							<div class="mb-2 flex items-center justify-between gap-2 text-xs text-gray-500">
 								<strong>{row.event.meta}</strong><span>{formatEpochTime(row.time)}</span>
 							</div>
-							{#if row.event.role === 'assistant' && row.event.thinking_level}<p
-									class="mb-2 text-xs text-gray-500"
-								>
-									{$i18n.t('Thinking: {{level}}', {
-										level: $i18n.t(
-											THINKING_SETTING_TEXT[row.event.thinking_level] ?? row.event.thinking_level
-										)
-									})}
+							{#if row.event.role === 'assistant'}<p class="mb-2 text-xs text-gray-500">
+									<span class="break-words"
+										>{$i18n.t('Model: {{model}}', {
+											model: row.event.model_id ?? $i18n.t('Model not recorded')
+										})}</span
+									>
+									<span aria-hidden="true"> · </span>
+									{row.event.thinking_level
+										? $i18n.t('Thinking: {{level}}', {
+												level: $i18n.t(
+													THINKING_SETTING_TEXT[row.event.thinking_level] ??
+														row.event.thinking_level
+												)
+											})
+										: $i18n.t('Thinking level not recorded')}
 								</p>{/if}
 							<div
 								class="prose prose-sm max-w-none break-words dark:prose-invert {row.event.label

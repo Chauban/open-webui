@@ -120,7 +120,7 @@ def test_assignment_api_follows_the_delegation(education_client):
     UserContext.current_user = teacher
     assert client.get('/api/v1/teacher/assignment-defaults').json()['thinking'] == {
         'control': 'admin',
-        'default': 'model_default',
+        'default': 'medium',
     }
     _, res = _create_assignment(client, teacher, {'thinking': 'off'}, title='Locked')
     assert res.status_code == 400, res.text
@@ -359,6 +359,9 @@ def test_coaching_chat_retries_follow_the_retry_scopes(education_client, monkeyp
     )
     client = education_client[0]
     UserContext.current_user = student
+    assert client.post('/api/v1/me/writing/personal', json={'title': '学生个人写作已关闭'}).status_code == 403
+    teacher = education_client[1]
+    UserContext.current_user = teacher
     personal = client.post('/api/v1/me/writing/personal', json={'title': '随笔'})
     assert personal.status_code == 200, personal.text
     personal_folder = personal.json()['project']['id']
@@ -374,18 +377,26 @@ def test_coaching_chat_retries_follow_the_retry_scopes(education_client, monkeyp
     monkeypatch.setattr(webui_main, 'publish_event', no_event)
     monkeypatch.setattr(webui_main, 'emit_chat_list_event', capture)
 
-    def retries(folder):
+    def retries(folder, actor):
         body = _chat_body(folder)
         body['id'] = f'assistant-{uuid.uuid4()}'
         if folder is None:
             body.pop('folder_id')
         with pytest.raises(HTTPException):
-            asyncio.run(webui_main.chat_completion(_chat_request({}), body, student, client_request=True))
+            asyncio.run(webui_main.chat_completion(_chat_request({}), body, actor, client_request=True))
         return flags[-1]
 
-    assert [retries(assignment_folder), retries(personal_folder), retries(None)] == [True, False, False]
+    assert [retries(assignment_folder, student), retries(personal_folder, teacher), retries(None, teacher)] == [
+        True,
+        False,
+        False,
+    ]
     asyncio.run(Config.upsert({'education.auto_retry': {'personal_writing': True}}))
-    assert [retries(assignment_folder), retries(personal_folder), retries(None)] == [True, True, False]
+    assert [retries(assignment_folder, student), retries(personal_folder, teacher), retries(None, teacher)] == [
+        True,
+        True,
+        False,
+    ]
 
 
 def test_admin_toggles_are_exactly_the_policy_fields():

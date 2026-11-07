@@ -4444,7 +4444,7 @@
 	"查看整段阅读意见": "View the full reading notes",
 	"查看辅导方式": "View coaching approach",
 	"正在写作": "Writing in progress",
-	"正在阅读，你可以继续写作或提交。": "Reading now. You can keep writing or submit.",
+	"AI 正在阅读，暂时无法编辑或提交，完成后自动恢复。": "AI is reading. Editing and submission will resume automatically when finished.",
 	"此作业类型未获授权，不能复制。请联系管理员。": "You cannot copy this assignment type without authorization. Contact an administrator.",
 	"没有反思题，学生可直接确认提交。": "No reflection questions. Students may confirm and submit directly.",
 	"要求版本": "Requirements version",
@@ -4501,5 +4501,9 @@
 	"稿件或评阅已更新，你的批改草稿已保留供参考。请重新核对后保存。": "The submission or review changed. Your review draft is preserved for reference. Check the latest submission before saving.",
 	"查看保留的批改草稿": "View preserved review draft",
 	"重新载入最新提交": "Reload latest submission",
-	"清除参考草稿": "Clear reference draft"
+	"清除参考草稿": "Clear reference draft",
+	"Model not recorded": "Model not recorded",
+	"No AI model usage recorded": "No AI model usage recorded",
+	"Thinking level not recorded": "Thinking level not recorded",
+	"Model: {{model}}": "Model: {{model}}"
 }

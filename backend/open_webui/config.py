@@ -2776,14 +2776,15 @@ DEFAULT_EDUCATION_TASK_PROMPTS = {
 # 教学各 AI 步骤的模型与思考档位默认值,结构与校验见 services/education/ai_steps.py。
 # model 为空:通读、试读用学生选的模型,班级归纳用老师选的;图片识别为空即不提供图片导入。
 # 只有辅导对话的思考可交给教师;图片识别默认关思考,转录用不上。
+# 平台 medium 对应 DeepSeek 官方 high（平台 high 会发 max）；2026-11-07 对照后固定此默认。
 DEFAULT_EDUCATION_AI_STEPS = {
-    'coaching_chat': {'control': 'admin', 'default': 'model_default'},
-    'first_read': {'model': None, 'thinking': 'model_default'},
-    'revision_review': {'model': None, 'thinking': 'model_default'},
-    'whole_review': {'model': None, 'thinking': 'model_default'},
-    'reader_check': {'model': None, 'thinking': 'model_default'},
+    'coaching_chat': {'control': 'admin', 'default': 'medium'},
+    'first_read': {'model': None, 'thinking': 'medium'},
+    'revision_review': {'model': None, 'thinking': 'medium'},
+    'whole_review': {'model': None, 'thinking': 'medium'},
+    'reader_check': {'model': None, 'thinking': 'medium'},
     'image_parsing': {'model': None, 'thinking': 'off'},
-    'class_insight': {'model': None, 'thinking': 'model_default'},
+    'class_insight': {'model': None, 'thinking': 'medium'},
 }
 
 # 管理员能开关的自动重发(服务商一时出错时),结构见 services/education/ai_steps.py 的 RETRY_SCOPES。

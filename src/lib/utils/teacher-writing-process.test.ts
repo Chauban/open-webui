@@ -1,6 +1,10 @@
 import { expect, test } from 'vitest';
 import type { RevisionReading } from '$lib/apis/education';
-import { teacherConversationEvents, teacherPromptLabel } from './teacher-writing-process';
+import {
+	teacherConversationEvents,
+	teacherModelUsage,
+	teacherPromptLabel
+} from './teacher-writing-process';
 const t = (s: string) => s;
 const reading = {
 	id: 'r1',
@@ -8,6 +12,7 @@ const reading = {
 	created_at: 1,
 	source_text: '初稿',
 	thinking: 'low',
+	model_id: 'reader-model',
 	context: { description_version: 1, teaching_version: 1 },
 	feedback: {
 		understanding: '我读到的判断',
@@ -38,6 +43,51 @@ test('初读与后续交流合在同一时间线，冻结快照优先且不使�
 	expect(events[2].source?.text).toBe('本轮冻结的改稿');
 	expect(events[0].label).toContain('证据问题');
 	expect(events[1].source).toBeNull();
+});
+
+test('逐次模型切换与平台阅读分开汇总，缺失模型不按其他回复猜补', () => {
+	const events = teacherConversationEvents(
+		[
+			{ id: 'u', role: 'user', content: '问题', model_id: 'not-an-ai-reply' },
+			{
+				id: 'a1',
+				role: 'assistant',
+				content: '回复1',
+				model_id: 'deepseek-flash',
+				thinking_level: 'medium'
+			},
+			{
+				id: 'a2',
+				role: 'assistant',
+				content: '回复2',
+				model_id: 'other-model',
+				thinking_level: 'off'
+			},
+			{ id: 'a3', role: 'assistant', content: '回复3', model_id: 'deepseek-flash' },
+			{ id: 'a4', role: 'assistant', content: '未记录模型的回复' }
+		],
+		[reading],
+		[],
+		t
+	);
+	expect(events.find((e) => e.key === 'prompt:a1')).toMatchObject({
+		model_id: 'deepseek-flash',
+		thinking_level: 'medium',
+		ai_step: 'coaching_chat'
+	});
+	expect(events.find((e) => e.key === 'prompt:a2')).toMatchObject({
+		model_id: 'other-model',
+		thinking_level: 'off'
+	});
+	expect(events.find((e) => e.key === 'reading:r1')).toMatchObject({
+		model_id: 'reader-model',
+		ai_step: 'first_read'
+	});
+	expect(teacherModelUsage(events, [{ step: 'reader_check', model_id: 'check-model' }])).toEqual([
+		{ step: 'coaching_chat', models: ['deepseek-flash', 'other-model', null] },
+		{ step: 'first_read', models: ['reader-model'] },
+		{ step: 'reader_check', models: ['check-model'] }
+	]);
 });
 test('区分快捷请求、自己输入的说明和未记录具体动作的预设消息', () => {
 	expect(

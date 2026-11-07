@@ -33,6 +33,7 @@
 	import EduButton from '$lib/components/education/EduButton.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 	import ReflectionAnswerForm from '$lib/components/education/ReflectionAnswerForm.svelte';
+	import ReadingLock from '$lib/components/education/ReadingLock.svelte';
 	import DraftBaselineStep from '$lib/components/education/DraftBaselineStep.svelte';
 	import EditorImportDialog from '$lib/components/education/EditorImportDialog.svelte';
 	import ThinkingSwitch from '$lib/components/education/ThinkingSwitch.svelte';
@@ -193,6 +194,7 @@
 		!!writingSession?.draft_baseline_at &&
 		!isReadOnly &&
 		!isSubmitted &&
+		!readingLocked &&
 		!review;
 	let showWithdrawDraftConfirm = false;
 	let withdrawingDraft = false;
@@ -204,7 +206,7 @@
 		}
 	];
 	const withdrawDraft = async () => {
-		if (withdrawingDraft || !writingSession) return;
+		if (withdrawingDraft || !writingSession || readingLocked) return;
 		// 正在存的那一笔落库前删掉会被它写回来,等它存完再撤。
 		if (saving) {
 			toast.info($i18n.t('Saving. Please try again in a moment.'));
@@ -238,6 +240,12 @@
 
 	let readings: RevisionReading[] = [];
 	let readingBusy = false;
+	let chatReadingBusy = false;
+	$: readingLocked =
+		hasRevisionCoaching &&
+		!isReadOnly &&
+		(readingBusy || chatReadingBusy || readings.some((record) => record.status === 'running'));
+	$: editorLocked = isReadOnly || readingLocked;
 	let revisionTimer: ReturnType<typeof setTimeout> | null = null;
 	$: hasRevisionCoaching =
 		isAssignment && isRevision(assignment?.task_mode) && !!writingSession?.draft_baseline_at;
@@ -638,7 +646,7 @@
 		// 只看 docChanged 会把它当成学生清空全文：整篇记一次删除、source map
 		// 被清掉，回填后又整体标成 user_typed，还会喂出假的「疑似未标注导入」。
 		// 挡掉这两类之后，剩下的空文档就真是学生全选删光，如实留痕。
-		if (isReadOnly || !content.docChanged || content.programmatic) return;
+		if (editorLocked || !content.docChanged || content.programmatic) return;
 		const nextText = content.text ?? content.md ?? '';
 
 		noteJson = content.json;
@@ -686,7 +694,7 @@
 	};
 
 	const insertAssistantContent = async (message) => {
-		if (isReadOnly || !editor) return;
+		if (editorLocked || !editor) return;
 		const preparedContent = prepareAssistantContentForWriting({
 			content: `${message.content ?? ''}`
 		});
@@ -707,7 +715,7 @@
 	$: canImportIntoEditor = isAssignment && assignment?.task_mode === 'from_scratch' && !isReadOnly;
 
 	const insertImportedText = (text: string, mode: 'insert' | 'replace', info: ImportInfo) => {
-		if (isReadOnly || !editor) return;
+		if (editorLocked || !editor) return;
 		const html = importedTextToHtml(text);
 		if (!html) return;
 		pendingSource = {
@@ -823,13 +831,14 @@
 		saveReflectionDraft();
 	};
 	const openSubmitFlow = async () => {
+		if (readingLocked) return;
 		try {
 			await refreshSubmissionSettings();
 		} catch (error) {
 			toast.error(resolveErrorMessage(error, t));
 			return;
 		}
-		if (!canSubmitAssignment) return;
+		if (!canSubmitAssignment || readingLocked) return;
 		if (!challengeEnabled || challengeSettledThisRound) {
 			showSubmitModal = true;
 			return;
@@ -861,7 +870,7 @@
 	};
 
 	const submit = async () => {
-		if (!canSubmitAssignment || isSubmitting) return;
+		if (!canSubmitAssignment || readingLocked || isSubmitting) return;
 		const reflectionError = getReflectionAnswersError(
 			reflectionQuestions,
 			aiUsage,
@@ -879,6 +888,8 @@
 				toast.error($i18n.t('Save failed. Fix the connection before submitting.'));
 				return;
 			}
+
+			if (readingLocked) return;
 
 			await submitAssignment(localStorage.token, assignment.id, {
 				writing_session_id: writingSession.id,
@@ -1029,6 +1040,7 @@
 		revisionMode={hasRevisionCoaching}
 		revisionReadings={readings}
 		{readingBusy}
+		bind:revisionResponseBusy={chatReadingBusy}
 		onRetryReading={runReading}
 		revisionDraftText={noteText}
 		revisionBaselineText={writingSession?.draft_baseline_text ?? ''}
@@ -1142,6 +1154,7 @@
 							{/if}
 							{#if canSubmitAssignment}
 								<EduButton
+									disabled={readingLocked}
 									variant="primary"
 									on:click={() => {
 										loadReflectionDraft();
@@ -1169,7 +1182,7 @@
 					{:else}
 						{#if isAssignment}
 							<AssignmentBrief {assignment} />
-							{#if hasRevisionCoaching && !isReadOnly && !isSubmitted}
+							{#if hasRevisionCoaching && !isReadOnly && !isSubmitted && !readingLocked}
 								<p class="mt-2 text-xs leading-relaxed text-gray-500">
 									{$i18n.t('初稿已保存，还未交作业。你可以边聊边改，完成后点击「提交作业」。')}
 								</p>
@@ -1193,74 +1206,76 @@
 					{/if}
 				</div>
 			</div>
-			<div
-				class="min-h-0 flex-1 overflow-y-auto px-5 py-5 {needsDraftBaseline
-					? 'flex flex-col !overflow-hidden'
-					: ''}"
-			>
+			<ReadingLock locked={readingLocked}>
 				<div
-					class="mx-auto w-full {WRITING_COLUMN} {needsDraftBaseline
-						? 'flex min-h-0 flex-1 flex-col'
+					class="min-h-0 flex-1 overflow-y-auto px-5 py-5 {needsDraftBaseline
+						? 'flex flex-col !overflow-hidden'
 						: ''}"
 				>
-					{#if isAssignment && review}
-						<ReviewResultCard {review} {assignment} onRevise={null} />
-					{/if}
-					{#if showComposition}
-						<WritingComposition {sourceRuns} {clarificationAnsweredCount} />
-					{/if}
-					{#if needsDraftBaseline}
-						<DraftBaselineStep
-							sessionId={writingSession.id}
-							onSubmitted={onDraftBaselineSubmitted}
-						/>
-					{:else}
-						{#if canImportIntoEditor}
-							<div class="mb-2 flex justify-end">
-								<EduButton size="sm" on:click={() => (showImportDialog = true)}>
-									{$i18n.t('Import from file or images')}
-								</EduButton>
-							</div>
+					<div
+						class="mx-auto w-full {WRITING_COLUMN} {needsDraftBaseline
+							? 'flex min-h-0 flex-1 flex-col'
+							: ''}"
+					>
+						{#if isAssignment && review}
+							<ReviewResultCard {review} {assignment} onRevise={null} />
 						{/if}
-						<RichTextInput
-							bind:editor
-							bind:value={noteJson}
-							editable={!isReadOnly}
-							json={true}
-							placeholder={$i18n.t(
-								isAssignment ? 'Write the final assignment here.' : 'Start writing...'
-							)}
-							className="input-prose min-h-[70vh] [&>.tiptap]:min-h-[inherit]"
-							onChange={handleContentChange}
-							on:paste={async (event) => {
-								const clipboardEvent = event?.detail?.event ?? event;
-								const payload =
-									clipboardEvent?.clipboardData?.getData(
-										'application/x-openwebui-ai-snippet+json'
-									) ?? '';
-								if (!payload) {
-									pendingSource = {
-										sourceType: 'external_paste',
-										sourceMessageId: null,
-										text: ''
-									};
-									return;
-								}
-								try {
-									const meta = JSON.parse(payload);
-									pendingSource = {
-										sourceType: meta.sourceType ?? 'ai_pasted',
-										sourceMessageId: meta.sourceMessageId ?? null,
-										text: meta.text ?? ''
-									};
-								} catch (error) {
-									console.error(error);
-								}
-							}}
-						/>
-					{/if}
+						{#if showComposition}
+							<WritingComposition {sourceRuns} {clarificationAnsweredCount} />
+						{/if}
+						{#if needsDraftBaseline}
+							<DraftBaselineStep
+								sessionId={writingSession.id}
+								onSubmitted={onDraftBaselineSubmitted}
+							/>
+						{:else}
+							{#if canImportIntoEditor}
+								<div class="mb-2 flex justify-end">
+									<EduButton size="sm" on:click={() => (showImportDialog = true)}>
+										{$i18n.t('Import from file or images')}
+									</EduButton>
+								</div>
+							{/if}
+							<RichTextInput
+								bind:editor
+								bind:value={noteJson}
+								editable={!editorLocked}
+								json={true}
+								placeholder={$i18n.t(
+									isAssignment ? 'Write the final assignment here.' : 'Start writing...'
+								)}
+								className="input-prose min-h-[70vh] [&>.tiptap]:min-h-[inherit]"
+								onChange={handleContentChange}
+								on:paste={async (event) => {
+									const clipboardEvent = event?.detail?.event ?? event;
+									const payload =
+										clipboardEvent?.clipboardData?.getData(
+											'application/x-openwebui-ai-snippet+json'
+										) ?? '';
+									if (!payload) {
+										pendingSource = {
+											sourceType: 'external_paste',
+											sourceMessageId: null,
+											text: ''
+										};
+										return;
+									}
+									try {
+										const meta = JSON.parse(payload);
+										pendingSource = {
+											sourceType: meta.sourceType ?? 'ai_pasted',
+											sourceMessageId: meta.sourceMessageId ?? null,
+											text: meta.text ?? ''
+										};
+									} catch (error) {
+										console.error(error);
+									}
+								}}
+							/>
+						{/if}
+					</div>
 				</div>
-			</div>
+			</ReadingLock>
 		</div>
 	</Chat>
 
@@ -1286,6 +1301,7 @@
 				</EduButton>
 				{#if canSubmitAssignment}
 					<EduButton
+						disabled={readingLocked}
 						variant="primary"
 						size="sm"
 						on:click={() => {
@@ -1325,6 +1341,7 @@
 						</div>
 						{#if canSubmitAssignment}
 							<EduButton
+								disabled={readingLocked}
 								size="sm"
 								variant="primary"
 								on:click={() => {
@@ -1361,7 +1378,7 @@
 					{:else}
 						{#if isAssignment}
 							<AssignmentBrief {assignment} />
-							{#if hasRevisionCoaching && !isReadOnly && !isSubmitted}
+							{#if hasRevisionCoaching && !isReadOnly && !isSubmitted && !readingLocked}
 								<p class="mt-2 text-xs leading-relaxed text-gray-500">
 									{$i18n.t('初稿已保存，还未交作业。你可以边聊边改，完成后点击「提交作业」。')}
 								</p>
@@ -1384,68 +1401,70 @@
 						{/if}
 					{/if}
 				</div>
-				<div
-					class="min-h-0 flex-1 overflow-y-auto px-5 py-5 {needsDraftBaseline
-						? 'flex flex-col !overflow-hidden'
-						: ''}"
-				>
-					{#if isAssignment && review}
-						<ReviewResultCard {review} {assignment} onRevise={null} />
-					{/if}
-					{#if showComposition}
-						<WritingComposition {sourceRuns} {clarificationAnsweredCount} />
-					{/if}
-					{#if needsDraftBaseline}
-						<DraftBaselineStep
-							sessionId={writingSession.id}
-							onSubmitted={onDraftBaselineSubmitted}
-						/>
-					{:else}
-						{#if canImportIntoEditor}
-							<div class="mb-2 flex justify-end">
-								<EduButton size="sm" on:click={() => (showImportDialog = true)}>
-									{$i18n.t('Import from file or images')}
-								</EduButton>
-							</div>
+				<ReadingLock locked={readingLocked}>
+					<div
+						class="min-h-0 flex-1 overflow-y-auto px-5 py-5 {needsDraftBaseline
+							? 'flex flex-col !overflow-hidden'
+							: ''}"
+					>
+						{#if isAssignment && review}
+							<ReviewResultCard {review} {assignment} onRevise={null} />
 						{/if}
-						<RichTextInput
-							bind:editor
-							bind:value={noteJson}
-							editable={!isReadOnly}
-							json={true}
-							placeholder={$i18n.t(
-								isAssignment ? 'Write the final assignment here.' : 'Start writing...'
-							)}
-							className="input-prose min-h-[60vh] [&>.tiptap]:min-h-[inherit]"
-							onChange={handleContentChange}
-							on:paste={async (event) => {
-								const clipboardEvent = event?.detail?.event ?? event;
-								const payload =
-									clipboardEvent?.clipboardData?.getData(
-										'application/x-openwebui-ai-snippet+json'
-									) ?? '';
-								if (!payload) {
-									pendingSource = {
-										sourceType: 'external_paste',
-										sourceMessageId: null,
-										text: ''
-									};
-									return;
-								}
-								try {
-									const meta = JSON.parse(payload);
-									pendingSource = {
-										sourceType: meta.sourceType ?? 'ai_pasted',
-										sourceMessageId: meta.sourceMessageId ?? null,
-										text: meta.text ?? ''
-									};
-								} catch (error) {
-									console.error(error);
-								}
-							}}
-						/>
-					{/if}
-				</div>
+						{#if showComposition}
+							<WritingComposition {sourceRuns} {clarificationAnsweredCount} />
+						{/if}
+						{#if needsDraftBaseline}
+							<DraftBaselineStep
+								sessionId={writingSession.id}
+								onSubmitted={onDraftBaselineSubmitted}
+							/>
+						{:else}
+							{#if canImportIntoEditor}
+								<div class="mb-2 flex justify-end">
+									<EduButton size="sm" on:click={() => (showImportDialog = true)}>
+										{$i18n.t('Import from file or images')}
+									</EduButton>
+								</div>
+							{/if}
+							<RichTextInput
+								bind:editor
+								bind:value={noteJson}
+								editable={!editorLocked}
+								json={true}
+								placeholder={$i18n.t(
+									isAssignment ? 'Write the final assignment here.' : 'Start writing...'
+								)}
+								className="input-prose min-h-[60vh] [&>.tiptap]:min-h-[inherit]"
+								onChange={handleContentChange}
+								on:paste={async (event) => {
+									const clipboardEvent = event?.detail?.event ?? event;
+									const payload =
+										clipboardEvent?.clipboardData?.getData(
+											'application/x-openwebui-ai-snippet+json'
+										) ?? '';
+									if (!payload) {
+										pendingSource = {
+											sourceType: 'external_paste',
+											sourceMessageId: null,
+											text: ''
+										};
+										return;
+									}
+									try {
+										const meta = JSON.parse(payload);
+										pendingSource = {
+											sourceType: meta.sourceType ?? 'ai_pasted',
+											sourceMessageId: meta.sourceMessageId ?? null,
+											text: meta.text ?? ''
+										};
+									} catch (error) {
+										console.error(error);
+									}
+								}}
+							/>
+						{/if}
+					</div>
+				</ReadingLock>
 			</div>
 		</div>
 	{/if}
@@ -1552,7 +1571,7 @@
 					<EduButton
 						variant="primary"
 						class="flex items-center gap-2 disabled:cursor-not-allowed"
-						disabled={isSubmitting}
+						disabled={isSubmitting || readingLocked}
 						on:click={submit}
 					>
 						{#if isSubmitting}

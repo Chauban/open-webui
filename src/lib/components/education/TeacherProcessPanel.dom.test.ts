@@ -55,6 +55,8 @@ test('交流定位实际稿件，版本对照和按期间看交流共享选择',
 					label: '反馈内容',
 					created_at: 2,
 					thinking_level: null,
+					model_id: 'frozen-chat-model',
+					ai_step: 'coaching_chat',
 					inserted_length: null,
 					source: null
 				},
@@ -66,6 +68,8 @@ test('交流定位实际稿件，版本对照和按期间看交流共享选择',
 					label: '稍后的交流',
 					created_at: 3,
 					thinking_level: null,
+					model_id: null,
+					ai_step: null,
 					inserted_length: null,
 					source: null
 				}
@@ -74,6 +78,8 @@ test('交流定位实际稿件，版本对照和按期间看交流共享选择',
 		context
 	});
 	await screen.findByTestId('process-snapshot-v1');
+	expect(screen.getByText('Model: frozen-chat-model')).toBeTruthy();
+	expect(screen.getByText('Thinking level not recorded')).toBeTruthy();
 	expect(screen.queryByTestId('process-snapshot-hidden')).toBeNull();
 	await fireEvent.click(screen.getByRole('button', { name: '查看稿件：AI 回复' }));
 	expect(inspect).toHaveBeenLastCalledWith({ beforeId: 'v1', afterId: 'v1', mode: 'snapshot' });

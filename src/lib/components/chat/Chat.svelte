@@ -248,6 +248,9 @@
 	export let reserveWorkspaceActions = false;
 	export let revisionReadings: RevisionReading[] = [];
 	export let readingBusy = false;
+	export let revisionResponseBusy = false;
+	$: revisionResponseBusy =
+		revisionMode && Boolean(sendingRevision || generating || revisionReplyPending);
 	export let onRetryReading: (purpose: ReadingPurpose) => void = () => {};
 	export let revisionDraftText = '';
 	export let revisionBaselineText = '';

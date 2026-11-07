@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { isRevision } from '$lib/utils/task-types';
 	import TeacherProcessPanel from '$lib/components/education/TeacherProcessPanel.svelte';
+	import TeacherModelSummary from '$lib/components/education/TeacherModelSummary.svelte';
 	import ProcessDraftView from '$lib/components/education/ProcessDraftView.svelte';
 	import { initialProcessState, type ProcessInspection } from '$lib/utils/process-review';
-	import type { SubmissionProcess } from '$lib/apis/education';
-	import { teacherConversationEvents } from '$lib/utils/teacher-writing-process';
+	import type { AiStepKey, SubmissionProcess } from '$lib/apis/education';
+	import { teacherConversationEvents, teacherModelUsage } from '$lib/utils/teacher-writing-process';
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 	import { getContext, onMount, tick } from 'svelte';
@@ -14,7 +15,7 @@
 	import { createLatestRequestGate } from '$lib/utils/latest-request';
 	import { goto } from '$app/navigation';
 	import { get } from 'svelte/store';
-	import { config, models, user } from '$lib/stores';
+	import { config, user } from '$lib/stores';
 
 	import {
 		getSubmissionAnalysisSegmentDetail,
@@ -291,22 +292,21 @@
 	// 本轮辅导对话的思考档位(提交时冻存)。学生可开关时每条回复另记实际档位,时间线上逐条标出。
 	$: roundThinking = roundCoaching?.thinking ?? null;
 	$: showReplyThinking = Boolean(roundThinking?.students_choose);
-	// 本轮各平台步骤实际用的模型(提交时冻存);老师未必看得到管理员指定的模型,名称取不到就显示 id。
+	// 模型标识取提交时的事实，不用当前模型列表重新解释历史记录。
 	$: roundStepModels = [
 		{
-			label: 'First read',
-			model: detail?.submission?.stats_json?.revision_items?.models?.first_read
+			step: 'first_read',
+			model_id: detail?.submission?.stats_json?.revision_items?.models?.first_read
 		},
 		{
-			label: 'Follow-up review',
-			model: detail?.submission?.stats_json?.revision_items?.models?.follow_up
+			step: 'revision_review',
+			model_id: detail?.submission?.stats_json?.revision_items?.models?.follow_up
 		},
 		...(detail?.submission?.stats_json?.challenge?.models ?? []).map((model) => ({
-			label: 'AI reader check',
-			model
+			step: 'reader_check',
+			model_id: model
 		}))
-	].filter((item) => item.model);
-	const modelName = (id: string) => $models?.find((model) => model.id === id)?.name ?? id;
+	].filter((item) => item.model_id) as Array<{ step: AiStepKey; model_id: string }>;
 	const THINKING_SOURCE_TEXT = {
 		admin: 'Administrator default',
 		teacher: 'Set for this assignment',
@@ -405,6 +405,7 @@
 		detail?.submission?.stats_json?.chat_contexts ?? [],
 		t
 	);
+	$: roundModelUsage = teacherModelUsage(conversationEvents, roundStepModels);
 	$: editingEvents = analysisTimeline
 		.filter((item) => item.event_type !== 'version')
 		.map((item, index) => ({
@@ -1371,6 +1372,7 @@
 							<!-- ── 分析 tab ── -->
 						{:else if activeTab === 'analysis'}
 							<div class="space-y-5 p-5">
+								<TeacherModelSummary usage={roundModelUsage} />
 								<!-- Segments -->
 								<div>
 									<div class="mb-3 flex items-center justify-between">
@@ -1693,27 +1695,6 @@
 												: $i18n.t(
 														'Frozen at submission time; later setting changes do not change it.'
 													)}
-										</div>
-									</div>
-								{/if}
-
-								<!-- Models the platform steps actually used this round, frozen at submission time -->
-								{#if roundStepModels.length > 0}
-									<div
-										class="rounded-2xl bg-gray-50 dark:bg-gray-800 px-4 py-4"
-										data-testid="round-step-models"
-									>
-										<div class="mb-2 text-[11px] text-gray-400">
-											{$i18n.t('AI models used this round')}
-										</div>
-										<div class="flex flex-wrap gap-2">
-											{#each roundStepModels as item}
-												<span
-													class="rounded-full border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-3 py-1 text-xs text-gray-700 dark:text-gray-300"
-												>
-													{$i18n.t(item.label)}: {modelName(item.model)}
-												</span>
-											{/each}
 										</div>
 									</div>
 								{/if}

@@ -13,5 +13,7 @@
 		aria-hidden="true"
 		class="size-5 shrink-0 animate-spin rounded-full border-2 border-sky-200 border-t-sky-600 motion-reduce:animate-none dark:border-sky-900 dark:border-t-sky-300"
 	></span>
-	<p class="text-xs leading-relaxed">{$i18n.t('正在阅读，你可以继续写作或提交。')}</p>
+	<p class="text-xs leading-relaxed">
+		{$i18n.t('AI 正在阅读，暂时无法编辑或提交，完成后自动恢复。')}
+	</p>
 </div>

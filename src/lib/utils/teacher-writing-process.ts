@@ -1,4 +1,4 @@
-import type { RevisionReading } from '$lib/apis/education';
+import type { AiStepKey, RevisionReading } from '$lib/apis/education';
 
 export type ReadingContext = {
 	source_text?: string;
@@ -15,6 +15,7 @@ type Prompt = {
 	auto_started?: boolean;
 	revision_review_requested?: boolean;
 	thinking_level?: string | null;
+	model_id?: string | null;
 	education_context?: ReadingContext;
 };
 export type SourceSnapshot = {
@@ -32,6 +33,8 @@ export type TeacherConversationEvent = {
 	meta: string;
 	created_at: number;
 	thinking_level: string | null;
+	model_id: string | null;
+	ai_step: AiStepKey | null;
 	inserted_length: null;
 	source: SourceSnapshot | null;
 	run?: undefined;
@@ -64,6 +67,8 @@ export const teacherConversationEvents = (
 			meta,
 			created_at: item.created_at ?? 0,
 			thinking_level: item.thinking_level ?? null,
+			model_id: item.role === 'assistant' ? (item.model_id ?? null) : null,
+			ai_step: item.role === 'assistant' ? 'coaching_chat' : null,
 			inserted_length: null,
 			source:
 				item.role === 'assistant' && typeof context?.source_text === 'string'
@@ -100,6 +105,8 @@ export const teacherConversationEvents = (
 			meta,
 			created_at: record.created_at,
 			thinking_level: record.thinking,
+			model_id: record.model_id,
+			ai_step: record.purpose,
 			inserted_length: null,
 			source: {
 				title: meta,
@@ -119,4 +126,25 @@ export const teacherConversationEvents = (
 					? -1
 					: 1)
 	);
+};
+
+export type TeacherModelUsage = { step: AiStepKey; models: Array<string | null> };
+
+/** Use only submitted evidence; never infer a past model from today's settings. */
+export const teacherModelUsage = (
+	events: TeacherConversationEvent[],
+	steps: Array<{ step: AiStepKey; model_id: string }> = []
+): TeacherModelUsage[] => {
+	const groups = new Map<AiStepKey, Set<string | null>>();
+	for (const item of [
+		...events
+			.filter((event) => event.role === 'assistant' && event.ai_step)
+			.map((event) => ({ step: event.ai_step!, model_id: event.model_id })),
+		...steps
+	]) {
+		const models = groups.get(item.step) ?? new Set<string | null>();
+		models.add(item.model_id);
+		groups.set(item.step, models);
+	}
+	return [...groups].map(([step, models]) => ({ step, models: [...models] }));
 };

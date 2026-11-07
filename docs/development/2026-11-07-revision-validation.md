@@ -47,6 +47,8 @@ backend/.venv/Scripts/python.exe -m pytest backend/open_webui/test/apps/webui/ro
 
 ## 独立网站实际模型试用
 
+后续按用户要求完成 [DeepSeek low / 官方 high 对照](2026-11-07-thinking-effort-comparison.md)：36 次受控重放加 2 次格式修正，保留相同输入与完整结果；这项对照不改变下述原网站试用的 low 配置和证据。
+
 本次使用运行中的网站路由和真实模型，不计入此前离线单轮盲测结果。模型 `deepseek-flash`，思考设置 low；在隔离实例显式开启该模型的思考控制并授权测试学生使用。模型级系统提示为空，修订未叠加通用辅导档位。
 
 [实际输入、输出、稿件、配置快照、阅读记录与冻结对话](assets/revision-trial-20261107/website-model-trial.json)；[文献综述额外回归](assets/revision-trial-20261107/literature-trial.json)。记录不含连接密钥。

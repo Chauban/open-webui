@@ -97,6 +97,18 @@ def test_default_policy_is_valid_and_matches_the_registry():
     assert {row.key: row.model_source for row in rows}['class_insight'] == 'teacher_chat_model'
 
 
+def test_teaching_defaults_send_deepseek_official_high_not_max():
+    from open_webui.utils.thinking import apply_thinking_level
+
+    for row in describe_steps(_policy(), {}):
+        if row.key == 'image_parsing':
+            assert row.thinking == 'off'
+            continue
+        payload = apply_thinking_level({'model': 'deepseek-flash'}, row.thinking, 'deepseek')
+        assert payload['thinking'] == {'type': 'enabled'}
+        assert payload['reasoning_effort'] == 'high'
+
+
 @pytest.mark.parametrize(
     'change',
     [

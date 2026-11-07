@@ -1169,7 +1169,7 @@
 										aria-label={$i18n.t(meta.label)}
 									>
 										<div
-											class="self-center flex size-[calc(30px*var(--app-text-scale,1))] items-center justify-center rounded-lg transition {itemId ===
+											class="relative self-center flex size-[calc(30px*var(--app-text-scale,1))] items-center justify-center rounded-lg transition {itemId ===
 											activeMenuItemId
 												? ($settings?.highContrastMode ?? false)
 													? 'bg-black/[0.035] dark:bg-white/[0.06]'
@@ -1465,21 +1465,21 @@
 														</svg>
 											
 												{/if}
-												{#if (itemId === 'writing' && studentUnread > 0) || (itemId === 'teaching' && teacherUnread > 0)}
-													{@const unread = itemId === 'writing' ? studentUnread : teacherUnread}
-													<span
-														class="absolute -top-0.5 -right-0.5 min-w-[1rem] h-4 px-1 rounded-full bg-rose-500 text-white text-[10px] flex items-center justify-center"
-													>
-														{unread > 99 ? '99+' : unread}
-													</span>
-												{/if}
 											</div>
 
-											<div class="flex self-center translate-y-[0.5px]">
+											<div class="flex min-w-0 flex-1 self-center translate-y-[0.5px]">
 												<div class=" self-center text-[0.8125rem] leading-5">
 													{$i18n.t(meta.label)}
 												</div>
 											</div>
+											{#if (itemId === 'writing' && studentUnread > 0) || (itemId === 'teaching' && teacherUnread > 0)}
+												{@const unread = itemId === 'writing' ? studentUnread : teacherUnread}
+												<span
+													class="shrink-0 min-w-[1rem] h-4 px-1 rounded-full bg-rose-500 text-white text-[10px] flex items-center justify-center"
+												>
+													{unread > 99 ? '99+' : unread}
+												</span>
+											{/if}
 										</a>
 									</div>
 								{/if}

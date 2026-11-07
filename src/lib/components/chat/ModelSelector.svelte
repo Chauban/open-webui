@@ -57,34 +57,49 @@
 	$: if (selectedModels.length > 1 && !compareModels) {
 		compareModels = true;
 	}
+
+	$: singleStudentModel =
+		$user?.education_role === 'student' && $models.length === 1 ? $models[0] : null;
+	$: if (singleStudentModel && !equal(selectedModels, [singleStudentModel.id])) {
+		selectedModels = [singleStudentModel.id];
+	}
 </script>
 
 <div class="flex min-w-0 max-w-full flex-col items-start">
 	<div class="flex min-w-0 max-w-full">
 		<div class="min-w-0 max-w-full overflow-hidden">
 			<div class="min-w-0 max-w-full">
-				<Selector
-					bind:this={selector}
-					id="model"
-					placeholder={$i18n.t('Select a model')}
-					items={$models.map((model) => ({
-						value: model.id,
-						label: model.name,
-						model: model
-					}))}
-					{pinModelHandler}
-					{className}
-					{triggerClassName}
-					{placement}
-					{align}
-					{showSetDefault}
-					onSetDefault={saveDefaultModel}
-					multipleEnabled={$user?.role === 'admin' ||
-						($user?.permissions?.chat?.multiple_models ?? true)}
-					{disabled}
-					bind:compareEnabled={compareModels}
-					bind:values={selectedModels}
-				/>
+				{#if singleStudentModel}
+					<span
+						class="block truncate px-2 py-1 text-[0.8125rem] text-gray-600 dark:text-gray-300"
+						title={singleStudentModel.name}
+						aria-label={$i18n.t('Model: {{model}}', { model: singleStudentModel.name })}
+						data-testid="single-student-model">{singleStudentModel.name}</span
+					>
+				{:else}
+					<Selector
+						bind:this={selector}
+						id="model"
+						placeholder={$i18n.t('Select a model')}
+						items={$models.map((model) => ({
+							value: model.id,
+							label: model.name,
+							model: model
+						}))}
+						{pinModelHandler}
+						{className}
+						{triggerClassName}
+						{placement}
+						{align}
+						{showSetDefault}
+						onSetDefault={saveDefaultModel}
+						multipleEnabled={$user?.role === 'admin' ||
+							($user?.permissions?.chat?.multiple_models ?? true)}
+						{disabled}
+						bind:compareEnabled={compareModels}
+						bind:values={selectedModels}
+					/>
+				{/if}
 			</div>
 		</div>
 	</div>
