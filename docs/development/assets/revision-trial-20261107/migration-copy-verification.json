@@ -1,0 +1,57 @@
+{
+  "before": {
+    "assignment": {
+      "count": 36,
+      "hash": "a929398788b1c3c53861e637c9fcf72cd2efbe951746d1a1df2f9ae974582083"
+    },
+    "submission": {
+      "count": 27,
+      "hash": "564e603e6a33e2fe1dc65c672e3a42b656152ad89518f7b831f4f04468081d43"
+    },
+    "micro_reflection": {
+      "count": 27,
+      "hash": "2febe5941cf4abee0f8cda9a4a025128e225922ace0f38247b6e97c4c5cc6a0b"
+    },
+    "submission_review": {
+      "count": 15,
+      "hash": "e274c67b477e292c7a77037dd57afb74e095e102470159ea77541f4a76f746c0"
+    },
+    "profile_evidence_snapshot": {
+      "count": 17,
+      "hash": "f9d7d5fda0aa0b153a35ac330b666c1d66ab9ecf08332b4f9bf6aa60e41d3aca"
+    },
+    "submission_review_event": {
+      "count": 9,
+      "hash": "60c88311eb00b3b9bc02aaf22b5ab55c405d0809e4dbf9fe1f07c0afb7232746"
+    },
+    "return_switch": "false"
+  },
+  "after": {
+    "assignment": {
+      "count": 36,
+      "hash": "49e3f3329d87aeb4db83f06ab4e30e1d8d031c2c70fa63553f5e9ea324d85b1d"
+    },
+    "submission": {
+      "count": 27,
+      "hash": "564e603e6a33e2fe1dc65c672e3a42b656152ad89518f7b831f4f04468081d43"
+    },
+    "micro_reflection": {
+      "count": 27,
+      "hash": "2febe5941cf4abee0f8cda9a4a025128e225922ace0f38247b6e97c4c5cc6a0b"
+    },
+    "submission_review": {
+      "count": 15,
+      "hash": "e274c67b477e292c7a77037dd57afb74e095e102470159ea77541f4a76f746c0"
+    },
+    "profile_evidence_snapshot": {
+      "count": 17,
+      "hash": "f9d7d5fda0aa0b153a35ac330b666c1d66ab9ecf08332b4f9bf6aa60e41d3aca"
+    },
+    "submission_review_event": {
+      "count": 9,
+      "hash": "60c88311eb00b3b9bc02aaf22b5ab55c405d0809e4dbf9fe1f07c0afb7232746"
+    },
+    "return_switch": "false"
+  },
+  "preserved": true
+}

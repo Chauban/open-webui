@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { isRevision } from '$lib/utils/task-types';
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 	import { getContext, onDestroy, onMount } from 'svelte';
@@ -79,13 +80,13 @@
 
 	$: scoped = Boolean(assignmentId);
 	// 修订初稿作业「用了 AI 吗」永远是用了(首轮通读是平台发起的)，这一列改看修改清单。
-	$: reviseCount = items.filter((item) => item.assignment.task_mode === 'revise_draft').length;
+	$: reviseCount = items.filter((item) => isRevision(item.assignment.task_mode)).length;
 	$: lastColumnLabel =
 		reviseCount === 0
 			? $i18n.t('AI Use')
 			: reviseCount === items.length
-				? $i18n.t('Revision list')
-				: $i18n.t('AI Use / Revision list');
+				? $i18n.t('修订记录')
+				: $i18n.t('AI 使用 / 修订记录');
 	// 作业下拉跟着班级走,选了班级就只列那个班的作业。
 	$: assignmentOptions = assignments.filter(
 		(item) => selectedClassroom === 'all' || item.classroom?.id === selectedClassroom
@@ -205,7 +206,10 @@
 <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
 	<div class="flex flex-wrap gap-2">
 		{#each STATUS_TABS.filter((tab) => tab.value !== 'returned' || $config?.features?.enable_education_return) as tab}
-			<button class={eduSegmentClass(status === tab.value)} on:click={() => selectStatus(tab.value)}>
+			<button
+				class={eduSegmentClass(status === tab.value)}
+				on:click={() => selectStatus(tab.value)}
+			>
 				{$i18n.t(tab.label)}
 			</button>
 		{/each}
@@ -230,7 +234,9 @@
 				>
 					<option value="all">{$i18n.t('All Classrooms')}</option>
 					{#each classrooms as item}
-						<option value={item.classroom.id}>{getClassroomDisplayName(item.classroom.name, t)}</option>
+						<option value={item.classroom.id}
+							>{getClassroomDisplayName(item.classroom.name, t)}</option
+						>
 					{/each}
 				</select>
 				<select
@@ -298,7 +304,9 @@
 	<EduCard padding="none">
 		<div class="overflow-x-auto">
 			<table class="w-full min-w-[44rem] text-sm">
-				<thead class="bg-gray-50 text-left text-xs text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+				<thead
+					class="bg-gray-50 text-left text-xs text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+				>
 					<tr>
 						<th class="px-4 py-2.5 font-medium">{$i18n.t('Student')}</th>
 						<th class="px-4 py-2.5 font-medium">{$i18n.t('Submitted At')}</th>
@@ -359,7 +367,7 @@
 								{/if}
 							</td>
 							<td class="px-4 py-3 text-gray-600 dark:text-gray-300">
-								{#if item.assignment.task_mode === 'revise_draft'}
+								{#if isRevision(item.assignment.task_mode)}
 									<RevisionOverviewCell overview={item.revision_overview} />
 								{:else}
 									<span class="whitespace-nowrap">

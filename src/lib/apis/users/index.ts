@@ -569,6 +569,7 @@ export const deleteUserById = async (token: string, userId: string) => {
 };
 
 type UserUpdateForm = {
+	assignment_types?: import('$lib/apis/education').TeacherTaskAccess;
 	role: string;
 	profile_image_url: string;
 	email: string;
@@ -648,6 +649,10 @@ export const updateUserById = async (token: string, userId: string, user: UserUp
 			name: user.name,
 			password: user.password !== '' ? user.password : undefined,
 			education_role: user.role === 'admin' ? undefined : user.education_role || undefined,
+			assignment_types:
+				user.role !== 'admin' && user.education_role === 'teacher'
+					? user.assignment_types
+					: undefined,
 			classroom_id:
 				user.role === 'admin' || user.education_role !== 'student'
 					? undefined

@@ -14,7 +14,11 @@
 		getTeacherClassrooms,
 		getTeacherReflectionQuestionSets
 	} from '$lib/apis/education';
-	import type { ReflectionQuestionSet, ThinkingControl, ThinkingSetting } from '$lib/apis/education';
+	import type {
+		ReflectionQuestionSet,
+		ThinkingControl,
+		ThinkingSetting
+	} from '$lib/apis/education';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import AssignmentForm from '$lib/components/education/AssignmentForm.svelte';
 	import EduButton from '$lib/components/education/EduButton.svelte';
@@ -25,6 +29,7 @@
 		getDefaultReflectionQuestions
 	} from '$lib/utils/reflection-questions';
 	import {
+		applyTeachingDefaults,
 		buildAssignmentPayload,
 		draftThinkingFrom,
 		getDefaultRubricCriteria,
@@ -37,12 +42,17 @@
 	const i18n = getContext<Writable<i18nType>>('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
 
+	let allowedTaskModes: import('$lib/apis/education').TaskMode[] = [];
+	let teachingConfigs: Partial<
+		Record<import('$lib/apis/education').TaskMode, import('$lib/apis/education').TeachingConfig>
+	> = {};
 	let classrooms = [];
 	let selectedClassroomIds = new Set<string>();
 	let reflectionQuestionSets: ReflectionQuestionSet[] = [];
 	let reflectionNotice = '';
 	// 默认维度走词条，教师看到的是母语名称；key 只是后端字段名，教师不填。
 	let draft: AssignmentDraft = {
+		scoringMode: 'dimensions',
 		title: '',
 		description: '',
 		dueAt: '',
@@ -77,33 +87,14 @@
 			]);
 			classrooms = teacherClassrooms;
 			// 档位和作业形式的初始值由管理员按实例设定；复制作业时下面会改用源作业的设置。
+			allowedTaskModes = assignmentDefaults.allowed_task_modes;
+			teachingConfigs = assignmentDefaults.teaching_configs;
 			draft.coachingStyle = assignmentDefaults.coaching_style;
-			draft.taskMode = assignmentDefaults.task_mode;
-			rubricDefaults = assignmentDefaults.rubrics ?? {};
 			thinkingPolicy = assignmentDefaults.thinking;
-			draft.rubricCriteria = getDefaultRubricCriteria(rubricDefaults, draft.taskMode, t);
-			draft.scoreMax = rubricTotal(draft.rubricCriteria);
+			rubricDefaults = assignmentDefaults.rubrics;
+			if (assignmentDefaults.task_mode)
+				draft = applyTeachingDefaults(draft, teachingConfigs[assignmentDefaults.task_mode]!);
 			reflectionQuestionSets = questionSets;
-			// 教师大多一门课一套反思，所以默认沿用最近一份作业的题；第一次出题才给推荐题。
-			// 上一份沿用的若只是另一种作业形式的默认题（没改过），换成这种形式的默认题，
-			// 免得从零写作的默认题带进修订初稿作业、和修改清单重复。
-			const carried =
-				questionSets.length > 0
-					? cloneReflectionQuestions(questionSets[0].questions)
-					: getDefaultReflectionQuestions(t, draft.taskMode);
-			const adapted = adaptDefaultReflectionQuestions(carried, t, draft.taskMode);
-			if (questionSets.length > 0 && adapted === carried) {
-				draft.reflectionQuestions = carried;
-				reflectionNotice = t(
-					'Pre-filled with the questions from your last assignment "{{title}}". Edit them, import another set, or restore defaults.',
-					{ title: questionSets[0].assignment_title }
-				);
-			} else {
-				draft.reflectionQuestions = adapted;
-				reflectionNotice = t(
-					'Pre-filled with recommended questions. Add, remove, or rewrite them to fit this assignment.'
-				);
-			}
 			const params = get(page).url.searchParams;
 			const presetClassroomId = params.get('classroomId');
 			const duplicateFromId = params.get('from');
@@ -114,7 +105,10 @@
 			if (duplicateFromId) {
 				try {
 					const source = await getTeacherAssignment(localStorage.token, duplicateFromId);
+					if (!allowedTaskModes.includes(source.assignment.task_mode))
+						throw new Error(t('此作业类型未获授权，不能复制。请联系管理员。'));
 					draft = {
+						scoringMode: source.assignment.scoring_mode,
 						title: source.assignment.title ?? '',
 						description: source.assignment.description ?? '',
 						dueAt: '',
@@ -145,7 +139,7 @@
 				}
 			}
 
-			if (presetChallengeFocus) {
+			if (presetChallengeFocus && allowedTaskModes.includes('from_scratch')) {
 				// 质疑式读者只有从零写作才有；实例默认是修订初稿时也要切回来，焦点才不会被丢掉。
 				if (draft.taskMode !== 'from_scratch' && !duplicateFromId) {
 					draft.rubricCriteria = getDefaultRubricCriteria(rubricDefaults, 'from_scratch', t);
@@ -176,6 +170,10 @@
 	});
 
 	const submit = async () => {
+		if (!allowedTaskModes.includes(draft.taskMode)) {
+			toast.error(t('请联系管理员开通可布置的作业类型。'));
+			return;
+		}
 		if (selectedClassroomIds.size === 0) {
 			toast.error(t('Classroom is required.'));
 			return;
@@ -198,7 +196,11 @@
 					? t('Assignment published to {{count}} classrooms.', { count: assignments.length })
 					: t('Assignment created.')
 			);
-			goto(assignments.length === 1 ? `/teacher/assignments/${assignments[0].id}` : '/teacher/assignments');
+			goto(
+				assignments.length === 1
+					? `/teacher/assignments/${assignments[0].id}`
+					: '/teacher/assignments'
+			);
 		} catch (error) {
 			toast.error(resolveErrorMessage(error, t));
 		} finally {
@@ -217,15 +219,18 @@
 			<EduStateCard tone="error">{loadError}</EduStateCard>
 		{:else if loading}
 			<EduStateCard>{$i18n.t('Loading classrooms...')}</EduStateCard>
+		{:else if !allowedTaskModes.length}
+			<EduStateCard>{$i18n.t('请联系管理员开通可布置的作业类型。')}</EduStateCard>
 		{:else}
 			<AssignmentForm
+				{allowedTaskModes}
+				{teachingConfigs}
 				bind:draft
 				bind:selectedClassroomIds
 				multiClassroom
 				{classrooms}
 				{reflectionQuestionSets}
 				{reflectionNotice}
-				{rubricDefaults}
 				{thinkingPolicy}
 			>
 				<div

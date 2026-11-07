@@ -14,11 +14,9 @@ export const AI_STEP_TEXT: Record<AiStepKey, { title: string; hint: string; note
 		title: 'Coaching chat',
 		hint: 'The chat in the student writing workspace.'
 	},
-	first_read: {
-		title: 'First read and follow-up review',
-		hint: 'Revise-a-draft assignments: the item-by-item read of the draft against the rubric, and the re-check of deferred items.',
-		note: 'In trial runs, turning thinking off here led to clearly more missed and wrong judgements.'
-	},
+	first_read: { title: '初次阅读', hint: '按独立教学标准阅读确认的初稿，不评分、不设置提交门槛。' },
+	revision_review: { title: '看看这次修改', hint: '对照保存稿与此前讨论，反馈实际改动。' },
+	whole_review: { title: '整段复看', hint: '检查当前全文的衔接与实质疑问，可跳过。' },
 	reader_check: {
 		title: 'AI reader check',
 		hint: 'The questions about the student’s text before submitting.'

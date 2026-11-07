@@ -24,6 +24,9 @@
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import AssignmentForm from '$lib/components/education/AssignmentForm.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
+	import Modal from '$lib/components/common/Modal.svelte';
+	import { taskTypeLabel } from '$lib/utils/task-types';
+	import { THINKING_SETTING_TEXT } from '$lib/utils/ai-steps';
 	import EduButton from '$lib/components/education/EduButton.svelte';
 	import EduCard from '$lib/components/education/EduCard.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
@@ -40,6 +43,13 @@
 
 	const assignmentId = $page.params.assignmentId;
 
+	let allowedTaskModes: import('$lib/apis/education').TaskMode[] = [];
+	let teachingConfigs = {};
+	let changeSummary = '';
+	let showSaveConfirm = false;
+	let pendingPayload: Parameters<typeof updateAssignment>[2] | null = null;
+	let changePreview: Array<{ label: string; before: string; after: string }> = [];
+	let adoptLatest = false;
 	let item = null;
 	let classrooms = [];
 	let reflectionQuestionSets: ReflectionQuestionSet[] = [];
@@ -59,6 +69,7 @@
 		const assignment = item.assignment;
 		classroomId = assignment.classroom_id || '';
 		draft = {
+			scoringMode: assignment.scoring_mode,
 			title: assignment.title || '',
 			description: assignment.description || '',
 			dueAt: assignment.due_at ? toLocalDateTimeInput(assignment.due_at) : '',
@@ -93,6 +104,8 @@
 				getTeacherAssignmentDefaults(localStorage.token)
 			]
 		);
+		allowedTaskModes = assignmentDefaults.allowed_task_modes;
+		teachingConfigs = assignmentDefaults.teaching_configs;
 		thinkingPolicy = assignmentDefaults.thinking;
 		classrooms = teacherClassrooms;
 		reflectionQuestionSets = questionSets;
@@ -110,12 +123,89 @@
 			toast.error(error);
 			return;
 		}
+		// The picker displays minutes. Editing another field must not round away
+		// seconds from an existing deadline created through the API.
+		if (draft.dueAt === toLocalDateTimeInput(item.assignment.due_at)) {
+			payload.due_at = item.assignment.due_at;
+		}
+		pendingPayload = {
+			...payload,
+			expected_config_revision: item.assignment.config_revision,
+			change_summary: changeSummary,
+			adopt_latest_teaching_config: adoptLatest,
+			classroom_id: classroomId
+		};
+		const labels = {
+			title: 'Assignment title',
+			description: 'Assignment description',
+			due_at: 'Due At',
+			score_max: 'Maximum Score',
+			scoring_mode: 'Scoring',
+			rubric_schema: 'Rubric',
+			reflection_questions: 'Reflection Before Submitting',
+			task_mode: 'Assignment type',
+			coaching_style: 'AI Coaching Style',
+			challenge_enabled: 'AI Reader Check Before Submitting',
+			challenge_rounds: 'Rounds',
+			challenge_focus_keys: 'Rubric',
+			model_params: 'AI Coaching',
+			classroom_id: 'Classroom'
+		};
+		const describe = (key: string, value: any) => {
+			if (value == null || value === '') return t('无');
+			if (key === 'due_at') return new Date(value * 1000).toLocaleString();
+			if (key === 'task_mode') return t(taskTypeLabel(value));
+			if (key === 'coaching_style')
+				return t({ socratic: 'Socratic', balanced: 'Balanced', hands_off: 'Hands-off' }[value]);
+			if (key === 'classroom_id')
+				return classrooms.find((item) => item.classroom.id === value)?.classroom.name ?? value;
+			if (key === 'scoring_mode') return t(value === 'total' ? '仅总分与总评' : '按维度评分');
+			if (key === 'rubric_schema')
+				return value.criteria.map((c) => `${c.label} · ${c.max_score}`).join('\n') || t('无');
+			if (key === 'reflection_questions')
+				return (
+					value
+						.map(
+							(q) =>
+								`${q.prompt} (${t(q.required ? 'Required' : 'Optional')})${q.options.length ? '\n' + q.options.join(' / ') : ''}`
+						)
+						.join('\n\n') || t('无')
+				);
+			if (typeof value === 'boolean') return t(value ? 'On' : 'Off');
+			if (key === 'challenge_focus_keys')
+				return value
+					.map((id) => draft.rubricCriteria.find((c) => c.key === id)?.label ?? id)
+					.join(' / ');
+			if (key === 'model_params')
+				return `${t(THINKING_SETTING_TEXT[value.thinking ?? 'model_default'])} · ${t(value.students_choose_thinking ? 'Students may turn thinking off' : 'Admin only')}`;
+			return String(value);
+		};
+		changePreview = Object.keys(labels)
+			.filter(
+				(key) =>
+					key in pendingPayload &&
+					JSON.stringify(pendingPayload[key]) !== JSON.stringify(item.assignment[key])
+			)
+			.map((key) => ({
+				label: t(labels[key]),
+				before: describe(key, item.assignment[key]),
+				after: describe(key, pendingPayload[key])
+			}));
+		if (adoptLatest)
+			changePreview.push({
+				label: t('AI 辅导说明'),
+				before: `v${item.assignment.teaching_config.version}`,
+				after: `v${teachingConfigs[draft.taskMode]?.version}`
+			});
+		showSaveConfirm = true;
+	};
+
+	const confirmSave = async () => {
+		if (!pendingPayload) return;
 		saving = true;
 		try {
-			await updateAssignment(localStorage.token, assignmentId, {
-				...payload,
-				classroom_id: classroomId
-			});
+			await updateAssignment(localStorage.token, assignmentId, pendingPayload);
+			showSaveConfirm = false;
 			await loadData();
 			aiSummaryVersion += 1;
 			toast.success(t('Assignment updated.'));
@@ -162,7 +252,22 @@
 			{#key aiSummaryVersion}
 				<AssignmentAiSummary {assignmentId} />
 			{/key}
+			<div class="mb-4 grid gap-2 text-sm">
+				<label
+					>{$i18n.t('变更说明（学生已开始后修改要求时必填）')}<textarea
+						class="mt-1 w-full rounded-xl dark:bg-gray-800"
+						bind:value={changeSummary}
+					></textarea></label
+				>
+				{#if !item.task_mode_locked}<label
+						><input type="checkbox" bind:checked={adoptLatest} />
+						{$i18n.t('采用该类型最新教学配置')}</label
+					>{/if}
+			</div>
 			<AssignmentForm
+				{allowedTaskModes}
+				{teachingConfigs}
+				teachingSnapshot={item.assignment.teaching_config}
 				bind:draft
 				bind:classroomId
 				{classrooms}
@@ -201,6 +306,46 @@
 			</AssignmentForm>
 		{/if}
 	</div>
+
+	<Modal size="lg" bind:show={showSaveConfirm}>
+		<div class="max-h-[85vh] overflow-y-auto p-6">
+			<h2 class="font-semibold">{$i18n.t('请核对本次修改')}</h2>
+			<p class="my-2 text-sm">
+				{$i18n.t('已开始但尚未提交')}：{item?.writing_count ?? 0}；{$i18n.t(
+					'已提交'
+				)}：{item?.submission_count ?? 0}
+			</p>
+			<p class="mb-3 text-xs text-gray-500">
+				{$i18n.t('新要求作用于之后的辅导与提交，历史记录保留原内容。')}
+			</p>
+			{#if pendingPayload?.due_at && pendingPayload.due_at < Date.now() / 1000}<p
+					class="mb-3 text-sm text-amber-700"
+				>
+					{$i18n.t('新的截止时间将立即停止尚未获得延期的学生写作。')}
+				</p>{/if}
+			{#each changePreview as change}
+				<section class="mb-4 rounded-xl border p-3 dark:border-gray-700">
+					<h3 class="mb-2 text-sm font-medium">{change.label}</h3>
+					<div class="grid gap-3 text-sm sm:grid-cols-2">
+						<div>
+							<div class="text-xs text-gray-500">{$i18n.t('修改前')}</div>
+							<p class="whitespace-pre-wrap break-words">{change.before}</p>
+						</div>
+						<div>
+							<div class="text-xs text-gray-500">{$i18n.t('修改后')}</div>
+							<p class="whitespace-pre-wrap break-words">{change.after}</p>
+						</div>
+					</div>
+				</section>
+			{/each}
+			<div class="flex justify-end gap-2">
+				<EduButton on:click={() => (showSaveConfirm = false)}>{$i18n.t('Cancel')}</EduButton
+				><EduButton variant="primary" disabled={saving} on:click={confirmSave}
+					>{$i18n.t('确认保存')}</EduButton
+				>
+			</div>
+		</div>
+	</Modal>
 
 	<ConfirmDialog
 		bind:show={showDeleteConfirm}

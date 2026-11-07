@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { isRevision } from '$lib/utils/task-types';
+	import RevisionReadings from '$lib/components/education/RevisionReadings.svelte';
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 	import { getContext, onMount } from 'svelte';
@@ -9,7 +11,7 @@
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { get } from 'svelte/store';
-	import { config, models } from '$lib/stores';
+	import { config, models, user } from '$lib/stores';
 
 	import {
 		getSubmissionAnalysisSegmentDetail,
@@ -119,6 +121,44 @@
 		{ value: 'returned', label: 'Returned' }
 	];
 
+	let conflictDraft: { round_no: number; version_no: number; text: string } | null = null;
+	const conflictKey = () => `education:review-conflict:${$user?.id}:${detail?.writing_session?.id}`;
+	const clearConflictDraft = () => {
+		sessionStorage.removeItem(conflictKey());
+		conflictDraft = null;
+	};
+	const preserveReviewDraft = () => {
+		conflictDraft = {
+			round_no: detail.submission.round_no,
+			version_no: detail.final_version.version_no,
+			text: [
+				`${t('Total Score')}: ${score || '—'}`,
+				...rubricCriteria.map((c) => `${c.label}: ${rubricScores[c.key] ?? '—'}`),
+				`${t('Reflection Quality')}: ${reflectionScore || '—'}`,
+				`${t('Prompt Quality')}: ${promptScore || '—'}`,
+				overallComment,
+				returnedComment
+			]
+				.filter(Boolean)
+				.join('\n')
+		};
+		try {
+			sessionStorage.setItem(conflictKey(), JSON.stringify(conflictDraft));
+		} catch {
+			toast.warning(t('无法保存本地参考草稿，请先复制当前评语。'));
+		}
+	};
+	const reloadCurrentReview = async () => {
+		try {
+			const fresh = await getTeacherSubmissionDetail(localStorage.token, submissionId);
+			const latest = fresh.rounds?.find((round) => round.is_current);
+			if (latest && latest.submission_id !== submissionId)
+				await goto(`/teacher/submissions/${latest.submission_id}`);
+			else await loadDetail(submissionId);
+		} catch (error) {
+			toast.error(resolveErrorMessage(error, t));
+		}
+	};
 	let detail = null;
 	let loaded = false;
 	let loadError = '';
@@ -194,16 +234,21 @@
 	// 本轮提交时实际生效的辅导档位和原文（档位措辞管理员随时可改，所以随轮次冻存）。
 	$: roundCoaching = detail?.submission?.stats_json?.coaching ?? null;
 	$: coachingStyleLabel =
-		{ socratic: 'Socratic', balanced: 'Balanced', hands_off: 'Hands-off' }[
-			roundCoaching?.style
-		] ?? null;
+		{ socratic: 'Socratic', balanced: 'Balanced', hands_off: 'Hands-off' }[roundCoaching?.style] ??
+		null;
 	// 本轮辅导对话的思考档位(提交时冻存)。学生可开关时每条回复另记实际档位,时间线上逐条标出。
 	$: roundThinking = roundCoaching?.thinking ?? null;
 	$: showReplyThinking = Boolean(roundThinking?.students_choose);
 	// 本轮各平台步骤实际用的模型(提交时冻存);老师未必看得到管理员指定的模型,名称取不到就显示 id。
 	$: roundStepModels = [
-		{ label: 'First read', model: detail?.submission?.stats_json?.revision_items?.models?.first_read },
-		{ label: 'Follow-up review', model: detail?.submission?.stats_json?.revision_items?.models?.follow_up },
+		{
+			label: 'First read',
+			model: detail?.submission?.stats_json?.revision_items?.models?.first_read
+		},
+		{
+			label: 'Follow-up review',
+			model: detail?.submission?.stats_json?.revision_items?.models?.follow_up
+		},
 		...(detail?.submission?.stats_json?.challenge?.models ?? []).map((model) => ({
 			label: 'AI reader check',
 			model
@@ -217,13 +262,22 @@
 	};
 	$: segmentCharStats = (() => {
 		if (!analysisHighlights.length) return null;
-		let typed = 0, aiInserted = 0, aiPasted = 0, externalPaste = 0, unknown = 0, declaredDraft = 0;
+		let typed = 0,
+			aiInserted = 0,
+			aiPasted = 0,
+			externalPaste = 0,
+			unknown = 0,
+			declaredDraft = 0;
 		for (const seg of analysisHighlights) {
 			const len = (seg.segment_text ?? '').length;
 			if (seg.source_type === 'user_typed') typed += len;
 			else if (seg.source_type === 'ai_inserted') aiInserted += len;
 			else if (seg.source_type === 'ai_pasted') aiPasted += len;
-			else if (seg.source_type === 'external_paste' || seg.source_type === 'suspected_unmarked_import') externalPaste += len;
+			else if (
+				seg.source_type === 'external_paste' ||
+				seg.source_type === 'suspected_unmarked_import'
+			)
+				externalPaste += len;
 			else if (seg.source_type === 'unknown') unknown += len;
 			else if (seg.source_type === 'declared_draft') declaredDraft += len;
 		}
@@ -244,17 +298,55 @@
 		stats: detail?.submission?.stats_json ?? {}
 	});
 	$: sourceSegments = [
-		{ label: 'Typed', chars: reviewOverview.typedChars, percent: reviewOverview.typedPercent, bar: 'bg-emerald-300', swatch: 'bg-emerald-300' },
-		{ label: 'AI inserted', chars: reviewOverview.aiInsertedChars, percent: reviewOverview.aiInsertedPercent, bar: 'bg-amber-300', swatch: 'bg-amber-300' },
-		{ label: 'AI pasted', chars: reviewOverview.aiPastedChars, percent: reviewOverview.aiPastedPercent, bar: 'bg-sky-300', swatch: 'bg-sky-300' },
-		{ label: 'External paste / suspected import', chars: reviewOverview.externalPasteChars, percent: reviewOverview.externalPastePercent, bar: 'bg-rose-300', swatch: 'bg-rose-300' },
-		{ label: 'Unknown source', chars: reviewOverview.unknownChars, percent: reviewOverview.unknownPercent, bar: 'bg-gray-300', swatch: 'bg-gray-300' },
+		{
+			label: 'Typed',
+			chars: reviewOverview.typedChars,
+			percent: reviewOverview.typedPercent,
+			bar: 'bg-emerald-300',
+			swatch: 'bg-emerald-300'
+		},
+		{
+			label: 'AI inserted',
+			chars: reviewOverview.aiInsertedChars,
+			percent: reviewOverview.aiInsertedPercent,
+			bar: 'bg-amber-300',
+			swatch: 'bg-amber-300'
+		},
+		{
+			label: 'AI pasted',
+			chars: reviewOverview.aiPastedChars,
+			percent: reviewOverview.aiPastedPercent,
+			bar: 'bg-sky-300',
+			swatch: 'bg-sky-300'
+		},
+		{
+			label: 'External paste / suspected import',
+			chars: reviewOverview.externalPasteChars,
+			percent: reviewOverview.externalPastePercent,
+			bar: 'bg-rose-300',
+			swatch: 'bg-rose-300'
+		},
+		{
+			label: 'Unknown source',
+			chars: reviewOverview.unknownChars,
+			percent: reviewOverview.unknownPercent,
+			bar: 'bg-gray-300',
+			swatch: 'bg-gray-300'
+		},
 		// 修订初稿作业里学生声明的初稿:来源明确，不用风险色；其他作业没有这一行。
 		...(reviewOverview.declaredDraftChars > 0
-			? [{ label: 'Declared first draft', chars: reviewOverview.declaredDraftChars, percent: reviewOverview.declaredDraftPercent, bar: 'bg-violet-300', swatch: 'bg-violet-300' }]
+			? [
+					{
+						label: 'Declared first draft',
+						chars: reviewOverview.declaredDraftChars,
+						percent: reviewOverview.declaredDraftPercent,
+						bar: 'bg-violet-300',
+						swatch: 'bg-violet-300'
+					}
+				]
 			: [])
 	];
-	$: isReviseDraft = detail?.assignment?.task_mode === 'revise_draft';
+	$: isReviseDraft = isRevision(detail?.assignment?.task_mode);
 	$: filteredPromptTimeline = (detail?.prompt_timeline ?? []).filter((item) => {
 		if (item.role === 'user') return showUserTimeline;
 		if (item.role === 'assistant') return showAssistantTimeline;
@@ -287,9 +379,7 @@
 		}))
 	].sort((a, b) => (a.created_at ?? 0) - (b.created_at ?? 0));
 
-	$: lastSavedStr = lastSavedAt
-		? formatEpochTime(Math.floor(lastSavedAt.getTime() / 1000))
-		: null;
+	$: lastSavedStr = lastSavedAt ? formatEpochTime(Math.floor(lastSavedAt.getTime() / 1000)) : null;
 
 	// 维度分从高到低列出：批改时命中的多是接近满分的档位。
 	const scoreOptions = (max: number) => Array.from({ length: max + 1 }, (_, index) => max - index);
@@ -320,19 +410,25 @@
 		(criterion) => (rubricScores[criterion.key] ?? '') !== ''
 	).length;
 	// 总分不再手填：评完全部维度才算出总分，否则留空（后端要求总分等于各维度之和）。
-	$: score =
-		rubricCriteria.length > 0 && rubricFilledCount === rubricCriteria.length
-			? String(
-					rubricCriteria.reduce((sum, criterion) => sum + Number(rubricScores[criterion.key]), 0)
-				)
-			: '';
+	$: if (detail?.assignment?.scoring_mode !== 'total')
+		score =
+			rubricCriteria.length > 0 && rubricFilledCount === rubricCriteria.length
+				? String(
+						rubricCriteria.reduce((sum, criterion) => sum + Number(rubricScores[criterion.key]), 0)
+					)
+				: '';
 
 	// 本轮没和 AI 对话过就没有提问可评，提问质量这一项不显示也不提交。
+	$: hasReflectionAnswers = (detail?.micro_reflection?.reflection_json?.items ?? []).some(
+		(item) => item.text?.trim() || item.selected?.length || item.other_text?.trim()
+	);
 	$: hasRoundPrompts = (detail?.round_prompt_count ?? 0) > 0;
 
 	const syncReview = () => {
 		const review = detail?.review;
 		reviewStatus = review?.review_status || 'pending';
+		if (detail?.assignment?.scoring_mode === 'total')
+			score = review?.score != null ? String(review.score) : '';
 		reflectionScore = review?.reflection_score != null ? String(review.reflection_score) : '';
 		promptScore = review?.prompt_score != null ? String(review.prompt_score) : '';
 		overallComment = review?.overall_comment || '';
@@ -358,27 +454,28 @@
 		const parsedRubricScores =
 			rubricCriteria.length > 0 && rubricFilledCount === rubricCriteria.length
 				? Object.fromEntries(
-						rubricCriteria.map((criterion) => [
-							criterion.key,
-							Number(rubricScores[criterion.key])
-						])
+						rubricCriteria.map((criterion) => [criterion.key, Number(rubricScores[criterion.key])])
 					)
 				: null;
 		if (rubricFilledCount > 0 && parsedRubricScores == null) {
 			toast.error(t('Score every rubric criterion before saving.'));
 			return false;
 		}
-		if (effectiveStatus === 'reviewed' && (parsedScore == null || parsedRubricScores == null)) {
+		if (
+			effectiveStatus === 'reviewed' &&
+			(parsedScore == null ||
+				(detail.assignment.scoring_mode !== 'total' && parsedRubricScores == null))
+		) {
 			toast.error(t('Reviewed submissions require a total score and complete rubric scores.'));
 			return false;
 		}
-		const parsedReflectionScore = reflectionScore === '' ? null : Number(reflectionScore);
-		if (effectiveStatus === 'reviewed' && parsedReflectionScore == null) {
+		const parsedReflectionScore =
+			!hasReflectionAnswers || reflectionScore === '' ? null : Number(reflectionScore);
+		if (effectiveStatus === 'reviewed' && hasReflectionAnswers && parsedReflectionScore == null) {
 			toast.error(t('Rate the reflection before marking this submission reviewed.'));
 			return false;
 		}
-		const parsedPromptScore =
-			hasRoundPrompts && promptScore !== '' ? Number(promptScore) : null;
+		const parsedPromptScore = hasRoundPrompts && promptScore !== '' ? Number(promptScore) : null;
 		if (effectiveStatus === 'reviewed' && hasRoundPrompts && parsedPromptScore == null) {
 			toast.error(t('Rate the AI prompts before marking this submission reviewed.'));
 			return false;
@@ -395,6 +492,8 @@
 		saving = true;
 		try {
 			const response = await saveSubmissionReview(localStorage.token, $page.params.submissionId, {
+				expected_final_version_id: detail.submission.final_version_id,
+				expected_review_revision: detail.review_revision,
 				review_status: effectiveStatus,
 				score: parsedScore,
 				reflection_score: parsedReflectionScore,
@@ -406,12 +505,18 @@
 				// 只在真的退回时带上：换个状态保存不该把这个意图留在记录里。
 				challenge_followup: effectiveStatus === 'returned' && challengeFollowup
 			});
+			detail.review_revision = response.review_revision;
 			detail.review = response;
 			syncReview();
 			lastSavedAt = new Date();
 			toast.success(t('Review saved.'));
 			return true;
 		} catch (error) {
+			if (
+				String(error?.detail ?? '').includes('The submission or review changed') ||
+				String(error?.detail ?? '').includes('Historical submission rounds')
+			)
+				preserveReviewDraft();
 			toast.error(resolveErrorMessage(error, t));
 			return false;
 		} finally {
@@ -588,6 +693,11 @@
 			const response = await getTeacherSubmissionDetail(localStorage.token, id);
 			if (seq !== loadSeq) return;
 			detail = response;
+			try {
+				conflictDraft = JSON.parse(sessionStorage.getItem(conflictKey()) || 'null');
+			} catch {
+				conflictDraft = null;
+			}
 			showAllVersions = false;
 			syncReview();
 			try {
@@ -656,13 +766,39 @@
 	{#if loaded && detail}
 		<!-- h-full + overflow-hidden prevents the shell's overflow-y-auto from activating -->
 		<div class="flex h-full flex-col overflow-hidden">
+			{#if conflictDraft}
+				<section
+					class="mb-3 shrink-0 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm dark:border-amber-900 dark:bg-gray-850"
+				>
+					<p>{$i18n.t('稿件或评阅已更新，你的批改草稿已保留供参考。请重新核对后保存。')}</p>
+					<details class="my-2">
+						<summary
+							>{$i18n.t('查看保留的批改草稿')} · {$i18n.t('Round {{round}}', {
+								round: conflictDraft.round_no
+							})} · {$i18n.t('稿件版本')}
+							{conflictDraft.version_no}</summary
+						>
+						<pre
+							class="max-h-40 overflow-auto whitespace-pre-wrap font-sans">{conflictDraft.text}</pre>
+					</details>
+					<div class="flex gap-4">
+						<button type="button" class="underline" on:click={reloadCurrentReview}
+							>{$i18n.t('重新载入最新提交')}</button
+						><button type="button" class="underline" on:click={clearConflictDraft}
+							>{$i18n.t('清除参考草稿')}</button
+						>
+					</div>
+				</section>
+			{/if}
 
 			<!--
 				固定头部此前叠了五层(分区导航、返回与上下份、标题与关注点、7 格来源统计、免责声明),
 				笔记本屏上原文区被压得很矮。导航交给顶栏;7 格统计收成一条来源比例条,
 				同时充当原文高亮的图例。
 			-->
-			<div class="shrink-0 space-y-2 border-b border-gray-100 bg-white px-6 py-3 dark:border-gray-800 dark:bg-gray-850">
+			<div
+				class="shrink-0 space-y-2 border-b border-gray-100 bg-white px-6 py-3 dark:border-gray-800 dark:bg-gray-850"
+			>
 				<div class="flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
 					<span
 						class="rounded-full px-2.5 py-0.5 {reviewStatus === 'reviewed'
@@ -676,6 +812,12 @@
 						)}
 					</span>
 					<span>{$i18n.t('Submitted At')}: {formatEpoch(detail.submission.submitted_at)}</span>
+					<span
+						>{$i18n.t('Round {{round}}', { round: detail.submission.round_no })} · {$i18n.t(
+							'稿件版本'
+						)}
+						{detail.final_version.version_no}</span
+					>
 					{#if detail?.rounds?.length > 1}
 						<span class="text-gray-300 dark:text-gray-600">|</span>
 						{#each detail.rounds as round}
@@ -686,7 +828,9 @@
 									: 'border-gray-200 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800'}"
 							>
 								{$i18n.t('Round {{round}}', { round: round.round_no })}{#if !round.is_current}<span
-										class="opacity-60"> · {$i18n.t('History')}</span
+										class="opacity-60"
+									>
+										· {$i18n.t('History')}</span
 									>{/if}
 							</a>
 						{/each}
@@ -732,7 +876,9 @@
 							{/if}
 						{/each}
 					</div>
-					<div class="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-600 dark:text-gray-400">
+					<div
+						class="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-600 dark:text-gray-400"
+					>
 						{#each sourceSegments as segment}
 							<span class="inline-flex items-center gap-1.5">
 								<span class="inline-block size-2.5 rounded {segment.swatch}"></span>
@@ -742,8 +888,10 @@
 							</span>
 						{/each}
 						<span class="text-gray-400">
-							{$i18n.t('Total characters')} {reviewOverview.totalChars} · {$i18n.t('Prompts')}
-							{reviewOverview.promptCount} · {$i18n.t('Versions')} {reviewOverview.versionCount}
+							{$i18n.t('Total characters')}
+							{reviewOverview.totalChars} · {$i18n.t('Prompts')}
+							{reviewOverview.promptCount} · {$i18n.t('Versions')}
+							{reviewOverview.versionCount}
 						</span>
 					</div>
 					<EduEvidenceDisclaimer class="mt-1" />
@@ -751,36 +899,46 @@
 			</div>
 
 			<!-- ── Main two-column body ── -->
-			<div class="min-h-0 flex-1 grid grid-cols-1 gap-3 overflow-hidden p-4 lg:grid-cols-[1.2fr_0.8fr]">
-
+			<div
+				class="min-h-0 flex-1 grid grid-cols-1 gap-3 overflow-hidden p-4 lg:grid-cols-[1.2fr_0.8fr]"
+			>
 				<!-- LEFT: Article panel (internal scroll) -->
-				<div class="flex flex-col overflow-hidden rounded-3xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850">
+				<div
+					class="flex flex-col overflow-hidden rounded-3xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850"
+				>
 					<!-- Article header (fixed) -->
 					<div class="shrink-0 border-b border-gray-100 dark:border-gray-800 px-6 pt-5 pb-4">
 						<div class="flex items-center justify-between">
 							{#if isReviseDraft}
-								<div class="flex items-center gap-1 rounded-full bg-gray-100 p-0.5 text-sm dark:bg-gray-800">
-									{#each [
-										{ key: 'final', label: 'Final Submission' },
-										{ key: 'draft', label: 'First draft → final' }
-									] as view}
+								<div
+									class="flex items-center gap-1 rounded-full bg-gray-100 p-0.5 text-sm dark:bg-gray-800"
+								>
+									{#each [{ key: 'final', label: 'Final Submission' }, { key: 'draft', label: 'First draft → final' }] as view}
 										<button
 											type="button"
 											class="rounded-full px-3 py-1 font-medium transition {docView === view.key
 												? 'bg-white text-gray-950 shadow-sm dark:bg-gray-700 dark:text-gray-100'
 												: 'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'}"
-											on:click={() => (docView = view.key)}
+											on:click={() => (docView = view.key as 'draft' | 'final')}
 										>
 											{$i18n.t(view.label)}
 										</button>
 									{/each}
 								</div>
 							{:else}
-								<div class="text-sm font-semibold text-gray-950 dark:text-gray-100">{$i18n.t('Final Submission')}</div>
+								<div class="text-sm font-semibold text-gray-950 dark:text-gray-100">
+									{$i18n.t('Final Submission')}
+								</div>
 							{/if}
 							{#if docView === 'final'}
-								<label class="flex cursor-pointer items-center gap-2 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300">
-									<input type="checkbox" bind:checked={highlight} class="accent-black dark:accent-white" />
+								<label
+									class="flex cursor-pointer items-center gap-2 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+								>
+									<input
+										type="checkbox"
+										bind:checked={highlight}
+										class="accent-black dark:accent-white"
+									/>
 									{$i18n.t('Highlight sources')}
 								</label>
 							{/if}
@@ -795,19 +953,25 @@
 								{:else if draftDiffData?.has_baseline}
 									<TextDiffBlocks blocks={draftDiffData.blocks} />
 								{:else}
-									<div class="text-sm text-gray-400">{$i18n.t('No first draft was submitted.')}</div>
+									<div class="text-sm text-gray-400">
+										{$i18n.t('No first draft was submitted.')}
+									</div>
 								{/if}
 							{:else if highlight}
 								<SourceHighlightedText
 									json={detail.final_version.note_snapshot_json}
-									text={detail.final_version.note_snapshot_text ?? detail.note?.data?.content?.md ?? ''}
+									text={detail.final_version.note_snapshot_text ??
+										detail.note?.data?.content?.md ??
+										''}
 									segments={analysisHighlights}
 									{activeSegmentId}
 								/>
 							{:else}
 								<SourceHighlightedText
 									json={detail.final_version.note_snapshot_json}
-									text={detail.final_version.note_snapshot_text ?? detail.note?.data?.content?.md ?? ''}
+									text={detail.final_version.note_snapshot_text ??
+										detail.note?.data?.content?.md ??
+										''}
 									segments={[]}
 								/>
 							{/if}
@@ -816,24 +980,26 @@
 				</div>
 
 				<!-- RIGHT: Tabbed review panel (internal scroll) -->
-				<div class="flex flex-col overflow-hidden rounded-3xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850">
-
+				<div
+					class="flex flex-col overflow-hidden rounded-3xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850"
+				>
 					<!-- Tab bar -->
-					<div class="shrink-0 flex items-end gap-0.5 border-b border-gray-100 dark:border-gray-800 px-5 pt-4">
-						{#each [
-							{ key: 'review' as const, label: t('Grading') },
-							{ key: 'analysis' as const, label: t('Analysis') },
-							{ key: 'reflection' as const, label: t('Reflection & Versions') }
-						] as tab}
+					<div
+						class="shrink-0 flex items-end gap-0.5 border-b border-gray-100 dark:border-gray-800 px-5 pt-4"
+					>
+						{#each [{ key: 'review' as const, label: t('Grading') }, { key: 'analysis' as const, label: t('Analysis') }, { key: 'reflection' as const, label: t('Reflection & Versions') }] as tab}
 							<button
-								class="relative px-4 pb-3 text-sm font-medium transition-colors {activeTab === tab.key
+								class="relative px-4 pb-3 text-sm font-medium transition-colors {activeTab ===
+								tab.key
 									? 'text-gray-950 dark:text-gray-100'
 									: 'text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}"
 								on:click={() => (activeTab = tab.key)}
 							>
 								{tab.label}
 								{#if activeTab === tab.key}
-									<span class="absolute bottom-0 left-0 right-0 h-0.5 rounded-full bg-black dark:bg-gray-100"></span>
+									<span
+										class="absolute bottom-0 left-0 right-0 h-0.5 rounded-full bg-black dark:bg-gray-100"
+									></span>
 								{/if}
 							</button>
 						{/each}
@@ -841,114 +1007,154 @@
 
 					<!-- Tab content (scrollable) -->
 					<div class="min-h-0 flex-1 overflow-y-auto">
-
 						<!-- ── 评分 tab ── -->
 						{#if activeTab === 'review'}
 							<div class="space-y-4 p-5">
-
 								{#if isHistoricalRound}
-									<div class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-700 dark:text-amber-300">
+									<div
+										class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-700 dark:text-amber-300"
+									>
 										{$i18n.t('Historical round, read-only')}
 									</div>
 								{/if}
 
-								<!-- Rubric: pick a score per criterion; the total below is derived -->
-								<div>
-									<div class="mb-1.5 text-xs font-medium text-gray-400">
-										{$i18n.t('Rubric')}
-									</div>
-									<div class="divide-y divide-gray-100 dark:divide-gray-800 rounded-2xl border border-gray-200 dark:border-gray-800 overflow-hidden">
-										{#each rubricCriteria as criterion}
-											<div class="flex items-center gap-3 px-4 py-3 bg-white dark:bg-gray-850 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
-												<div class="flex-1 min-w-0">
-													<div class="text-sm text-gray-700 dark:text-gray-300">
-														{criterion.label} / {criterion.max_score}
-													</div>
-													{#if firstReadByKey[criterion.key]}
-														{@const firstRead = firstReadByKey[criterion.key]}
-														<div class="mt-0.5 text-[11px] text-gray-400">
-															{firstRead.follow_up_at && !firstRead.is_blocking
-																? $i18n.t('Follow-up read')
-																: $i18n.t('First read-through')}: {$i18n.t(
-																FIRST_READ_STATUS_LABELS[firstRead.status]
-															)}{#if firstRead.follow_up_at && firstRead.is_blocking}
-																· {$i18n.t('Fixed, confirmed on follow-up')}{/if}{#if firstRead.decision}
-																· {$i18n.t('Student')}: {$i18n.t(
-																	FIRST_READ_DECISION_LABELS[firstRead.decision]
-																)}{/if}{#if firstRead.decision && firstRead.decision !== 'kept' && firstRead.quote_unchanged}
-																· <span class="text-rose-600 dark:text-rose-400"
-																	>{$i18n.t('Quoted sentence unchanged')}</span
-																>{/if}
-														</div>
-													{/if}
-												</div>
-												<select
-													value={rubricScores[criterion.key] ?? ''}
-													on:change={(event) =>
-														(rubricScores = {
-															...rubricScores,
-															[criterion.key]: event.currentTarget.value
-														})}
-													disabled={isHistoricalRound}
-													class="w-24 rounded-xl border border-gray-200 dark:border-gray-800 dark:bg-gray-850 py-1.5 pl-3 pr-8 text-right text-sm outline-none focus:border-gray-400 transition-colors disabled:opacity-50"
+								{#if detail.assignment.scoring_mode === 'dimensions'}
+									<!-- Rubric: pick a score per criterion; the total below is derived -->
+									<div>
+										<div class="mb-1.5 text-xs font-medium text-gray-400">
+											{$i18n.t('Rubric')}
+										</div>
+										<div
+											class="divide-y divide-gray-100 dark:divide-gray-800 rounded-2xl border border-gray-200 dark:border-gray-800 overflow-hidden"
+										>
+											{#each rubricCriteria as criterion}
+												<div
+													class="flex items-center gap-3 px-4 py-3 bg-white dark:bg-gray-850 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
 												>
-													<option value="">—</option>
-													{#each scoreOptions(criterion.max_score) as option}
-														<option value={String(option)}>{option}</option>
-													{/each}
-												</select>
-											</div>
-										{/each}
+													<div class="flex-1 min-w-0">
+														<div class="text-sm text-gray-700 dark:text-gray-300">
+															{criterion.label} / {criterion.max_score}
+														</div>
+														{#if firstReadByKey[criterion.key]}
+															{@const firstRead = firstReadByKey[criterion.key]}
+															<div class="mt-0.5 text-[11px] text-gray-400">
+																{firstRead.follow_up_at && !firstRead.is_blocking
+																	? $i18n.t('Follow-up read')
+																	: $i18n.t('First read-through')}: {$i18n.t(
+																	FIRST_READ_STATUS_LABELS[firstRead.status]
+																)}{#if firstRead.follow_up_at && firstRead.is_blocking}
+																	· {$i18n.t(
+																		'Fixed, confirmed on follow-up'
+																	)}{/if}{#if firstRead.decision}
+																	· {$i18n.t('Student')}: {$i18n.t(
+																		FIRST_READ_DECISION_LABELS[firstRead.decision]
+																	)}{/if}{#if firstRead.decision && firstRead.decision !== 'kept' && firstRead.quote_unchanged}
+																	· <span class="text-rose-600 dark:text-rose-400"
+																		>{$i18n.t('Quoted sentence unchanged')}</span
+																	>{/if}
+															</div>
+														{/if}
+													</div>
+													<select
+														value={rubricScores[criterion.key] ?? ''}
+														on:change={(event) =>
+															(rubricScores = {
+																...rubricScores,
+																[criterion.key]: event.currentTarget.value
+															})}
+														disabled={isHistoricalRound}
+														class="w-24 rounded-xl border border-gray-200 dark:border-gray-800 dark:bg-gray-850 py-1.5 pl-3 pr-8 text-right text-sm outline-none focus:border-gray-400 transition-colors disabled:opacity-50"
+													>
+														<option value="">—</option>
+														{#each scoreOptions(criterion.max_score) as option}
+															<option value={String(option)}>{option}</option>
+														{/each}
+													</select>
+												</div>
+											{/each}
+										</div>
 									</div>
-								</div>
-
+								{/if}
+								{#if detail.review_history?.length}
+									<details class="text-xs text-gray-500">
+										<summary>{$i18n.t('评阅历史')}</summary>
+										{#each detail.review_history as event}
+											<p class="mt-1">
+												v{event.review_revision} · {new Date(
+													event.created_at * 1000
+												).toLocaleString()} · {$i18n.t(
+													reviewStatusOptions.find((option) => option.value === event.review_status)
+														?.label ?? event.review_status
+												)} · {event.score ?? '—'}<br />{event.overall_comment ||
+													event.returned_comment ||
+													''}
+											</p>
+										{/each}
+									</details>
+								{/if}
 								<!-- Total score: sum of the rubric scores above, read-only -->
 								<div>
 									<div class="mb-1.5 text-xs font-medium text-gray-400">
 										{$i18n.t('Total Score')}
 									</div>
-									<div class="flex items-center justify-between gap-3 rounded-2xl border border-gray-200 dark:border-gray-800 px-4 py-3">
+									<div
+										class="flex items-center justify-between gap-3 rounded-2xl border border-gray-200 dark:border-gray-800 px-4 py-3"
+									>
 										<span class="text-xs text-gray-400 dark:text-gray-500">
 											{#if rubricFilledCount < rubricCriteria.length}
 												{$i18n.t('Score every rubric criterion to get a total.')}
 											{/if}
 										</span>
 										<span class="shrink-0 text-gray-700 dark:text-gray-300">
-											<span class="text-lg font-semibold tabular-nums">{score === '' ? '—' : score}</span>
+											{#if detail.assignment.scoring_mode === 'total'}<input
+													aria-label={$i18n.t('Total Score')}
+													type="number"
+													min="0"
+													max={detail.assignment.score_max}
+													step="1"
+													disabled={isHistoricalRound}
+													bind:value={score}
+													class="w-24 rounded-lg dark:bg-gray-800"
+												/>{:else}<span class="text-lg font-semibold tabular-nums"
+													>{score === '' ? '—' : score}</span
+												>{/if}
 											<span class="text-sm text-gray-400"> / {detail.assignment.score_max}</span>
 										</span>
 									</div>
 								</div>
 
-								<!-- Reflection quality: the only source of this metric; character counts never were one -->
-								<div>
-									<div class="mb-1.5 text-xs font-medium text-gray-400">
-										{$i18n.t('Reflection Quality')}
-									</div>
-									<div class="rounded-2xl border border-gray-200 dark:border-gray-800 px-4 py-3">
-										<div class="flex items-center gap-1.5">
-											{#each [1, 2, 3, 4, 5] as option}
-												<button
-													type="button"
-													disabled={isHistoricalRound}
-													on:click={() => (reflectionScore = String(option))}
-													class="h-9 flex-1 rounded-xl border text-sm font-semibold tabular-nums transition-colors disabled:opacity-50 {reflectionScore ===
-													String(option)
-														? 'border-gray-900 bg-gray-900 text-white dark:border-white dark:bg-white dark:text-gray-900'
-														: 'border-gray-200 text-gray-500 hover:border-gray-400 dark:border-gray-800 dark:text-gray-400'}"
-												>
-													{option}
-												</button>
-											{/each}
+								{#if hasReflectionAnswers}
+									<!-- Reflection quality: the only source of this metric; character counts never were one -->
+									<div>
+										<div class="mb-1.5 text-xs font-medium text-gray-400">
+											{$i18n.t('Reflection Quality')}
 										</div>
-										<p class="mt-2 text-xs text-gray-400 dark:text-gray-500">
-											{$i18n.t(
-												'Rate how well the reflection names what the student actually did and judged. 1 = perfunctory, 5 = specific and self-aware.'
-											)}
-										</p>
+										<div class="rounded-2xl border border-gray-200 dark:border-gray-800 px-4 py-3">
+											<div class="flex items-center gap-1.5">
+												{#each [1, 2, 3, 4, 5] as option}
+													<button
+														type="button"
+														disabled={isHistoricalRound}
+														on:click={() => (reflectionScore = String(option))}
+														class="h-9 flex-1 rounded-xl border text-sm font-semibold tabular-nums transition-colors disabled:opacity-50 {reflectionScore ===
+														String(option)
+															? 'border-gray-900 bg-gray-900 text-white dark:border-white dark:bg-white dark:text-gray-900'
+															: 'border-gray-200 text-gray-500 hover:border-gray-400 dark:border-gray-800 dark:text-gray-400'}"
+													>
+														{option}
+													</button>
+												{/each}
+											</div>
+											<p class="mt-2 text-xs text-gray-400 dark:text-gray-500">
+												{$i18n.t(
+													'Rate how well the reflection names what the student actually did and judged. 1 = perfunctory, 5 = specific and self-aware.'
+												)}
+											</p>
+										</div>
 									</div>
-								</div>
-
+								{:else}<p class="text-xs text-gray-500">
+										{$i18n.t('反思质量：不适用（本轮没有反思回答）')}
+									</p>{/if}
 								<!-- Prompt quality: replaces counting prompts, which only rewarded asking more -->
 								{#if hasRoundPrompts}
 									<div>
@@ -978,11 +1184,18 @@
 											</p>
 										</div>
 									</div>
+								{:else}
+									<p class="text-xs text-gray-500">
+										{$i18n.t('提问质量：不适用（本轮没有学生提问）')}
+									</p>
 								{/if}
 
 								<!-- Overall comment -->
 								<div>
-									<label for="review-overall-comment" class="mb-1.5 block text-xs font-medium text-gray-400">
+									<label
+										for="review-overall-comment"
+										class="mb-1.5 block text-xs font-medium text-gray-400"
+									>
 										{$i18n.t('Overall Comment')}
 									</label>
 									<textarea
@@ -1023,9 +1236,16 @@
 										<EduButton
 											variant="link"
 											disabled={saving || isHistoricalRound}
-											on:click={() => saveReview('pending')}
+											on:click={() =>
+												saveReview(
+													reviewStatus === 'reviewed'
+														? 'reviewed'
+														: reviewStatus === 'returned'
+															? 'returned'
+															: 'pending'
+												)}
 										>
-											{$i18n.t('Save Draft')}
+											{$i18n.t(reviewStatus === 'pending' ? 'Save Draft' : '保存更正')}
 										</EduButton>
 										{#if lastSavedStr}
 											<span class="ml-auto text-xs text-gray-400">
@@ -1036,125 +1256,150 @@
 
 									<!-- 退回重写由管理员按实例开关；关着时批完即结束，学生直接看批改结果。 -->
 									{#if $config?.features?.enable_education_return}
-									<div class="rounded-2xl border border-amber-200 dark:border-amber-900/60">
-										<button
-											type="button"
-											class="flex w-full items-center justify-between px-4 py-2.5 text-left text-sm font-medium text-amber-800 dark:text-amber-300"
-											aria-expanded={returnMode}
-											disabled={isHistoricalRound}
-											on:click={() => (returnMode = !returnMode)}
-										>
-											{$i18n.t('Return for Revision')}
-											<span aria-hidden="true" class="text-xs">{returnMode ? '▲' : '▼'}</span>
-										</button>
-										{#if returnMode}
-											<div class="space-y-4 border-t border-amber-100 px-4 pb-4 pt-3 dark:border-amber-900/60">
-												<div>
-													<label for="review-returned-comment" class="mb-1.5 block text-xs font-medium text-gray-400">
-														{$i18n.t('Returned Comment')}
-													</label>
-													<textarea
-										id="review-returned-comment"
-														bind:value={returnedComment}
-														disabled={isHistoricalRound}
-														class="min-h-20 w-full resize-none rounded-2xl border border-gray-200 dark:border-gray-800 px-4 py-3 text-sm outline-none focus:border-gray-400 transition-colors disabled:opacity-50"
-														placeholder={$i18n.t('Returned Comment')}
-													></textarea>
-												</div>
+										<div class="rounded-2xl border border-amber-200 dark:border-amber-900/60">
+											<button
+												type="button"
+												class="flex w-full items-center justify-between px-4 py-2.5 text-left text-sm font-medium text-amber-800 dark:text-amber-300"
+												aria-expanded={returnMode}
+												disabled={isHistoricalRound}
+												on:click={() => (returnMode = !returnMode)}
+											>
+												{$i18n.t('Return for Revision')}
+												<span aria-hidden="true" class="text-xs">{returnMode ? '▲' : '▼'}</span>
+											</button>
+											{#if returnMode}
+												<div
+													class="space-y-4 border-t border-amber-100 px-4 pb-4 pt-3 dark:border-amber-900/60"
+												>
+													<div>
+														<label
+															for="review-returned-comment"
+															class="mb-1.5 block text-xs font-medium text-gray-400"
+														>
+															{$i18n.t('Returned Comment')}
+														</label>
+														<textarea
+															id="review-returned-comment"
+															bind:value={returnedComment}
+															disabled={isHistoricalRound}
+															class="min-h-20 w-full resize-none rounded-2xl border border-gray-200 dark:border-gray-800 px-4 py-3 text-sm outline-none focus:border-gray-400 transition-colors disabled:opacity-50"
+															placeholder={$i18n.t('Returned Comment')}
+														></textarea>
+													</div>
 
-												<!--
+													<!--
 													让质疑读者就这条意见追问。退回意见此前写完就没下文了，学生看不看、
 													改不改全凭自觉；勾上之后，下一轮提交前的质疑会围绕这条展开。
 													作业没启用质疑时不显示 —— 不在这里替教师悄悄打开那个环节。
 												-->
-												{#if detail?.assignment?.challenge_enabled}
-													<label
-														class="flex cursor-pointer items-start gap-2 rounded-2xl bg-gray-50 px-4 py-3 dark:bg-gray-800"
-													>
-														<input
-															type="checkbox"
-															class="mt-0.5 size-3.5 shrink-0 accent-black dark:accent-gray-100"
-															bind:checked={challengeFollowup}
+													{#if detail?.assignment?.challenge_enabled}
+														<label
+															class="flex cursor-pointer items-start gap-2 rounded-2xl bg-gray-50 px-4 py-3 dark:bg-gray-800"
+														>
+															<input
+																type="checkbox"
+																class="mt-0.5 size-3.5 shrink-0 accent-black dark:accent-gray-100"
+																bind:checked={challengeFollowup}
+																disabled={isHistoricalRound}
+															/>
+															<span
+																class="text-xs leading-relaxed text-gray-700 dark:text-gray-200"
+															>
+																{$i18n.t('Have the reader follow up on this comment next round')}
+															</span>
+														</label>
+													{/if}
+
+													<!-- Resubmit due at (required when returning for revision) -->
+													<div>
+														<div class="mb-1.5 block text-xs font-medium text-gray-400">
+															{$i18n.t('Resubmit before')}
+														</div>
+														<EduDateTimeField
+															bind:value={resubmitDueLocal}
 															disabled={isHistoricalRound}
+															className="w-full rounded-2xl border border-gray-200 dark:border-gray-800 px-4 py-3 text-sm outline-none focus:border-gray-400 transition-colors disabled:opacity-50"
 														/>
-														<span class="text-xs leading-relaxed text-gray-700 dark:text-gray-200">
-															{$i18n.t('Have the reader follow up on this comment next round')}
-														</span>
-													</label>
-												{/if}
-
-												<!-- Resubmit due at (required when returning for revision) -->
-												<div>
-													<div class="mb-1.5 block text-xs font-medium text-gray-400">
-														{$i18n.t('Resubmit before')}
 													</div>
-													<EduDateTimeField
-														bind:value={resubmitDueLocal}
-														disabled={isHistoricalRound}
-														className="w-full rounded-2xl border border-gray-200 dark:border-gray-800 px-4 py-3 text-sm outline-none focus:border-gray-400 transition-colors disabled:opacity-50"
-													/>
-												</div>
 
-												<div class="flex justify-end">
-													<button
-														class="rounded-full bg-amber-600 px-4 py-2 text-sm text-white transition-colors hover:bg-amber-700 disabled:opacity-60"
-														disabled={saving || isHistoricalRound}
-														on:click={() => saveReview('returned')}
-													>
-														{$i18n.t('Return to Student')}
-													</button>
+													<div class="flex justify-end">
+														<button
+															class="rounded-full bg-amber-600 px-4 py-2 text-sm text-white transition-colors hover:bg-amber-700 disabled:opacity-60"
+															disabled={saving || isHistoricalRound}
+															on:click={() => saveReview('returned')}
+														>
+															{$i18n.t('Return to Student')}
+														</button>
+													</div>
 												</div>
-											</div>
-										{/if}
-									</div>
+											{/if}
+										</div>
 									{/if}
 								</div>
 							</div>
 
-						<!-- ── 分析 tab ── -->
+							<!-- ── 分析 tab ── -->
 						{:else if activeTab === 'analysis'}
 							<div class="space-y-5 p-5">
-
 								<!-- Segments -->
 								<div>
 									<div class="mb-3 flex items-center justify-between">
-										<div class="text-sm font-semibold text-gray-950 dark:text-gray-100">{$i18n.t('Segment Details')}</div>
+										<div class="text-sm font-semibold text-gray-950 dark:text-gray-100">
+											{$i18n.t('Segment Details')}
+										</div>
 										<EduButton size="sm" disabled={recomputing} on:click={recomputeAnalysis}>
 											{recomputing ? $i18n.t('Recomputing...') : $i18n.t('Recompute Analysis')}
 										</EduButton>
 									</div>
 									{#if analysisSegments.length === 0}
-										<div class="rounded-2xl bg-gray-50 dark:bg-gray-800 px-4 py-4 text-sm text-gray-400">
+										<div
+											class="rounded-2xl bg-gray-50 dark:bg-gray-800 px-4 py-4 text-sm text-gray-400"
+										>
 											{$i18n.t('No tracked import segments yet.')}
 										</div>
 									{:else}
 										<div class="space-y-2">
 											{#each analysisSegments as segment}
 												<button
-													class="w-full rounded-2xl border px-4 py-3.5 text-left text-sm transition-colors {expandedSegmentId === segment.segment_id
+													class="w-full rounded-2xl border px-4 py-3.5 text-left text-sm transition-colors {expandedSegmentId ===
+													segment.segment_id
 														? 'border-gray-900 dark:border-gray-100 bg-stone-50 dark:bg-gray-900'
 														: 'border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 hover:border-gray-300 dark:hover:border-gray-600'}"
 													on:click={() => focusSegment(segment.segment_id)}
 												>
 													<!-- Segment header row -->
 													<div class="flex items-center justify-between gap-2">
-														<div class="font-medium text-gray-900 dark:text-gray-100">{getWritingSourceLabel(segment.origin_type, t)}</div>
+														<div class="font-medium text-gray-900 dark:text-gray-100">
+															{getWritingSourceLabel(segment.origin_type, t)}
+														</div>
 														<div class="flex shrink-0 items-center gap-2">
 															{#if segment.is_suspected_unmarked_import}
 																<EduBadge soft tone="rose">{$i18n.t('Suspected')}</EduBadge>
 															{/if}
 															<!-- Chevron -->
 															<svg
-																class="h-4 w-4 text-gray-400 transition-transform {expandedSegmentId === segment.segment_id ? 'rotate-180' : ''}"
-																fill="none" stroke="currentColor" viewBox="0 0 24 24"
+																class="h-4 w-4 text-gray-400 transition-transform {expandedSegmentId ===
+																segment.segment_id
+																	? 'rotate-180'
+																	: ''}"
+																fill="none"
+																stroke="currentColor"
+																viewBox="0 0 24 24"
 															>
-																<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+																<path
+																	stroke-linecap="round"
+																	stroke-linejoin="round"
+																	stroke-width="2"
+																	d="M19 9l-7 7-7-7"
+																/>
 															</svg>
 														</div>
 													</div>
 
 													<!-- Preview text -->
-													<div class="mt-1.5 line-clamp-2 whitespace-pre-wrap break-words text-xs text-gray-400">
+													<div
+														class="mt-1.5 line-clamp-2 whitespace-pre-wrap break-words text-xs text-gray-400"
+													>
 														{segment.content_initial}
 													</div>
 
@@ -1164,33 +1409,47 @@
 															<div class="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
 																<div class="flex items-center justify-between">
 																	<span class="text-gray-400">{$i18n.t('Initial Length')}</span>
-																	<span class="font-medium text-gray-700 dark:text-gray-300">{segment.initial_length ?? 0}</span>
+																	<span class="font-medium text-gray-700 dark:text-gray-300"
+																		>{segment.initial_length ?? 0}</span
+																	>
 																</div>
 																<div class="flex items-center justify-between">
 																	<span class="text-gray-400">{$i18n.t('Final Length')}</span>
-																	<span class="font-medium text-gray-700 dark:text-gray-300">{segment.final_length ?? 0}</span>
+																	<span class="font-medium text-gray-700 dark:text-gray-300"
+																		>{segment.final_length ?? 0}</span
+																	>
 																</div>
 																<div class="flex items-center justify-between">
 																	<span class="text-gray-400">{$i18n.t('Retained Ratio')}</span>
-																	<span class="font-medium text-gray-700 dark:text-gray-300">{segment.retained_ratio ?? 0}%</span>
+																	<span class="font-medium text-gray-700 dark:text-gray-300"
+																		>{segment.retained_ratio ?? 0}%</span
+																	>
 																</div>
 																<div class="flex items-center justify-between">
 																	<span class="text-gray-400">{$i18n.t('Rewrite Ratio')}</span>
-																	<span class="font-medium text-gray-700 dark:text-gray-300">{segment.rewrite_ratio ?? 0}%</span>
+																	<span class="font-medium text-gray-700 dark:text-gray-300"
+																		>{segment.rewrite_ratio ?? 0}%</span
+																	>
 																</div>
 																<div class="col-span-2 flex items-center justify-between">
 																	<span class="text-gray-400">{$i18n.t('Rewrite Level')}</span>
-																	<span class="font-medium text-gray-700 dark:text-gray-300">{getRewriteLevelLabel(segment.rewrite_level, t)}</span>
+																	<span class="font-medium text-gray-700 dark:text-gray-300"
+																		>{getRewriteLevelLabel(segment.rewrite_level, t)}</span
+																	>
 																</div>
 																{#if segment.suspicion_score}
 																	<div class="col-span-2 flex items-center justify-between">
 																		<span class="text-gray-400">{$i18n.t('Suspicion Score')}</span>
-																		<span class="font-medium text-rose-600 dark:text-rose-400">{segment.suspicion_score}</span>
+																		<span class="font-medium text-rose-600 dark:text-rose-400"
+																			>{segment.suspicion_score}</span
+																		>
 																	</div>
 																{/if}
 															</div>
 															{#if segment.suspicion_reason}
-																<div class="mt-2 rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:text-rose-300">
+																<div
+																	class="mt-2 rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:text-rose-300"
+																>
 																	{$i18n.t(segment.suspicion_reason)}
 																</div>
 															{/if}
@@ -1204,84 +1463,92 @@
 
 								<!-- AI clarification questions：没有就不摆这一块(哈工深关了「询问用户」，永远是空的) -->
 								{#if clarifications.length > 0}
-								<div>
-									<div class="mb-3">
-										<div class="text-sm font-semibold text-gray-950 dark:text-gray-100">
-											{$i18n.t('AI Clarification Questions')}
+									<div>
+										<div class="mb-3">
+											<div class="text-sm font-semibold text-gray-950 dark:text-gray-100">
+												{$i18n.t('AI Clarification Questions')}
+											</div>
+											<div class="mt-0.5 text-xs text-gray-400">
+												{$i18n.t(
+													'Questions the AI paused to ask, and what the student answered. Recorded server-side from the chat itself.'
+												)}
+											</div>
 										</div>
-										<div class="mt-0.5 text-xs text-gray-400">
-											{$i18n.t(
-												'Questions the AI paused to ask, and what the student answered. Recorded server-side from the chat itself.'
-											)}
-										</div>
-									</div>
-									{#if clarifications.length === 0}
-										<div class="rounded-2xl bg-gray-50 dark:bg-gray-800 px-4 py-4 text-sm text-gray-400">
-											{$i18n.t('The AI never paused to ask this student a question.')}
-										</div>
-									{:else}
-										<div class="mb-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
-											<span>
-												{$i18n.t('Asked: {{count}}', {
-													count: clarificationSummary.clarification_question_count ?? 0
-												})}
-											</span>
-											<span>
-												{$i18n.t('Answered: {{count}}', {
-													count: clarificationSummary.clarification_answered_count ?? 0
-												})}
-											</span>
-											<span class="text-emerald-600 dark:text-emerald-400">
-												{$i18n.t('In own words: {{count}}', {
-													count: clarificationSummary.clarification_free_text_count ?? 0
-												})}
-											</span>
-											{#if clarificationSummary.clarification_declined_count}
+										{#if clarifications.length === 0}
+											<div
+												class="rounded-2xl bg-gray-50 dark:bg-gray-800 px-4 py-4 text-sm text-gray-400"
+											>
+												{$i18n.t('The AI never paused to ask this student a question.')}
+											</div>
+										{:else}
+											<div
+												class="mb-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400"
+											>
 												<span>
-													{$i18n.t('Dismissed: {{count}}', {
-														count: clarificationSummary.clarification_declined_count
+													{$i18n.t('Asked: {{count}}', {
+														count: clarificationSummary.clarification_question_count ?? 0
 													})}
 												</span>
-											{/if}
-										</div>
-										<div class="space-y-2">
-											{#each clarifications as exchange}
-												<div class="rounded-2xl bg-gray-50 dark:bg-gray-800 px-4 py-3 text-sm">
-													{#if exchange.created_at}
-														<div class="mb-1.5 text-[10px] text-gray-400 tabular-nums">
-															{formatEpochTime(exchange.created_at)}
-														</div>
-													{/if}
-													<div class="space-y-2.5">
-														{#each exchange.questions as question}
-															<div>
-																<div class="text-gray-800 dark:text-gray-200">{question.question}</div>
-																{#if question.options.length}
-																	<div class="mt-1 text-xs text-gray-400">
-																		{question.options.join(' / ')}
-																	</div>
-																{/if}
-																{#if question.answer === null}
-																	<div class="mt-1.5 text-xs text-gray-400">
-																		{$i18n.t('No answer')}
-																	</div>
-																{:else if question.answer.type === 'other'}
-																	<div class="mt-1.5 rounded-xl bg-emerald-50 px-3 py-2 text-sm whitespace-pre-wrap break-words text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
-																		{question.answer.text}
-																	</div>
-																{:else}
-																	<div class="mt-1.5 text-sm text-gray-700 dark:text-gray-300">
-																		{question.answer.label}
-																	</div>
-																{/if}
+												<span>
+													{$i18n.t('Answered: {{count}}', {
+														count: clarificationSummary.clarification_answered_count ?? 0
+													})}
+												</span>
+												<span class="text-emerald-600 dark:text-emerald-400">
+													{$i18n.t('In own words: {{count}}', {
+														count: clarificationSummary.clarification_free_text_count ?? 0
+													})}
+												</span>
+												{#if clarificationSummary.clarification_declined_count}
+													<span>
+														{$i18n.t('Dismissed: {{count}}', {
+															count: clarificationSummary.clarification_declined_count
+														})}
+													</span>
+												{/if}
+											</div>
+											<div class="space-y-2">
+												{#each clarifications as exchange}
+													<div class="rounded-2xl bg-gray-50 dark:bg-gray-800 px-4 py-3 text-sm">
+														{#if exchange.created_at}
+															<div class="mb-1.5 text-[10px] text-gray-400 tabular-nums">
+																{formatEpochTime(exchange.created_at)}
 															</div>
-														{/each}
+														{/if}
+														<div class="space-y-2.5">
+															{#each exchange.questions as question}
+																<div>
+																	<div class="text-gray-800 dark:text-gray-200">
+																		{question.question}
+																	</div>
+																	{#if question.options.length}
+																		<div class="mt-1 text-xs text-gray-400">
+																			{question.options.join(' / ')}
+																		</div>
+																	{/if}
+																	{#if question.answer === null}
+																		<div class="mt-1.5 text-xs text-gray-400">
+																			{$i18n.t('No answer')}
+																		</div>
+																	{:else if question.answer.type === 'other'}
+																		<div
+																			class="mt-1.5 rounded-xl bg-emerald-50 px-3 py-2 text-sm whitespace-pre-wrap break-words text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
+																		>
+																			{question.answer.text}
+																		</div>
+																	{:else}
+																		<div class="mt-1.5 text-sm text-gray-700 dark:text-gray-300">
+																			{question.answer.label}
+																		</div>
+																	{/if}
+																</div>
+															{/each}
+														</div>
 													</div>
-												</div>
-											{/each}
-										</div>
-									{/if}
-								</div>
+												{/each}
+											</div>
+										{/if}
+									</div>
 								{/if}
 
 								<!-- 提交前读者试读 -->
@@ -1291,30 +1558,54 @@
 								<div>
 									<div class="mb-3 flex items-center justify-between">
 										<div>
-											<div class="text-sm font-semibold text-gray-950 dark:text-gray-100">{$i18n.t('Writing Process Timeline')}</div>
-											<div class="mt-0.5 text-xs text-gray-400">{$i18n.t('Prompts, text changes and analysis events combined')}</div>
+											<div class="text-sm font-semibold text-gray-950 dark:text-gray-100">
+												{$i18n.t('Writing Process Timeline')}
+											</div>
+											<div class="mt-0.5 text-xs text-gray-400">
+												{$i18n.t('Prompts, text changes and analysis events combined')}
+											</div>
 										</div>
-										<div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+										<div
+											class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500 dark:text-gray-400"
+										>
 											<label class="inline-flex cursor-pointer items-center gap-1.5">
-												<input type="checkbox" bind:checked={showUserTimeline} class="accent-blue-500" />
+												<input
+													type="checkbox"
+													bind:checked={showUserTimeline}
+													class="accent-blue-500"
+												/>
 												<span class="text-blue-600">{$i18n.t('User')}</span>
 											</label>
 											<label class="inline-flex cursor-pointer items-center gap-1.5">
-												<input type="checkbox" bind:checked={showAssistantTimeline} class="accent-purple-500" />
+												<input
+													type="checkbox"
+													bind:checked={showAssistantTimeline}
+													class="accent-purple-500"
+												/>
 												<span class="text-purple-600">{$i18n.t('AI')}</span>
 											</label>
 											<label class="inline-flex cursor-pointer items-center gap-1.5">
-												<input type="checkbox" bind:checked={showAnalysisTimeline} class="accent-gray-500" />
+												<input
+													type="checkbox"
+													bind:checked={showAnalysisTimeline}
+													class="accent-gray-500"
+												/>
 												<span>{$i18n.t('Writing Events')}</span>
 											</label>
 											<label class="inline-flex cursor-pointer items-center gap-1.5 opacity-60">
-												<input type="checkbox" bind:checked={showAutosaveTimeline} class="accent-gray-400" />
+												<input
+													type="checkbox"
+													bind:checked={showAutosaveTimeline}
+													class="accent-gray-400"
+												/>
 												<span>{$i18n.t('Autosave')}</span>
 											</label>
 										</div>
 									</div>
 									{#if unifiedTimeline.length === 0}
-										<div class="rounded-2xl bg-gray-50 dark:bg-gray-800 px-4 py-4 text-sm text-gray-400">
+										<div
+											class="rounded-2xl bg-gray-50 dark:bg-gray-800 px-4 py-4 text-sm text-gray-400"
+										>
 											{$i18n.t('No analysis timeline available yet.')}
 										</div>
 									{:else}
@@ -1326,26 +1617,45 @@
 												{@const isLong = item.run
 													? Boolean(item.run.inserted_text || item.run.deleted_text)
 													: (item.label?.length ?? 0) > 200}
-												<div class="rounded-r-2xl rounded-l-none border-l-[3px] bg-gray-50 dark:bg-gray-800 px-4 py-3 text-sm {isUser
-													? 'border-blue-400'
-													: isAI
-														? 'border-purple-400'
-														: 'border-gray-300 dark:border-gray-700'}">
+												<div
+													class="rounded-r-2xl rounded-l-none border-l-[3px] bg-gray-50 dark:bg-gray-800 px-4 py-3 text-sm {isUser
+														? 'border-blue-400'
+														: isAI
+															? 'border-purple-400'
+															: 'border-gray-300 dark:border-gray-700'}"
+												>
 													<div class="mb-1 flex items-center justify-between gap-2 text-[10px]">
-														<span class="font-semibold {isUser ? 'text-blue-500' : isAI ? 'text-purple-500' : 'text-gray-400'}">
-															{item.kind === 'prompt' ? item.meta : (item.meta ?? item.kind)}{#if isAI && showReplyThinking && item.thinking_level}
+														<span
+															class="font-semibold {isUser
+																? 'text-blue-500'
+																: isAI
+																	? 'text-purple-500'
+																	: 'text-gray-400'}"
+														>
+															{item.kind === 'prompt'
+																? item.meta
+																: (item.meta ??
+																	item.kind)}{#if isAI && showReplyThinking && item.thinking_level}
 																· {$i18n.t('Thinking: {{level}}', {
 																	level: $i18n.t(THINKING_SETTING_TEXT[item.thinking_level])
 																})}{/if}
 														</span>
 														{#if item.created_at}
 															<span class="text-gray-400 tabular-nums">
-																{formatEpochTime(item.created_at)}{#if item.run && formatEpochTime(item.run.ended_at) !== formatEpochTime(item.created_at)}–{formatEpochTime(item.run.ended_at)}{/if}
+																{formatEpochTime(
+																	item.created_at
+																)}{#if item.run && formatEpochTime(item.run.ended_at) !== formatEpochTime(item.created_at)}–{formatEpochTime(
+																		item.run.ended_at
+																	)}{/if}
 															</span>
 														{/if}
 													</div>
 													{#if isAI}
-														<div class="prose prose-sm dark:prose-invert max-w-none break-words prose-headings:my-2 prose-headings:text-sm prose-headings:font-semibold text-gray-800 dark:text-gray-200 {isExpanded ? '' : 'max-h-[4.5rem] overflow-hidden'}">
+														<div
+															class="prose prose-sm dark:prose-invert max-w-none break-words prose-headings:my-2 prose-headings:text-sm prose-headings:font-semibold text-gray-800 dark:text-gray-200 {isExpanded
+																? ''
+																: 'max-h-[4.5rem] overflow-hidden'}"
+														>
 															{@html renderMarkdown(item.label)}
 														</div>
 													{:else if item.run}
@@ -1354,25 +1664,39 @@
 															<div class="mt-2 space-y-1.5 text-xs">
 																{#if item.run.inserted_text}
 																	<div class="whitespace-pre-wrap break-words">
-																		<span class="text-emerald-600 dark:text-emerald-400">{$i18n.t('Wrote')}</span>
-																		<span class="text-gray-700 dark:text-gray-300">{item.run.inserted_text}</span>
+																		<span class="text-emerald-600 dark:text-emerald-400"
+																			>{$i18n.t('Wrote')}</span
+																		>
+																		<span class="text-gray-700 dark:text-gray-300"
+																			>{item.run.inserted_text}</span
+																		>
 																	</div>
 																{/if}
 																{#if item.run.deleted_text}
 																	<div class="whitespace-pre-wrap break-words">
-																		<span class="text-rose-600 dark:text-rose-400">{$i18n.t('Removed')}</span>
-																		<span class="text-gray-500 line-through">{item.run.deleted_text}</span>
+																		<span class="text-rose-600 dark:text-rose-400"
+																			>{$i18n.t('Removed')}</span
+																		>
+																		<span class="text-gray-500 line-through"
+																			>{item.run.deleted_text}</span
+																		>
 																	</div>
 																{/if}
 															</div>
 														{/if}
 													{:else}
-														<div class="whitespace-pre-wrap break-words text-gray-800 dark:text-gray-200 {isExpanded ? '' : 'line-clamp-3'}">{item.label}</div>
+														<div
+															class="whitespace-pre-wrap break-words text-gray-800 dark:text-gray-200 {isExpanded
+																? ''
+																: 'line-clamp-3'}"
+														>
+															{item.label}
+														</div>
 													{/if}
 													{#if item.inserted_length}
 														<div class="mt-1 text-xs text-gray-400">
-														{$i18n.t('+{{count}} chars', { count: item.inserted_length })}
-													</div>
+															{$i18n.t('+{{count}} chars', { count: item.inserted_length })}
+														</div>
 													{/if}
 													{#if isLong}
 														<button
@@ -1406,19 +1730,25 @@
 											{#if diffData.has_previous}
 												<TextDiffBlocks blocks={diffData.blocks} />
 											{:else}
-												<div class="mt-2 text-sm text-gray-400">{$i18n.t('No previous round to compare.')}</div>
+												<div class="mt-2 text-sm text-gray-400">
+													{$i18n.t('No previous round to compare.')}
+												</div>
 											{/if}
 										{/if}
 									</div>
 								{/if}
 							</div>
 
-						<!-- ── 反思 & 版本 tab ── -->
+							<!-- ── 反思 & 版本 tab ── -->
 						{:else if activeTab === 'reflection'}
 							<div class="space-y-4 p-5">
-
 								<!-- 修订初稿作业:第一次通读的逐项结论与学生的处理 -->
 								{#if isReviseDraft}
+									<RevisionReadings
+										records={detail.submission.stats_json?.revision_readings ?? []}
+										currentText={detail.final_version?.note_snapshot_text ?? ''}
+										readonly
+									/>
 									<RevisionItemsReview
 										sheet={detail?.submission?.stats_json?.revision_items ?? null}
 										{criteriaLabels}
@@ -1432,7 +1762,9 @@
 											{$i18n.t('AI Coaching Style')}
 										</div>
 										<div class="flex flex-wrap items-center gap-2">
-											<span class="rounded-full border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-3 py-1 text-xs text-gray-700 dark:text-gray-300">
+											<span
+												class="rounded-full border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-3 py-1 text-xs text-gray-700 dark:text-gray-300"
+											>
 												{coachingStyleLabel ? $i18n.t(coachingStyleLabel) : roundCoaching.style}
 											</span>
 											{#if roundCoaching.prompt}
@@ -1447,22 +1779,30 @@
 											{/if}
 										</div>
 										{#if roundCoaching.prompt && showCoachingPrompt}
-											<pre class="mt-2 whitespace-pre-wrap break-words rounded-xl bg-white dark:bg-gray-850 px-3 py-2 font-sans text-xs leading-6 text-gray-600 dark:text-gray-400">{roundCoaching.prompt}</pre>
+											<pre
+												class="mt-2 whitespace-pre-wrap break-words rounded-xl bg-white dark:bg-gray-850 px-3 py-2 font-sans text-xs leading-6 text-gray-600 dark:text-gray-400">{roundCoaching.prompt}</pre>
 										{/if}
 										<div class="mt-2 text-[11px] text-gray-400">
-											{$i18n.t('Frozen at submission time; later edits to this style do not change it.')}
+											{$i18n.t(
+												'Frozen at submission time; later edits to this style do not change it.'
+											)}
 										</div>
 									</div>
 								{/if}
 
 								<!-- Coaching-chat thinking in force for this round, frozen at submission time -->
 								{#if roundThinking}
-									<div class="rounded-2xl bg-gray-50 dark:bg-gray-800 px-4 py-4" data-testid="round-thinking">
+									<div
+										class="rounded-2xl bg-gray-50 dark:bg-gray-800 px-4 py-4"
+										data-testid="round-thinking"
+									>
 										<div class="mb-2 text-[11px] text-gray-400">
 											{$i18n.t('AI thinking in the coaching chat')}
 										</div>
 										<div class="flex flex-wrap items-center gap-2">
-											<span class="rounded-full border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-3 py-1 text-xs text-gray-700 dark:text-gray-300">
+											<span
+												class="rounded-full border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-3 py-1 text-xs text-gray-700 dark:text-gray-300"
+											>
 												{$i18n.t(THINKING_SETTING_TEXT[roundThinking.level])}
 											</span>
 											<span class="text-xs text-gray-400">
@@ -1474,20 +1814,27 @@
 												? $i18n.t(
 														'Students could switch thinking off; each reply in the timeline shows what it used.'
 													)
-												: $i18n.t('Frozen at submission time; later setting changes do not change it.')}
+												: $i18n.t(
+														'Frozen at submission time; later setting changes do not change it.'
+													)}
 										</div>
 									</div>
 								{/if}
 
 								<!-- Models the platform steps actually used this round, frozen at submission time -->
 								{#if roundStepModels.length > 0}
-									<div class="rounded-2xl bg-gray-50 dark:bg-gray-800 px-4 py-4" data-testid="round-step-models">
+									<div
+										class="rounded-2xl bg-gray-50 dark:bg-gray-800 px-4 py-4"
+										data-testid="round-step-models"
+									>
 										<div class="mb-2 text-[11px] text-gray-400">
 											{$i18n.t('AI models used this round')}
 										</div>
 										<div class="flex flex-wrap gap-2">
 											{#each roundStepModels as item}
-												<span class="rounded-full border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-3 py-1 text-xs text-gray-700 dark:text-gray-300">
+												<span
+													class="rounded-full border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-3 py-1 text-xs text-gray-700 dark:text-gray-300"
+												>
 													{$i18n.t(item.label)}: {modelName(item.model)}
 												</span>
 											{/each}
@@ -1501,8 +1848,12 @@
 										<div class="mb-2 text-[11px] text-gray-400">
 											{$i18n.t('Did you use AI for this submission?')}
 										</div>
-										<span class="rounded-full border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-3 py-1 text-xs text-gray-700 dark:text-gray-300">
-											{detail.micro_reflection.ai_used ? $i18n.t('Used AI') : $i18n.t('Did not use AI')}
+										<span
+											class="rounded-full border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-3 py-1 text-xs text-gray-700 dark:text-gray-300"
+										>
+											{detail.micro_reflection.ai_used
+												? $i18n.t('Used AI')
+												: $i18n.t('Did not use AI')}
 										</span>
 									</div>
 								{/if}
@@ -1515,7 +1866,9 @@
 										</div>
 										{#if item.kind === 'text'}
 											{#if item.text}
-												<div class="whitespace-pre-wrap text-sm leading-7 text-gray-700 dark:text-gray-300">
+												<div
+													class="whitespace-pre-wrap text-sm leading-7 text-gray-700 dark:text-gray-300"
+												>
 													{item.text}
 												</div>
 											{:else}
@@ -1524,12 +1877,16 @@
 										{:else if item.selected.length || item.other_text}
 											<div class="flex flex-wrap gap-2">
 												{#each item.selected as option}
-													<span class="rounded-full border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-3 py-1 text-xs text-gray-700 dark:text-gray-300">
+													<span
+														class="rounded-full border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-3 py-1 text-xs text-gray-700 dark:text-gray-300"
+													>
 														{option}
 													</span>
 												{/each}
 												{#if item.other_text}
-													<span class="rounded-full border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-3 py-1 text-xs text-gray-700 dark:text-gray-300">
+													<span
+														class="rounded-full border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-3 py-1 text-xs text-gray-700 dark:text-gray-300"
+													>
 														{$i18n.t('Other')}: {item.other_text}
 													</span>
 												{/if}
@@ -1543,7 +1900,9 @@
 								<!-- Version history -->
 								<div>
 									<div class="mb-3 flex items-center justify-between">
-										<div class="text-sm font-semibold text-gray-950 dark:text-gray-100">{$i18n.t('Versions')}</div>
+										<div class="text-sm font-semibold text-gray-950 dark:text-gray-100">
+											{$i18n.t('Versions')}
+										</div>
 										<div class="text-xs text-gray-400">
 											{#if hiddenVersionCount > 0 && !showAllVersions}
 												{$i18n.t('Latest {{visible}} / {{total}}', {
@@ -1558,11 +1917,18 @@
 									<div class="space-y-1.5">
 										{#each visibleVersions as version}
 											{@const isAutosave = version.trigger_type === 'autosave'}
-											<div class="flex items-center justify-between gap-3 rounded-2xl border px-4 text-sm transition-colors {isAutosave
-												? 'border-gray-100 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-800/40 py-2 opacity-55'
-												: 'border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 py-3'}">
-												<span class="{isAutosave ? 'text-xs text-gray-500 dark:text-gray-400' : 'font-medium text-gray-900 dark:text-gray-100'}">
-													{$i18n.t('Version')} {version.version_no}
+											<div
+												class="flex items-center justify-between gap-3 rounded-2xl border px-4 text-sm transition-colors {isAutosave
+													? 'border-gray-100 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-800/40 py-2 opacity-55'
+													: 'border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 py-3'}"
+											>
+												<span
+													class={isAutosave
+														? 'text-xs text-gray-500 dark:text-gray-400'
+														: 'font-medium text-gray-900 dark:text-gray-100'}
+												>
+													{$i18n.t('Version')}
+													{version.version_no}
 												</span>
 												<div class="flex items-center gap-2 text-right">
 													{#if !isAutosave}
@@ -1591,12 +1957,10 @@
 								</div>
 							</div>
 						{/if}
-
 					</div>
 				</div>
 			</div>
 		</div>
-
 	{:else if loaded && loadError}
 		<div class="mx-auto max-w-3xl px-4 py-16">
 			<EduStateCard tone="error">{loadError}</EduStateCard>

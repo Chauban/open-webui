@@ -13,6 +13,8 @@ teach, and the teaching endpoints accept either.
 
 from __future__ import annotations
 
+from starlette.concurrency import run_in_threadpool
+
 from typing import Optional
 
 from open_webui.models.education import Education
@@ -53,9 +55,7 @@ class EducationIdentityConflict(Exception):
     """An identity change that would strand teaching data behind it."""
 
 
-async def set_education_role(
-    user_id: str, role: Optional[str], db: Optional[AsyncSession] = None
-) -> None:
+async def set_education_role(user_id: str, role: Optional[str], db: Optional[AsyncSession] = None) -> None:
     """Move a user into the group for ``role``, leaving the other one.
 
     ``admin`` is not a teaching identity and is left alone entirely: a platform
@@ -68,6 +68,11 @@ async def set_education_role(
     """
     if role == 'admin':
         return
+
+    if role == 'teacher':
+        from open_webui.services.education.teaching_config import initialize_teacher_access
+
+        await run_in_threadpool(initialize_teacher_access, user_id)
 
     target_group_id = GROUP_ID_BY_ROLE.get(role or '')
 
@@ -87,6 +92,4 @@ async def set_education_role(
 
     for member_role in ROLE_BY_GROUP_ID.values():
         if member_role != role:
-            Education.delete_classroom_memberships_by_user_id(
-                user_id, member_role=member_role
-            )
+            Education.delete_classroom_memberships_by_user_id(user_id, member_role=member_role)

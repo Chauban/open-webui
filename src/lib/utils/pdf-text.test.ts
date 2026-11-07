@@ -100,7 +100,9 @@ describe('pdf.js fixtures', () => {
 		const data = new Uint8Array(readFileSync(new URL(`./fixtures/${name}`, import.meta.url)));
 		const doc = await pdfjs.getDocument({
 			data,
-			cMapUrl: fileURLToPath(new URL('../../../node_modules/pdfjs-dist/cmaps/', import.meta.url)),
+			cMapUrl: fileURLToPath(
+				new URL('../../../node_modules/pdfjs-dist/cmaps/', import.meta.url)
+			).replace(/\\/g, '/'),
 			cMapPacked: true,
 			verbosity: 0
 		}).promise;

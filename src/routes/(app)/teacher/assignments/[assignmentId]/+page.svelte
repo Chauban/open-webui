@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { isRevision, taskTypeLabel } from '$lib/utils/task-types';
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 	import { getContext, onMount } from 'svelte';
@@ -19,11 +20,7 @@
 	import EduStatCard from '$lib/components/education/EduStatCard.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 	import { assignmentTabs } from '$lib/components/education/teacher-nav';
-	import {
-		formatEpoch,
-		getClassroomDisplayName,
-		resolveErrorMessage
-	} from '$lib/utils/education';
+	import { formatEpoch, getClassroomDisplayName, resolveErrorMessage } from '$lib/utils/education';
 
 	// 作业首页此前是一整张编辑表单,老师点「打开作业」多半是想看进度。
 	// 现在首页只答「交得怎么样、还要做什么」,编辑挪到「设置」标签。
@@ -166,12 +163,31 @@
 						{/each}
 					</div>
 					<div class="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
-						<span><span class="mr-1 inline-block size-2 rounded-full bg-emerald-500"></span>{$i18n.t('Reviewed')} {item.reviewed_count}</span>
+						<span
+							><span class="mr-1 inline-block size-2 rounded-full bg-emerald-500"></span>{$i18n.t(
+								'Reviewed'
+							)}
+							{item.reviewed_count}</span
+						>
 						{#if $config?.features?.enable_education_return}
-							<span><span class="mr-1 inline-block size-2 rounded-full bg-sky-400"></span>{$i18n.t('Returned')} {item.returned_count}</span>
+							<span
+								><span class="mr-1 inline-block size-2 rounded-full bg-sky-400"></span>{$i18n.t(
+									'Returned'
+								)}
+								{item.returned_count}</span
+							>
 						{/if}
-						<span><span class="mr-1 inline-block size-2 rounded-full bg-amber-400"></span>{$i18n.t('To Review')} {item.pending_review_count}</span>
-						<span><span class="mr-1 inline-block size-2 rounded-full bg-gray-300 dark:bg-gray-600"></span>{$i18n.t('Unsubmitted')} {unsubmittedCount}</span>
+						<span
+							><span class="mr-1 inline-block size-2 rounded-full bg-amber-400"></span>{$i18n.t(
+								'To Review'
+							)}
+							{item.pending_review_count}</span
+						>
+						<span
+							><span class="mr-1 inline-block size-2 rounded-full bg-gray-300 dark:bg-gray-600"
+							></span>{$i18n.t('Unsubmitted')}
+							{unsubmittedCount}</span
+						>
 					</div>
 				</EduCard>
 			{/if}
@@ -186,13 +202,13 @@
 				<div class="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-300">
 					{assignment.description || $i18n.t('No description')}
 				</div>
-				<dl class="mt-5 grid gap-x-6 gap-y-3 border-t border-gray-100 pt-4 text-sm sm:grid-cols-2 dark:border-gray-800">
+				<dl
+					class="mt-5 grid gap-x-6 gap-y-3 border-t border-gray-100 pt-4 text-sm sm:grid-cols-2 dark:border-gray-800"
+				>
 					<div>
 						<dt class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Assignment type')}</dt>
 						<dd class="mt-0.5">
-							{assignment.task_mode === 'revise_draft'
-								? $i18n.t('Revise a draft')
-								: $i18n.t('Write from scratch')}
+							{$i18n.t(taskTypeLabel(assignment.task_mode))}
 						</dd>
 					</div>
 					<div>
@@ -204,14 +220,16 @@
 							<span class="text-gray-400">/ {assignment.score_max}</span>
 						</dd>
 					</div>
-					{#if $config?.features?.enable_education_coaching_styles ?? true}
+					{#if !isRevision(assignment.task_mode) && ($config?.features?.enable_education_coaching_styles ?? true)}
 						<div>
-							<dt class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('AI Coaching Style')}</dt>
+							<dt class="text-xs text-gray-500 dark:text-gray-400">
+								{$i18n.t('AI Coaching Style')}
+							</dt>
 							<dd class="mt-0.5">{$i18n.t(COACHING_TITLES[assignment.coaching_style])}</dd>
 						</div>
 					{/if}
 					<!-- 修订初稿作业结构上没有试读，不显示这一行，免得读成「没开」。 -->
-					{#if assignment.task_mode !== 'revise_draft'}
+					{#if !isRevision(assignment.task_mode)}
 						<div>
 							<dt class="text-xs text-gray-500 dark:text-gray-400">
 								{$i18n.t('AI Reader Check Before Submitting')}
@@ -230,8 +248,8 @@
 							{$i18n.t('Reflection Before Submitting')}
 						</dt>
 						<dd class="mt-0.5">
-							{assignment.task_mode === 'revise_draft'
-								? $i18n.t('{{count}} reflection questions, plus the revision list', {
+							{isRevision(assignment.task_mode)
+								? $i18n.t('{{count}} reflection questions', {
 										count: assignment.reflection_questions?.length ?? 0
 									})
 								: $i18n.t('{{count}} reflection questions, plus "Did you use AI?"', {

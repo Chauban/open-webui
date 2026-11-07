@@ -33,7 +33,7 @@ _PROFILE_MAX_INSIGHTS = 5
 _TREND_FLAT_TOLERANCE = 0.05
 _TREND_MIN_SAMPLES = 3
 _TREND_MAX_WINDOW = 3
-PROFILE_METRIC_VERSION = "2026-10-01.1"
+PROFILE_METRIC_VERSION = '2026-11-07.1'
 PROFILE_INSIGHT_VERSION = "2026-09-23.1"
 
 _INSIGHT_META = {
@@ -183,6 +183,7 @@ def _compute_collaboration_index(
     prompt_count: int,
     prompt_quality: Optional[int],
     reflection_quality: Optional[int],
+    reflection_applicable: bool = True,
 ) -> Optional[int]:
     """提问质量与反思质量的平均,两项都来自教师批改。
 
@@ -190,14 +191,12 @@ def _compute_collaboration_index(
     AI 用得少既不扣分也不加分(用量另由 ai_ratio 呈现)。是否有对话看系统记录,
     不看学生自己勾的「用了 AI」。
     """
-    # 两项都来自教师批改,批改之前留空比先给个假分诚实。
-    if reflection_quality is None:
+    if prompt_count and prompt_quality is None or reflection_applicable and reflection_quality is None:
         return None
-    if prompt_count == 0:
-        return int(round(reflection_quality))
-    if prompt_quality is None:
-        return None
-    return int(round((prompt_quality + reflection_quality) / 2))
+    applicable = [
+        value for value in (prompt_quality if prompt_count else None, reflection_quality) if value is not None
+    ]
+    return int(round(sum(applicable) / len(applicable))) if applicable else None
 
 
 def _slice_round_versions(versions, previous_final_version_id, final_version_id):

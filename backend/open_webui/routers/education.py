@@ -1,3 +1,11 @@
+from starlette.concurrency import run_in_threadpool
+from open_webui.services.education.task_types import is_revision, TASK_MODES
+from open_webui.services.education.teaching_config import (
+    lock_assignment,
+    teacher_access,
+    latest_teaching_config,
+    revision_system_context,
+)
 import csv
 import difflib
 import hashlib
@@ -69,10 +77,6 @@ from open_webui.models.education import (
     DashboardResponse,
     DRAFT_BASELINE_MIN_CHARS,
     DraftBaselineForm,
-    RevisionDecisionForm,
-    RevisionFollowUpResponse,
-    RevisionItemsResponse,
-    RevisionItemsStartForm,
     EditorOperationCreateForm,
     Education,
     MyAssignmentSubmissionsResponse,
@@ -84,6 +88,7 @@ from open_webui.models.education import (
     TaskMode,
     PersonalWorkspaceListItem,
     ProvenanceCreateForm,
+    ProvenanceSegmentModel,
     ReflectionQuestionSetItem,
     SubmissionAlreadyReviewedError,
     SubmissionCreateForm,
@@ -156,11 +161,7 @@ from open_webui.services.education.ai_steps import (
 from open_webui.services.education.profile import PROFILE_METRIC_VERSION
 from open_webui.services.education.revision_items import (
     build_first_read_distribution,
-    build_revision_snapshot,
-    ensure_follow_up,
-    ensure_revision_items,
     is_same_as_draft,
-    normalize_revision_decision,
     summarize_revision_snapshot,
 )
 from open_webui.services.education.identity import get_education_role
@@ -210,9 +211,9 @@ router = APIRouter()
 
 MAX_STUDENT_ASSIGNMENTS = 100
 SUBMISSION_DETAIL_VERSION_LIMIT = 20
-PROJECT_MODE_GENERAL = "general"
-PROJECT_MODE_PERSONAL_WRITING = "personal_writing"
-PROJECT_MODE_ASSIGNMENT_WRITING = "assignment_writing"
+PROJECT_MODE_GENERAL = 'general'
+PROJECT_MODE_PERSONAL_WRITING = 'personal_writing'
+PROJECT_MODE_ASSIGNMENT_WRITING = 'assignment_writing'
 
 
 class ChatMessageUpsertForm(BaseModel):
@@ -235,8 +236,8 @@ async def _send_education_notifications(
         return
     Education.insert_notifications(user_ids, notification_type, payload, db=db)
     await emit_to_users(
-        "education:notification",
-        {"type": notification_type, "payload": payload},
+        'education:notification',
+        {'type': notification_type, 'payload': payload},
         user_ids,
     )
 
@@ -248,12 +249,12 @@ async def _get_education_role(user):
 
 async def _ensure_teacher_identity(user):
     education_role = await _get_education_role(user)
-    if education_role in {"admin", "teacher"}:
+    if education_role in {'admin', 'teacher'}:
         return education_role
 
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
-        detail="Teacher identity is required",
+        detail='Teacher identity is required',
     )
 
 
@@ -263,8 +264,8 @@ def _is_valid_due_at(due_at: Optional[int]) -> bool:
 
 def _format_export_timestamp(timestamp: Optional[int]) -> str:
     if not timestamp:
-        return ""
-    return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M")
+        return ''
+    return datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M')
 
 
 async def _build_classroom_member_detail(member, db: Session):
@@ -277,27 +278,20 @@ async def _build_classroom_member_detail(member, db: Session):
     )
 
 
-def _make_teacher_assignment_list_item(
-    assignment, classroom, student_count: int, submissions, db: Session
-):
-    reviews = Education.get_submission_reviews_by_submission_ids(
-        [submission.id for submission in submissions], db=db
-    )
+def _make_teacher_assignment_list_item(assignment, classroom, student_count: int, submissions, db: Session):
+    reviews = Education.get_submission_reviews_by_submission_ids([submission.id for submission in submissions], db=db)
     statuses = [
-        reviews[submission.id].review_status if submission.id in reviews else "pending"
-        for submission in submissions
+        reviews[submission.id].review_status if submission.id in reviews else 'pending' for submission in submissions
     ]
     return TeacherAssignmentListItem(
         assignment=assignment,
         classroom=classroom,
         student_count=student_count,
         submission_count=len(submissions),
-        pending_review_count=statuses.count("pending"),
-        reviewed_count=statuses.count("reviewed"),
-        returned_count=statuses.count("returned"),
-        latest_submission_at=max(
-            (submission.submitted_at for submission in submissions), default=None
-        ),
+        pending_review_count=statuses.count('pending'),
+        reviewed_count=statuses.count('reviewed'),
+        returned_count=statuses.count('returned'),
+        latest_submission_at=max((submission.submitted_at for submission in submissions), default=None),
     )
 
 
@@ -307,11 +301,7 @@ async def _build_teacher_assignment_list_item(assignment, db: Session):
     if assignment.classroom_id:
         classroom = Education.get_classroom_by_id(assignment.classroom_id, db=db)
         if classroom is not None:
-            student_count = len(
-                Education.get_classroom_members(
-                    classroom.id, member_role="student", db=db
-                )
-            )
+            student_count = len(Education.get_classroom_members(classroom.id, member_role='student', db=db))
 
     return _make_teacher_assignment_list_item(
         assignment,
@@ -324,19 +314,13 @@ async def _build_teacher_assignment_list_item(assignment, db: Session):
 
 async def _build_submission_list_item(submission, assignment, db: Session):
     session = Education.get_writing_session_by_id(submission.writing_session_id, db=db)
-    reflection = Education.get_micro_reflection_by_id(
-        submission.micro_reflection_id, db=db
-    )
+    reflection = Education.get_micro_reflection_by_id(submission.micro_reflection_id, db=db)
     student = await Users.get_user_by_id(submission.student_id, db=db)
     review = Education.get_submission_review_by_submission_id(submission.id, db=db)
-    classroom = (
-        Education.get_classroom_by_id(assignment.classroom_id, db=db)
-        if assignment.classroom_id
-        else None
-    )
+    classroom = Education.get_classroom_by_id(assignment.classroom_id, db=db) if assignment.classroom_id else None
     analysis = await get_materialized_submission_analysis(submission, session, db)
     revision_overview = None
-    if assignment.task_mode == "revise_draft":
+    if is_revision(assignment.task_mode):
         revision_overview = summarize_revision_snapshot(
             submission.stats_json, _is_submission_same_as_draft(submission, session, db)
         )
@@ -347,9 +331,9 @@ async def _build_submission_list_item(submission, assignment, db: Session):
         classroom=classroom,
         reflection=reflection,
         student_name=student.name if student else submission.student_id,
-        review_status=review.review_status if review else "pending",
+        review_status=review.review_status if review else 'pending',
         score=review.score if review else None,
-        risk_summary=analysis.get("summary", {}),
+        risk_summary=analysis.get('summary', {}),
         revision_overview=revision_overview,
     )
 
@@ -358,106 +342,90 @@ def _is_submission_same_as_draft(submission, session, db: Session) -> bool:
     if session is None or session.draft_baseline_at is None:
         return False
     version = Education.get_version_by_id(submission.final_version_id, db=db)
-    return is_same_as_draft(
-        version.note_snapshot_text if version else "", session.draft_baseline_text
-    )
+    return is_same_as_draft(version.note_snapshot_text if version else '', session.draft_baseline_text)
 
 
-def _ensure_classroom_access(
-    user, classroom, db: Session, require_teacher: bool = False
-):
-    if user.role == "admin":
-        return "admin"
+def _ensure_classroom_access(user, classroom, db: Session, require_teacher: bool = False):
+    if user.role == 'admin':
+        return 'admin'
 
     member = Education.get_classroom_member(classroom.id, user.id, db=db)
     if member is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have access to this classroom",
+            detail='You do not have access to this classroom',
         )
 
-    if require_teacher and member.member_role != "teacher":
+    if require_teacher and member.member_role != 'teacher':
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Teacher access is required",
+            detail='Teacher access is required',
         )
 
     return member.member_role
 
 
-def _make_assignment_project_meta(
-    assignment_id: str, session_id: Optional[str] = None
-) -> dict:
+def _make_assignment_project_meta(assignment_id: str, session_id: Optional[str] = None) -> dict:
     meta = {
-        "mode": PROJECT_MODE_ASSIGNMENT_WRITING,
-        "assignment_id": assignment_id,
-        "hidden_from_sidebar": False,
+        'mode': PROJECT_MODE_ASSIGNMENT_WRITING,
+        'assignment_id': assignment_id,
+        'hidden_from_sidebar': False,
     }
     if session_id:
-        meta["writing_session_id"] = session_id
+        meta['writing_session_id'] = session_id
     return meta
 
 
 async def _get_coaching_prompt(coaching_style: str) -> str:
     """取该辅导档位当前的提示词；管理员把某档清空就返回空串。"""
-    coaching_prompts = await Config.get("education.coaching_prompts") or {}
-    return (coaching_prompts.get(coaching_style) or "").strip()
-
-
-async def _get_task_prompt(task_mode: str) -> str:
-    """取该作业形式当前的任务说明；管理员把某个形式清空就返回空串。"""
-    task_prompts = await Config.get("education.task_prompts") or {}
-    return (task_prompts.get(task_mode) or "").strip()
+    coaching_prompts = await Config.get('education.coaching_prompts') or {}
+    return (coaching_prompts.get(coaching_style) or '').strip()
 
 
 async def _build_assignment_system_prompt(assignment) -> str:
     """把作业信息、任务说明和辅导风格拼成项目文件夹的系统提示，让写作区里的对话自带作业上下文。"""
-    lines = [f"【作业】{assignment.title}"]
+    if is_revision(assignment.task_mode):
+        return revision_system_context(assignment)
+    lines = [f'【作业】{assignment.title}']
 
-    description = (assignment.description or "").strip()
+    description = (assignment.description or '').strip()
     if description:
-        lines.append(f"【要求】{description}")
+        lines.append(f'【要求】{description}')
 
     criteria = assignment.rubric_schema.criteria
-    rubric_text = " / ".join(f"{c.label}({c.max_score})" for c in criteria)
-    lines.append(f"【评分维度】{rubric_text}，满分 {assignment.score_max}")
+    rubric_text = ' / '.join(f'{c.label}({c.max_score})' for c in criteria)
+    lines.append(f'【评分维度】{rubric_text}，满分 {assignment.score_max}')
 
     if assignment.due_at:
-        due_text = datetime.fromtimestamp(assignment.due_at).strftime("%Y-%m-%d %H:%M")
-        lines.append(f"【截止】{due_text}")
+        due_text = datetime.fromtimestamp(assignment.due_at).strftime('%Y-%m-%d %H:%M')
+        lines.append(f'【截止】{due_text}')
 
-    task_prompt = await _get_task_prompt(assignment.task_mode)
+    task_prompt = assignment.teaching_config['prompt']
     if task_prompt:
         lines.append(task_prompt)
 
     # 管理员关了辅导风格时,怎么辅导全写在任务说明里,不再附档位提示词。
-    if await Config.get("education.enable_coaching_styles"):
+    if await Config.get('education.enable_coaching_styles'):
         coaching_prompt = await _get_coaching_prompt(assignment.coaching_style)
         if coaching_prompt:
             lines.append(coaching_prompt)
 
-    return "\n".join(lines)
+    return '\n'.join(lines)
 
 
 def _make_personal_project_meta(session_id: str) -> dict:
     return {
-        "mode": PROJECT_MODE_PERSONAL_WRITING,
-        "writing_session_id": session_id,
-        "hidden_from_sidebar": False,
+        'mode': PROJECT_MODE_PERSONAL_WRITING,
+        'writing_session_id': session_id,
+        'hidden_from_sidebar': False,
     }
 
 
 def _get_project_mode_from_session(session) -> str:
-    return (
-        PROJECT_MODE_ASSIGNMENT_WRITING
-        if session.scope == "assignment"
-        else PROJECT_MODE_PERSONAL_WRITING
-    )
+    return PROJECT_MODE_ASSIGNMENT_WRITING if session.scope == 'assignment' else PROJECT_MODE_PERSONAL_WRITING
 
 
-def _refresh_profile_aggregates_after_scope_change(
-    student_ids: list[str], db: Session
-) -> None:
+def _refresh_profile_aggregates_after_scope_change(student_ids: list[str], db: Session) -> None:
     refresh_profile_aggregates_after_scope_change(student_ids, db)
 
 
@@ -470,23 +438,18 @@ def _get_other_student_classroom(student_id: str, classroom_id: str, db: Session
 
 
 def _get_classroom_student_ids(classroom_id: str, db: Session) -> list[str]:
-    return [
-        member.user_id
-        for member in Education.get_classroom_members(
-            classroom_id, member_role="student", db=db
-        )
-    ]
+    return [member.user_id for member in Education.get_classroom_members(classroom_id, member_role='student', db=db)]
 
 
 def _make_default_note(title: str, assignment_id: str) -> NoteForm:
     return NoteForm(
         title=title,
         data={
-            "content": {"json": None, "html": "", "md": ""},
-            "versions": [],
-            "files": [],
+            'content': {'json': None, 'html': '', 'md': ''},
+            'versions': [],
+            'files': [],
         },
-        meta={"assignment_id": assignment_id},
+        meta={'assignment_id': assignment_id},
         access_grants=[],
     )
 
@@ -495,11 +458,11 @@ def _make_personal_note(title: str) -> NoteForm:
     return NoteForm(
         title=title,
         data={
-            "content": {"json": None, "html": "", "md": ""},
-            "versions": [],
-            "files": [],
+            'content': {'json': None, 'html': '', 'md': ''},
+            'versions': [],
+            'files': [],
         },
-        meta={"scope": "personal"},
+        meta={'scope': 'personal'},
         access_grants=[],
     )
 
@@ -507,38 +470,28 @@ def _make_personal_note(title: str) -> NoteForm:
 def _get_assignment_or_404(assignment_id: str, db: Session) -> AssignmentModel:
     assignment = Education.get_assignment_by_id(assignment_id, db=db)
     if assignment is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Assignment not found')
     return assignment
 
 
 def _get_classroom_or_404(classroom_id: str, db: Session) -> ClassroomModel:
     classroom = Education.get_classroom_by_id(classroom_id, db=db)
     if classroom is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Classroom not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Classroom not found')
     return classroom
 
 
 def _get_submission_or_404(submission_id: str, db: Session) -> SubmissionModel:
     submission = Education.get_submission_by_id(submission_id, db=db)
     if submission is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Submission not found')
     return submission
 
 
-def _build_student_review_view(
-    assignment, student_id: str, db: Session
-) -> tuple[Optional[dict], Optional[int]]:
+def _build_student_review_view(assignment, student_id: str, db: Session) -> tuple[Optional[dict], Optional[int]]:
     rounds, reviews = _load_submission_rounds_with_reviews(assignment, student_id, db)
     extension = Education.get_assignment_extension(assignment.id, student_id, db=db)
-    effective_due_at = _resolve_effective_due_at(
-        assignment, rounds, reviews, extension.due_at if extension else None
-    )
+    effective_due_at = _resolve_effective_due_at(assignment, rounds, reviews, extension.due_at if extension else None)
     submission = next(
         (item for item in rounds if item.is_current == 1),
         None,
@@ -547,25 +500,25 @@ def _build_student_review_view(
         return None, effective_due_at
     review = reviews.get(submission.id)
     view = {
-        "round_no": submission.round_no,
-        "submitted_at": submission.submitted_at,
-        "review_status": review.review_status if review else "pending",
+        'round_no': submission.round_no,
+        'submitted_at': submission.submitted_at,
+        'review_status': review.review_status if review else 'pending',
     }
-    if review and review.review_status == "reviewed":
+    if review and review.review_status == 'reviewed':
         view.update(
             {
-                "score": review.score,
-                "overall_comment": review.overall_comment,
-                "rubric": review.rubric_scores,
-                "reviewed_at": review.reviewed_at,
+                'score': review.score,
+                'overall_comment': review.overall_comment,
+                'rubric': review.rubric_scores,
+                'reviewed_at': review.reviewed_at,
             }
         )
-    elif review and review.review_status == "returned":
+    elif review and review.review_status == 'returned':
         view.update(
             {
-                "returned_comment": review.returned_comment,
-                "resubmit_due_at": review.resubmit_due_at,
-                "reviewed_at": review.reviewed_at,
+                'returned_comment': review.returned_comment,
+                'resubmit_due_at': review.resubmit_due_at,
+                'reviewed_at': review.reviewed_at,
             }
         )
     return view, effective_due_at
@@ -574,15 +527,13 @@ def _build_student_review_view(
 def _get_workspace_session_or_404(session_id: str, db: Session):
     session = Education.get_writing_session_by_id(session_id, db=db)
     if session is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Writing session not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Writing session not found')
     return session
 
 
 def _ensure_workspace_session_owner(user, session):
-    if user.role != "admin" and session.owner_user_id != user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    if user.role != 'admin' and session.owner_user_id != user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Forbidden')
 
 
 def _get_assignment_classroom_or_404(assignment, db: Session):
@@ -590,27 +541,25 @@ def _get_assignment_classroom_or_404(assignment, db: Session):
     if classroom_id is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Classroom not found",
+            detail='Classroom not found',
         )
     classroom = Education.get_classroom_by_id(classroom_id, db=db)
     if classroom is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Classroom not found",
+            detail='Classroom not found',
         )
     return classroom
 
 
 async def _ensure_assignment_project(assignment, session, db: Session):
     project = (
-        await Folders.get_folder_by_id_and_user_id(
-            session.folder_id, session.owner_user_id, db=db
-        )
+        await Folders.get_folder_by_id_and_user_id(session.folder_id, session.owner_user_id, db=db)
         if session.folder_id
         else None
     )
 
-    desired_data = {"system_prompt": await _build_assignment_system_prompt(assignment)}
+    desired_data = {'system_prompt': await _build_assignment_system_prompt(assignment)}
 
     if project is None:
         project = await Folders.insert_new_folder(
@@ -636,8 +585,7 @@ async def _ensure_assignment_project(assignment, session, db: Session):
         if (
             desired_meta != (project.meta or {})
             or desired_name != project.name
-            or (project.data or {}).get("system_prompt")
-            != desired_data["system_prompt"]
+            or (project.data or {}).get('system_prompt') != desired_data['system_prompt']
         ):
             project = await Folders.update_folder_by_id_and_user_id(
                 project.id,
@@ -650,18 +598,14 @@ async def _ensure_assignment_project(assignment, session, db: Session):
                 db=db,
             )
 
-    legacy_chat = (
-        await Chats.get_chat_by_id(session.chat_id, db=db) if session.chat_id else None
-    )
+    legacy_chat = await Chats.get_chat_by_id(session.chat_id, db=db) if session.chat_id else None
     if legacy_chat is not None and legacy_chat.folder_id != project.id:
-        await Chats.update_chat_folder_id_by_id_and_user_id(
-            legacy_chat.id, session.owner_user_id, project.id, db=db
-        )
+        await Chats.update_chat_folder_id_by_id_and_user_id(legacy_chat.id, session.owner_user_id, project.id, db=db)
         chat_meta = dict(legacy_chat.meta or {})
-        if chat_meta.get("category") == "assignment_workspace":
-            chat_meta.pop("category", None)
-            chat_meta.pop("assignment_id", None)
-            chat_meta.pop("writing_session_id", None)
+        if chat_meta.get('category') == 'assignment_workspace':
+            chat_meta.pop('category', None)
+            chat_meta.pop('assignment_id', None)
+            chat_meta.pop('writing_session_id', None)
             Chats.update_chat_meta_by_id(legacy_chat.id, chat_meta, db=db)
 
     return project
@@ -669,13 +613,11 @@ async def _ensure_assignment_project(assignment, session, db: Session):
 
 async def _ensure_personal_project(session, note, db: Session):
     project = (
-        await Folders.get_folder_by_id_and_user_id(
-            session.folder_id, session.owner_user_id, db=db
-        )
+        await Folders.get_folder_by_id_and_user_id(session.folder_id, session.owner_user_id, db=db)
         if session.folder_id
         else None
     )
-    desired_name = note.title or "Untitled Writing"
+    desired_name = note.title or 'Untitled Writing'
     desired_meta = _make_personal_project_meta(session.id)
 
     if project is None:
@@ -709,9 +651,7 @@ async def _get_workspace_resources_or_409(assignment, session, db: Session):
     project = await _ensure_assignment_project(assignment, session, db=db)
 
     active_chat_id = session.active_chat_id or session.chat_id
-    active_chat = (
-        await Chats.get_chat_by_id(active_chat_id, db=db) if active_chat_id else None
-    )
+    active_chat = await Chats.get_chat_by_id(active_chat_id, db=db) if active_chat_id else None
     if active_chat_id and active_chat is None:
         session = Education.update_writing_session_context(
             session.id,
@@ -724,12 +664,12 @@ async def _get_workspace_resources_or_409(assignment, session, db: Session):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={
-                "code": "ASSIGNMENT_WORKSPACE_CORRUPTED",
-                "detail": "Assignment workspace is missing note resources.",
-                "assignment_id": assignment.id,
-                "writing_session_id": session.id,
-                "missing_note": note is None,
-                "missing_chat": False,
+                'code': 'ASSIGNMENT_WORKSPACE_CORRUPTED',
+                'detail': 'Assignment workspace is missing note resources.',
+                'assignment_id': assignment.id,
+                'writing_session_id': session.id,
+                'missing_note': note is None,
+                'missing_chat': False,
             },
         )
 
@@ -737,27 +677,25 @@ async def _get_workspace_resources_or_409(assignment, session, db: Session):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={
-                "code": "ASSIGNMENT_WORKSPACE_CORRUPTED",
-                "detail": "Assignment workspace is missing project resources.",
-                "assignment_id": assignment.id,
-                "writing_session_id": session.id,
-                "missing_note": False,
-                "missing_chat": False,
-                "missing_project": True,
+                'code': 'ASSIGNMENT_WORKSPACE_CORRUPTED',
+                'detail': 'Assignment workspace is missing project resources.',
+                'assignment_id': assignment.id,
+                'writing_session_id': session.id,
+                'missing_note': False,
+                'missing_chat': False,
+                'missing_project': True,
             },
         )
 
     return note, project, session.active_chat_id or session.chat_id
 
 
-def _ensure_assignment_access(
-    user, assignment, db: Session, require_teacher: bool = False
-):
-    if user.role == "admin":
-        return "admin"
+def _ensure_assignment_access(user, assignment, db: Session, require_teacher: bool = False):
+    if user.role == 'admin':
+        return 'admin'
 
     if assignment.teacher_id == user.id:
-        return "teacher"
+        return 'teacher'
 
     classroom = _get_assignment_classroom_or_404(assignment, db)
 
@@ -765,13 +703,13 @@ def _ensure_assignment_access(
     if member is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have access to this assignment",
+            detail='You do not have access to this assignment',
         )
 
-    if require_teacher and member.member_role != "teacher":
+    if require_teacher and member.member_role != 'teacher':
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Teacher access is required",
+            detail='Teacher access is required',
         )
 
     return member.member_role
@@ -843,28 +781,20 @@ def _ensure_draft_baseline_ready(session, db: Session) -> None:
     if is_draft_baseline_missing(session, db=db):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Submit your first draft first",
+            detail='Submit your first draft first',
         )
 
 
-
-
-
-
-async def _build_personal_workspace_item(
-    session, db: Session
-) -> Optional[PersonalWorkspaceListItem]:
+async def _build_personal_workspace_item(session, db: Session) -> Optional[PersonalWorkspaceListItem]:
     note = await Notes.get_note_by_id(session.note_id, db=db)
     if note is None:
         return None
-    preview_text = (((note.data or {}).get("content") or {}).get("md") or "").strip()[
-        :160
-    ] or None
+    preview_text = (((note.data or {}).get('content') or {}).get('md') or '').strip()[:160] or None
     return PersonalWorkspaceListItem(
         project_mode=PROJECT_MODE_PERSONAL_WRITING,
         writing_session=session,
         project_id=session.folder_id,
-        title=note.title or "Untitled Writing",
+        title=note.title or 'Untitled Writing',
         updated_at=max(session.updated_at, note.updated_at // 1_000_000_000),
         preview_text=preview_text,
     )
@@ -876,14 +806,10 @@ async def _build_recent_item(session, db: Session) -> Optional[WritingRecentItem
         return None
     assignment = (
         Education.get_assignment_by_id(session.assignment_id, db=db)
-        if session.assignment_id and session.scope == "assignment"
+        if session.assignment_id and session.scope == 'assignment'
         else None
     )
-    title = (
-        assignment.title
-        if assignment is not None
-        else (note.title or "Untitled Writing")
-    )
+    title = assignment.title if assignment is not None else (note.title or 'Untitled Writing')
     # 上游 Notes 的时间戳是纳秒,写作会话是秒;直接取 max 会让前端显示「未知」
     updated_at = max(session.updated_at, note.updated_at // 1_000_000_000)
     return WritingRecentItem(
@@ -897,36 +823,35 @@ async def _build_recent_item(session, db: Session) -> Optional[WritingRecentItem
     )
 
 
-
-
-@router.post("/assignments", response_model=list[AssignmentModel])
+@router.post('/assignments', response_model=list[AssignmentModel])
 async def create_assignment(
     form_data: AssignmentCreateForm,
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
     await _ensure_teacher_identity(user)
+    if user.role != 'admin' and form_data.task_mode not in teacher_access(user.id, db).allowed_task_modes:
+        raise HTTPException(403, 'This assignment type is not authorized for your account')
+    teaching_config = latest_teaching_config(form_data.task_mode, db)
     classroom_ids = list(
         dict.fromkeys(
-            classroom_id.strip()
-            for classroom_id in form_data.classroom_ids
-            if classroom_id and classroom_id.strip()
+            classroom_id.strip() for classroom_id in form_data.classroom_ids if classroom_id and classroom_id.strip()
         )
     )
     if not classroom_ids:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="At least one classroom is required",
+            detail='At least one classroom is required',
         )
     if not form_data.title.strip():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Assignment title is required",
+            detail='Assignment title is required',
         )
     if not _is_valid_due_at(form_data.due_at):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Assignment due time is required",
+            detail='Assignment due time is required',
         )
     await _ensure_model_params_allowed(form_data.model_params)
     classrooms = []
@@ -935,7 +860,7 @@ async def create_assignment(
         if classroom is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Classroom not found",
+                detail='Classroom not found',
             )
         _ensure_classroom_access(user, classroom, db, require_teacher=True)
         classrooms.append(classroom)
@@ -944,22 +869,20 @@ async def create_assignment(
     affected_student_ids = []
     for classroom in classrooms:
         assignment = Education.insert_assignment(
-            user.id, classroom.id, form_data, db=db
+            user.id, classroom.id, form_data, db=db, teaching_config=teaching_config
         )
         student_ids = [
             member.user_id
-            for member in Education.get_classroom_members(
-                assignment.classroom_id, member_role="student", db=db
-            )
+            for member in Education.get_classroom_members(assignment.classroom_id, member_role='student', db=db)
         ]
         affected_student_ids.extend(student_ids)
         await _send_education_notifications(
             student_ids,
-            "assignment_published",
+            'assignment_published',
             {
-                "assignment_id": assignment.id,
-                "assignment_title": assignment.title,
-                "due_at": assignment.due_at,
+                'assignment_id': assignment.id,
+                'assignment_title': assignment.title,
+                'due_at': assignment.due_at,
             },
             db,
         )
@@ -968,7 +891,7 @@ async def create_assignment(
     return assignments
 
 
-@router.patch("/assignments/{assignment_id}", response_model=AssignmentModel)
+@router.patch('/assignments/{assignment_id}', response_model=AssignmentModel)
 async def update_assignment(
     assignment_id: str,
     form_data: AssignmentUpdateForm,
@@ -976,34 +899,55 @@ async def update_assignment(
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
-    next_due_at = (
-        form_data.due_at
-        if "due_at" in form_data.model_fields_set
-        else assignment.due_at
+    if 'model_params' in form_data.model_fields_set and form_data.model_params is not None:
+        await _ensure_model_params_allowed(form_data.model_params)
+    assignment = await run_in_threadpool(lock_assignment, assignment_id, db)
+    if assignment.config_revision != form_data.expected_config_revision:
+        raise HTTPException(409, 'Assignment settings changed; reload before saving')
+    next_mode = form_data.task_mode or assignment.task_mode
+    if (
+        next_mode != assignment.task_mode
+        and user.role != 'admin'
+        and next_mode not in teacher_access(user.id, db).allowed_task_modes
+    ):
+        raise HTTPException(403, 'This assignment type is not authorized for your account')
+    started = Education.assignment_has_draft_baseline(assignment.id, db=db) or bool(
+        Education.get_submissions_by_assignment(assignment.id, db=db)
     )
+    if form_data.adopt_latest_teaching_config and started:
+        raise HTTPException(409, 'Teaching configuration is locked after students have started')
+    description_changed = any(
+        getattr(form_data, key) != getattr(assignment, key)
+        for key in ('title', 'description')
+        if key in form_data.model_fields_set
+    )
+    has_sessions = bool(Education.get_writing_sessions_by_assignment(assignment.id, db=db))
+    if description_changed and has_sessions and not (form_data.change_summary or '').strip():
+        raise HTTPException(400, 'Describe the change to the assignment requirements')
+    teaching_config = (
+        latest_teaching_config(next_mode, db)
+        if next_mode != assignment.task_mode or form_data.adopt_latest_teaching_config
+        else None
+    )
+    next_due_at = form_data.due_at if 'due_at' in form_data.model_fields_set else assignment.due_at
     if not _is_valid_due_at(next_due_at):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Assignment due time is required",
+            detail='Assignment due time is required',
         )
 
     if (
-        (
-            "score_max" in form_data.model_fields_set
-            and form_data.score_max != assignment.score_max
-        )
-        or (
-            "rubric_schema" in form_data.model_fields_set
-            and form_data.rubric_schema != assignment.rubric_schema
-        )
+        (form_data.scoring_mode is not None and form_data.scoring_mode != assignment.scoring_mode)
+        or ('score_max' in form_data.model_fields_set and form_data.score_max != assignment.score_max)
+        or ('rubric_schema' in form_data.model_fields_set and form_data.rubric_schema != assignment.rubric_schema)
     ) and Education.get_submissions_by_assignment(assignment.id, db=db):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Scoring configuration cannot change after submissions exist",
+            detail='Scoring configuration cannot change after submissions exist',
         )
 
     if (
-        "task_mode" in form_data.model_fields_set
+        'task_mode' in form_data.model_fields_set
         and form_data.task_mode != assignment.task_mode
         and (
             Education.assignment_has_draft_baseline(assignment.id, db=db)
@@ -1012,18 +956,18 @@ async def update_assignment(
     ):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Task mode cannot change after students have started",
+            detail='Task mode cannot change after students have started',
         )
-
-    if "model_params" in form_data.model_fields_set and form_data.model_params is not None:
-        await _ensure_model_params_allowed(form_data.model_params)
 
     next_score_max = form_data.score_max or assignment.score_max
     next_rubric = form_data.rubric_schema or assignment.rubric_schema
-    if next_rubric.total_score != next_score_max:
+    next_scoring_mode = form_data.scoring_mode or assignment.scoring_mode
+    if (next_scoring_mode == 'total' and next_rubric.criteria) or (
+        next_scoring_mode == 'dimensions' and (not next_rubric.criteria or next_rubric.total_score != next_score_max)
+    ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Rubric maximum scores must add up to assignment maximum score",
+            detail='Rubric maximum scores must add up to assignment maximum score',
         )
 
     if form_data.classroom_id is not None:
@@ -1034,14 +978,14 @@ async def update_assignment(
         ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Classroom cannot be changed after submissions exist",
+                detail='Classroom cannot be changed after submissions exist',
             )
 
     previous_due_at = assignment.due_at
     previous_classroom_id = assignment.classroom_id
     try:
         updated_assignment = Education.update_assignment(
-            assignment_id, form_data, db=db
+            assignment_id, form_data, db=db, teaching_config=teaching_config
         )
     except ValueError as err:
         raise HTTPException(
@@ -1051,45 +995,46 @@ async def update_assignment(
     if updated_assignment is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Assignment not found",
+            detail='Assignment not found',
         )
 
-    if (
-        "due_at" in form_data.model_fields_set
-        and updated_assignment.due_at != previous_due_at
-        and updated_assignment.classroom_id
+    if updated_assignment.classroom_id and any(
+        key in form_data.model_fields_set
+        for key in (
+            'title',
+            'description',
+            'due_at',
+            'reflection_questions',
+            'rubric_schema',
+            'score_max',
+            'scoring_mode',
+        )
     ):
         student_ids = [
             member.user_id
-            for member in Education.get_classroom_members(
-                updated_assignment.classroom_id, member_role="student", db=db
-            )
+            for member in Education.get_classroom_members(updated_assignment.classroom_id, member_role='student', db=db)
         ]
         await _send_education_notifications(
             student_ids,
-            "assignment_updated",
+            'assignment_updated',
             {
-                "assignment_id": updated_assignment.id,
-                "assignment_title": updated_assignment.title,
-                "due_at": updated_assignment.due_at,
+                'assignment_id': updated_assignment.id,
+                'assignment_title': updated_assignment.title,
+                'due_at': updated_assignment.due_at,
             },
             db,
         )
     if updated_assignment.classroom_id != previous_classroom_id:
         affected_student_ids = []
         if previous_classroom_id:
-            affected_student_ids.extend(
-                _get_classroom_student_ids(previous_classroom_id, db)
-            )
+            affected_student_ids.extend(_get_classroom_student_ids(previous_classroom_id, db))
         if updated_assignment.classroom_id:
-            affected_student_ids.extend(
-                _get_classroom_student_ids(updated_assignment.classroom_id, db)
-            )
+            affected_student_ids.extend(_get_classroom_student_ids(updated_assignment.classroom_id, db))
         _refresh_profile_aggregates_after_scope_change(affected_student_ids, db)
     return updated_assignment
 
 
-@router.delete("/assignments/{assignment_id}")
+@router.delete('/assignments/{assignment_id}')
 async def delete_assignment(
     assignment: AssignmentModel = Depends(require_teacher_assignment),
     db: Session = Depends(get_session),
@@ -1097,39 +1042,32 @@ async def delete_assignment(
     if Education.get_submissions_by_assignment(assignment.id, db=db):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Assignments with submissions cannot be deleted",
+            detail='Assignments with submissions cannot be deleted',
         )
     if Education.get_writing_sessions_by_assignment(assignment.id, db=db):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Assignments with student writing activity cannot be deleted",
+            detail='Assignments with student writing activity cannot be deleted',
         )
-    affected_student_ids = (
-        _get_classroom_student_ids(assignment.classroom_id, db)
-        if assignment.classroom_id
-        else []
-    )
+    affected_student_ids = _get_classroom_student_ids(assignment.classroom_id, db) if assignment.classroom_id else []
     Education.delete_assignment_notifications(assignment.id, db=db)
     Education.delete_assignment(assignment.id, db=db)
     _refresh_profile_aggregates_after_scope_change(affected_student_ids, db)
-    return {"ok": True}
+    return {'ok': True}
 
 
 def _get_unsubmitted_members(assignment, db: Session):
     if not assignment.classroom_id:
         return []
-    members = Education.get_classroom_members(
-        assignment.classroom_id, member_role="student", db=db
-    )
+    members = Education.get_classroom_members(assignment.classroom_id, member_role='student', db=db)
     submitted_ids = {
-        submission.student_id
-        for submission in Education.get_submissions_by_assignment(assignment.id, db=db)
+        submission.student_id for submission in Education.get_submissions_by_assignment(assignment.id, db=db)
     }
     return [member for member in members if member.user_id not in submitted_ids]
 
 
 @router.get(
-    "/teacher/assignments/{assignment_id}/unsubmitted",
+    '/teacher/assignments/{assignment_id}/unsubmitted',
     response_model=list[UnsubmittedStudentItem],
 )
 async def get_assignment_unsubmitted_students(
@@ -1147,9 +1085,7 @@ async def get_assignment_unsubmitted_students(
                 user_name=member_user.name if member_user else member.user_id,
                 user_email=member_user.email if member_user else None,
                 extension=extension,
-                effective_due_at=(
-                    extension.due_at if extension else assignment.due_at
-                ),
+                effective_due_at=(extension.due_at if extension else assignment.due_at),
             )
         )
     return items
@@ -1160,21 +1096,19 @@ def _require_assignment_student(assignment, student_user_id: str, db: Session):
     if not assignment.classroom_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Assignment is not bound to a classroom",
+            detail='Assignment is not bound to a classroom',
         )
-    member = Education.get_classroom_member(
-        assignment.classroom_id, student_user_id, db=db
-    )
-    if member is None or member.member_role != "student":
+    member = Education.get_classroom_member(assignment.classroom_id, student_user_id, db=db)
+    if member is None or member.member_role != 'student':
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Student is not in this classroom",
+            detail='Student is not in this classroom',
         )
     return member
 
 
 @router.put(
-    "/teacher/assignments/{assignment_id}/extensions/{student_user_id}",
+    '/teacher/assignments/{assignment_id}/extensions/{student_user_id}',
     response_model=AssignmentExtensionModel,
 )
 async def grant_assignment_extension(
@@ -1188,18 +1122,16 @@ async def grant_assignment_extension(
     if form_data.due_at <= int(time.time()):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Extension due time must be in the future",
+            detail='Extension due time must be in the future',
         )
-    extension = Education.upsert_assignment_extension(
-        assignment.id, student_user_id, user.id, form_data, db=db
-    )
+    extension = Education.upsert_assignment_extension(assignment.id, student_user_id, user.id, form_data, db=db)
     await _send_education_notifications(
         [student_user_id],
-        "assignment_extension_granted",
+        'assignment_extension_granted',
         {
-            "assignment_id": assignment.id,
-            "assignment_title": assignment.title,
-            "due_at": extension.due_at,
+            'assignment_id': assignment.id,
+            'assignment_title': assignment.title,
+            'due_at': extension.due_at,
         },
         db,
     )
@@ -1207,7 +1139,7 @@ async def grant_assignment_extension(
 
 
 @router.delete(
-    "/teacher/assignments/{assignment_id}/extensions/{student_user_id}",
+    '/teacher/assignments/{assignment_id}/extensions/{student_user_id}',
     response_model=bool,
 )
 async def revoke_assignment_extension(
@@ -1215,20 +1147,16 @@ async def revoke_assignment_extension(
     assignment: AssignmentModel = Depends(require_teacher_assignment),
     db: Session = Depends(get_session),
 ):
-    if not Education.delete_assignment_extension(
-        assignment.id, student_user_id, db=db
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Extension not found"
-        )
+    if not Education.delete_assignment_extension(assignment.id, student_user_id, db=db):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Extension not found')
     # 撤销把学生的截止时间改回全班口径,不通知等于让他按错的时间写。
     await _send_education_notifications(
         [student_user_id],
-        "assignment_extension_revoked",
+        'assignment_extension_revoked',
         {
-            "assignment_id": assignment.id,
-            "assignment_title": assignment.title,
-            "due_at": assignment.due_at,
+            'assignment_id': assignment.id,
+            'assignment_title': assignment.title,
+            'due_at': assignment.due_at,
         },
         db,
     )
@@ -1236,7 +1164,7 @@ async def revoke_assignment_extension(
 
 
 @router.post(
-    "/teacher/assignments/{assignment_id}/remind",
+    '/teacher/assignments/{assignment_id}/remind',
     response_model=AssignmentRemindResult,
 )
 async def remind_unsubmitted_students(
@@ -1244,42 +1172,38 @@ async def remind_unsubmitted_students(
     assignment: AssignmentModel = Depends(require_teacher_assignment),
     db: Session = Depends(get_session),
 ):
-    unsubmitted_ids = [
-        member.user_id for member in _get_unsubmitted_members(assignment, db)
-    ]
+    unsubmitted_ids = [member.user_id for member in _get_unsubmitted_members(assignment, db)]
     if form_data.user_ids is not None:
         requested_ids = set(form_data.user_ids)
-        target_ids = [
-            user_id for user_id in unsubmitted_ids if user_id in requested_ids
-        ]
+        target_ids = [user_id for user_id in unsubmitted_ids if user_id in requested_ids]
     else:
         target_ids = unsubmitted_ids
 
     await _send_education_notifications(
         target_ids,
-        "assignment_reminder",
+        'assignment_reminder',
         {
-            "assignment_id": assignment.id,
-            "assignment_title": assignment.title,
-            "due_at": assignment.due_at,
+            'assignment_id': assignment.id,
+            'assignment_title': assignment.title,
+            'due_at': assignment.due_at,
         },
         db,
     )
     return AssignmentRemindResult(reminded_count=len(target_ids), user_ids=target_ids)
 
 
-@router.get("/me/classroom", response_model=ClassroomResponse)
+@router.get('/me/classroom', response_model=ClassroomResponse)
 async def get_my_classroom(
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
     education_role = await _get_education_role(user)
-    if education_role == "teacher" or user.role == "admin":
+    if education_role == 'teacher' or user.role == 'admin':
         classrooms = Education.get_classrooms_by_teacher(user.id, db=db)
         if not classrooms:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Classroom not found",
+                detail='Classroom not found',
             )
         classroom = classrooms[0]
         membership = Education.get_classroom_member(classroom.id, user.id, db=db)
@@ -1289,14 +1213,14 @@ async def get_my_classroom(
     if membership is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Classroom not found",
+            detail='Classroom not found',
         )
 
     classroom = Education.get_classroom_by_id(membership.classroom_id, db=db)
     return ClassroomResponse(classroom=classroom, membership=membership)
 
 
-@router.post("/classrooms", response_model=ClassroomResponse)
+@router.post('/classrooms', response_model=ClassroomResponse)
 async def create_classroom(
     form_data: ClassroomCreateForm,
     user=Depends(get_verified_user),
@@ -1306,7 +1230,7 @@ async def create_classroom(
     if not form_data.name.strip():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Classroom name is required",
+            detail='Classroom name is required',
         )
     try:
         classroom = Education.insert_classroom(user.id, form_data, db=db)
@@ -1319,7 +1243,7 @@ async def create_classroom(
     return ClassroomResponse(classroom=classroom, membership=membership)
 
 
-@router.post("/classrooms/join", response_model=ClassroomResponse)
+@router.post('/classrooms/join', response_model=ClassroomResponse)
 async def join_classroom(
     form_data: ClassroomJoinForm,
     user=Depends(get_verified_user),
@@ -1328,43 +1252,41 @@ async def join_classroom(
     if not form_data.invite_code.strip():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Classroom invite code is required",
+            detail='Classroom invite code is required',
         )
 
-    if await _get_education_role(user) != "student":
+    if await _get_education_role(user) != 'student':
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only students can join classrooms",
+            detail='Only students can join classrooms',
         )
 
     classroom = Education.get_classroom_by_invite_code(form_data.invite_code, db=db)
     if classroom is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Invalid classroom invite code",
+            detail='Invalid classroom invite code',
         )
 
     existing_membership = Education.get_classroom_member(classroom.id, user.id, db=db)
     if existing_membership is not None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Student has already joined this classroom",
+            detail='Student has already joined this classroom',
         )
     if _get_other_student_classroom(user.id, classroom.id, db) is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="You are already in a classroom. Ask your teacher or an administrator to change classes.",
+            detail='You are already in a classroom. Ask your teacher or an administrator to change classes.',
         )
 
-    membership = Education.ensure_classroom_member(
-        classroom.id, user.id, "student", db=db
-    )
+    membership = Education.ensure_classroom_member(classroom.id, user.id, 'student', db=db)
     _refresh_profile_aggregates_after_scope_change([user.id], db)
     return ClassroomResponse(classroom=classroom, membership=membership)
 
 
 @router.post(
-    "/classrooms/{classroom_id}/invite-code/regenerate",
+    '/classrooms/{classroom_id}/invite-code/regenerate',
     response_model=ClassroomResponse,
 )
 async def regenerate_classroom_invite_code(
@@ -1377,7 +1299,7 @@ async def regenerate_classroom_invite_code(
     return ClassroomResponse(classroom=classroom, membership=membership)
 
 
-@router.get("/teacher/classrooms", response_model=list[TeacherClassroomListItem])
+@router.get('/teacher/classrooms', response_model=list[TeacherClassroomListItem])
 async def get_teacher_classrooms(
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
@@ -1388,9 +1310,7 @@ async def get_teacher_classrooms(
     items = []
     for classroom in classrooms:
         assignments = Education.get_assignments_by_classroom(classroom.id, db=db)
-        student_count = len(
-            Education.get_classroom_members(classroom.id, member_role="student", db=db)
-        )
+        student_count = len(Education.get_classroom_members(classroom.id, member_role='student', db=db))
         items.append(
             TeacherClassroomListItem(
                 classroom=classroom,
@@ -1402,17 +1322,14 @@ async def get_teacher_classrooms(
     return items
 
 
-@router.get("/teacher/assignments", response_model=list[TeacherAssignmentListItem])
+@router.get('/teacher/assignments', response_model=list[TeacherAssignmentListItem])
 async def get_teacher_assignments(
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
     await _ensure_teacher_identity(user)
     assignments = Education.get_assignments_by_teacher(user.id, db=db)
-    return [
-        await _build_teacher_assignment_list_item(assignment, db)
-        for assignment in assignments
-    ]
+    return [await _build_teacher_assignment_list_item(assignment, db) for assignment in assignments]
 
 
 _REFLECTION_QUESTION_SET_LIMIT = 10
@@ -1425,7 +1342,9 @@ class DefaultRubricCriterionItem(BaseModel):
 
 class AssignmentDefaultsResponse(BaseModel):
     coaching_style: CoachingStyle
-    task_mode: TaskMode
+    task_mode: Optional[TaskMode]
+    allowed_task_modes: list[TaskMode]
+    teaching_configs: dict[TaskMode, dict]
     rubrics: dict[TaskMode, list[DefaultRubricCriterionItem]]
     # 辅导对话的思考档位由谁定、管理员默认是哪档；作业表单据此决定显不显示思考设置。
     thinking: CoachingChatPolicy
@@ -1435,20 +1354,23 @@ async def _ensure_model_params_allowed(params: AssignmentModelParams) -> None:
     try:
         ensure_model_params_allowed(params, await get_ai_step_policy())
     except ModelParamsNotAllowed as error:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)
-        ) from error
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
 
 
-@router.get("/teacher/assignment-defaults", response_model=AssignmentDefaultsResponse)
-async def get_teacher_assignment_defaults(user=Depends(get_verified_user)):
+@router.get('/teacher/assignment-defaults', response_model=AssignmentDefaultsResponse)
+async def get_teacher_assignment_defaults(user=Depends(get_verified_user), db: Session = Depends(get_session)):
     """新建作业表单的初始值。辅导档位和作业形式由管理员按实例设定，教师仍可改选。"""
     await _ensure_teacher_identity(user)
+    configs = {mode: latest_teaching_config(mode, db) for mode in TASK_MODES}
     return {
-        "coaching_style": await Config.get("education.default_coaching_style"),
-        "task_mode": await Config.get("education.default_task_mode"),
-        "rubrics": await Config.get("education.default_rubrics"),
-        "thinking": (await get_ai_step_policy()).coaching_chat,
+        'coaching_style': await Config.get('education.default_coaching_style'),
+        'task_mode': 'from_scratch' if user.role == 'admin' else teacher_access(user.id, db).default_task_mode,
+        'allowed_task_modes': list(TASK_MODES)
+        if user.role == 'admin'
+        else teacher_access(user.id, db).allowed_task_modes,
+        'teaching_configs': configs,
+        'rubrics': {mode: config['rubric_schema']['criteria'] for mode, config in configs.items()},
+        'thinking': (await get_ai_step_policy()).coaching_chat,
     }
 
 
@@ -1460,7 +1382,7 @@ class AssignmentAiSettingsResponse(BaseModel):
 
 
 @router.get(
-    "/teacher/assignments/{assignment_id}/ai-settings",
+    '/teacher/assignments/{assignment_id}/ai-settings',
     response_model=AssignmentAiSettingsResponse,
 )
 async def get_teacher_assignment_ai_settings(
@@ -1471,13 +1393,13 @@ async def get_teacher_assignment_ai_settings(
     policy = await get_ai_step_policy()
     coaching = resolve_coaching_thinking(policy, assignment.model_params)
     return {
-        "steps": describe_steps(policy, await available_models(request, user), coaching),
-        "coaching_thinking": coaching,
+        'steps': describe_steps(policy, await available_models(request, user), coaching),
+        'coaching_thinking': coaching,
     }
 
 
 @router.get(
-    "/teacher/reflection-question-sets",
+    '/teacher/reflection-question-sets',
     response_model=list[ReflectionQuestionSetItem],
 )
 async def get_teacher_reflection_question_sets(
@@ -1502,10 +1424,7 @@ async def get_teacher_reflection_question_sets(
         if not assignment.reflection_questions:
             continue
         fingerprint = json.dumps(
-            [
-                question.model_dump(exclude={"id"})
-                for question in assignment.reflection_questions
-            ],
+            [question.model_dump(exclude={'id'}) for question in assignment.reflection_questions],
             ensure_ascii=False,
             sort_keys=True,
         )
@@ -1525,17 +1444,20 @@ async def get_teacher_reflection_question_sets(
     return items
 
 
-@router.get(
-    "/teacher/assignments/{assignment_id}", response_model=TeacherAssignmentListItem
-)
+@router.get('/teacher/assignments/{assignment_id}', response_model=TeacherAssignmentListItem)
 async def get_teacher_assignment(
     assignment: AssignmentModel = Depends(require_teacher_assignment),
     db: Session = Depends(get_session),
 ):
     item = await _build_teacher_assignment_list_item(assignment, db)
-    item.task_mode_locked = item.submission_count > 0 or (
-        Education.assignment_has_draft_baseline(assignment.id, db=db)
+    item.writing_count = len(
+        [
+            session
+            for session in Education.get_writing_sessions_by_assignment(assignment.id, db=db)
+            if session.status == 'draft'
+        ]
     )
+    item.task_mode_locked = item.submission_count > 0 or (Education.assignment_has_draft_baseline(assignment.id, db=db))
     return item
 
 
@@ -1544,7 +1466,7 @@ OVERVIEW_FOLLOWUP_LIMIT = 6
 OVERVIEW_RECENT_SUBMISSION_LIMIT = 5
 
 
-@router.get("/teacher/overview", response_model=TeacherOverviewResponse)
+@router.get('/teacher/overview', response_model=TeacherOverviewResponse)
 async def get_teacher_overview(
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
@@ -1560,17 +1482,11 @@ async def get_teacher_overview(
     overdue_unsubmitted_count = 0
 
     for classroom in classrooms:
-        student_count = len(
-            Education.get_classroom_members(classroom.id, member_role="student", db=db)
-        )
+        student_count = len(Education.get_classroom_members(classroom.id, member_role='student', db=db))
         for assignment in Education.get_assignments_by_classroom(classroom.id, db=db):
             submissions = Education.get_submissions_by_assignment(assignment.id, db=db)
-            submission_pairs.extend(
-                (submission, assignment) for submission in submissions
-            )
-            item = _make_teacher_assignment_list_item(
-                assignment, classroom, student_count, submissions, db
-            )
+            submission_pairs.extend((submission, assignment) for submission in submissions)
+            item = _make_teacher_assignment_list_item(assignment, classroom, student_count, submissions, db)
             pending_review_count += item.pending_review_count
             returned_count += item.returned_count
 
@@ -1596,9 +1512,7 @@ async def get_teacher_overview(
         followup_assignments=[item for _, item in followups[:OVERVIEW_FOLLOWUP_LIMIT]],
         recent_submissions=[
             await _build_submission_list_item(submission, assignment, db)
-            for submission, assignment in submission_pairs[
-                :OVERVIEW_RECENT_SUBMISSION_LIMIT
-            ]
+            for submission, assignment in submission_pairs[:OVERVIEW_RECENT_SUBMISSION_LIMIT]
         ],
     )
 
@@ -1608,19 +1522,19 @@ REVIEW_QUEUE_MAX_LIMIT = 200
 
 def _review_sort_key(item: SubmissionListItem, sort: str):
     summary = item.risk_summary or {}
-    if sort == "suspected":
-        return summary.get("suspected_unmarked_import_count", 0) or 0
-    if sort == "burst":
-        return summary.get("burst_count", 0) or 0
+    if sort == 'suspected':
+        return summary.get('suspected_unmarked_import_count', 0) or 0
+    if sort == 'burst':
+        return summary.get('burst_count', 0) or 0
     return item.submission.submitted_at
 
 
-@router.get("/teacher/review", response_model=TeacherReviewResponse)
+@router.get('/teacher/review', response_model=TeacherReviewResponse)
 async def get_teacher_review(
     review_status: Optional[str] = None,
     classroom_id: Optional[str] = None,
     assignment_id: Optional[str] = None,
-    sort: str = "latest",
+    sort: str = 'latest',
     only_suspected: bool = False,
     only_bursts: bool = False,
     limit: int = 50,
@@ -1631,15 +1545,9 @@ async def get_teacher_review(
     await _ensure_teacher_identity(user)
     assignments = Education.get_assignments_by_teacher(user.id, db=db)
     if assignment_id:
-        assignments = [
-            assignment for assignment in assignments if assignment.id == assignment_id
-        ]
+        assignments = [assignment for assignment in assignments if assignment.id == assignment_id]
     if classroom_id:
-        assignments = [
-            assignment
-            for assignment in assignments
-            if assignment.classroom_id == classroom_id
-        ]
+        assignments = [assignment for assignment in assignments if assignment.classroom_id == classroom_id]
 
     candidates = [
         (submission, assignment)
@@ -1654,20 +1562,13 @@ async def get_teacher_review(
         candidates = [
             (submission, assignment)
             for submission, assignment in candidates
-            if (
-                reviews[submission.id].review_status
-                if submission.id in reviews
-                else "pending"
-            )
-            == review_status
+            if (reviews[submission.id].review_status if submission.id in reviews else 'pending') == review_status
         ]
 
     limit = max(1, min(limit, REVIEW_QUEUE_MAX_LIMIT))
     offset = max(offset, 0)
 
-    if sort not in ("suspected", "burst") and not (
-        only_suspected or only_bursts
-    ):
+    if sort not in ('suspected', 'burst') and not (only_suspected or only_bursts):
         # 排序与筛选都不依赖分析结果:先分页再构建,整个队列只为当前这一页构建分析。
         candidates.sort(key=lambda pair: pair[0].submitted_at, reverse=True)
         return TeacherReviewResponse(
@@ -1679,25 +1580,16 @@ async def get_teacher_review(
         )
 
     # 疑似导入/爆发/改写率的筛选与排序键都来自分析摘要,只能全量构建后再分页。
-    items = [
-        await _build_submission_list_item(submission, assignment, db)
-        for submission, assignment in candidates
-    ]
+    items = [await _build_submission_list_item(submission, assignment, db) for submission, assignment in candidates]
     if only_suspected:
-        items = [
-            item
-            for item in items
-            if (item.risk_summary or {}).get("suspected_unmarked_import_count", 0) > 0
-        ]
+        items = [item for item in items if (item.risk_summary or {}).get('suspected_unmarked_import_count', 0) > 0]
     if only_bursts:
-        items = [
-            item for item in items if (item.risk_summary or {}).get("burst_count", 0) > 0
-        ]
+        items = [item for item in items if (item.risk_summary or {}).get('burst_count', 0) > 0]
     items.sort(key=lambda item: _review_sort_key(item, sort), reverse=True)
     return TeacherReviewResponse(items=items[offset : offset + limit], total=len(items))
 
 
-@router.get("/teacher/classrooms/{classroom_id}", response_model=ClassroomResponse)
+@router.get('/teacher/classrooms/{classroom_id}', response_model=ClassroomResponse)
 async def get_teacher_classroom(
     classroom: ClassroomModel = Depends(require_teacher_classroom),
     user=Depends(get_verified_user),
@@ -1708,28 +1600,22 @@ async def get_teacher_classroom(
 
 
 @router.get(
-    "/teacher/classrooms/{classroom_id}/members",
+    '/teacher/classrooms/{classroom_id}/members',
     response_model=list[ClassroomRosterItem],
 )
 async def get_classroom_members(
     classroom: ClassroomModel = Depends(require_teacher_classroom),
     db: Session = Depends(get_session),
 ):
-    members = Education.get_classroom_members(
-        classroom.id, member_role="student", db=db
-    )
+    members = Education.get_classroom_members(classroom.id, member_role='student', db=db)
     assignments = Education.get_assignments_by_classroom(classroom.id, db=db)
-    score_max_by_assignment = {
-        assignment.id: assignment.score_max for assignment in assignments
-    }
+    score_max_by_assignment = {assignment.id: assignment.score_max for assignment in assignments}
     submissions = [
         submission
         for assignment in assignments
         for submission in Education.get_submissions_by_assignment(assignment.id, db=db)
     ]
-    reviews = Education.get_submission_reviews_by_submission_ids(
-        [submission.id for submission in submissions], db=db
-    )
+    reviews = Education.get_submission_reviews_by_submission_ids([submission.id for submission in submissions], db=db)
     submissions_by_student: dict[str, list] = {}
     for submission in submissions:
         submissions_by_student.setdefault(submission.student_id, []).append(submission)
@@ -1742,9 +1628,9 @@ async def get_classroom_members(
         pending = 0
         for submission in own:
             review = reviews.get(submission.id)
-            if review is None or review.review_status == "pending":
+            if review is None or review.review_status == 'pending':
                 pending += 1
-            elif review.review_status == "reviewed" and review.score is not None:
+            elif review.review_status == 'reviewed' and review.score is not None:
                 score_max = score_max_by_assignment.get(submission.assignment_id)
                 if score_max:
                     percents.append(review.score * 100 / score_max)
@@ -1754,19 +1640,15 @@ async def get_classroom_members(
                 assignment_count=len(assignments),
                 submitted_count=len(own),
                 pending_review_count=pending,
-                average_score_percent=(
-                    round(sum(percents) / len(percents), 1) if percents else None
-                ),
-                latest_submitted_at=max(
-                    (submission.submitted_at for submission in own), default=None
-                ),
+                average_score_percent=(round(sum(percents) / len(percents), 1) if percents else None),
+                latest_submitted_at=max((submission.submitted_at for submission in own), default=None),
             )
         )
     return items
 
 
 @router.post(
-    "/teacher/classrooms/{classroom_id}/members",
+    '/teacher/classrooms/{classroom_id}/members',
     response_model=ClassroomMemberDetail,
 )
 async def add_classroom_member(
@@ -1778,29 +1660,27 @@ async def add_classroom_member(
     if member_user is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found",
+            detail='User not found',
         )
 
     education_role = await get_education_role(member_user)
-    if education_role != "student":
+    if education_role != 'student':
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only users with student identity can be added",
+            detail='Only users with student identity can be added',
         )
     if _get_other_student_classroom(member_user.id, classroom.id, db) is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="This student is already in another classroom. Remove them there first, or ask an administrator to transfer them.",
+            detail='This student is already in another classroom. Remove them there first, or ask an administrator to transfer them.',
         )
 
-    member = Education.ensure_classroom_member(
-        classroom.id, member_user.id, "student", db=db
-    )
+    member = Education.ensure_classroom_member(classroom.id, member_user.id, 'student', db=db)
     _refresh_profile_aggregates_after_scope_change([member_user.id], db)
     return await _build_classroom_member_detail(member, db)
 
 
-@router.delete("/teacher/classrooms/{classroom_id}/members/{member_user_id}")
+@router.delete('/teacher/classrooms/{classroom_id}/members/{member_user_id}')
 async def delete_classroom_member(
     member_user_id: str,
     classroom: ClassroomModel = Depends(require_teacher_classroom),
@@ -1809,23 +1689,23 @@ async def delete_classroom_member(
     if classroom.teacher_id == member_user_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Teacher membership cannot be removed",
+            detail='Teacher membership cannot be removed',
         )
 
     deleted = Education.delete_classroom_member(classroom.id, member_user_id, db=db)
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Classroom member not found",
+            detail='Classroom member not found',
         )
 
     _refresh_profile_aggregates_after_scope_change([member_user_id], db)
 
-    return {"ok": True}
+    return {'ok': True}
 
 
 @router.post(
-    "/teacher/classrooms/{classroom_id}/bulk-import",
+    '/teacher/classrooms/{classroom_id}/bulk-import',
     response_model=ClassroomBulkImportResult,
 )
 async def bulk_import_classroom_members(
@@ -1834,49 +1714,37 @@ async def bulk_import_classroom_members(
     db: Session = Depends(get_session),
 ):
     result = ClassroomBulkImportResult()
-    candidate_ids = {
-        item.strip() for item in form_data.user_ids if item and item.strip()
-    }
+    candidate_ids = {item.strip() for item in form_data.user_ids if item and item.strip()}
     for email in form_data.emails:
         normalized_email = email.strip().lower()
         if not normalized_email:
             continue
         member_user = await Users.get_user_by_email(normalized_email, db=db)
         if member_user is None:
-            result.failed_users.append(
-                {"value": normalized_email, "reason": "User not found"}
-            )
+            result.failed_users.append({'value': normalized_email, 'reason': 'User not found'})
             continue
         candidate_ids.add(member_user.id)
 
     for user_id in candidate_ids:
         member_user = await Users.get_user_by_id(user_id, db=db)
         if member_user is None:
-            result.failed_users.append({"value": user_id, "reason": "User not found"})
+            result.failed_users.append({'value': user_id, 'reason': 'User not found'})
             continue
 
         education_role = await get_education_role(member_user)
-        if education_role != "student":
-            result.failed_users.append(
-                {"value": user_id, "reason": "Only student users can be imported"}
-            )
+        if education_role != 'student':
+            result.failed_users.append({'value': user_id, 'reason': 'Only student users can be imported'})
             continue
 
-        existing_membership = Education.get_classroom_member(
-            classroom.id, member_user.id, db=db
-        )
+        existing_membership = Education.get_classroom_member(classroom.id, member_user.id, db=db)
         if existing_membership is not None:
             result.skipped_users.append(user_id)
             continue
         if _get_other_student_classroom(member_user.id, classroom.id, db) is not None:
-            result.failed_users.append(
-                {"value": user_id, "reason": "Already in another classroom"}
-            )
+            result.failed_users.append({'value': user_id, 'reason': 'Already in another classroom'})
             continue
 
-        Education.ensure_classroom_member(
-            classroom.id, member_user.id, "student", db=db
-        )
+        Education.ensure_classroom_member(classroom.id, member_user.id, 'student', db=db)
         result.added_users.append(user_id)
 
     result.added_count = len(result.added_users)
@@ -1887,7 +1755,7 @@ async def bulk_import_classroom_members(
 
 
 @router.post(
-    "/teacher/classrooms/{classroom_id}/members/bulk-remove",
+    '/teacher/classrooms/{classroom_id}/members/bulk-remove',
     response_model=ClassroomMembersActionResult,
 )
 async def bulk_remove_classroom_members(
@@ -1904,14 +1772,12 @@ async def bulk_remove_classroom_members(
             result.affected_count += 1
         else:
             result.skipped_users.append(user_id)
-    _refresh_profile_aggregates_after_scope_change(
-        [user_id for user_id in form_data.user_ids if user_id], db
-    )
+    _refresh_profile_aggregates_after_scope_change([user_id for user_id in form_data.user_ids if user_id], db)
     return result
 
 
 @router.post(
-    "/teacher/classrooms/{classroom_id}/members/transfer",
+    '/teacher/classrooms/{classroom_id}/members/transfer',
     response_model=ClassroomMembersActionResult,
 )
 async def transfer_classroom_members(
@@ -1920,51 +1786,41 @@ async def transfer_classroom_members(
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
-    target_classroom = Education.get_classroom_by_id(
-        form_data.target_classroom_id.strip(), db=db
-    )
+    target_classroom = Education.get_classroom_by_id(form_data.target_classroom_id.strip(), db=db)
     if target_classroom is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Target classroom not found",
+            detail='Target classroom not found',
         )
     _ensure_classroom_access(user, target_classroom, db, require_teacher=True)
     if target_classroom.id == classroom.id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Target classroom must be different",
+            detail='Target classroom must be different',
         )
 
     result = ClassroomMembersActionResult()
     for user_id in dict.fromkeys(form_data.user_ids):
-        member = (
-            Education.get_classroom_member(classroom.id, user_id, db=db)
-            if user_id
-            else None
-        )
-        if member is None or member.member_role != "student":
+        member = Education.get_classroom_member(classroom.id, user_id, db=db) if user_id else None
+        if member is None or member.member_role != 'student':
             result.skipped_users.append(user_id)
             continue
         Education.delete_classroom_member(classroom.id, user_id, db=db)
-        Education.ensure_classroom_member(target_classroom.id, user_id, "student", db=db)
+        Education.ensure_classroom_member(target_classroom.id, user_id, 'student', db=db)
         result.affected_count += 1
-    _refresh_profile_aggregates_after_scope_change(
-        [user_id for user_id in form_data.user_ids if user_id], db
-    )
+    _refresh_profile_aggregates_after_scope_change([user_id for user_id in form_data.user_ids if user_id], db)
     return result
 
 
 @router.get(
-    "/teacher/classrooms/{classroom_id}/progress",
+    '/teacher/classrooms/{classroom_id}/progress',
     response_model=ClassroomProgressResponse,
 )
 async def get_classroom_progress(
     classroom: ClassroomModel = Depends(require_teacher_classroom),
     db: Session = Depends(get_session),
 ):
-    students = Education.get_classroom_members(
-        classroom.id, member_role="student", db=db
-    )
+    students = Education.get_classroom_members(classroom.id, member_role='student', db=db)
     assignments = Education.get_assignments_by_classroom(classroom.id, db=db)
     progress_items = []
     submitted_total = 0
@@ -1974,14 +1830,9 @@ async def get_classroom_progress(
 
     # 提交、批改都先一次性取回,避免「作业 × 提交」两层循环里逐条查库。
     submissions_by_assignment = {
-        assignment.id: Education.get_submissions_by_assignment(assignment.id, db=db)
-        for assignment in assignments
+        assignment.id: Education.get_submissions_by_assignment(assignment.id, db=db) for assignment in assignments
     }
-    all_submissions = [
-        submission
-        for submissions in submissions_by_assignment.values()
-        for submission in submissions
-    ]
+    all_submissions = [submission for submissions in submissions_by_assignment.values() for submission in submissions]
     reviews = Education.get_submission_reviews_by_submission_ids(
         [submission.id for submission in all_submissions], db=db
     )
@@ -1994,7 +1845,7 @@ async def get_classroom_progress(
         pending_count = 0
         for submission in submissions:
             review = reviews.get(submission.id)
-            if review and review.review_status in {"reviewed", "returned"}:
+            if review and review.review_status in {'reviewed', 'returned'}:
                 reviewed_count += 1
             else:
                 pending_count += 1
@@ -2025,26 +1876,24 @@ async def get_classroom_progress(
     )
 
 
-@router.get("/teacher/classrooms/{classroom_id}/export")
+@router.get('/teacher/classrooms/{classroom_id}/export')
 async def export_classroom_progress(
     classroom: ClassroomModel = Depends(require_teacher_classroom),
     db: Session = Depends(get_session),
 ):
-    students = Education.get_classroom_members(
-        classroom.id, member_role="student", db=db
-    )
+    students = Education.get_classroom_members(classroom.id, member_role='student', db=db)
     assignments = Education.get_assignments_by_classroom(classroom.id, db=db)
     stream = io.StringIO()
     writer = csv.writer(stream)
     writer.writerow(
         [
-            "student_name",
-            "student_email",
-            "assignment_title",
-            "submitted_at",
-            "review_status",
-            "score",
-            "overall_comment",
+            'student_name',
+            'student_email',
+            'assignment_title',
+            'submitted_at',
+            'review_status',
+            'score',
+            'overall_comment',
         ]
     )
 
@@ -2052,27 +1901,19 @@ async def export_classroom_progress(
     submissions_by_assignment = {
         assignment.id: {
             submission.student_id: submission
-            for submission in Education.get_submissions_by_assignment(
-                assignment.id, db=db
-            )
+            for submission in Education.get_submissions_by_assignment(assignment.id, db=db)
         }
         for assignment in assignments
     }
     reviews_by_submission = Education.get_submission_reviews_by_submission_ids(
-        [
-            submission.id
-            for submissions in submissions_by_assignment.values()
-            for submission in submissions.values()
-        ],
+        [submission.id for submissions in submissions_by_assignment.values() for submission in submissions.values()],
         db=db,
     )
 
     for student_member in students:
         student_detail = await _build_classroom_member_detail(student_member, db)
         for assignment in assignments:
-            latest_submission = submissions_by_assignment[assignment.id].get(
-                student_member.user_id
-            )
+            latest_submission = submissions_by_assignment[assignment.id].get(student_member.user_id)
             if latest_submission is not None:
                 review = reviews_by_submission.get(latest_submission.id)
                 writer.writerow(
@@ -2081,9 +1922,9 @@ async def export_classroom_progress(
                         student_detail.user_email,
                         assignment.title,
                         _format_export_timestamp(latest_submission.submitted_at),
-                        review.review_status if review else "pending",
-                        review.score if review else "",
-                        (review.overall_comment or "") if review else "",
+                        review.review_status if review else 'pending',
+                        review.score if review else '',
+                        (review.overall_comment or '') if review else '',
                     ]
                 )
             else:
@@ -2092,24 +1933,24 @@ async def export_classroom_progress(
                         student_detail.user_name,
                         student_detail.user_email,
                         assignment.title,
-                        "",
-                        "unsubmitted",
-                        "",
-                        "",
+                        '',
+                        'unsubmitted',
+                        '',
+                        '',
                     ]
                 )
 
-    filename = f"classroom-{classroom.id}-progress.csv"
+    filename = f'classroom-{classroom.id}-progress.csv'
     # utf-8-sig BOM 前缀,避免 Excel 打开含中文的 CSV 乱码
     return Response(
-        content="\ufeff" + stream.getvalue(),
-        media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        content='\ufeff' + stream.getvalue(),
+        media_type='text/csv; charset=utf-8',
+        headers={'Content-Disposition': f'attachment; filename="{filename}"'},
     )
 
 
 @router.get(
-    "/teacher/classrooms/{classroom_id}/students/{student_user_id}/profile",
+    '/teacher/classrooms/{classroom_id}/students/{student_user_id}/profile',
     response_model=TeacherStudentProfileResponse,
 )
 async def get_student_profile(
@@ -2128,13 +1969,13 @@ async def get_student_profile(
     if start_at is not None and end_at is not None and start_at > end_at:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="start_at must not be later than end_at",
+            detail='start_at must not be later than end_at',
         )
     member = Education.get_classroom_member(classroom.id, student_user_id, db=db)
-    if member is None or member.member_role != "student":
+    if member is None or member.member_role != 'student':
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Student not found in classroom",
+            detail='Student not found in classroom',
         )
 
     student = await Users.get_user_by_id(student_user_id, db=db)
@@ -2155,21 +1996,17 @@ async def get_student_profile(
             limit=limit,
             offset=offset,
             teacher_notes=(
-                Education.get_teacher_student_notes(
-                    user.id, classroom.id, student_user_id, db=db
-                )
+                Education.get_teacher_student_notes(user.id, classroom.id, student_user_id, db=db)
                 if user.id == classroom.teacher_id
                 else []
             ),
         )
     except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
 
 
 @router.get(
-    "/teacher/classrooms/{classroom_id}/assignments",
+    '/teacher/classrooms/{classroom_id}/assignments',
     response_model=list[TeacherAssignmentListItem],
 )
 async def get_teacher_classroom_assignments(
@@ -2177,15 +2014,10 @@ async def get_teacher_classroom_assignments(
     db: Session = Depends(get_session),
 ):
     assignments = Education.get_assignments_by_classroom(classroom.id, db=db)
-    return [
-        await _build_teacher_assignment_list_item(assignment, db)
-        for assignment in assignments
-    ]
+    return [await _build_teacher_assignment_list_item(assignment, db) for assignment in assignments]
 
 
-@router.get(
-    "/assignments/{assignment_id}/workspace", response_model=AssignmentWorkspaceResponse
-)
+@router.get('/assignments/{assignment_id}/workspace', response_model=AssignmentWorkspaceResponse)
 async def get_assignment_workspace(
     assignment_id: str,
     user=Depends(get_verified_user),
@@ -2193,32 +2025,28 @@ async def get_assignment_workspace(
 ):
     assignment = Education.get_assignment_by_id(assignment_id, db=db)
     if assignment is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Assignment not found')
 
     role = _ensure_assignment_access(user, assignment, db)
-    if role != "student":
+    if role != 'student':
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only students can open the writing workspace",
+            detail='Only students can open the writing workspace',
         )
 
     session = Education.get_assignment_writing_session(assignment_id, user.id, db=db)
     if session is None:
-        note = await Notes.insert_new_note(
-            user.id, _make_default_note(assignment.title, assignment_id), db=db
-        )
+        note = await Notes.insert_new_note(user.id, _make_default_note(assignment.title, assignment_id), db=db)
         if note is None:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={
-                    "code": "ASSIGNMENT_WORKSPACE_CORRUPTED",
-                    "detail": "Assignment workspace note could not be created.",
-                    "assignment_id": assignment.id,
-                    "missing_note": True,
-                    "missing_chat": False,
-                    "missing_project": False,
+                    'code': 'ASSIGNMENT_WORKSPACE_CORRUPTED',
+                    'detail': 'Assignment workspace note could not be created.',
+                    'assignment_id': assignment.id,
+                    'missing_note': True,
+                    'missing_chat': False,
+                    'missing_project': False,
                 },
             )
         writing_session_id = str(uuid.uuid4())
@@ -2227,7 +2055,7 @@ async def get_assignment_workspace(
             FolderForm(
                 name=assignment.title,
                 meta=_make_assignment_project_meta(assignment.id, writing_session_id),
-                data={"system_prompt": await _build_assignment_system_prompt(assignment)},
+                data={'system_prompt': await _build_assignment_system_prompt(assignment)},
             ),
             db=db,
         )
@@ -2235,18 +2063,18 @@ async def get_assignment_workspace(
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={
-                    "code": "ASSIGNMENT_WORKSPACE_CORRUPTED",
-                    "detail": "Assignment workspace project could not be created.",
-                    "assignment_id": assignment.id,
-                    "missing_note": False,
-                    "missing_chat": False,
-                    "missing_project": True,
+                    'code': 'ASSIGNMENT_WORKSPACE_CORRUPTED',
+                    'detail': 'Assignment workspace project could not be created.',
+                    'assignment_id': assignment.id,
+                    'missing_note': False,
+                    'missing_chat': False,
+                    'missing_project': True,
                 },
             )
         session = Education.insert_writing_session(
             assignment_id,
             user.id,
-            "assignment",
+            'assignment',
             note.id,
             project.id,
             None,
@@ -2255,16 +2083,12 @@ async def get_assignment_workspace(
             db=db,
         )
     else:
-        note, project, active_chat_id = await _get_workspace_resources_or_409(
-            assignment, session, db=db
-        )
+        note, project, active_chat_id = await _get_workspace_resources_or_409(assignment, session, db=db)
         session = Education.get_writing_session_by_id(session.id, db=db)
-        review_view, effective_due_at = _build_student_review_view(
-            assignment, user.id, db
-        )
+        review_view, effective_due_at = _build_student_review_view(assignment, user.id, db)
         return AssignmentWorkspaceResponse(
             assignment=assignment,
-            membership_role="student",
+            membership_role='student',
             writing_session=session,
             note=note.model_dump(),
             project=project.model_dump(),
@@ -2278,7 +2102,7 @@ async def get_assignment_workspace(
     review_view, effective_due_at = _build_student_review_view(assignment, user.id, db)
     return AssignmentWorkspaceResponse(
         assignment=assignment,
-        membership_role="student",
+        membership_role='student',
         writing_session=session,
         note=note.model_dump(),
         project=project.model_dump(),
@@ -2295,23 +2119,19 @@ async def _can_switch_thinking(assignment) -> bool:
     return resolve_coaching_thinking(policy, assignment.model_params).students_choose
 
 
-@router.get("/me/writing/home", response_model=WritingHomeResponse)
+@router.get('/me/writing/home', response_model=WritingHomeResponse)
 async def get_writing_home(
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
     education_role = await _get_education_role(user)
-    memberships = (
-        Education.get_classroom_members_by_user_id(user.id, db=db)
-        if education_role == "student"
-        else []
-    )
+    memberships = Education.get_classroom_members_by_user_id(user.id, db=db) if education_role == 'student' else []
     classrooms = [
         classroom
         for classroom in (
             Education.get_classroom_by_id(membership.classroom_id, db=db)
             for membership in memberships
-            if membership.member_role == "student"
+            if membership.member_role == 'student'
         )
         if classroom is not None
     ]
@@ -2320,7 +2140,7 @@ async def get_writing_home(
     personal_items = []
     recent_items = []
     for session in sessions:
-        if session.scope == "personal":
+        if session.scope == 'personal':
             item = await _build_personal_workspace_item(session, db)
             if item is not None:
                 personal_items.append(item)
@@ -2329,14 +2149,10 @@ async def get_writing_home(
             recent_items.append(recent_item)
 
     assignment_items = []
-    if education_role == "student":
-        assignments = Education.get_assignments_by_student(user.id, db=db)[
-            :MAX_STUDENT_ASSIGNMENTS
-        ]
+    if education_role == 'student':
+        assignments = Education.get_assignments_by_student(user.id, db=db)[:MAX_STUDENT_ASSIGNMENTS]
         for assignment in assignments:
-            session = Education.get_assignment_writing_session(
-                assignment.id, user.id, db=db
-            )
+            session = Education.get_assignment_writing_session(assignment.id, user.id, db=db)
             if session is None:
                 assignment_items.append(
                     AssignmentWorkspaceListItem(
@@ -2344,26 +2160,20 @@ async def get_writing_home(
                         assignment=assignment,
                         project_id=None,
                         writing_session_id=None,
-                        status="not_started",
+                        status='not_started',
                         updated_at=assignment.updated_at,
                         # 还没开写也可能已经拿到个人延期,这里不能直接回落到全班 due_at
-                        effective_due_at=_get_effective_due_at(
-                            assignment, user.id, db
-                        ),
+                        effective_due_at=_get_effective_due_at(assignment, user.id, db),
                     )
                 )
                 continue
 
             submitted_at = None
             if session.submitted_submission_id:
-                submission = Education.get_submission_by_id(
-                    session.submitted_submission_id, db=db
-                )
+                submission = Education.get_submission_by_id(session.submitted_submission_id, db=db)
                 submitted_at = submission.submitted_at if submission else None
 
-            review_view, effective_due_at = _build_student_review_view(
-                assignment, user.id, db
-            )
+            review_view, effective_due_at = _build_student_review_view(assignment, user.id, db)
 
             assignment_items.append(
                 AssignmentWorkspaceListItem(
@@ -2374,22 +2184,16 @@ async def get_writing_home(
                     status=session.status,
                     updated_at=max(assignment.updated_at, session.updated_at),
                     submitted_at=submitted_at,
-                    review_status=review_view["review_status"] if review_view else None,
-                    score=(review_view or {}).get("score"),
-                    round_no=(review_view or {}).get("round_no"),
+                    review_status=review_view['review_status'] if review_view else None,
+                    score=(review_view or {}).get('score'),
+                    round_no=(review_view or {}).get('round_no'),
                     effective_due_at=effective_due_at,
                 )
             )
 
-    recent_items = sorted(recent_items, key=lambda item: item.updated_at, reverse=True)[
-        :12
-    ]
-    personal_items = sorted(
-        personal_items, key=lambda item: item.updated_at, reverse=True
-    )
-    assignment_items = sorted(
-        assignment_items, key=lambda item: item.updated_at, reverse=True
-    )
+    recent_items = sorted(recent_items, key=lambda item: item.updated_at, reverse=True)[:12]
+    personal_items = sorted(personal_items, key=lambda item: item.updated_at, reverse=True)
+    assignment_items = sorted(assignment_items, key=lambda item: item.updated_at, reverse=True)
 
     return WritingHomeResponse(
         role=education_role or user.role,
@@ -2400,28 +2204,26 @@ async def get_writing_home(
     )
 
 
-@router.post("/me/writing/personal", response_model=UnifiedWritingWorkspaceResponse)
+@router.post('/me/writing/personal', response_model=UnifiedWritingWorkspaceResponse)
 async def create_personal_writing(
     form_data: PersonalWritingCreateForm,
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
-    title = (form_data.title or "").strip() or "Untitled Writing"
+    title = (form_data.title or '').strip() or 'Untitled Writing'
     note = await Notes.insert_new_note(user.id, _make_personal_note(title), db=db)
     if note is None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="Unable to create note"
-        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='Unable to create note')
 
     session = Education.insert_writing_session(
         None,
         user.id,
-        "personal",
+        'personal',
         note.id,
         None,
         None,
         None,
-        status="active",
+        status='active',
         db=db,
     )
     project = await Folders.insert_new_folder(
@@ -2430,9 +2232,7 @@ async def create_personal_writing(
         db=db,
     )
     if project is None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="Unable to create project"
-        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='Unable to create project')
 
     session = Education.update_writing_session_context(
         session.id,
@@ -2442,7 +2242,7 @@ async def create_personal_writing(
         db=db,
     )
     return UnifiedWritingWorkspaceResponse(
-        scope="personal",
+        scope='personal',
         owner_role=await _get_education_role(user) or user.role,
         assignment=None,
         writing_session=session,
@@ -2453,9 +2253,7 @@ async def create_personal_writing(
     )
 
 
-@router.get(
-    "/writing/{session_id}/workspace", response_model=UnifiedWritingWorkspaceResponse
-)
+@router.get('/writing/{session_id}/workspace', response_model=UnifiedWritingWorkspaceResponse)
 async def get_writing_workspace(
     session: WritingSessionModel = Depends(require_owned_writing_session),
     user=Depends(get_verified_user),
@@ -2463,32 +2261,26 @@ async def get_writing_workspace(
 ):
     note = await Notes.get_note_by_id(session.note_id, db=db)
     if note is None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="Writing note is missing"
-        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='Writing note is missing')
 
     assignment = None
-    if session.scope == "assignment":
+    if session.scope == 'assignment':
         assignment = _get_assignment_or_404(session.assignment_id, db)
         role = _ensure_assignment_access(user, assignment, db)
-        if role != "student":
+        if role != 'student':
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only students can open the writing workspace",
+                detail='Only students can open the writing workspace',
             )
         project = await _ensure_assignment_project(assignment, session, db=db)
     else:
         project, session = await _ensure_personal_project(session, note, db=db)
 
     if project is None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="Writing project is missing"
-        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='Writing project is missing')
 
     active_chat_id = session.active_chat_id or session.chat_id
-    active_chat = (
-        await Chats.get_chat_by_id(active_chat_id, db=db) if active_chat_id else None
-    )
+    active_chat = await Chats.get_chat_by_id(active_chat_id, db=db) if active_chat_id else None
     if active_chat_id and active_chat is None:
         session = Education.update_writing_session_context(
             session.id,
@@ -2510,65 +2302,55 @@ async def get_writing_workspace(
     )
 
 
-@router.get(
-    "/writing/{session_id}/process-summary", response_model=WritingProcessSummaryResponse
-)
+@router.get('/writing/{session_id}/process-summary', response_model=WritingProcessSummaryResponse)
 async def get_writing_process_summary(
     session: WritingSessionModel = Depends(require_owned_writing_session),
     db: Session = Depends(get_session),
 ):
     exchanges = collect_clarification_exchanges(await get_prompt_timeline(session, db))
     counts = count_clarifications(exchanges)
-    return WritingProcessSummaryResponse(
-        clarification_answered_count=counts["clarification_answered_count"]
-    )
+    return WritingProcessSummaryResponse(clarification_answered_count=counts['clarification_answered_count'])
 
 
-@router.delete("/me/writing/personal/{session_id}", response_model=dict)
+@router.delete('/me/writing/personal/{session_id}', response_model=dict)
 async def delete_personal_writing(
     session: WritingSessionModel = Depends(require_owned_writing_session),
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
-    if session.scope != "personal":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid writing scope"
-        )
+    if session.scope != 'personal':
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Invalid writing scope')
 
     deleted = await Education.delete_personal_writing_session(session.id, user.id, db=db)
     if deleted is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Writing session not found"
-        )
-    return {"ok": True, **deleted}
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Writing session not found')
+    return {'ok': True, **deleted}
 
 
-@router.get("/me/writing/workspaces", response_model=list[AssignmentWorkspaceListItem])
+@router.get('/me/writing/workspaces', response_model=list[AssignmentWorkspaceListItem])
 async def get_student_assignment_workspaces(
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
     education_role = await _get_education_role(user)
-    if education_role != "student":
+    if education_role != 'student':
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only students can access writing workspaces",
+            detail='Only students can access writing workspaces',
         )
 
     assignments = Education.get_assignments_by_student(user.id, db=db)
     items = []
 
     for assignment in assignments[:MAX_STUDENT_ASSIGNMENTS]:
-        session = Education.get_assignment_writing_session(
-            assignment.id, user.id, db=db
-        )
+        session = Education.get_assignment_writing_session(assignment.id, user.id, db=db)
         if session is None:
             items.append(
                 AssignmentWorkspaceListItem(
                     project_mode=PROJECT_MODE_ASSIGNMENT_WRITING,
                     assignment=assignment,
                     project_id=None,
-                    status="not_started",
+                    status='not_started',
                     updated_at=assignment.updated_at,
                 )
             )
@@ -2576,9 +2358,7 @@ async def get_student_assignment_workspaces(
 
         submitted_at = None
         if session.submitted_submission_id:
-            submission = Education.get_submission_by_id(
-                session.submitted_submission_id, db=db
-            )
+            submission = Education.get_submission_by_id(session.submitted_submission_id, db=db)
             submitted_at = submission.submitted_at if submission else None
 
         items.append(
@@ -2596,7 +2376,7 @@ async def get_student_assignment_workspaces(
     return sorted(items, key=lambda item: item.updated_at, reverse=True)
 
 
-@router.post("/writing-sessions/{session_id}/autosave")
+@router.post('/writing-sessions/{session_id}/autosave')
 async def autosave_writing_session(
     form_data: AutosaveForm,
     session: WritingSessionModel = Depends(require_writable_writing_session),
@@ -2605,18 +2385,16 @@ async def autosave_writing_session(
     _ensure_draft_baseline_ready(session, db)
     note = await Notes.get_note_by_id(session.note_id, db=db)
     if note is None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="Writing note is missing"
-        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='Writing note is missing')
     await Notes.update_note_by_id(
         session.note_id,
         NoteForm(
             title=note.title,
             data={
-                "content": {
-                    "json": form_data.content_json,
-                    "html": form_data.content_html,
-                    "md": form_data.content_text,
+                'content': {
+                    'json': form_data.content_json,
+                    'html': form_data.content_html,
+                    'md': form_data.content_text,
                 }
             },
             meta=note.meta,
@@ -2625,10 +2403,10 @@ async def autosave_writing_session(
         db=db,
     )
     Education.touch_writing_session(session.id, db=db)
-    return {"ok": True, "saved_at": int(time.time())}
+    return {'ok': True, 'saved_at': int(time.time())}
 
 
-@router.post("/writing-sessions/{session_id}/versions")
+@router.post('/writing-sessions/{session_id}/versions')
 async def create_writing_version(
     form_data: VersionCreateForm,
     session: WritingSessionModel = Depends(require_writable_writing_session),
@@ -2646,7 +2424,7 @@ async def create_writing_version(
     return version
 
 
-@router.post("/writing-sessions/{session_id}/provenance")
+@router.post('/writing-sessions/{session_id}/provenance')
 async def create_provenance_segments(
     form_data: ProvenanceCreateForm,
     session: WritingSessionModel = Depends(require_writable_writing_session),
@@ -2654,11 +2432,11 @@ async def create_provenance_segments(
 ):
     _ensure_draft_baseline_ready(session, db)
     if session.draft_baseline_at is None and any(
-        segment.source_type == "declared_draft" for segment in form_data.segments
+        segment.source_type == 'declared_draft' for segment in form_data.segments
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only a submitted first draft can be marked as declared",
+            detail='Only a submitted first draft can be marked as declared',
         )
     return Education.insert_provenance_segments(
         session.id,
@@ -2671,26 +2449,24 @@ async def create_provenance_segments(
 
 def _ensure_draft_baseline_open(session: WritingSessionModel, db: Session) -> None:
     """修订初稿作业、初稿还没交、作业没截止,才能交初稿(或解析初稿文件)。"""
-    if session.scope != "assignment":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid writing scope"
-        )
+    if session.scope != 'assignment':
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Invalid writing scope')
     assignment = _get_assignment_or_404(session.assignment_id, db)
-    if assignment.task_mode != "revise_draft":
+    if not is_revision(assignment.task_mode):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="This assignment does not take a first draft",
+            detail='This assignment does not take a first draft',
         )
     if session.draft_baseline_at is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="First draft has already been submitted",
+            detail='First draft has already been submitted',
         )
     effective_due_at = _get_effective_due_at(assignment, session.owner_user_id, db)
     if effective_due_at is not None and effective_due_at <= int(time.time()):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Assignment due time has passed",
+            detail='Assignment due time has passed',
         )
 
 
@@ -2701,19 +2477,17 @@ def _ensure_text_import_open(user, session: WritingSessionModel, db: Session) ->
     (导入结果插进编辑器)。管理员也不能代导入:图片导入要调模型,只算学生自己的。
     """
     if session.owner_user_id != user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
-    if session.scope != "assignment":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid writing scope"
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Forbidden')
+    if session.scope != 'assignment':
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Invalid writing scope')
     assignment = _get_assignment_or_404(session.assignment_id, db)
-    if assignment.task_mode == "revise_draft":
+    if is_revision(assignment.task_mode):
         _ensure_draft_baseline_open(session, db)
     else:
         ensure_writing_session_writable(session, db)
 
 
-@router.post("/writing-sessions/{session_id}/import/document")
+@router.post('/writing-sessions/{session_id}/import/document')
 async def extract_import_document(
     file: UploadFile = File(...),
     user=Depends(get_verified_user),
@@ -2728,15 +2502,13 @@ async def extract_import_document(
     # 多读 1 字节,超限时不必把整个大文件读进内存。
     data = await file.read(DRAFT_FILE_MAX_BYTES + 1)
     try:
-        text = extract_draft_text(file.filename or "", data)
+        text = extract_draft_text(file.filename or '', data)
     except DraftFileError as err:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(err)
-        ) from err
-    return {"text": text}
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(err)) from err
+    return {'text': text}
 
 
-@router.post("/writing-sessions/{session_id}/import/images")
+@router.post('/writing-sessions/{session_id}/import/images')
 async def extract_import_images(
     request: Request,
     files: list[UploadFile] = File(...),
@@ -2753,14 +2525,12 @@ async def extract_import_images(
     # 后面的模型调用要很久,不把这次只读查询的事务和连接一直占着。
     db.commit()
     if not files:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Choose at least one image"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Choose at least one image')
     if len(files) > DRAFT_IMAGE_MAX_COUNT:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             # 文案是 i18n 键,数字与 DRAFT_IMAGE_MAX_COUNT 保持一致。
-            detail="Upload at most 8 images at a time",
+            detail='Upload at most 8 images at a time',
         )
     try:
         model = await resolve_draft_image_model(request, user)
@@ -2770,76 +2540,61 @@ async def extract_import_images(
             data = await file.read(DRAFT_IMAGE_MAX_BYTES + 1)
             if len(data) > DRAFT_IMAGE_MAX_BYTES:
                 # 数字与 DRAFT_IMAGE_MAX_BYTES / DRAFT_IMAGE_TOTAL_MAX_BYTES 保持一致。
-                raise DraftImageError("Each image must be 10 MB or smaller")
+                raise DraftImageError('Each image must be 10 MB or smaller')
             total += len(data)
             if total > DRAFT_IMAGE_TOTAL_MAX_BYTES:
-                raise DraftImageError("The images add up to more than 30 MB")
+                raise DraftImageError('The images add up to more than 30 MB')
             images.append(data)
         image_urls = await prepare_draft_images(images)
     except DraftImageError as err:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(err)
-        ) from err
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(err)) from err
     try:
         pages = await transcribe_draft_images(request, user, model, image_urls)
     except DraftImageModelBusyError as err:
         # 已自动重发过几次,服务商仍在限流或过载。
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(err)
-        ) from err
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(err)) from err
     except DraftImageModelError as err:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY, detail=str(err)
-        ) from err
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(err)) from err
     except DraftImageError as err:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(err)
-        ) from err
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(err)) from err
     # model_id 随导入记进编辑操作,老师看得到这段文字是哪个模型转录的。
     return {
-        "text": "\n".join(page for page in pages if page),
-        "pages": pages,
-        "model_id": model.model_id,
+        'text': '\n'.join(page for page in pages if page),
+        'pages': pages,
+        'model_id': model.model_id,
     }
 
 
-@router.post(
-    "/writing-sessions/{session_id}/draft-baseline", response_model=WritingSessionModel
-)
+@router.post('/writing-sessions/{session_id}/draft-baseline', response_model=WritingSessionModel)
 async def submit_draft_baseline(
     form_data: DraftBaselineForm,
     session: WritingSessionModel = Depends(require_writable_writing_session),
     db: Session = Depends(get_session),
 ):
     """修订初稿作业:冻结课外写好的初稿为修改起点,同时成为编辑器的初始正文。"""
+    await run_in_threadpool(lock_assignment, session.assignment_id, db)
     _ensure_draft_baseline_open(session, db)
 
     paragraphs = normalize_draft_paragraphs(form_data.text)
-    if sum(len("".join(line.split())) for line in paragraphs) < DRAFT_BASELINE_MIN_CHARS:
+    if sum(len(''.join(line.split())) for line in paragraphs) < DRAFT_BASELINE_MIN_CHARS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="First draft is too short",
+            detail='First draft is too short',
         )
     content = build_draft_note_content(paragraphs)
     try:
-        updated = Education.set_draft_baseline(
-            session.id, content["md"], content, db=db
-        )
+        updated = Education.set_draft_baseline(session.id, content['md'], content, db=db)
     except ValueError as err:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail=str(err)
-        ) from err
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(err)) from err
     if updated is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="First draft has already been submitted",
+            detail='First draft has already been submitted',
         )
     return updated
 
 
-@router.delete(
-    "/writing-sessions/{session_id}/draft-baseline", response_model=WritingSessionModel
-)
+@router.delete('/writing-sessions/{session_id}/draft-baseline', response_model=WritingSessionModel)
 async def reset_draft_baseline(
     request: Request,
     session: WritingSessionModel = Depends(require_writable_writing_session),
@@ -2849,22 +2604,20 @@ async def reset_draft_baseline(
 
     只在从没提交过、作业没截止时可以;交过一次(含退回重交)基线就锁定。
     """
-    if session.scope != "assignment":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid writing scope"
-        )
+    if session.scope != 'assignment':
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Invalid writing scope')
     assignment = _get_assignment_or_404(session.assignment_id, db)
     effective_due_at = _get_effective_due_at(assignment, session.owner_user_id, db)
     if effective_due_at is not None and effective_due_at <= int(time.time()):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Assignment due time has passed",
+            detail='Assignment due time has passed',
         )
     updated = Education.reset_draft_baseline(session.id, db=db)
     if updated is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="First draft can no longer be withdrawn",
+            detail='First draft can no longer be withdrawn',
         )
 
     # 基线已提交清空,对话走异步表接口另开连接删;生成中的回复先停掉。
@@ -2872,127 +2625,25 @@ async def reset_draft_baseline(
         session.folder_id, session.owner_user_id, skip=0, limit=None
     ):
         await stop_item_tasks(request.app.state.redis, chat.id)
-    await Chats.delete_chats_by_user_id_and_folder_id(
-        session.owner_user_id, session.folder_id
-    )
+    await Chats.delete_chats_by_user_id_and_folder_id(session.owner_user_id, session.folder_id)
     return updated
 
 
 def _get_revise_draft_session(session: WritingSessionModel, db: Session):
     """第一次通读和修改清单只属于已交初稿的修订初稿作业。"""
-    if session.scope != "assignment":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid writing scope"
-        )
+    if session.scope != 'assignment':
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Invalid writing scope')
     assignment = _get_assignment_or_404(session.assignment_id, db)
-    if assignment.task_mode != "revise_draft":
+    if not is_revision(assignment.task_mode):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="This assignment has no revision list",
+            detail='This assignment has no revision list',
         )
     _ensure_draft_baseline_ready(session, db)
     return assignment
 
 
-@router.post(
-    "/writing-sessions/{session_id}/revision-items",
-    response_model=RevisionItemsResponse,
-)
-async def get_or_build_revision_items(
-    request: Request,
-    form_data: Optional[RevisionItemsStartForm] = None,
-    session: WritingSessionModel = Depends(require_owned_writing_session),
-    user=Depends(get_verified_user),
-    db: Session = Depends(get_session),
-):
-    """取第一次通读的结论;还没通读就用学生选的模型当场通读(一次要半分钟上下)。
-
-    同步做完再返回:前端在这段时间里锁着对话、显示进度,通读完才发出首轮那句话。
-    生产的反向代理读超时远大于一次通读的耗时。
-    """
-    assignment = _get_revise_draft_session(session, db)
-    if session.revision_items_generated_at is None:
-        ensure_writing_session_writable(session, db)
-    status_value, items = await ensure_revision_items(
-        request,
-        user,
-        session,
-        assignment,
-        form_data.model_id if form_data else None,
-        await _get_task_prompt(assignment.task_mode),
-        db,
-    )
-    return {"status": status_value, "items": items}
-
-
-@router.post(
-    "/writing-sessions/{session_id}/revision-items/follow-up",
-    response_model=RevisionFollowUpResponse,
-)
-async def follow_up_revision_items(
-    request: Request,
-    form_data: RevisionItemsStartForm,
-    session: WritingSessionModel = Depends(require_writable_writing_session),
-    user=Depends(get_verified_user),
-    db: Session = Depends(get_session),
-):
-    """补看:学生说挡住其余几项的那一项改好了。先确认改到位,再给暂缓的几项补上结论。"""
-    assignment = _get_revise_draft_session(session, db)
-    if session.revision_items_generated_at is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="The first read-through has not finished",
-        )
-    if not any(
-        item.status == "deferred"
-        for item in Education.get_revision_items(session.id, db=db)
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Nothing is waiting for a follow-up read",
-        )
-    status_value, note, items = await ensure_follow_up(
-        request,
-        user,
-        session,
-        assignment,
-        form_data.model_id,
-        await _get_task_prompt(assignment.task_mode),
-        db,
-    )
-    return {"status": status_value, "note": note, "items": items}
-
-
-@router.patch(
-    "/writing-sessions/{session_id}/revision-items/{item_no}",
-    response_model=RevisionItemsResponse,
-)
-async def update_revision_item(
-    item_no: int,
-    form_data: RevisionDecisionForm,
-    session: WritingSessionModel = Depends(require_writable_writing_session),
-    db: Session = Depends(get_session),
-):
-    _get_revise_draft_session(session, db)
-    if form_data.item_no != item_no:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Mismatched item"
-        )
-    try:
-        decision, reason = normalize_revision_decision(
-            form_data.decision, form_data.reason
-        )
-        items = Education.set_revision_decisions(
-            session.id, [(item_no, decision, reason)], db=db
-        )
-    except ValueError as err:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(err)
-        ) from err
-    return {"status": "ready", "items": items}
-
-
-@router.post("/writing-sessions/{session_id}/operations")
+@router.post('/writing-sessions/{session_id}/operations')
 async def create_editor_operations(
     form_data: EditorOperationCreateForm,
     session: WritingSessionModel = Depends(require_writable_writing_session),
@@ -3008,7 +2659,7 @@ async def create_editor_operations(
     )
 
 
-@router.post("/writing-sessions/{session_id}/chat/messages/{message_id}")
+@router.post('/writing-sessions/{session_id}/chat/messages/{message_id}')
 async def upsert_writing_chat_message(
     message_id: str,
     form_data: ChatMessageUpsertForm,
@@ -3019,19 +2670,17 @@ async def upsert_writing_chat_message(
     _ensure_draft_baseline_ready(session, db)
     active_chat_id = session.active_chat_id or session.chat_id
     if active_chat_id is None:
-        prompt_preview = (form_data.message or {}).get("content", "")[
-            :50
-        ].strip() or "New Chat"
+        prompt_preview = (form_data.message or {}).get('content', '')[:50].strip() or 'New Chat'
         chat = await Chats.insert_new_chat(
             str(uuid.uuid4()),
             user.id,
             ChatForm(
                 chat={
-                    "title": prompt_preview,
-                    "models": [],
-                    "params": {},
-                    "history": {"messages": {}, "currentId": None},
-                    "messages": [],
+                    'title': prompt_preview,
+                    'models': [],
+                    'params': {},
+                    'history': {'messages': {}, 'currentId': None},
+                    'messages': [],
                 },
                 folder_id=session.folder_id,
             ),
@@ -3054,9 +2703,9 @@ async def upsert_writing_chat_message(
     if chat is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Failed to upsert chat message",
+            detail='Failed to upsert chat message',
         )
-    return {"ok": True}
+    return {'ok': True}
 
 
 def _challenge_unresolved(challenge_session) -> list:
@@ -3074,28 +2723,26 @@ def _challenge_detail(challenge_session, db: Session) -> ChallengeSessionDetail:
 def _get_challenge_session_or_404(session_id: str, db: Session):
     challenge_session = Education.get_challenge_session_by_id(session_id, db=db)
     if challenge_session is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Challenge not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Challenge not found')
     return challenge_session
 
 
 def _ensure_challenge_owner(user, challenge_session):
-    if user.role != "admin" and challenge_session.student_id != user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    if user.role != 'admin' and challenge_session.student_id != user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Forbidden')
 
 
 def _ensure_student_challenge_access(user, assignment, db: Session):
     role = _ensure_assignment_access(user, assignment, db)
-    if role not in ("student", "admin"):
+    if role not in ('student', 'admin'):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only students take the pre-submission challenge",
+            detail='Only students take the pre-submission challenge',
         )
 
 
 @router.post(
-    "/assignments/{assignment_id}/challenge/start",
+    '/assignments/{assignment_id}/challenge/start',
     response_model=ChallengeSessionDetail,
 )
 async def start_assignment_challenge(
@@ -3109,26 +2756,20 @@ async def start_assignment_challenge(
     _ensure_student_challenge_access(user, assignment, db)
 
     session = _get_workspace_session_or_404(form_data.writing_session_id, db)
-    if session.scope != "assignment" or session.assignment_id != assignment.id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Mismatched session"
-        )
+    if session.scope != 'assignment' or session.assignment_id != assignment.id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Mismatched session')
     _ensure_workspace_session_owner(user, session)
     ensure_writing_session_writable(session, db)
 
     try:
-        challenge_session, _ = await start_challenge(
-            request, user, assignment, session, form_data.model, db
-        )
+        challenge_session, _ = await start_challenge(request, user, assignment, session, form_data.model, db)
     except ChallengeError as error:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)
-        ) from error
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
 
     return _challenge_detail(challenge_session, db)
 
 
-@router.get("/assignments/{assignment_id}/challenge/current")
+@router.get('/assignments/{assignment_id}/challenge/current')
 async def get_current_assignment_challenge(
     assignment_id: str,
     writing_session_id: str = Query(...),
@@ -3141,25 +2782,19 @@ async def get_current_assignment_challenge(
     _ensure_student_challenge_access(user, assignment, db)
 
     session = _get_workspace_session_or_404(writing_session_id, db)
-    if session.scope != "assignment" or session.assignment_id != assignment.id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Mismatched session"
-        )
+    if session.scope != 'assignment' or session.assignment_id != assignment.id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Mismatched session')
     _ensure_workspace_session_owner(user, session)
 
-    round_no = Education.resolve_next_submission_round_no(
-        assignment.id, session.owner_user_id, db=db
-    )
-    challenge_session = Education.get_challenge_session_for_round(
-        session.id, round_no, db=db
-    )
+    round_no = Education.resolve_next_submission_round_no(assignment.id, session.owner_user_id, db=db)
+    challenge_session = Education.get_challenge_session_for_round(session.id, round_no, db=db)
     if challenge_session is None:
         return None
     return _challenge_detail(challenge_session, db)
 
 
 @router.post(
-    "/assignments/{assignment_id}/challenge/skip",
+    '/assignments/{assignment_id}/challenge/skip',
     response_model=ChallengeSessionDetail,
 )
 async def skip_assignment_challenge_before_start(
@@ -3178,24 +2813,20 @@ async def skip_assignment_challenge_before_start(
     _ensure_student_challenge_access(user, assignment, db)
 
     session = _get_workspace_session_or_404(form_data.writing_session_id, db)
-    if session.scope != "assignment" or session.assignment_id != assignment.id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Mismatched session"
-        )
+    if session.scope != 'assignment' or session.assignment_id != assignment.id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Mismatched session')
     _ensure_workspace_session_owner(user, session)
     ensure_writing_session_writable(session, db)
 
     try:
         challenge_session = skip_challenge_before_start(assignment, session, db)
     except ChallengeError as error:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)
-        ) from error
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
 
     return _challenge_detail(challenge_session, db)
 
 
-@router.post("/challenge/{session_id}/respond", response_model=ChallengeSessionDetail)
+@router.post('/challenge/{session_id}/respond', response_model=ChallengeSessionDetail)
 async def respond_to_challenge(
     request: Request,
     session_id: str,
@@ -3206,9 +2837,7 @@ async def respond_to_challenge(
     challenge_session = _get_challenge_session_or_404(session_id, db)
     _ensure_challenge_owner(user, challenge_session)
     assignment = _get_assignment_or_404(challenge_session.assignment_id, db)
-    ensure_writing_session_writable(
-        _get_workspace_session_or_404(challenge_session.writing_session_id, db), db
-    )
+    ensure_writing_session_writable(_get_workspace_session_or_404(challenge_session.writing_session_id, db), db)
 
     try:
         result = await submit_challenge_response(
@@ -3222,14 +2851,12 @@ async def respond_to_challenge(
             db,
         )
     except ChallengeError as error:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)
-        ) from error
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
 
-    return _challenge_detail(result["session"], db)
+    return _challenge_detail(result['session'], db)
 
 
-@router.post("/challenge/{session_id}/skip", response_model=ChallengeSessionDetail)
+@router.post('/challenge/{session_id}/skip', response_model=ChallengeSessionDetail)
 async def skip_assignment_challenge(
     session_id: str,
     user=Depends(get_verified_user),
@@ -3243,22 +2870,18 @@ async def skip_assignment_challenge(
 
     challenge_session = _get_challenge_session_or_404(session_id, db)
     _ensure_challenge_owner(user, challenge_session)
-    ensure_writing_session_writable(
-        _get_workspace_session_or_404(challenge_session.writing_session_id, db), db
-    )
-    if challenge_session.status != "in_progress":
+    ensure_writing_session_writable(_get_workspace_session_or_404(challenge_session.writing_session_id, db), db)
+    if challenge_session.status != 'in_progress':
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Challenge is already finished",
+            detail='Challenge is already finished',
         )
 
     updated = Education.skip_challenge_session(challenge_session.id, db=db)
     return _challenge_detail(updated, db)
 
 
-@router.patch(
-    "/challenge/{session_id}/checklist", response_model=ChallengeSessionDetail
-)
+@router.patch('/challenge/{session_id}/checklist', response_model=ChallengeSessionDetail)
 async def update_challenge_checklist(
     session_id: str,
     form_data: ChallengeChecklistForm,
@@ -3267,22 +2890,18 @@ async def update_challenge_checklist(
 ):
     challenge_session = _get_challenge_session_or_404(session_id, db)
     _ensure_challenge_owner(user, challenge_session)
-    ensure_writing_session_writable(
-        _get_workspace_session_or_404(challenge_session.writing_session_id, db), db
-    )
-    if challenge_session.status != "completed":
+    ensure_writing_session_writable(_get_workspace_session_or_404(challenge_session.writing_session_id, db), db)
+    if challenge_session.status != 'completed':
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Checklist is available after the challenge closes",
+            detail='Checklist is available after the challenge closes',
         )
 
-    updated = Education.update_challenge_checklist(
-        challenge_session.id, form_data.checked_indexes, db=db
-    )
+    updated = Education.update_challenge_checklist(challenge_session.id, form_data.checked_indexes, db=db)
     return _challenge_detail(updated, db)
 
 
-@router.get("/submissions/{submission_id}/challenge")
+@router.get('/submissions/{submission_id}/challenge')
 async def get_submission_challenge(
     submission_id: str,
     user=Depends(get_verified_user),
@@ -3294,393 +2913,323 @@ async def get_submission_challenge(
     assignment = _get_assignment_or_404(submission.assignment_id, db)
     _ensure_assignment_access(user, assignment, db, require_teacher=True)
 
-    frozen = (submission.stats_json or {}).get("challenge") or {}
-    challenge_id = frozen.get("session_id")
+    frozen = (submission.stats_json or {}).get('challenge') or {}
+    challenge_id = frozen.get('session_id')
     if not challenge_id:
         return None
     challenge_session = Education.get_challenge_session_by_id(challenge_id, db=db)
     if challenge_session is None:
         return None
     detail = _challenge_detail(challenge_session, db)
-    detail.revision = frozen.get("revision")
+    detail.revision = frozen.get('revision')
     return detail
 
 
-def _prepare_revision_decisions(
-    session: WritingSessionModel, decisions: list[RevisionDecisionForm], db: Session
-) -> Optional[list[tuple[int, Optional[str], Optional[str]]]]:
-    """提交时修改清单的处理:已存的加上本次请求带来的。
-
-    「要改」的每一项都要有结论,没全改的要写为什么;「可改进」的可填可不填。
-    第一次通读没做成时返回 None、不拦提交——学生控制不了这一步,不能因为它交不了作业。
-    老师那边会看到这一轮没有清单。
-    """
-    if session.revision_items_generated_at is None:
-        return None
-    items = Education.get_revision_items(session.id, db=db)
-    statuses = {item.item_no: item.status for item in items}
-    merged = {
-        item.item_no: (item.decision, item.reason)
-        for item in items
-        if item.status in ("problem", "minor")
-    }
-    for form in decisions:
-        if form.item_no not in merged:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Unknown revision item",
-            )
-        try:
-            merged[form.item_no] = normalize_revision_decision(
-                form.decision, form.reason
-            )
-        except ValueError as err:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail=str(err)
-            ) from err
-    for item_no, (decision, reason) in merged.items():
-        if statuses[item_no] != "problem":
-            continue
-        if decision is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Mark how you handled every item on the revision list",
-            )
-        if decision != "revised" and not reason:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Explain the items you did not fully revise",
-            )
-    return [(no, decision, reason) for no, (decision, reason) in sorted(merged.items())]
-
-
-@router.post("/assignments/{assignment_id}/submit")
+@router.post('/assignments/{assignment_id}/submit')
 async def submit_assignment(
     assignment_id: str,
     form_data: SubmissionCreateForm,
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
+    # Finish asynchronous reads before taking a write lock. SQLite writers may
+    # need this event loop to commit while another connection waits for the lock.
     assignment = _get_assignment_or_404(assignment_id, db)
-    role = _ensure_assignment_access(user, assignment, db)
-    if role not in ("student", "admin"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only students can submit assignments",
-        )
+    _ensure_assignment_access(user, assignment, db)
     session = _get_workspace_session_or_404(form_data.writing_session_id, db)
-    if session.scope != "assignment":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid writing scope"
-        )
-    if session.assignment_id != assignment.id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Mismatched session"
-        )
     _ensure_workspace_session_owner(user, session)
-    ensure_writing_session_writable(session, db)
-    _ensure_draft_baseline_ready(session, db)
-
-    # 修订初稿作业不问「用了 AI 吗」:首轮通读是平台替学生发起的,一定用了。
-    # 让学生自报只会多一个和对话记录矛盾的口子,所以这里一律记为用了,不看客户端。
-    ai_used = True if assignment.task_mode == "revise_draft" else form_data.ai_used
-
-    # 反思答案对着作业「此刻」的题目校验;教师中途改题,已交的反思存的是当时的快照。
-    try:
-        reflection_record = build_reflection_record(
-            assignment.reflection_questions,
-            ai_used,
-            form_data.reflection_answers,
-        )
-    except ValueError as err:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(err)
-        ) from err
-    revision_plan = (
-        _prepare_revision_decisions(session, form_data.revision_decisions, db)
-        if assignment.task_mode == "revise_draft"
-        else None
-    )
-
-    current_submission = Education.get_current_submission(
-        assignment.id, session.owner_user_id, db=db
-    )
-    current_review = (
-        Education.get_submission_review_by_submission_id(current_submission.id, db=db)
-        if current_submission is not None
-        else None
-    )
-
-    # 截止时间按会话归属人算:管理员代提交时不应套用管理员自己的轮次。
-    effective_due_at = _get_effective_due_at(assignment, session.owner_user_id, db)
-
-    previous_round_submission = None
-    if current_submission is not None:
-        if current_review is not None and current_review.review_status == "returned":
-            previous_round_submission = current_submission
-        elif current_submission.round_no > 1:
-            previous_round_submission = next(
-                (
-                    item
-                    for item in Education.get_submission_rounds(
-                        assignment.id, session.owner_user_id, db=db
-                    )
-                    if item.round_no == current_submission.round_no - 1
-                ),
-                None,
-            )
-
-    note = await Notes.get_note_by_id(session.note_id, db=db)
-    if note is None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="Writing note is missing"
-        )
-    stored_note = db.get(Note, session.note_id)
-    if stored_note is None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="Writing note is missing"
-        )
-    stored_note.data = {
-        **(sanitize_note_data(stored_note.data) or {}),
-        "content": {
-            "json": form_data.final_content_json,
-            "html": form_data.final_content_html,
-            "md": form_data.final_content_text,
-        },
-    }
-    stored_note.updated_at = int(time.time_ns())
-
-    final_version = Education.insert_version(
-        session.id,
-        "submit",
-        form_data.final_content_json,
-        form_data.final_content_text,
-        commit=False,
-        db=db,
-    )
-    versions = Education.get_submission_window_versions(
-        session.id,
-        final_version.id,
-        previous_final_version_id=(
-            previous_round_submission.final_version_id
-            if previous_round_submission is not None
-            else None
-        ),
-        db=db,
-    )
-    version_count = Education.count_versions(session.id, db=db)
-    provenance_segments = Education.get_provenance_segments(session.id, db=db)
-    normalized_segments = [
-        NormalizedSegment(segment) for segment in provenance_segments
-    ]
-    source_map_highlights = build_source_map_highlights(
-        form_data.final_content_text,
-        normalized_segments,
-    )
-    segments = (
-        source_map_highlights
-        if source_map_highlights is not None
-        else filter_segments_for_final_text(
-            form_data.final_content_text, normalized_segments
-        )
-    )
+    if session.assignment_id != assignment.id:
+        raise HTTPException(400, 'Mismatched session')
     prompt_timeline = await get_prompt_timeline(session, db)
-    prompt_count = len(
-        [message for message in prompt_timeline if is_student_prompt(message)]
-    )
-    if source_map_highlights is not None:
-        stats = compute_stats_from_highlights(
-            form_data.final_content_text,
-            source_map_highlights,
-            prompt_count=prompt_count,
-            version_count=version_count,
-        )
-    else:
-        stats = compute_stats(
-            form_data.final_content_text,
-            segments,
-            prompt_count=prompt_count,
-            version_count=version_count,
-        )
-    stats["data_completeness"] = form_data.data_completeness.model_dump()
-    # 档位的措辞管理员随时可改，所以把这一轮实际生效的原文一起冻进本轮记录。
-    # 管理员关了辅导风格时这一轮没有档位生效，记为空。
-    coaching_enabled = bool(await Config.get("education.enable_coaching_styles"))
-    stats["coaching"] = {
-        "style": assignment.coaching_style if coaching_enabled else None,
-        "prompt": (
-            await _get_coaching_prompt(assignment.coaching_style)
-            if coaching_enabled
-            else ""
-        ),
-        "task_mode": assignment.task_mode,
-        "task_prompt": await _get_task_prompt(assignment.task_mode),
-        # 辅导对话的思考档位：管理员的下放方式与默认随时可改，这一轮按提交时生效的冻存。
-        # 学生可开关时每条回复实际用的档位另记在回复上（对话时间线的 thinking_level）。
-        "thinking": resolve_coaching_thinking(
-            await get_ai_step_policy(), assignment.model_params
-        ).model_dump(),
-    }
-    # 质疑措辞同理，管理员随时可改，已交的这一轮不能跟着变。
-    challenge_round_no = Education.resolve_next_submission_round_no(
-        assignment.id, session.owner_user_id, db=db
-    )
-    challenge_session = Education.get_challenge_session_for_round(
-        session.id, challenge_round_no, db=db
-    )
-    if challenge_session is None:
-        stats["challenge"] = {"enabled": assignment.challenge_enabled, "status": None}
-    else:
-        answered = [
-            turn
-            for turn in Education.get_challenge_turns(challenge_session.id, db=db)
-            if turn.response_text is not None
-        ]
+    coaching_styles_enabled = await Config.get('education.enable_coaching_styles')
+    coaching_prompt = await _get_coaching_prompt(assignment.coaching_style)
+    ai_policy = await get_ai_step_policy()
+    challenge_turn_prompt = await _get_challenge_prompt('turn')
+    challenge_closing_prompt = await _get_challenge_prompt('closing')
 
-        # 被质疑的那几处 vs 这次交上来的正文：教师最想知道的是「被问住之后动没动那句话」。
-        challenge_turns = Education.get_challenge_turns(challenge_session.id, db=db)
-        stats["challenge"] = {
-            "enabled": assignment.challenge_enabled,
-            "session_id": challenge_session.id,
-            "status": challenge_session.status,
-            "planned_rounds": challenge_session.planned_rounds,
-            "answered_rounds": len(answered),
-            "focus_keys": list(challenge_session.focus_keys or []),
-            # 画像层与班级聚合都只读 stats_json，不回读原始表，所以未解决条数和
-            # 它们的维度归属都在这里算好。归属不上的条目照样给学生看，只是不进
-            # 班级那张按维度统计的表——不硬塞给某个维度。
-            "unresolved_count": len(_challenge_unresolved(challenge_session)),
-            "unresolved_items": [
-                {"text": item.text, "focus_key": item.focus_key}
-                for item in _challenge_unresolved(challenge_session)
-            ],
-            "revision": summarize_post_challenge_revision(
-                challenge_turns,
-                form_data.final_content_text,
-            ),
-            "turn_prompt": await _get_challenge_prompt("turn"),
-            "closing_prompt": await _get_challenge_prompt("closing"),
-            # 这一轮试读实际用过的模型（各轮质疑与收尾，按出现先后去重）。
-            "models": list(
-                dict.fromkeys(
-                    model_id
-                    for model_id in [
-                        *(turn.model_id for turn in challenge_turns),
-                        challenge_session.closing_model_id,
-                    ]
-                    if model_id
-                )
-            ),
-        }
-    # 修改清单随这一轮冻存:学生之后再改处理方式(退回重交),已交的这一轮不跟着变。
-    if assignment.task_mode == "revise_draft":
-        if revision_plan is None:
-            stats["revision_items"] = {"status": "missing", "items": []}
-        else:
-            stats["revision_items"] = {
-                "status": "ready",
-                # 第一次通读与补看实际用的模型（没补看过为空）。
-                "models": {
-                    "first_read": session.revision_items_model_id,
-                    "follow_up": session.revision_follow_up_model_id,
-                },
-                "items": build_revision_snapshot(
-                    Education.set_revision_decisions(
-                        session.id, revision_plan, commit=False, db=db
+    def persist_submission():
+        assignment = lock_assignment(assignment_id, db)
+        if assignment is None:
+            raise HTTPException(404, 'Assignment not found')
+        if assignment.config_revision != form_data.expected_config_revision:
+            raise HTTPException(409, 'Assignment settings changed; review the questions before submitting')
+        role = _ensure_assignment_access(user, assignment, db)
+        if role not in ('student', 'admin'):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail='Only students can submit assignments',
+            )
+        session = _get_workspace_session_or_404(form_data.writing_session_id, db)
+        if session.scope != 'assignment':
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Invalid writing scope')
+        if session.assignment_id != assignment.id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Mismatched session')
+        _ensure_workspace_session_owner(user, session)
+        ensure_writing_session_writable(session, db)
+        _ensure_draft_baseline_ready(session, db)
+
+        # 修订初稿作业不问「用了 AI 吗」:首轮通读是平台替学生发起的,一定用了。
+        # 让学生自报只会多一个和对话记录矛盾的口子,所以这里一律记为用了,不看客户端。
+        ai_used = True if is_revision(assignment.task_mode) else form_data.ai_used
+
+        # 反思答案对着作业「此刻」的题目校验;教师中途改题,已交的反思存的是当时的快照。
+        try:
+            reflection_record = build_reflection_record(
+                assignment.reflection_questions,
+                ai_used,
+                form_data.reflection_answers,
+            )
+        except ValueError as err:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(err)) from err
+        current_submission = Education.get_current_submission(assignment.id, session.owner_user_id, db=db)
+        current_review = (
+            Education.get_submission_review_by_submission_id(current_submission.id, db=db)
+            if current_submission is not None
+            else None
+        )
+
+        # 截止时间按会话归属人算:管理员代提交时不应套用管理员自己的轮次。
+        effective_due_at = _get_effective_due_at(assignment, session.owner_user_id, db)
+
+        previous_round_submission = None
+        if current_submission is not None:
+            if current_review is not None and current_review.review_status == 'returned':
+                previous_round_submission = current_submission
+            elif current_submission.round_no > 1:
+                previous_round_submission = next(
+                    (
+                        item
+                        for item in Education.get_submission_rounds(assignment.id, session.owner_user_id, db=db)
+                        if item.round_no == current_submission.round_no - 1
                     ),
+                    None,
+                )
+
+        stored_note = db.get(Note, session.note_id)
+        if stored_note is None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='Writing note is missing')
+        stored_note.data = {
+            **(sanitize_note_data(stored_note.data) or {}),
+            'content': {
+                'json': form_data.final_content_json,
+                'html': form_data.final_content_html,
+                'md': form_data.final_content_text,
+            },
+        }
+        stored_note.updated_at = int(time.time_ns())
+
+        final_version = Education.insert_version(
+            session.id,
+            'submit',
+            form_data.final_content_json,
+            form_data.final_content_text,
+            commit=False,
+            db=db,
+        )
+        versions = Education.get_submission_window_versions(
+            session.id,
+            final_version.id,
+            previous_final_version_id=(
+                previous_round_submission.final_version_id if previous_round_submission is not None else None
+            ),
+            db=db,
+        )
+        version_count = Education.count_versions(session.id, db=db)
+        provenance_segments = Education.get_provenance_segments(session.id, db=db)
+        normalized_segments = [NormalizedSegment(segment) for segment in provenance_segments]
+        source_map_highlights = build_source_map_highlights(
+            form_data.final_content_text,
+            normalized_segments,
+        )
+        segments = (
+            source_map_highlights
+            if source_map_highlights is not None
+            else filter_segments_for_final_text(form_data.final_content_text, normalized_segments)
+        )
+        prompt_count = len([message for message in prompt_timeline if is_student_prompt(message)])
+        if source_map_highlights is not None:
+            stats = compute_stats_from_highlights(
+                form_data.final_content_text,
+                source_map_highlights,
+                prompt_count=prompt_count,
+                version_count=version_count,
+            )
+        else:
+            stats = compute_stats(
+                form_data.final_content_text,
+                segments,
+                prompt_count=prompt_count,
+                version_count=version_count,
+            )
+        stats['data_completeness'] = form_data.data_completeness.model_dump()
+        # 档位的措辞管理员随时可改，所以把这一轮实际生效的原文一起冻进本轮记录。
+        # 管理员关了辅导风格时这一轮没有档位生效，记为空。
+        coaching_enabled = not is_revision(assignment.task_mode) and bool(coaching_styles_enabled)
+        stats['coaching'] = {
+            'style': assignment.coaching_style if coaching_enabled else None,
+            'prompt': (coaching_prompt if coaching_enabled else ''),
+            'task_mode': assignment.task_mode,
+            'task_prompt': assignment.teaching_config['prompt'],
+            # 辅导对话的思考档位：管理员的下放方式与默认随时可改，这一轮按提交时生效的冻存。
+            # 学生可开关时每条回复实际用的档位另记在回复上（对话时间线的 thinking_level）。
+            'thinking': resolve_coaching_thinking(ai_policy, assignment.model_params).model_dump(),
+        }
+        # 质疑措辞同理，管理员随时可改，已交的这一轮不能跟着变。
+        challenge_round_no = Education.resolve_next_submission_round_no(assignment.id, session.owner_user_id, db=db)
+        challenge_session = Education.get_challenge_session_for_round(session.id, challenge_round_no, db=db)
+        if challenge_session is None:
+            stats['challenge'] = {'enabled': assignment.challenge_enabled, 'status': None}
+        else:
+            answered = [
+                turn
+                for turn in Education.get_challenge_turns(challenge_session.id, db=db)
+                if turn.response_text is not None
+            ]
+
+            # 被质疑的那几处 vs 这次交上来的正文：教师最想知道的是「被问住之后动没动那句话」。
+            challenge_turns = Education.get_challenge_turns(challenge_session.id, db=db)
+            stats['challenge'] = {
+                'enabled': assignment.challenge_enabled,
+                'session_id': challenge_session.id,
+                'status': challenge_session.status,
+                'planned_rounds': challenge_session.planned_rounds,
+                'answered_rounds': len(answered),
+                'focus_keys': list(challenge_session.focus_keys or []),
+                # 画像层与班级聚合都只读 stats_json，不回读原始表，所以未解决条数和
+                # 它们的维度归属都在这里算好。归属不上的条目照样给学生看，只是不进
+                # 班级那张按维度统计的表——不硬塞给某个维度。
+                'unresolved_count': len(_challenge_unresolved(challenge_session)),
+                'unresolved_items': [
+                    {'text': item.text, 'focus_key': item.focus_key}
+                    for item in _challenge_unresolved(challenge_session)
+                ],
+                'revision': summarize_post_challenge_revision(
+                    challenge_turns,
                     form_data.final_content_text,
                 ),
+                'turn_prompt': challenge_turn_prompt,
+                'closing_prompt': challenge_closing_prompt,
+                # 这一轮试读实际用过的模型（各轮质疑与收尾，按出现先后去重）。
+                'models': list(
+                    dict.fromkeys(
+                        model_id
+                        for model_id in [
+                            *(turn.model_id for turn in challenge_turns),
+                            challenge_session.closing_model_id,
+                        ]
+                        if model_id
+                    )
+                ),
             }
-    reflection = Education.insert_micro_reflection(
-        assignment.id,
-        session.owner_user_id,
-        session.id,
-        ai_used,
-        reflection_record,
-        commit=False,
-        db=db,
-    )
-    try:
-        submission = Education.insert_submission(
+        stats['assignment_config'] = assignment.model_dump(mode='json')
+        stats['prompt_timeline'] = [
+            message
+            for message in prompt_timeline
+            if message.get('role') != 'assistant' or message.get('content') or message.get('output')
+        ]
+        stats['chat_contexts'] = [
+            {'message_id': message['id'], **message['education_context']}
+            for message in prompt_timeline
+            if message.get('education_context')
+        ]
+        if is_revision(assignment.task_mode):
+            from open_webui.services.education.revision_reading import reading_records, published_return_feedback
+
+            stats['revision_readings'] = reading_records(session.id, db, completed_only=True)
+            stats['returned_feedback'] = published_return_feedback(session, db)
+        reflection = Education.insert_micro_reflection(
             assignment.id,
             session.owner_user_id,
             session.id,
-            final_version.id,
-            stats,
-            reflection.id,
+            ai_used,
+            reflection_record,
             commit=False,
             db=db,
         )
-        evidence = capture_profile_evidence(
-            submission=submission,
-            assignment=assignment,
-            writing_session=session,
-            final_version=final_version,
-            reflection=reflection,
-            versions=versions,
-            provenance_segments=provenance_segments,
-            operations=Education.get_editor_operations(session.id, db=db),
-            prompt_timeline=prompt_timeline,
-            effective_due_at=effective_due_at,
-            previous_submission=previous_round_submission,
-            db=db,
-        )
-        _, analysis_payload = project_profile_evidence(
-            evidence,
-            None,
-            db,
-            commit=False,
-        )
-        Education.upsert_analysis_result(
-            session.id,
-            "submission_analysis",
-            analysis_payload,
-            submission_id=submission.id,
-            commit=False,
-            db=db,
-        )
-        refresh_student_profile_aggregates(
-            submission.student_id,
-            PROFILE_METRIC_VERSION,
-            db,
-            commit=False,
-        )
-        db.commit()
-    except SubmissionAlreadyReviewedError:
-        db.rollback()
-        # 上面已提前拦过一次,这里兜住「批改与提交并发」的窄窗口。
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Submission has already been reviewed",
-        )
-    except IntegrityError:
-        db.rollback()
-        # 唯一约束 (assignment_id, student_id, round_no):同一轮已被并发请求写入。
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="A submission for this round is already being processed",
-        )
-    except Exception:
-        db.rollback()
-        raise
+        try:
+            submission = Education.insert_submission(
+                assignment.id,
+                session.owner_user_id,
+                session.id,
+                final_version.id,
+                stats,
+                reflection.id,
+                commit=False,
+                db=db,
+            )
+            evidence = capture_profile_evidence(
+                submission=submission,
+                assignment=assignment,
+                writing_session=session,
+                final_version=final_version,
+                reflection=reflection,
+                versions=versions,
+                provenance_segments=provenance_segments,
+                operations=Education.get_editor_operations(session.id, db=db),
+                prompt_timeline=prompt_timeline,
+                effective_due_at=effective_due_at,
+                previous_submission=previous_round_submission,
+                db=db,
+            )
+            _, analysis_payload = project_profile_evidence(
+                evidence,
+                None,
+                db,
+                commit=False,
+            )
+            Education.upsert_analysis_result(
+                session.id,
+                'submission_analysis',
+                analysis_payload,
+                submission_id=submission.id,
+                commit=False,
+                db=db,
+            )
+            refresh_student_profile_aggregates(
+                submission.student_id,
+                PROFILE_METRIC_VERSION,
+                db,
+                commit=False,
+            )
+            db.commit()
+        except SubmissionAlreadyReviewedError:
+            db.rollback()
+            # 上面已提前拦过一次,这里兜住「批改与提交并发」的窄窗口。
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail='Submission has already been reviewed',
+            )
+        except IntegrityError:
+            db.rollback()
+            # 唯一约束 (assignment_id, student_id, round_no):同一轮已被并发请求写入。
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail='A submission for this round is already being processed',
+            )
+        except Exception:
+            db.rollback()
+            raise
+        return assignment, submission, final_version
+
+    assignment, submission, final_version = await run_in_threadpool(persist_submission)
     await _send_education_notifications(
         [assignment.teacher_id],
-        "submission_created",
+        'submission_created',
         {
-            "assignment_id": assignment.id,
-            "assignment_title": assignment.title,
-            "submission_id": submission.id,
-            "student_id": user.id,
-            "student_name": user.name,
-            "round_no": submission.round_no,
+            'assignment_id': assignment.id,
+            'assignment_title': assignment.title,
+            'submission_id': submission.id,
+            'student_id': user.id,
+            'student_name': user.name,
+            'round_no': submission.round_no,
         },
         db,
     )
-    return {"submission_id": submission.id, "final_version_id": final_version.id}
+    return {'submission_id': submission.id, 'final_version_id': final_version.id}
 
 
 @router.get(
-    "/assignments/{assignment_id}/me/submissions",
+    '/assignments/{assignment_id}/me/submissions',
     response_model=MyAssignmentSubmissionsResponse,
 )
 async def get_my_assignment_submissions(
@@ -3690,10 +3239,10 @@ async def get_my_assignment_submissions(
 ):
     assignment = _get_assignment_or_404(assignment_id, db)
     role = _ensure_assignment_access(user, assignment, db)
-    if role != "student":
+    if role != 'student':
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only students can view their own submission history",
+            detail='Only students can view their own submission history',
         )
 
     submissions = sorted(
@@ -3704,9 +3253,7 @@ async def get_my_assignment_submissions(
     rounds = []
     for submission in submissions:
         version = Education.get_version_by_id(submission.final_version_id, db=db)
-        review = Education.get_submission_review_by_submission_id(
-            submission.id, db=db
-        )
+        review = Education.get_submission_review_by_submission_id(submission.id, db=db)
         rounds.append(
             MySubmissionRound(
                 submission_id=submission.id,
@@ -3715,16 +3262,15 @@ async def get_my_assignment_submissions(
                 submitted_at=submission.submitted_at,
                 content=MySubmissionRoundContent(
                     content_json=version.note_snapshot_json if version else None,
-                    content_text=(version.note_snapshot_text if version else "")
-                    or "",
+                    content_text=(version.note_snapshot_text if version else '') or '',
                 ),
                 review=(
                     MySubmissionRoundReview(
                         review_status=review.review_status,
-                        score=review.score,
-                        rubric=review.rubric_scores,
-                        overall_comment=review.overall_comment,
-                        returned_comment=review.returned_comment,
+                        score=review.score if review.review_status == 'reviewed' else None,
+                        rubric=review.rubric_scores if review.review_status == 'reviewed' else None,
+                        overall_comment=review.overall_comment if review.review_status == 'reviewed' else None,
+                        returned_comment=review.returned_comment if review.review_status == 'returned' else None,
                         resubmit_due_at=review.resubmit_due_at,
                         reviewed_at=review.reviewed_at,
                     )
@@ -3737,9 +3283,7 @@ async def get_my_assignment_submissions(
     return MyAssignmentSubmissionsResponse(assignment_id=assignment.id, rounds=rounds)
 
 
-@router.get(
-    "/teacher/submissions/{submission_id}", response_model=SubmissionDetailResponse
-)
+@router.get('/teacher/submissions/{submission_id}', response_model=SubmissionDetailResponse)
 async def get_submission_detail(
     scope: TeacherSubmissionScope = Depends(require_teacher_submission),
     db: Session = Depends(get_session),
@@ -3748,27 +3292,27 @@ async def get_submission_detail(
     session = _get_workspace_session_or_404(submission.writing_session_id, db)
     versions = Education.get_versions(session.id, db=db)
     analysis = await get_materialized_submission_analysis(submission, session, db)
-    provenance_segments = filter_segments_for_final_text(
-        (versions[-1].note_snapshot_text if versions else "") or "",
-        Education.get_provenance_segments(session.id, db=db),
-    )
-    reflection = Education.get_micro_reflection_by_id(
-        submission.micro_reflection_id, db=db
-    )
+    reflection = Education.get_micro_reflection_by_id(submission.micro_reflection_id, db=db)
     review = Education.get_submission_review_by_submission_id(submission.id, db=db)
-    prompt_timeline = await get_prompt_timeline(session, db)
     evidence = Education.get_latest_profile_evidence_snapshot(submission.id, db=db)
     if evidence is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Submission evidence snapshot is missing",
+            detail='Submission evidence snapshot is missing',
         )
+    prompt_timeline = submission.stats_json.get('prompt_timeline')
+    if prompt_timeline is None:
+        prompt_timeline = [message.model_dump() for message in evidence.evidence_json.conversation]
+    provenance_segments = [
+        ProvenanceSegmentModel.model_validate({**segment.model_dump(), 'writing_session_id': session.id})
+        for segment in evidence.evidence_json.provenance
+    ]
+    if 'assignment_config' in submission.stats_json:
+        assignment = AssignmentModel.model_validate(submission.stats_json['assignment_config'])
     student = await Users.get_user_by_id(submission.student_id, db=db)
     note = await Notes.get_note_by_id(session.note_id, db=db)
     if note is None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="Writing note is missing"
-        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='Writing note is missing')
     final_version = next(
         (version for version in versions if version.id == submission.final_version_id),
         None,
@@ -3776,24 +3320,21 @@ async def get_submission_detail(
     if final_version is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Submission final version not found",
+            detail='Submission final version not found',
         )
 
+    versions = [version for version in versions if version.version_no <= final_version.version_no]
     rounds = []
-    for item in Education.get_submission_rounds(
-        submission.assignment_id, submission.student_id, db=db
-    ):
+    for item in Education.get_submission_rounds(submission.assignment_id, submission.student_id, db=db):
         item_review = Education.get_submission_review_by_submission_id(item.id, db=db)
         rounds.append(
             {
-                "submission_id": item.id,
-                "round_no": item.round_no,
-                "submitted_at": item.submitted_at,
-                "is_current": item.is_current,
-                "review_status": (
-                    item_review.review_status if item_review else "pending"
-                ),
-                "score": item_review.score if item_review else None,
+                'submission_id': item.id,
+                'round_no': item.round_no,
+                'submitted_at': item.submitted_at,
+                'is_current': item.is_current,
+                'review_status': (item_review.review_status if item_review else 'pending'),
+                'score': item_review.score if item_review else None,
             }
         )
 
@@ -3809,7 +3350,13 @@ async def get_submission_detail(
         version_count=len(versions),
         provenance_segments=provenance_segments,
         prompt_timeline=prompt_timeline,
+        review_history=[event.model_dump() for event in Education.get_submission_review_history(submission.id, db=db)],
         round_prompt_count=evidence_prompt_count(evidence.evidence_json),
+        review_revision=(
+            event.review_revision
+            if (event := Education.get_latest_submission_review_event(submission.id, db=db))
+            else 0
+        ),
         micro_reflection=reflection,
         review=review,
         note=note.model_dump(),
@@ -3820,7 +3367,7 @@ async def get_submission_detail(
 
 
 @router.get(
-    "/teacher/submissions/{submission_id}/versions",
+    '/teacher/submissions/{submission_id}/versions',
     response_model=list[WritingVersionSummaryModel],
 )
 async def get_submission_versions(
@@ -3828,13 +3375,10 @@ async def get_submission_versions(
     db: Session = Depends(get_session),
 ):
     session = _get_workspace_session_or_404(scope.submission.writing_session_id, db)
-    return [
-        WritingVersionSummaryModel.model_validate(version)
-        for version in Education.get_versions(session.id, db=db)
-    ]
+    return [WritingVersionSummaryModel.model_validate(version) for version in Education.get_versions(session.id, db=db)]
 
 
-@router.get("/teacher/submissions/{submission_id}/diff")
+@router.get('/teacher/submissions/{submission_id}/diff')
 async def get_submission_round_diff(
     scope: TeacherSubmissionScope = Depends(require_teacher_submission),
     db: Session = Depends(get_session),
@@ -3843,37 +3387,35 @@ async def get_submission_round_diff(
     previous = next(
         (
             item
-            for item in Education.get_submission_rounds(
-                submission.assignment_id, submission.student_id, db=db
-            )
+            for item in Education.get_submission_rounds(submission.assignment_id, submission.student_id, db=db)
             if item.round_no == submission.round_no - 1
         ),
         None,
     )
     if previous is None:
-        return {"has_previous": False, "previous_round_no": None, "blocks": []}
+        return {'has_previous': False, 'previous_round_no': None, 'blocks': []}
 
     current_version = Education.get_version_by_id(submission.final_version_id, db=db)
     previous_version = Education.get_version_by_id(previous.final_version_id, db=db)
-    old_text = (previous_version.note_snapshot_text or "") if previous_version else ""
-    new_text = (current_version.note_snapshot_text or "") if current_version else ""
+    old_text = (previous_version.note_snapshot_text or '') if previous_version else ''
+    new_text = (current_version.note_snapshot_text or '') if current_version else ''
     matcher = difflib.SequenceMatcher(None, old_text, new_text)
     blocks = [
         {
-            "op": op,
-            "old_text": old_text[i1:i2],
-            "new_text": new_text[j1:j2],
+            'op': op,
+            'old_text': old_text[i1:i2],
+            'new_text': new_text[j1:j2],
         }
         for op, i1, i2, j1, j2 in matcher.get_opcodes()
     ]
     return {
-        "has_previous": True,
-        "previous_round_no": previous.round_no,
-        "blocks": blocks,
+        'has_previous': True,
+        'previous_round_no': previous.round_no,
+        'blocks': blocks,
     }
 
 
-@router.get("/teacher/submissions/{submission_id}/draft-diff")
+@router.get('/teacher/submissions/{submission_id}/draft-diff')
 async def get_submission_draft_diff(
     scope: TeacherSubmissionScope = Depends(require_teacher_submission),
     db: Session = Depends(get_session),
@@ -3882,33 +3424,34 @@ async def get_submission_draft_diff(
     submission = scope.submission
     session = _get_workspace_session_or_404(submission.writing_session_id, db)
     if session.draft_baseline_at is None:
-        return {"has_baseline": False, "blocks": []}
+        return {'has_baseline': False, 'blocks': []}
 
     current_version = Education.get_version_by_id(submission.final_version_id, db=db)
-    old_text = session.draft_baseline_text or ""
-    new_text = (current_version.note_snapshot_text or "") if current_version else ""
+    old_text = session.draft_baseline_text or ''
+    new_text = (current_version.note_snapshot_text or '') if current_version else ''
     blocks = _sentence_diff_blocks(old_text, new_text)
+
     # 批改页顶部一句话:「初稿 N 句,改动或删去 M 句,终稿里新写 K 句」。只说改了多少,不评价改得好不好。
     def count(text: str) -> int:
         return len([sentence for sentence in _SENTENCE_RE.findall(text) if sentence.strip()])
 
     return {
-        "has_baseline": True,
-        "blocks": blocks,
-        "draft_sentence_count": count(old_text),
-        "changed_sentence_count": sum(
-            count(block["old_text"]) for block in blocks if block["op"] in ("replace", "delete")
+        'has_baseline': True,
+        'blocks': blocks,
+        'draft_sentence_count': count(old_text),
+        'changed_sentence_count': sum(
+            count(block['old_text']) for block in blocks if block['op'] in ('replace', 'delete')
         ),
         # 终稿里初稿没有的句子(改写后的新句 + 新加的句子)。
-        "added_sentence_count": sum(
-            count(block["new_text"]) for block in blocks if block["op"] in ("replace", "insert")
+        'added_sentence_count': sum(
+            count(block['new_text']) for block in blocks if block['op'] in ('replace', 'insert')
         ),
-        "same_as_draft": is_same_as_draft(new_text, old_text),
+        'same_as_draft': is_same_as_draft(new_text, old_text),
     }
 
 
 # 句末标点或换行之后断句;标点留在句子里,各句拼回去就是原文。
-_SENTENCE_RE = re.compile(r"[^。！？；!?;\n]*(?:[。！？；!?;]+|\n)|[^。！？；!?;\n]+")
+_SENTENCE_RE = re.compile(r'[^。！？；!?;\n]*(?:[。！？；!?;]+|\n)|[^。！？；!?;\n]+')
 
 
 def _sentence_diff_blocks(old_text: str, new_text: str) -> list[dict]:
@@ -3919,15 +3462,15 @@ def _sentence_diff_blocks(old_text: str, new_text: str) -> list[dict]:
     matcher = difflib.SequenceMatcher(None, old_sentences, new_sentences, autojunk=False)
     return [
         {
-            "op": op,
-            "old_text": "".join(old_sentences[i1:i2]),
-            "new_text": "".join(new_sentences[j1:j2]),
+            'op': op,
+            'old_text': ''.join(old_sentences[i1:i2]),
+            'new_text': ''.join(new_sentences[j1:j2]),
         }
         for op, i1, i2, j1, j2 in matcher.get_opcodes()
     ]
 
 
-@router.post("/teacher/submissions/{submission_id}/analysis")
+@router.post('/teacher/submissions/{submission_id}/analysis')
 async def recompute_submission_analysis(
     scope: TeacherSubmissionScope = Depends(require_teacher_submission),
     db: Session = Depends(get_session),
@@ -3937,12 +3480,12 @@ async def recompute_submission_analysis(
     if evidence is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Submission evidence is not materialized",
+            detail='Submission evidence is not materialized',
         )
     payload = build_analysis_from_evidence(evidence)
     Education.upsert_analysis_result(
         submission.writing_session_id,
-        "submission_analysis",
+        'submission_analysis',
         payload,
         submission_id=submission.id,
         db=db,
@@ -3950,19 +3493,15 @@ async def recompute_submission_analysis(
     return payload
 
 
-async def _load_submission_analysis(
-    scope: TeacherSubmissionScope, db: Session
-) -> dict:
+async def _load_submission_analysis(scope: TeacherSubmissionScope, db: Session) -> dict:
     session = _get_workspace_session_or_404(scope.submission.writing_session_id, db)
     try:
         return await get_materialized_submission_analysis(scope.submission, session, db)
     except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
-@router.get("/teacher/submissions/{submission_id}/analysis")
+@router.get('/teacher/submissions/{submission_id}/analysis')
 async def get_submission_analysis(
     scope: TeacherSubmissionScope = Depends(require_teacher_submission),
     db: Session = Depends(get_session),
@@ -3970,43 +3509,43 @@ async def get_submission_analysis(
     return await _load_submission_analysis(scope, db)
 
 
-@router.get("/teacher/submissions/{submission_id}/analysis/summary")
+@router.get('/teacher/submissions/{submission_id}/analysis/summary')
 async def get_submission_analysis_summary(
     scope: TeacherSubmissionScope = Depends(require_teacher_submission),
     db: Session = Depends(get_session),
 ):
     analysis = await _load_submission_analysis(scope, db)
-    return analysis.get("summary", {})
+    return analysis.get('summary', {})
 
 
-@router.get("/teacher/submissions/{submission_id}/analysis/timeline")
+@router.get('/teacher/submissions/{submission_id}/analysis/timeline')
 async def get_submission_analysis_timeline(
     scope: TeacherSubmissionScope = Depends(require_teacher_submission),
     db: Session = Depends(get_session),
 ):
     analysis = await _load_submission_analysis(scope, db)
-    return analysis.get("timeline", [])
+    return analysis.get('timeline', [])
 
 
-@router.get("/teacher/submissions/{submission_id}/analysis/highlights")
+@router.get('/teacher/submissions/{submission_id}/analysis/highlights')
 async def get_submission_analysis_highlights(
     scope: TeacherSubmissionScope = Depends(require_teacher_submission),
     db: Session = Depends(get_session),
 ):
     analysis = await _load_submission_analysis(scope, db)
-    return analysis.get("highlights", [])
+    return analysis.get('highlights', [])
 
 
-@router.get("/teacher/submissions/{submission_id}/analysis/segments")
+@router.get('/teacher/submissions/{submission_id}/analysis/segments')
 async def get_submission_analysis_segments(
     scope: TeacherSubmissionScope = Depends(require_teacher_submission),
     db: Session = Depends(get_session),
 ):
     analysis = await _load_submission_analysis(scope, db)
-    return analysis.get("segments", [])
+    return analysis.get('segments', [])
 
 
-@router.get("/teacher/submissions/{submission_id}/analysis/segments/{segment_id}")
+@router.get('/teacher/submissions/{submission_id}/analysis/segments/{segment_id}')
 async def get_submission_analysis_segment_detail(
     segment_id: str,
     scope: TeacherSubmissionScope = Depends(require_teacher_submission),
@@ -4014,126 +3553,130 @@ async def get_submission_analysis_segment_detail(
 ):
     analysis = await _load_submission_analysis(scope, db)
     segment = next(
-        (
-            item
-            for item in analysis.get("segments", [])
-            if item.get("segment_id") == segment_id
-        ),
+        (item for item in analysis.get('segments', []) if item.get('segment_id') == segment_id),
         None,
     )
     if segment is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Segment not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Segment not found')
     return segment
 
 
-@router.get("/teacher/submissions/{submission_id}/review")
+@router.get('/teacher/submissions/{submission_id}/review')
 async def get_submission_review(
     scope: TeacherSubmissionScope = Depends(require_teacher_submission),
     db: Session = Depends(get_session),
 ):
     submission = scope.submission
     review = Education.get_submission_review_by_submission_id(submission.id, db=db)
-    return (
-        review.model_dump()
-        if review
-        else {"submission_id": submission.id, "review_status": "pending"}
-    )
+    return review.model_dump() if review else {'submission_id': submission.id, 'review_status': 'pending'}
 
 
-@router.post("/teacher/submissions/{submission_id}/review")
+@router.post('/teacher/submissions/{submission_id}/review')
 async def save_submission_review(
     form_data: SubmissionReviewForm,
     scope: TeacherSubmissionScope = Depends(require_teacher_submission),
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
+    return_enabled = await Config.get('education.enable_return')
     submission, assignment = scope
-    if form_data.review_status not in {"pending", "reviewed", "returned"}:
+    await run_in_threadpool(lock_assignment, assignment.id, db)
+    submission = Education.get_submission_by_id(submission.id, db=db)
+    event = Education.get_latest_submission_review_event(submission.id, db=db)
+    revision = event.review_revision if event else 0
+    if (
+        submission.final_version_id != form_data.expected_final_version_id
+        or revision != form_data.expected_review_revision
+    ):
+        raise HTTPException(409, 'The submission or review changed; reload before saving your review')
+    previous_review = Education.get_submission_review_by_submission_id(submission.id, db=db)
+    if (
+        previous_review
+        and previous_review.review_status in ('reviewed', 'returned')
+        and form_data.review_status == 'pending'
+    ):
+        raise HTTPException(409, 'Published reviews cannot become drafts; save a correction instead')
+    if 'assignment_config' in submission.stats_json:
+        assignment = AssignmentModel.model_validate(submission.stats_json['assignment_config'])
+    if form_data.review_status not in {'pending', 'reviewed', 'returned'}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid review status",
+            detail='Invalid review status',
         )
-    if form_data.review_status == "returned" and not await Config.get(
-        "education.enable_return"
-    ):
+    if form_data.review_status == 'returned' and not return_enabled:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Returning submissions for revision is turned off",
+            detail='Returning submissions for revision is turned off',
         )
     if form_data.score is not None and form_data.score > assignment.score_max:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Score must be between 0 and {assignment.score_max}",
+            detail=f'Score must be between 0 and {assignment.score_max}',
         )
-    rubric_criteria = {
-        criterion.key: criterion for criterion in assignment.rubric_schema.criteria
-    }
+    rubric_criteria = {criterion.key: criterion for criterion in assignment.rubric_schema.criteria}
+    if assignment.scoring_mode == 'total' and form_data.rubric_scores:
+        raise HTTPException(400, 'Total-only scoring has no rubric scores')
+    if assignment.scoring_mode == 'total':
+        form_data.rubric_scores = None
     if form_data.rubric_scores is not None:
         if set(form_data.rubric_scores) != set(rubric_criteria):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Rubric scores must include every configured criterion exactly once",
+                detail='Rubric scores must include every configured criterion exactly once',
             )
         for key, value in form_data.rubric_scores.items():
             if value < 0 or value > rubric_criteria[key].max_score:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Rubric score for {key} must be between 0 and {rubric_criteria[key].max_score}",
+                    detail=f'Rubric score for {key} must be between 0 and {rubric_criteria[key].max_score}',
                 )
         rubric_total = sum(form_data.rubric_scores.values())
         if form_data.score is not None and rubric_total != form_data.score:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Total score must equal the sum of rubric scores",
+                detail='Total score must equal the sum of rubric scores',
             )
-    if form_data.review_status == "reviewed" and (
-        form_data.score is None or form_data.rubric_scores is None
+    if form_data.review_status == 'reviewed' and (
+        form_data.score is None or assignment.scoring_mode == 'dimensions' and form_data.rubric_scores is None
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Reviewed submissions require a total score and complete rubric scores",
+            detail='Reviewed submissions require a total score and complete rubric scores',
         )
-    # 反思质量是教师给的,批完不给分这一维就永远是空的,所以定稿批改时必填。
-    if form_data.review_status == "reviewed" and form_data.reflection_score is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Reviewed submissions require a reflection score",
-        )
+    reflection = Education.get_micro_reflection_by_id(submission.micro_reflection_id, db=db)
+    has_reflection = any(item.text or item.selected or item.other_text for item in reflection.reflection_json.items)
+    if not has_reflection and form_data.reflection_score is not None:
+        raise HTTPException(400, 'This submission has no reflection answers to score')
+    if form_data.review_status == 'reviewed' and has_reflection and form_data.reflection_score is None:
+        raise HTTPException(400, 'Reviewed submissions with reflection answers require a reflection score')
     evidence = Education.get_latest_profile_evidence_snapshot(submission.id, db=db)
     if evidence is None:
-        raise RuntimeError("Submission evidence snapshot is missing")
+        raise RuntimeError('Submission evidence snapshot is missing')
     # 提问质量同样必填,但只在这一轮真有 AI 对话时才有东西可评;没对话的
     # 提交给了分也不会用,直接拒掉,免得分数存进去却对不上任何提问。
     has_prompts = evidence_prompt_count(evidence.evidence_json) > 0
     if not has_prompts and form_data.prompt_score is not None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="This submission has no AI conversation to score",
+            detail='This submission has no AI conversation to score',
         )
-    if (
-        form_data.review_status == "reviewed"
-        and has_prompts
-        and form_data.prompt_score is None
-    ):
+    if form_data.review_status == 'reviewed' and has_prompts and form_data.prompt_score is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Reviewed submissions with an AI conversation require a prompt score",
+            detail='Reviewed submissions with an AI conversation require a prompt score',
         )
     if not submission.is_current:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Historical submission rounds are read-only",
+            detail='Historical submission rounds are read-only',
         )
-    if form_data.review_status == "returned":
-        if (
-            form_data.resubmit_due_at is None
-            or form_data.resubmit_due_at <= int(time.time())
-        ):
+    if form_data.review_status == 'returned':
+        if not (form_data.returned_comment or '').strip():
+            raise HTTPException(400, 'A return comment is required')
+        if form_data.resubmit_due_at is None or form_data.resubmit_due_at <= int(time.time()):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="A future resubmit due time is required when returning",
+                detail='A future resubmit due time is required when returning',
             )
     if form_data.challenge_followup:
         # 不在这里替教师悄悄打开质疑：他勾这一下的意思是「就这条追问」，
@@ -4141,14 +3684,12 @@ async def save_submission_review(
         if not assignment.challenge_enabled:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Challenge follow-up needs the pre-submission challenge enabled",
+                detail='Challenge follow-up needs the pre-submission challenge enabled',
             )
-        if form_data.review_status != "returned" or not (
-            form_data.returned_comment or ""
-        ).strip():
+        if form_data.review_status != 'returned' or not (form_data.returned_comment or '').strip():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Challenge follow-up needs a returned submission with a comment",
+                detail='Challenge follow-up needs a returned submission with a comment',
             )
 
     try:
@@ -4160,19 +3701,17 @@ async def save_submission_review(
             commit=False,
             db=db,
         )
-        review_event = Education.append_submission_review_event(
-            review, evidence.id, commit=False, db=db
-        )
-        if form_data.review_status == "returned":
+        review_event = Education.append_submission_review_event(review, evidence.id, commit=False, db=db)
+        if form_data.review_status == 'returned':
             Education.set_writing_session_status(
                 submission.writing_session_id,
-                "draft",
+                'draft',
                 commit=False,
                 db=db,
             )
         stored_analysis = Education.get_analysis_result(
             submission.writing_session_id,
-            "submission_analysis",
+            'submission_analysis',
             submission_id=submission.id,
             db=db,
         )
@@ -4180,9 +3719,7 @@ async def save_submission_review(
             evidence,
             review_event,
             db,
-            analysis_payload=(
-                stored_analysis.payload_json if stored_analysis is not None else None
-            ),
+            analysis_payload=(stored_analysis.payload_json if stored_analysis is not None else None),
             commit=False,
         )
         refresh_student_profile_aggregates(
@@ -4196,34 +3733,34 @@ async def save_submission_review(
         db.rollback()
         raise
 
-    if form_data.review_status == "reviewed":
+    if form_data.review_status == 'reviewed':
         await _send_education_notifications(
             [submission.student_id],
-            "review_completed",
+            'review_completed',
             {
-                "assignment_id": assignment.id,
-                "assignment_title": assignment.title,
-                "score": form_data.score,
+                'assignment_id': assignment.id,
+                'assignment_title': assignment.title,
+                'score': form_data.score,
             },
             db,
         )
-    elif form_data.review_status == "returned":
+    elif form_data.review_status == 'returned':
         await _send_education_notifications(
             [submission.student_id],
-            "submission_returned",
+            'submission_returned',
             {
-                "assignment_id": assignment.id,
-                "assignment_title": assignment.title,
-                "returned_comment": form_data.returned_comment,
-                "resubmit_due_at": form_data.resubmit_due_at,
+                'assignment_id': assignment.id,
+                'assignment_title': assignment.title,
+                'returned_comment': form_data.returned_comment,
+                'resubmit_due_at': form_data.resubmit_due_at,
             },
             db,
         )
-    return review
+    return {**review.model_dump(), 'review_revision': review_event.review_revision}
 
 
 @router.post(
-    "/teacher/assignments/{assignment_id}/challenge-insight",
+    '/teacher/assignments/{assignment_id}/challenge-insight',
     response_model=ChallengeInsightResponse,
 )
 async def generate_teacher_challenge_insight(
@@ -4242,18 +3779,12 @@ async def generate_teacher_challenge_insight(
 
     submissions = Education.get_submissions_by_assignment(assignment.id, db=db)
     try:
-        return await build_challenge_insight(
-            request, user, assignment, submissions, form_data.model, db
-        )
+        return await build_challenge_insight(request, user, assignment, submissions, form_data.model, db)
     except ChallengeError as error:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)
-        ) from error
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
 
 
-@router.get(
-    "/teacher/assignments/{assignment_id}/dashboard", response_model=DashboardResponse
-)
+@router.get('/teacher/assignments/{assignment_id}/dashboard', response_model=DashboardResponse)
 async def get_teacher_dashboard(
     assignment: AssignmentModel = Depends(require_teacher_assignment),
     db: Session = Depends(get_session),
@@ -4262,10 +3793,10 @@ async def get_teacher_dashboard(
 
     items = []
     rewrite_distribution = {
-        "unchanged": 0,
-        "lightly_edited": 0,
-        "moderately_rewritten": 0,
-        "deeply_rewritten": 0,
+        'unchanged': 0,
+        'lightly_edited': 0,
+        'moderately_rewritten': 0,
+        'deeply_rewritten': 0,
     }
     # 学生、写作会话、微反思都按批取回,班级规模变大时看板不再是 N+1。
     students = {
@@ -4281,12 +3812,10 @@ async def get_teacher_dashboard(
         [submission.micro_reflection_id for submission in submissions], db=db
     )
     analyses = await get_materialized_submission_analyses(submissions, sessions, db)
-    is_revise_draft = assignment.task_mode == "revise_draft"
+    is_revise_draft = is_revision(assignment.task_mode)
     same_as_draft = (
         {
-            submission.id: _is_submission_same_as_draft(
-                submission, sessions.get(submission.writing_session_id), db
-            )
+            submission.id: _is_submission_same_as_draft(submission, sessions.get(submission.writing_session_id), db)
             for submission in submissions
         }
         if is_revise_draft
@@ -4295,8 +3824,8 @@ async def get_teacher_dashboard(
     for submission in submissions:
         student = students.get(submission.student_id)
         analysis = analyses.get(submission.id) or {}
-        for segment in analysis.get("segments", []):
-            rewrite_level = segment.get("rewrite_level")
+        for segment in analysis.get('segments', []):
+            rewrite_level = segment.get('rewrite_level')
             if rewrite_level in rewrite_distribution:
                 rewrite_distribution[rewrite_level] += 1
         items.append(
@@ -4305,52 +3834,48 @@ async def get_teacher_dashboard(
                 student_id=submission.student_id,
                 student_name=student.name if student else submission.student_id,
                 source_stats=submission.stats_json,
-                prompt_count=submission.stats_json.get("prompt_count", 0),
+                prompt_count=submission.stats_json.get('prompt_count', 0),
                 has_reflection=submission.micro_reflection_id in reflections,
                 submitted_at=submission.submitted_at,
-                risk_summary=analysis.get("summary", {}),
+                risk_summary=analysis.get('summary', {}),
                 revision_overview=(
-                    summarize_revision_snapshot(
-                        submission.stats_json, same_as_draft.get(submission.id, False)
-                    )
+                    summarize_revision_snapshot(submission.stats_json, same_as_draft.get(submission.id, False))
                     if is_revise_draft
                     else None
                 ),
             )
         )
     distributions = {
-        "rewrite_levels": rewrite_distribution,
-        "submission_count": len(items),
+        'rewrite_levels': rewrite_distribution,
+        'submission_count': len(items),
     }
     # 来源占比回答「他用了多少 AI」，这一项回答「这个班普遍在哪个维度上站不住」。
     # 纯内存聚合，不调模型、不落表、不进缓存。
     challenge_distribution = build_challenge_distribution(assignment, submissions)
     if challenge_distribution is not None:
-        distributions["challenge"] = challenge_distribution
+        distributions['challenge'] = challenge_distribution
     # 修订初稿:全班第一次通读汇总——每个维度多少人要改、改了没有,哪些人终稿和初稿一样。
     if is_revise_draft:
         first_read = build_first_read_distribution(assignment, submissions, same_as_draft)
         if first_read is not None:
-            distributions["first_read"] = first_read
+            distributions['first_read'] = first_read
 
     # 风险信号只落在逐份提交上(items[].risk_summary),不做全班加总:
     # 加总看不出是谁,还会把正常使用 AI 与风险标签并排。
     return DashboardResponse(items=items, distributions=distributions)
 
 
-@router.get("/me/writing/goals", response_model=list[StudentGrowthGoalModel])
+@router.get('/me/writing/goals', response_model=list[StudentGrowthGoalModel])
 async def get_my_growth_goals(
     user=Depends(get_verified_user),
     limit: int = Query(default=100, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_session),
 ):
-    return Education.get_student_growth_goals(
-        user.id, limit=limit, offset=offset, db=db
-    )
+    return Education.get_student_growth_goals(user.id, limit=limit, offset=offset, db=db)
 
 
-@router.post("/me/writing/goals", response_model=StudentGrowthGoalModel)
+@router.post('/me/writing/goals', response_model=StudentGrowthGoalModel)
 async def create_my_growth_goal(
     form_data: StudentGrowthGoalCreateForm,
     user=Depends(get_verified_user),
@@ -4360,7 +3885,7 @@ async def create_my_growth_goal(
     memberships = {
         membership.classroom_id
         for membership in Education.get_classroom_members_by_user_id(user.id, db=db)
-        if membership.member_role == "student"
+        if membership.member_role == 'student'
     }
     if form_data.classroom_id is not None and form_data.classroom_id not in memberships:
         raise HTTPException(
@@ -4374,24 +3899,17 @@ async def create_my_growth_goal(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Growth goal assignment is outside the student's memberships",
             )
-        if (
-            form_data.classroom_id is not None
-            and form_data.classroom_id != assignment.classroom_id
-        ):
+        if form_data.classroom_id is not None and form_data.classroom_id != assignment.classroom_id:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="Growth goal classroom and assignment do not match",
+                detail='Growth goal classroom and assignment do not match',
             )
         if form_data.classroom_id is None:
-            normalized_form = form_data.model_copy(
-                update={"classroom_id": assignment.classroom_id}
-            )
+            normalized_form = form_data.model_copy(update={'classroom_id': assignment.classroom_id})
     return Education.insert_student_growth_goal(user.id, normalized_form, db=db)
 
 
-@router.patch(
-    "/me/writing/goals/{goal_id}", response_model=StudentGrowthGoalModel
-)
+@router.patch('/me/writing/goals/{goal_id}', response_model=StudentGrowthGoalModel)
 async def update_my_growth_goal(
     goal_id: str,
     form_data: StudentGrowthGoalUpdateForm,
@@ -4400,14 +3918,12 @@ async def update_my_growth_goal(
 ):
     goal = Education.update_student_growth_goal(goal_id, user.id, form_data, db=db)
     if goal is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Growth goal not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Growth goal not found')
     return goal
 
 
 @router.get(
-    "/teacher/classrooms/{classroom_id}/students/{student_user_id}/profile-notes",
+    '/teacher/classrooms/{classroom_id}/students/{student_user_id}/profile-notes',
     response_model=list[TeacherStudentNoteModel],
 )
 async def get_student_profile_notes(
@@ -4419,10 +3935,10 @@ async def get_student_profile_notes(
     db: Session = Depends(get_session),
 ):
     member = Education.get_classroom_member(classroom.id, student_user_id, db=db)
-    if member is None or member.member_role != "student":
+    if member is None or member.member_role != 'student':
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Student not found in classroom",
+            detail='Student not found in classroom',
         )
     if user.id != classroom.teacher_id:
         return []
@@ -4437,7 +3953,7 @@ async def get_student_profile_notes(
 
 
 @router.post(
-    "/teacher/classrooms/{classroom_id}/students/{student_user_id}/profile-notes",
+    '/teacher/classrooms/{classroom_id}/students/{student_user_id}/profile-notes',
     response_model=TeacherStudentNoteModel,
 )
 async def create_student_profile_note(
@@ -4448,24 +3964,20 @@ async def create_student_profile_note(
     db: Session = Depends(get_session),
 ):
     member = Education.get_classroom_member(classroom.id, student_user_id, db=db)
-    if member is None or member.member_role != "student":
+    if member is None or member.member_role != 'student':
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Student not found in classroom",
+            detail='Student not found in classroom',
         )
     if user.id != classroom.teacher_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only the classroom teacher can add private notes",
+            detail='Only the classroom teacher can add private notes',
         )
-    return Education.insert_teacher_student_note(
-        user.id, classroom.id, student_user_id, form_data, db=db
-    )
+    return Education.insert_teacher_student_note(user.id, classroom.id, student_user_id, form_data, db=db)
 
 
-@router.patch(
-    "/teacher/profile-notes/{note_id}", response_model=TeacherStudentNoteModel
-)
+@router.patch('/teacher/profile-notes/{note_id}', response_model=TeacherStudentNoteModel)
 async def update_student_profile_note(
     note_id: str,
     form_data: TeacherStudentNoteUpdateForm,
@@ -4474,13 +3986,11 @@ async def update_student_profile_note(
 ):
     note = Education.update_teacher_student_note(note_id, user.id, form_data, db=db)
     if note is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Teacher note not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Teacher note not found')
     return note
 
 
-@router.delete("/teacher/profile-notes/{note_id}")
+@router.delete('/teacher/profile-notes/{note_id}')
 async def delete_student_profile_note(
     note_id: str,
     user=Depends(get_verified_user),
@@ -4488,13 +3998,11 @@ async def delete_student_profile_note(
 ):
     deleted = Education.delete_teacher_student_note(note_id, user.id, db=db)
     if not deleted:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Teacher note not found"
-        )
-    return {"ok": True}
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Teacher note not found')
+    return {'ok': True}
 
 
-@router.get("/me/writing/profile", response_model=StudentProfileResponse)
+@router.get('/me/writing/profile', response_model=StudentProfileResponse)
 async def get_my_writing_profile(
     user=Depends(get_verified_user),
     start_at: Optional[int] = Query(default=None, ge=0),
@@ -4509,7 +4017,7 @@ async def get_my_writing_profile(
     if start_at is not None and end_at is not None and start_at > end_at:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="start_at must not be later than end_at",
+            detail='start_at must not be later than end_at',
         )
     memberships = Education.get_classroom_members_by_user_id(user.id, db=db)
     classrooms = [
@@ -4517,13 +4025,11 @@ async def get_my_writing_profile(
         for classroom in (
             Education.get_classroom_by_id(membership.classroom_id, db=db)
             for membership in memberships
-            if membership.member_role == "student"
+            if membership.member_role == 'student'
         )
         if classroom is not None
     ]
-    assignments = Education.get_profile_assignments_by_student(user.id, db=db)[
-        :MAX_STUDENT_ASSIGNMENTS
-    ]
+    assignments = Education.get_profile_assignments_by_student(user.id, db=db)[:MAX_STUDENT_ASSIGNMENTS]
     try:
         return await build_student_profile(
             user,
@@ -4540,35 +4046,27 @@ async def get_my_writing_profile(
             offset=offset,
         )
     except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
 
 
-@router.get("/me/writing/assignments", response_model=list[StudentAssignmentListItem])
+@router.get('/me/writing/assignments', response_model=list[StudentAssignmentListItem])
 async def get_student_assignments(
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
-    assignments = Education.get_assignments_by_student(user.id, db=db)[
-        :MAX_STUDENT_ASSIGNMENTS
-    ]
+    assignments = Education.get_assignments_by_student(user.id, db=db)[:MAX_STUDENT_ASSIGNMENTS]
     memberships = {
         membership.classroom_id: membership
         for membership in Education.get_classroom_members_by_user_id(user.id, db=db)
-        if membership.member_role == "student"
+        if membership.member_role == 'student'
     }
     items = []
 
     for assignment in assignments:
-        session = Education.get_assignment_writing_session(
-            assignment.id, user.id, db=db
-        )
+        session = Education.get_assignment_writing_session(assignment.id, user.id, db=db)
         submission = None
         if session and session.submitted_submission_id:
-            submission = Education.get_submission_by_id(
-                session.submitted_submission_id, db=db
-            )
+            submission = Education.get_submission_by_id(session.submitted_submission_id, db=db)
 
         items.append(
             StudentAssignmentListItem(
@@ -4583,7 +4081,7 @@ async def get_student_assignments(
     return items
 
 
-@router.post("/writing-sessions/{session_id}/active-chat", response_model=dict)
+@router.post('/writing-sessions/{session_id}/active-chat', response_model=dict)
 async def update_writing_session_active_chat(
     form_data: ActiveChatUpdateForm,
     session: WritingSessionModel = Depends(require_owned_writing_session),
@@ -4596,12 +4094,12 @@ async def update_writing_session_active_chat(
         if chat is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Chat not found",
+                detail='Chat not found',
             )
         if session.folder_id and chat.folder_id != session.folder_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Chat does not belong to this assignment project",
+                detail='Chat does not belong to this assignment project',
             )
 
     updated = Education.update_writing_session_context(
@@ -4611,12 +4109,12 @@ async def update_writing_session_active_chat(
         db=db,
     )
     return {
-        "writing_session": updated.model_dump(),
-        "active_chat_id": updated.active_chat_id,
+        'writing_session': updated.model_dump(),
+        'active_chat_id': updated.active_chat_id,
     }
 
 
-@router.get("/me/notifications/summary")
+@router.get('/me/notifications/summary')
 async def get_my_notification_summary(
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
@@ -4624,7 +4122,7 @@ async def get_my_notification_summary(
     return Education.get_unread_notification_summary(user.id, db=db)
 
 
-@router.post("/me/notifications/mark-read")
+@router.post('/me/notifications/mark-read')
 async def mark_my_notifications_read(
     form_data: NotificationMarkReadForm,
     user=Depends(get_verified_user),
@@ -4636,7 +4134,7 @@ async def mark_my_notifications_read(
         assignment_id=form_data.assignment_id,
         db=db,
     )
-    return {"marked": marked}
+    return {'marked': marked}
 
 
 # ---------------------------------------------------------------------------
@@ -4650,88 +4148,88 @@ async def mark_my_notifications_read(
 # 比」；不带就是悄悄得出一个错误结论。
 # ---------------------------------------------------------------------------
 
-RESEARCH_EXPORT_SCHEMA_VERSION = "2026-09-23.1"
+RESEARCH_EXPORT_SCHEMA_VERSION = '2026-09-23.1'
 
 _RESEARCH_SUBMISSION_COLUMNS = (
-    "pseudo_id",
-    "assignment_id",
-    "assignment_title",
-    "round_no",
-    "is_current",
-    "submitted_at",
-    "review_status",
-    "score",
-    "score_max",
-    "normalized_score",
-    "total_chars",
-    "inserted_chars",
-    "revised_chars",
-    "revision_depth",
-    "writing_span_seconds",
-    "active_writing_seconds",
-    "lead_time_seconds",
-    "end_loaded_ratio",
-    "deadline_window_ratio",
-    "process_index",
-    "typed_ratio",
-    "ai_ratio",
-    "unknown_ratio",
-    "prompt_count",
-    "reflection_quality",
-    "prompt_quality",
-    "collaboration_index",
-    "challenge_status",
-    "challenge_answer_ratio",
-    "challenge_unresolved_count",
-    "challenge_revised",
-    "burst_count",
-    "suspected_unmarked_import_count",
-    "version_data_completeness",
-    "editor_operations_completeness",
-    "source_tracking_completeness",
-    "scoring_completeness",
-    "metric_version",
-    "algorithm_checksum",
+    'pseudo_id',
+    'assignment_id',
+    'assignment_title',
+    'round_no',
+    'is_current',
+    'submitted_at',
+    'review_status',
+    'score',
+    'score_max',
+    'normalized_score',
+    'total_chars',
+    'inserted_chars',
+    'revised_chars',
+    'revision_depth',
+    'writing_span_seconds',
+    'active_writing_seconds',
+    'lead_time_seconds',
+    'end_loaded_ratio',
+    'deadline_window_ratio',
+    'process_index',
+    'typed_ratio',
+    'ai_ratio',
+    'unknown_ratio',
+    'prompt_count',
+    'reflection_quality',
+    'prompt_quality',
+    'collaboration_index',
+    'challenge_status',
+    'challenge_answer_ratio',
+    'challenge_unresolved_count',
+    'challenge_revised',
+    'burst_count',
+    'suspected_unmarked_import_count',
+    'version_data_completeness',
+    'editor_operations_completeness',
+    'source_tracking_completeness',
+    'scoring_completeness',
+    'metric_version',
+    'algorithm_checksum',
 )
 
 _RESEARCH_ROUND_COLUMNS = (
-    "pseudo_id",
-    "assignment_id",
-    "from_round",
-    "to_round",
-    "char_delta",
-    "revision_ratio",
-    "score_delta",
-    "turnaround_seconds",
-    "metric_version",
-    "algorithm_checksum",
+    'pseudo_id',
+    'assignment_id',
+    'from_round',
+    'to_round',
+    'char_delta',
+    'revision_ratio',
+    'score_delta',
+    'turnaround_seconds',
+    'metric_version',
+    'algorithm_checksum',
 )
 
 _RESEARCH_REFLECTION_COLUMNS = (
-    "pseudo_id",
-    "assignment_id",
-    "round_no",
-    "submitted_at",
-    "ai_used",
-    "reflection_quality",
-    "question_position",
-    "question_id",
-    "question_kind",
-    "question_prompt",
-    "question_required",
-    "selected_options",
-    "other_chosen",
-    "answer_chars",
-    "other_text",
-    "answer_text",
+    'pseudo_id',
+    'assignment_id',
+    'round_no',
+    'submitted_at',
+    'ai_used',
+    'reflection_quality',
+    'question_position',
+    'question_id',
+    'question_kind',
+    'question_prompt',
+    'question_required',
+    'selected_options',
+    'other_chosen',
+    'answer_chars',
+    'other_text',
+    'answer_text',
 )
 
 
 def _research_pseudo_id(student_id: str) -> str:
     """稳定且不可逆的假名:同一个人在多次导出里是同一个 id,但反推不回账号。"""
     digest = hmac.new(
-        WEBUI_SECRET_KEY.encode("utf-8"),
-        student_id.encode("utf-8"),
+        WEBUI_SECRET_KEY.encode('utf-8'),
+        student_id.encode('utf-8'),
         hashlib.sha256,
     )
     return digest.hexdigest()[:16]
@@ -4744,56 +4242,54 @@ def _research_readme(
     include_text: bool,
     classroom_id: Optional[str],
 ) -> str:
-    generated_at = datetime.fromtimestamp(int(time.time())).strftime(
-        "%Y-%m-%d %H:%M:%S"
-    )
+    generated_at = datetime.fromtimestamp(int(time.time())).strftime('%Y-%m-%d %H:%M:%S')
     lines = [
-        "写作教学平台 · 教研数据导出",
-        "",
-        f"导出时间：{generated_at}",
-        f"导出格式版本：{RESEARCH_EXPORT_SCHEMA_VERSION}",
-        f"指标算法版本：{metric_version}",
-        f"算法代码校验和：{checksum}",
-        f"班级范围：{classroom_id or '全部班级'}",
-        f"提交行数：{row_count}",
-        f"含原始文本：{'是' if include_text else '否'}",
-        "",
-        "口径说明",
-        "--------",
-        "* pseudo_id 由账号 id 经服务端密钥 HMAC 得到，稳定但不可逆；导出不含姓名与邮箱。",
-        "* 每行都带 metric_version 与 algorithm_checksum。算法改版后同一份证据会算出不同",
-        "  结果，跨学期比较前必须先确认这两列一致，否则两批数据不可比。",
-        "* 来源占比（typed_ratio / ai_ratio / unknown_ratio）由学生浏览器",
-        "  上报，可能不完整也可以被绕过，只用于讨论写作过程，不作为学术不端判据。",
-        "* challenge_* 由服务端快照比对得出，不依赖客户端上报；作业未开启提交前试读时",
-        "  全为空，那是「不适用」而不是「表现差」。",
-        "* reflection_quality / prompt_quality 由教师批改时给的 1—5 分折算到 0—100，",
-        "  未批改为空；这一轮没有 AI 对话的提交 prompt_quality 也为空（不适用）。",
-        "* collaboration_index = (prompt_quality + reflection_quality) / 2；没有 AI 对话的",
-        "  提交只看 reflection_quality。prompt_count 仅作参考，不计入。",
-        "* 空值一律留空，不填 0 —— 0 和「没有数据」在统计上必须分得开。",
-        "",
-        "文件",
-        "----",
-        "submissions.csv    每份提交一行，当前算法下的最新投影（最新证据 × 最新批改）",
-        "round_progress.csv 退回—重交之间的改动幅度与分数变化",
-        "reflections.csv    提交时的反思，每道题一行；题目由教师按作业自定，存的是提交当时的",
-        "                   题目快照。一道题都没设的提交也留一行（题目列为空），保住 ai_used。",
-        "                   selected_options 以 | 分隔；answer_chars 为填空题回答或「其他」说明的字数。",
+        '写作教学平台 · 教研数据导出',
+        '',
+        f'导出时间：{generated_at}',
+        f'导出格式版本：{RESEARCH_EXPORT_SCHEMA_VERSION}',
+        f'指标算法版本：{metric_version}',
+        f'算法代码校验和：{checksum}',
+        f'班级范围：{classroom_id or "全部班级"}',
+        f'提交行数：{row_count}',
+        f'含原始文本：{"是" if include_text else "否"}',
+        '',
+        '口径说明',
+        '--------',
+        '* pseudo_id 由账号 id 经服务端密钥 HMAC 得到，稳定但不可逆；导出不含姓名与邮箱。',
+        '* 每行都带 metric_version 与 algorithm_checksum。算法改版后同一份证据会算出不同',
+        '  结果，跨学期比较前必须先确认这两列一致，否则两批数据不可比。',
+        '* 来源占比（typed_ratio / ai_ratio / unknown_ratio）由学生浏览器',
+        '  上报，可能不完整也可以被绕过，只用于讨论写作过程，不作为学术不端判据。',
+        '* challenge_* 由服务端快照比对得出，不依赖客户端上报；作业未开启提交前试读时',
+        '  全为空，那是「不适用」而不是「表现差」。',
+        '* reflection_quality / prompt_quality 由教师批改时给的 1—5 分折算到 0—100，',
+        '  未批改为空；这一轮没有 AI 对话的提交 prompt_quality 也为空（不适用）。',
+        '* collaboration_index = (prompt_quality + reflection_quality) / 2；没有 AI 对话的',
+        '  提交只看 reflection_quality。prompt_count 仅作参考，不计入。',
+        '* 空值一律留空，不填 0 —— 0 和「没有数据」在统计上必须分得开。',
+        '',
+        '文件',
+        '----',
+        'submissions.csv    每份提交一行，当前算法下的最新投影（最新证据 × 最新批改）',
+        'round_progress.csv 退回—重交之间的改动幅度与分数变化',
+        'reflections.csv    提交时的反思，每道题一行；题目由教师按作业自定，存的是提交当时的',
+        '                   题目快照。一道题都没设的提交也留一行（题目列为空），保住 ai_used。',
+        '                   selected_options 以 | 分隔；answer_chars 为填空题回答或「其他」说明的字数。',
     ]
-    return "\n".join(lines) + "\n"
+    return '\n'.join(lines) + '\n'
 
 
 def _research_csv_bytes(columns: tuple[str, ...], rows: list[list]) -> bytes:
     stream = io.StringIO()
-    writer = csv.writer(stream, lineterminator="\n")
+    writer = csv.writer(stream, lineterminator='\n')
     writer.writerow(columns)
     writer.writerows(rows)
     # utf-8-sig BOM 前缀，避免 Excel 打开含中文的 CSV 乱码
-    return ("﻿" + stream.getvalue()).encode("utf-8")
+    return ('﻿' + stream.getvalue()).encode('utf-8')
 
 
-@router.get("/research/export")
+@router.get('/research/export')
 async def export_research_dataset(
     user=Depends(get_admin_user),
     classroom_id: Optional[str] = Query(default=None, min_length=1),
@@ -4805,26 +4301,17 @@ async def export_research_dataset(
     if start_at is not None and end_at is not None and start_at > end_at:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="start_at must not be later than end_at",
+            detail='start_at must not be later than end_at',
         )
 
     assignment_ids: Optional[list[str]] = None
     if classroom_id is not None:
         classroom = Education.get_classroom_by_id(classroom_id, db=db)
         if classroom is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Classroom not found"
-            )
-        assignment_ids = [
-            assignment.id
-            for assignment in Education.get_assignments_by_classroom(
-                classroom_id, db=db
-            )
-        ]
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Classroom not found')
+        assignment_ids = [assignment.id for assignment in Education.get_assignments_by_classroom(classroom_id, db=db)]
 
-    metric_version = (
-        Education.get_active_profile_metric_version(db=db) or PROFILE_METRIC_VERSION
-    )
+    metric_version = Education.get_active_profile_metric_version(db=db) or PROFILE_METRIC_VERSION
     checksum = profile_algorithm_code_checksum()
     projections = Education.get_profile_metric_projections_for_export(
         metric_version,
@@ -4918,7 +4405,7 @@ async def export_research_dataset(
             ]
             items = reflection_facts.reflection.items
             if not items:
-                reflection_rows.append(row_prefix + [""] * 10)
+                reflection_rows.append(row_prefix + [''] * 10)
             for position, item in enumerate(items, start=1):
                 reflection_rows.append(
                     row_prefix
@@ -4928,42 +4415,70 @@ async def export_research_dataset(
                         item.kind,
                         item.prompt,
                         item.required,
-                        "|".join(item.selected),
+                        '|'.join(item.selected),
                         item.other_text is not None,
-                        len(item.text or item.other_text or ""),
-                        (item.other_text or "") if include_text else "",
-                        (item.text or "") if include_text else "",
+                        len(item.text or item.other_text or ''),
+                        (item.other_text or '') if include_text else '',
+                        (item.text or '') if include_text else '',
                     ]
                 )
 
     archive = io.BytesIO()
-    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
+    with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as bundle:
         bundle.writestr(
-            "README.txt",
+            'README.txt',
             _research_readme(
                 metric_version,
                 checksum,
                 len(submission_rows),
                 include_text,
                 classroom_id,
-            ).encode("utf-8"),
+            ).encode('utf-8'),
         )
         bundle.writestr(
-            "submissions.csv",
+            'submissions.csv',
             _research_csv_bytes(_RESEARCH_SUBMISSION_COLUMNS, submission_rows),
         )
         bundle.writestr(
-            "round_progress.csv",
+            'round_progress.csv',
             _research_csv_bytes(_RESEARCH_ROUND_COLUMNS, round_rows),
         )
         bundle.writestr(
-            "reflections.csv",
+            'reflections.csv',
             _research_csv_bytes(_RESEARCH_REFLECTION_COLUMNS, reflection_rows),
         )
 
-    filename = f"research-export-{metric_version}-{int(time.time())}.zip"
+    filename = f'research-export-{metric_version}-{int(time.time())}.zip'
     return Response(
         content=archive.getvalue(),
-        media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        media_type='application/zip',
+        headers={'Content-Disposition': f'attachment; filename="{filename}"'},
     )
+
+
+from open_webui.services.education.revision_reading import ReadingRequest, reading_records, read_revision
+
+
+@router.get('/writing-sessions/{session_id}/readings')
+async def get_revision_readings(
+    session: WritingSessionModel = Depends(require_owned_writing_session), db: Session = Depends(get_session)
+):
+    _get_revise_draft_session(session, db)
+    return reading_records(session.id, db)
+
+
+@router.post('/writing-sessions/{session_id}/readings')
+async def request_revision_reading(
+    request: Request,
+    form_data: ReadingRequest,
+    session: WritingSessionModel = Depends(require_writable_writing_session),
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+):
+    assignment = _get_revise_draft_session(session, db)
+    dialogue = await get_prompt_timeline(session, db)
+    try:
+        return await read_revision(request, user, session, assignment, form_data, db, dialogue)
+    except ValueError as error:
+        db.rollback()
+        raise HTTPException(400, str(error)) from error

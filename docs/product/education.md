@@ -29,7 +29,7 @@ Right Write 基于 Open WebUI v0.11.2。前端使用 Svelte 5、SvelteKit 2、Ty
 
 - `routers/education.py`：HTTP、身份权限、资源装配与事务入口；`models/education.py`：严格数据模型、数据库约束与仓储。
 - `services/education/identity.py`：教学身份，使用 `education-teacher` / `education-student` 用户组；平台角色 `user.role` 与教学身份不是同一字段，管理员通过平台角色获权。
-- `writing_context.py`：初稿文件解析、初稿基线和每轮对话的当前正文上下文；`revision_items.py`：第一次通读、修改清单、补看和提交快照汇总。
+- `writing_context.py`：初稿解析、基线及当前正文；`revision_reading.py`：自主阅读与上下文；`teaching_config.py`：版本、授权及事务锁；`revision_items.py`：历史冻结清单只读汇总。
 - `writing_access.py`：统一有效截止时间及写作状态校验。作业已批改返回 409，超过有效截止返回 400；写入路由、对话入口和模型调用共用校验。对话入口在创建聊天或保存消息之前检查，个人写作继续允许写入。
 - `challenge.py` / `challenge_insight.py`：提交前 AI 读者试读及维度聚合；`analysis.py`：来源、过程指标及分析缓存。
 - `profile_evidence.py` / `profile_snapshots.py`：冻结证据；`profile.py` / `profile_aggregates.py`：画像指标和聚合投影；`profile_recompute.py`：显式批量重算。细节参见 [画像投影说明](../../backend/open_webui/services/education/PROFILE_PROJECTIONS.md)。
@@ -55,10 +55,10 @@ Right Write 基于 Open WebUI v0.11.2。前端使用 Svelte 5、SvelteKit 2、Ty
 
 ## Task Modes & Writing Context
 
-- `task_mode` 仅为 `from_scratch`（从零写作）或 `revise_draft`（修订初稿）。修订初稿不能启用 AI 读者试读，模型校验与数据库 CHECK 都限制这个组合。
+- 作业类型集中登记在 `services/education/task_types.py`：`from_scratch / revise_draft / revise_argument`。后两者都需确认基线、使用自主修订辅导且禁止读者试读；模型与数据库共同校验。
 - 修订初稿须先明确确认初稿，再解锁正文编辑和 AI 对话；初稿至少 200 个非空白字符。导入支持 `.docx`、`.doc`、`.txt`、`.md`，文件上限 10 MB；也可导入照片（JPG / PNG / WebP，一次最多 8 张，单张 10 MB、合计 30 MB），由管理员选定的识图模型逐张转录、只转录不改写。PDF 在学生浏览器里读取（pdf.js，不上传 PDF、服务端不解析）：文字页直接取文字并还原段落、去掉页眉页脚与页码；扫描页渲染成图后走同一条识图路径，同样受 8 页上限。服务端提取正文供学生核对，不将导入文件或图片存入文件库。从零写作作业可在编辑器里用同一组导入，识别结果经预览后插入，记为外部粘贴并注明来自导入。导入只限作业的学生本人。
 - `draft_baseline_text` / `draft_baseline_at` 保存确认基线；确认后不可直接改写，可在尚未提交时通过专用撤回初稿接口重来。退回重交保留最初基线，不能借改稿覆盖它。
-- 确认初稿后自动发起首轮诊断，按评分维度逐项通读；修改清单含 `problem / minor / ok / deferred`，学生处理为 `revised / partly / kept`，暂缓维度通过补看继续。状态与并发请求应由服务端约束。
+- 确认初稿后可立即编辑、讨论与提交。初读、修改复看、整段复看由 `revision_reading.py` 记录，不使用评分维度，不要求处理清单。每条阅读保存来源正文、顺序号、教学/要求/退回意见版本与模型；同一请求复用记录，迟到结果不修改提交快照。`revision_items.py` 只读汇总历史清单。
 - `WritingWorkspaceShell.svelte` 管理统一工作区；发送前等待正文保存（最多 5 秒，失败提示学生），后端从最近已保存正文注入每轮上下文及改动说明，不能依赖静态文件夹提示词或模型自发调用工具取得正文。
 - 教师批改和本次分析读取提交时冻结的 `stats_json.revision_items` 与 `stats_json.coaching`；初稿到终稿按句对比。“说改了但原句未动”只是核查提示，可能在别处作等效修改，不能自动判错。
 - 学生的任何对话都禁止读写记忆；作业对话还禁用检索聊天记录与记忆的内置工具。修改模型工具或聊天中间件时必须保持这些权限边界。
@@ -70,16 +70,28 @@ Right Write 基于 Open WebUI v0.11.2。前端使用 Svelte 5、SvelteKit 2、Ty
 - 统一思考参数 `thinking_level`（`off / low / medium / high`，不设为模型默认）在 `utils/thinking.py` 按连接翻译：连接设置的「思考格式」（`thinking_format`：`openai` 的 reasoning_effort、Responses 的 reasoning.effort、`anthropic` 的 budget_tokens、`deepseek`、`kimi`、`zhipu`、`doubao`、`qwen` 的 enable_thinking、`chat_template`、`openrouter`），没设时按主机名后缀识别。各家写法以 2026-10-18 的实测为准，见 [思考档位实测结果](../reference/thinking-params-test-results.md)：关不掉思考的模型（GLM-5.3 系列实测；GLM-4.7、4.5V、Kimi K2.7-Code 按参考文档）从不发 `disabled`：能分档的「关」退到最低档，不分档的各档都按模型默认、什么也不发；Kimi 用 `thinking.type=disabled` 关，K3 用 `reasoning_effort` 分档，K2.6 只有开 / 关（各档都发 `thinking.type=enabled`）。各模型能不能关、能不能分档记在 `MODEL_THINKING_SUPPORT`，模型列表里每个模型带 `thinking_support`（自建模型随底模），模型编辑页（勾了思考控制时）与 AI 步骤设置（选到这类模型时）据此提示。服务商固定死的采样参数（`FIXED_SAMPLING_PARAMS`，目前是 Kimi 的 `temperature`、`top_p`、`n`、`presence_penalty`、`frequency_penalty`，只接受一个值，`temperature` 还随思考开关变）在发送前一律去掉，不管值是多少、有没有勾思考控制；模型编辑页（参数设了这类参数时）和连接设置（选到 Kimi 时）经 `POST /openai/sampling-rules` 读同一张表显示提示。只有模型能力勾了「思考控制」（`capabilities.reasoning`，默认不勾）才翻译，否则丢弃，档位本身不会原样发给服务商。
 - 服务商注意事项（`utils/provider_quirks.py`）：每家服务商、每个模型不寻常的地方一条不漏地写给管理员看——固定死的采样参数、只能开 / 关、关不掉思考、档位映射（如「中」按 high 发）、「模型默认」即开着思考，都从发送时实际读的表（`FIXED_SAMPLING_PARAMS`、`MODEL_THINKING_SUPPORT`、`EFFORT_BY_LEVEL`、`THINKS_BY_DEFAULT`）生成；代码管不了的事实（DeepSeek 高峰价、豆包按原始思考计费、千问开思考不支持 JSON 模式）记在 `PROVIDER_FACTS`。连接设置（「思考格式」下方，整家）与模型编辑页（「能力」下方，这个模型）经 `POST /openai/provider-quirks` 显示；「AI 步骤设置」每行按所选模型与档位显示（`StepView.quirks`），包括第一次通读选「高」或模型默认时可能超过 90 秒读超时、建议「低」（下拉里不标推荐，存的默认仍是「模型默认」）。表头说明「模型默认」：不发送思考参数、由服务商决定，后半句按目前接入的模型与能力表生成（`model_default_meaning`；服务商公开的默认档位记在 `PUBLISHED_DEFAULT_EFFORT`，目前只有 DeepSeek 的 high）。
 - 服务商一时出错自动重发（`utils/retry.py`）：作业辅导对话（`main.py` 在 metadata 里带 `retry_transient`）、管理员打开时的个人写作辅导对话（`education.auto_retry.personal_writing`，默认关；哪几处重发、哪些能开关登记在 `ai_steps.py` 的 `RETRY_SCOPES`，管理员「写作辅导」设置里的「自动重发」按它生成）与 `call_step_model` 发出的平台步骤（图片识别除外，它按页自己重发）在 OpenAI 兼容路由里遇 429、5xx、连接失败或超时时，按 1、2、4 秒 ±25% 最多发 4 次；只在还没往下游送内容之前重发（一次性回复读完响应体、流式回复读到第一段才算发成，等它们超时也重发），流式回复中途断了不重来。带重发的请求连接最多等 10 秒；流式第一段及两段之间最多 45 秒、过 60 秒不再开始新的一次；一次性回复最多 90 秒、过 120 秒不再开始新的一次，两者超时后都还能再发一次。其余 4xx 不重发。
-- `services/education/ai_steps.py` 登记教学的每处模型调用：`coaching_chat`、`first_read`（含补看）、`reader_check`、`image_parsing`、`class_insight`。平台步骤一律经 `call_step_model(step=…)` 发出，测试静态核对教学代码只在这里调用 `generate_chat_completion`，且每处调用写明登记过的步骤；新增调用必须先登记，管理员表与教师 AI 设置卡都按登记生成。
+- `services/education/ai_steps.py` 登记教学的每处模型调用：`coaching_chat`、`first_read`、`revision_review`、`whole_review`、`reader_check`、`image_parsing`、`class_insight`。平台步骤一律经 `call_step_model(step=…)` 发出，测试静态核对教学代码只在这里调用 `generate_chat_completion`，且每处调用写明登记过的步骤；新增调用必须先登记，管理员表与教师 AI 设置卡都按登记生成。
 - `education.ai_steps`：`coaching_chat: {control: admin|teacher|student, default}`，其余平台步骤各 `{model, thinking}`；思考默认全为模型默认，图片识别为关。只有辅导对话可下放；教师设置存 `assignment.model_params`（`{thinking, students_choose_thinking}`，迁移 `b3d5f7a9c1e4`），按此刻的下放方式解读，收回后不再生效。学生只能在允许时关闭当轮，不能调高。
 - 冻结与留痕：`stats_json.coaching.thinking` 冻存提交时的 `{control, level, source, students_choose}`；作业对话的每条回复在 `meta.thinking_level` 记实际发出的档位。
-- 模型：`model` 为空时通读与补看、读者试读用学生在写作区选的模型，班级论证归纳用老师选的；图片识别必须指定（为空即不提供图片导入，原 `education.draft_image_model` 已由迁移 `c6e8a0b2d4f7` 并入）。辅导对话不设固定模型：学生能选哪些由模型访问控制决定。`resolve_step_model` 是唯一的解析入口：指定的模型还在就用它并跳过学生 / 老师的模型访问控制；已被删掉时记告警、回落到学生 / 老师的模型（图片识别无回落），管理员页按 `EDUCATION_AI_STEP_VIEWS` 标红。保存设置时只校验新选的模型（须存在，图片识别还须能看图），已失效的旧值不挡保存。
+- 模型：`model` 为空时初读与复看、读者试读用学生在写作区选的模型，班级论证归纳用老师选的；图片识别必须指定（为空即不提供图片导入，原 `education.draft_image_model` 已由迁移 `c6e8a0b2d4f7` 并入）。辅导对话不设固定模型：学生能选哪些由模型访问控制决定。`resolve_step_model` 是唯一的解析入口：指定的模型还在就用它并跳过学生 / 老师的模型访问控制；已被删掉时记告警、回落到学生 / 老师的模型（图片识别无回落），管理员页按 `EDUCATION_AI_STEP_VIEWS` 标红。保存设置时只校验新选的模型（须存在，图片识别还须能看图），已失效的旧值不挡保存。
 - 实际用的模型：`writing_session.revision_items_model_id` / `revision_follow_up_model_id`、`challenge_turn.model_id`、`challenge_session.closing_model_id`、`challenge_insight.model_id`，图片导入写进编辑操作的 `metadata_json.model_id`；提交时冻进 `stats_json.revision_items.models`（`{first_read, follow_up}`）与 `stats_json.challenge.models`，批改页显示。
 
 ## Instance Configuration & Evidence
 
-- 管理员持久化配置：`education.default_task_mode`（默认 `from_scratch`）、`education.default_coaching_style`（默认 `balanced`）、`education.default_rubrics`（按作业形式分别配置）、`education.enable_coaching_styles`（默认开启）、`education.coaching_prompts`、`education.task_prompts`、`education.challenge_prompts`、`education.ai_steps`（各 AI 步骤的模型与思考档位，含初稿图片识别模型，以及辅导对话思考的下放方式，结构见上）。
-- 教师新建作业经 `/api/v1/teacher/assignment-defaults` 获取实例默认值；不要把某个部署实例的课程设定写成所有实例的固定默认值。档位取值为 `socratic / balanced / hands_off`，关闭档位后只使用任务说明，不再注入档位提示词。
+- 管理员维护 `teaching_configuration` 中三类版本化教学配置，以及 `education.default_coaching_style / enable_coaching_styles / coaching_prompts`（仅从零写作）、`education.enable_return / challenge_prompts / ai_steps / auto_retry`。
+- `/teacher/assignment-defaults` 返回该教师的类型授权和默认类型，以及三类当前教学配置。旧 `education.task_prompts / default_task_mode / default_rubrics` 仅保留为迁移来源，不再作为当前表单或修订上下文的配置入口。
 - 画像事实证据不可变，算法结果与聚合结果保存为版本化投影；普通画像 GET 读取投影，不扫描原始历史或偷偷重算。改算法须提升 `PROFILE_METRIC_VERSION`，改证据 schema 须同步更新严格类型与迁移。
-- 当前初稿证据 schema 与指标版本为 `2026-10-01.1`；首轮过程指标从声明初稿算起，重交轮从上一轮终稿算起，不能把整份初稿计成一次大段突增。
+- 当前证据 schema 为 `2026-10-01.1`，指标版本为 `2026-11-07.1`；首轮过程指标从声明初稿算起，重交轮从上一轮终稿算起，不能把整份初稿计成一次大段突增。
 - 不兼容迁移可能要求证据/投影表为空（如 `e8a0c2d4f6b7`）；按具体迁移和部署文档显式清理，不编写自动补建或兼容回填。需要切换算法时显式运行 `profile_recompute --activate`，不能在读取接口中修复。
+
+## 2026-11-07 作业类型与版本边界
+
+- `teacher_task_access` 存管理员明确授权与默认类型，数据库约束默认值必须获权；缺失授权记录时关闭创建权限，读取不补建。身份设为教师时显式建立从零写作授权。
+- `teaching_configuration` 按类型与版本保存配置；管理员通过 `/configs/education/types` 发布版本，作业保存 `teaching_config` 快照。前端教师默认值读取账号授权及三类配置。
+- 作业新增 `scoring_mode`、`config_revision`、`description_version`、`reflection_version`、`change_summary`。更新携带期望配置版本；首次提交锁评分，有基线或提交锁类型与教学规则。
+- `lock_assignment` 在 SQLite 与 PostgreSQL 上用同一作业行的写锁串行化更新、基线、提交与批改；模型生成前提交占位，模型调用期间不持有写事务。
+- 修订上下文显式白名单选取教学快照、题目说明、当前稿及已发布退回意见，排除评分模式、维度、满分、反思题与通用辅导档位。聊天每轮重新装配，避免旧文件夹提示词继续生效。
+- 新提交 `stats_json.assignment_config / revision_readings / returned_feedback / chat_contexts` 冻结实际配置与已完成过程。旧证据不重写、不补建、不清理。
+- 批改携带 `expected_final_version_id / expected_review_revision`，冲突返回 409。已发布评阅拒绝存为 pending；更正追加事件、重建当前版本投影，正文仍只读。
+- 无反思回答、无学生提问对应质量项不适用。仅总分不生成空分项零分。画像指标版本提升为 `2026-11-07.1`，证据 schema 保持原有结构；新算法的上线激活与重算仍须显式执行。
+- 迁移 `d7e9f1a3b5c8` 保留提交、反思、评阅及证据原文，迁移当时为既有作业绑定教学快照；旧教师保留从零写作及已布置类型，段落论证默认未授权。退回开关不变。正式执行前核查授权清单并备份。

@@ -24,6 +24,8 @@ const step = (key: AiStep['key'], model_source: AiStep['model_source']): AiStep 
 const STEPS: AiStep[] = [
 	step('coaching_chat', 'student_chat_model'),
 	step('first_read', 'student_chat_model'),
+	step('revision_review', 'student_chat_model'),
+	step('whole_review', 'student_chat_model'),
 	step('reader_check', 'student_chat_model'),
 	step('image_parsing', 'admin_model'),
 	step('class_insight', 'teacher_chat_model')
@@ -31,6 +33,8 @@ const STEPS: AiStep[] = [
 const POLICY: AiStepPolicy = {
 	coaching_chat: { control: 'admin', default: 'model_default' },
 	first_read: { model: null, thinking: 'model_default' },
+	revision_review: { model: null, thinking: 'model_default' },
+	whole_review: { model: null, thinking: 'model_default' },
 	reader_check: { model: null, thinking: 'model_default' },
 	image_parsing: { model: 'vision-model', thinking: 'off' },
 	class_insight: { model: null, thinking: 'model_default' }
@@ -67,10 +71,17 @@ test('每个平台步骤一行:模型与思考各一个下拉,通读那行带试
 	const onChange = vi.fn();
 	render_({ onChange });
 
-	for (const key of ['first_read', 'reader_check', 'image_parsing', 'class_insight']) {
+	for (const key of [
+		'first_read',
+		'revision_review',
+		'whole_review',
+		'reader_check',
+		'image_parsing',
+		'class_insight'
+	]) {
 		expect(screen.getByTestId(`ai-step-row-${key}`)).toBeTruthy();
 	}
-	expect(screen.getByText(/turning thinking off here led to clearly more missed/)).toBeTruthy();
+	expect(screen.getByText(/按独立教学标准阅读确认的初稿/)).toBeTruthy();
 	// 不标「推荐」;「模型默认」在表头说明
 	expect(screen.queryAllByRole('option', { name: /recommended/ })).toEqual([]);
 	expect(screen.getByTestId('model-default-note').textContent).toContain(
@@ -78,7 +89,7 @@ test('每个平台步骤一行:模型与思考各一个下拉,通读那行带试
 	);
 
 	// 不指定时的说法按步骤:通读跟学生、归纳跟老师、图片识别即关闭导入;竞技场模型不列
-	expect(optionLabels('Model for First read and follow-up review')).toEqual([
+	expect(optionLabels('Model for 初次阅读')).toEqual([
 		'Follow the student’s selected model',
 		'Vision',
 		'Text only',

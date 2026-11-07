@@ -453,12 +453,12 @@ def test_task_mode_defaults_and_revise_draft_forbids_challenge(tmp_path, monkeyp
 
     engine = create_engine(database_url)
     insert_sql = (
-        "INSERT INTO assignment "
-        "(id, title, teacher_id, score_max, coaching_style, challenge_enabled, "
-        "challenge_rounds, challenge_focus_keys, reflection_questions, rubric_schema, "
-        "created_at, updated_at{extra_columns}) "
-        "VALUES (?, 't', 'teacher', 100, 'balanced', ?, 3, '[]', '[]', '{{}}', 1, 1"
-        "{extra_values})"
+        'INSERT INTO assignment '
+        '(id, title, teacher_id, score_max, coaching_style, challenge_enabled, '
+        'challenge_rounds, challenge_focus_keys, reflection_questions, rubric_schema, '
+        'created_at, updated_at, teaching_config{extra_columns}) '
+        "VALUES (?, 't', 'teacher', 100, 'balanced', ?, 3, '[]', '[]', '{{}}', 1, 1, '{{}}'"
+        '{extra_values})'
     )
     try:
         schema = inspect(engine)

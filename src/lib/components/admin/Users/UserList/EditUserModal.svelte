@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { getTeacherTaskAccess, type TeacherTaskAccess } from '$lib/apis/education';
+	import { TASK_TYPES } from '$lib/utils/task-types';
 	import { toast } from 'svelte-sonner';
 	import dayjs from 'dayjs';
 	import { createEventDispatcher, getContext } from 'svelte';
@@ -36,6 +38,7 @@
 				classroom_id: '',
 				password: ''
 			};
+			loadAssignmentTypes();
 			loadUserGroups();
 			loadUserClassroomAssignment();
 		}
@@ -43,6 +46,7 @@
 
 	// id / oauth 由 selectedUser 带进来，初始空表单里没有。
 	let _user: {
+		assignment_types?: TeacherTaskAccess;
 		id?: string;
 		oauth?: Record<string, { sub?: string }>;
 		profile_image_url: string;
@@ -68,13 +72,35 @@
 	let originalClassroomId = '';
 	let classroomOptionsLoading = false;
 
+	let assignmentTypesLoading = false;
+	const loadAssignmentTypes = async () => {
+		assignmentTypesLoading = true;
+		try {
+			_user.assignment_types =
+				selectedUser.education_role === 'teacher'
+					? await getTeacherTaskAccess(localStorage.token, selectedUser.id)
+					: { allowed_task_modes: ['from_scratch'], default_task_mode: 'from_scratch' };
+		} catch (error) {
+			toast.error(String(error?.detail ?? error));
+		} finally {
+			assignmentTypesLoading = false;
+		}
+	};
 	const submitHandler = async () => {
+		if (_user.education_role === 'teacher' && (assignmentTypesLoading || !_user.assignment_types))
+			return;
 		if (_user.role !== 'admin' && !_user.education_role) {
 			toast.error('Education role is required.');
 			return;
 		}
 
-		const res = await updateUserById(localStorage.token, selectedUser.id, _user).catch((error) => {
+		const res = await updateUserById(localStorage.token, selectedUser.id, {
+			..._user,
+			assignment_types:
+				_user.education_role === 'teacher' && _user.role !== 'admin'
+					? _user.assignment_types
+					: undefined
+		}).catch((error) => {
 			toast.error(`${error}`);
 		});
 
@@ -108,10 +134,12 @@
 		}
 
 		classroomOptionsLoading = true;
-		const res = await getUserClassroomAssignment(localStorage.token, selectedUser.id).catch((error) => {
-			toast.error(`${error}`);
-			return null;
-		});
+		const res = await getUserClassroomAssignment(localStorage.token, selectedUser.id).catch(
+			(error) => {
+				toast.error(`${error}`);
+				return null;
+			}
+		);
 		classroomOptionsLoading = false;
 
 		if (!res) return;
@@ -264,13 +292,64 @@
 											{#if originalClassroomId && _user.classroom_id !== originalClassroomId}
 												<div class="mt-1 text-xs text-amber-600 dark:text-amber-400">
 													{_user.classroom_id
-														? $i18n.t('Saving will transfer this student to the selected classroom.')
+														? $i18n.t(
+																'Saving will transfer this student to the selected classroom.'
+															)
 														: $i18n.t('Saving will remove this student from their classroom.')}
 												</div>
 											{/if}
 										</div>
 									{/if}
 
+									{#if _user.role !== 'admin' && _user.education_role === 'teacher' && _user.assignment_types}
+										<fieldset class="mb-3 space-y-2 text-sm" disabled={assignmentTypesLoading}>
+											<legend class="font-medium">{$i18n.t('可布置的作业类型')}</legend>
+											{#each TASK_TYPES as type}
+												<label class="flex items-center gap-2">
+													<input
+														type="checkbox"
+														checked={_user.assignment_types.allowed_task_modes.includes(type.key)}
+														on:change={(event) => {
+															const allowed = event.currentTarget.checked
+																? [..._user.assignment_types!.allowed_task_modes, type.key]
+																: _user.assignment_types!.allowed_task_modes.filter(
+																		(mode) => mode !== type.key
+																	);
+															_user.assignment_types = {
+																allowed_task_modes: allowed,
+																default_task_mode: allowed.includes(
+																	_user.assignment_types!.default_task_mode!
+																)
+																	? _user.assignment_types!.default_task_mode
+																	: (allowed[0] ?? null)
+															};
+														}}
+													/>
+													{$i18n.t(type.title)}
+												</label>
+											{/each}
+											<label class="block"
+												>{$i18n.t('默认作业类型')}
+												<select
+													class="mt-1 w-full rounded-lg dark:bg-gray-800"
+													bind:value={_user.assignment_types.default_task_mode}
+													disabled={!_user.assignment_types.allowed_task_modes.length}
+												>
+													{#if !_user.assignment_types.allowed_task_modes.length}<option
+															value={null}>{$i18n.t('无')}</option
+														>{/if}
+													{#each TASK_TYPES.filter( (type) => _user.assignment_types!.allowed_task_modes.includes(type.key) ) as type}<option
+															value={type.key}>{$i18n.t(type.title)}</option
+														>{/each}
+												</select>
+											</label>
+											<p class="text-xs text-gray-500">
+												{$i18n.t(
+													'收回授权后仍可管理和批改已有作业，但不能新建、复制或切换到未授权类型。'
+												)}
+											</p>
+										</fieldset>
+									{/if}
 									<div class="flex flex-col w-full">
 										<div class=" mb-1 text-xs text-gray-500">{$i18n.t('Name')}</div>
 

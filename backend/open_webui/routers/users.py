@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from starlette.concurrency import run_in_threadpool
+
 import base64
 import io
 import logging
@@ -858,15 +860,13 @@ async def _get_admin_classroom_items(db) -> list[AdminClassroomListItem]:
     return items
 
 
-@router.get("/education/classrooms", response_model=list[AdminClassroomListItem])
-async def get_admin_classrooms(
-    user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)
-):
+@router.get('/education/classrooms', response_model=list[AdminClassroomListItem])
+async def get_admin_classrooms(user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)):
     return await _get_admin_classroom_items(db)
 
 
 @router.get(
-    "/{user_id}/education/classroom",
+    '/{user_id}/education/classroom',
     response_model=UserClassroomAssignmentResponse,
 )
 async def get_user_classroom_assignment(
@@ -890,8 +890,8 @@ async def get_user_classroom_assignment(
 async def get_user_by_id(user_id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)):
     # Check if user_id is a shared chat
     # If it is, get the user_id from the chat
-    if user_id.startswith("shared-"):
-        chat_id = user_id.replace("shared-", "")
+    if user_id.startswith('shared-'):
+        chat_id = user_id.replace('shared-', '')
         chat = await Chats.get_chat_by_id(chat_id)
         if chat:
             user_id = chat.user_id
@@ -1082,10 +1082,13 @@ async def update_user_by_id(
                 await revoke_user_tokens(request, user_id)
 
         effective_education_role = form_data.education_role
-        if form_data.role != "admin" and effective_education_role not in {"student", "teacher"}:
-            effective_education_role = "student"
-        if form_data.role == "admin":
-            effective_education_role = "admin"
+        if form_data.role != 'admin' and effective_education_role not in {'student', 'teacher'}:
+            effective_education_role = 'student'
+        if form_data.role == 'admin':
+            effective_education_role = 'admin'
+
+        if form_data.assignment_types is not None and effective_education_role != 'teacher':
+            raise HTTPException(400, 'Assignment type authorization is for teachers')
 
         existing_membership = Education.get_student_classroom_member(user_id, db=db)
         if form_data.classroom_id is not None:
@@ -1095,6 +1098,17 @@ async def update_user_by_id(
             await set_education_role(user_id, effective_education_role, db=db)
         except EducationIdentityConflict as e:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+        if form_data.assignment_types is not None:
+            from open_webui.models.education import get_db_context
+            from open_webui.services.education.teaching_config import set_teacher_access
+
+            def save_assignment_types():
+                with get_db_context() as education_db:
+                    set_teacher_access(user_id, form_data.assignment_types, education_db)
+                    education_db.commit()
+
+            await run_in_threadpool(save_assignment_types)
 
         # Build update dict from only the provided fields
         update_data = {}
@@ -1117,7 +1131,7 @@ async def update_user_by_id(
         # Dropping the student identity already shed every classroom membership;
         # what is left here is moving a student from one classroom to another.
         if (
-            effective_education_role == "student"
+            effective_education_role == 'student'
             and existing_membership
             and form_data.classroom_id != existing_membership.classroom_id
         ):
@@ -1127,27 +1141,23 @@ async def update_user_by_id(
                 db=db,
             )
 
-        if effective_education_role == "student" and form_data.classroom_id:
+        if effective_education_role == 'student' and form_data.classroom_id:
             classroom = Education.get_classroom_by_id(form_data.classroom_id, db=db)
             if classroom is None:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Classroom not found",
+                    detail='Classroom not found',
                 )
             Education.ensure_classroom_member(
                 classroom.id,
                 user_id,
-                "student",
+                'student',
                 db=db,
             )
 
         # 班级变了就按新范围重新物化画像;原班交过的作业仍计入(画像跟着学生走)。
-        previous_classroom_id = (
-            existing_membership.classroom_id if existing_membership else None
-        )
-        next_classroom_id = (
-            form_data.classroom_id if effective_education_role == "student" else None
-        )
+        previous_classroom_id = existing_membership.classroom_id if existing_membership else None
+        next_classroom_id = form_data.classroom_id if effective_education_role == 'student' else None
         if previous_classroom_id != next_classroom_id:
             refresh_profile_aggregates_after_scope_change([user_id])
 
@@ -1333,3 +1343,15 @@ async def get_user_preview(
             'total': len(all_tools),
         },
     }
+
+
+@router.get('/{user_id}/assignment-types')
+async def get_teacher_assignment_types(user_id: str, user=Depends(get_admin_user)):
+    from open_webui.models.education import get_db_context
+    from open_webui.services.education.teaching_config import teacher_access
+
+    target = await Users.get_user_by_id(user_id)
+    if target is None:
+        raise HTTPException(404, 'User not found')
+    with get_db_context() as db:
+        return teacher_access(user_id, db)

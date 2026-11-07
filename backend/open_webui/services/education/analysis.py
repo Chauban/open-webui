@@ -1194,16 +1194,17 @@ async def get_prompt_timeline(session, db: Session) -> list[dict]:
                 _order_chat_messages(
                     [
                         {
-                            "id": message.id,
-                            "role": message.role,
-                            "content": message.content,
-                            "created_at": message.created_at,
-                            "parent_id": message.parent_id,
-                            "model_id": message.model_id,
-                            "output": message.output,
-                            "usage": message.usage,
-                            "auto_started": _is_auto_started(message.meta),
-                            "thinking_level": _thinking_level(message.meta),
+                            'id': message.id,
+                            'role': message.role,
+                            'content': message.content,
+                            'created_at': message.created_at,
+                            'parent_id': message.parent_id,
+                            'model_id': message.model_id,
+                            'output': message.output,
+                            'usage': message.usage,
+                            'auto_started': _is_auto_started(message.meta),
+                            'thinking_level': _thinking_level(message.meta),
+                            'education_context': (message.meta or {}).get('education_context'),
                         }
                         for message in chat_messages
                     ],
@@ -1217,16 +1218,17 @@ async def get_prompt_timeline(session, db: Session) -> list[dict]:
             _order_chat_messages(
                 [
                     {
-                        "id": message.get("id"),
-                        "role": message.get("role"),
-                        "content": message.get("content"),
-                        "created_at": message.get("timestamp"),
-                        "parent_id": message.get("parentId"),
-                        "model_id": message.get("model"),
-                        "output": message.get("output"),
-                        "usage": message.get("usage"),
-                        "auto_started": _is_auto_started(message.get("meta")),
-                        "thinking_level": _thinking_level(message.get("meta")),
+                        'id': message.get('id'),
+                        'role': message.get('role'),
+                        'content': message.get('content'),
+                        'created_at': message.get('timestamp'),
+                        'parent_id': message.get('parentId'),
+                        'model_id': message.get('model'),
+                        'output': message.get('output'),
+                        'usage': message.get('usage'),
+                        'auto_started': _is_auto_started(message.get('meta')),
+                        'thinking_level': _thinking_level(message.get('meta')),
+                        'education_context': (message.get('meta') or {}).get('education_context'),
                     }
                     for message in _get_chat_history_messages(chat)
                 ],

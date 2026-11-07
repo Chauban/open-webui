@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { isRevision, taskTypeLabel } from '$lib/utils/task-types';
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 	import { getContext, onDestroy, onMount } from 'svelte';
@@ -6,12 +7,7 @@
 	import { get } from 'svelte/store';
 	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
-	import {
-		educationNotificationSummary,
-		folders,
-		selectedFolder,
-		user
-	} from '$lib/stores';
+	import { educationNotificationSummary, folders, selectedFolder, user } from '$lib/stores';
 	import { refreshChatList } from '$lib/stores/chatList';
 
 	import {
@@ -244,8 +240,7 @@
 		}
 		const { role } = result;
 		if (role === 'student') {
-			const hasPendingAssignments =
-				groupAssignmentItems(home?.assignment_items).todo.length > 0;
+			const hasPendingAssignments = groupAssignmentItems(home?.assignment_items).todo.length > 0;
 			// 还没加入班级的学生要先落在作业页，邀请码入口就在这一屏。
 			const hasClassroom = (home?.classrooms ?? []).length > 0;
 			activeTab = hasPendingAssignments || !hasClassroom ? 'assignment' : 'personal';
@@ -520,8 +515,8 @@
 					<div class="flex flex-wrap items-center gap-2">
 						<div class="text-base font-semibold">{item.assignment.title}</div>
 						<!-- 修订初稿要先交初稿才能开始，进门前就让学生知道；从零写作是常态，不标。 -->
-						{#if item.assignment.task_mode === 'revise_draft'}
-							<EduBadge soft>{$i18n.t('Revise a draft')}</EduBadge>
+						{#if isRevision(item.assignment.task_mode)}
+							<EduBadge soft>{$i18n.t(taskTypeLabel(item.assignment.task_mode))}</EduBadge>
 						{/if}
 						{#if item.review_status === 'returned'}
 							<EduBadge soft tone="rose">{$i18n.t('Returned')}</EduBadge>
@@ -548,9 +543,10 @@
 					{/if}
 					{#if item.effective_due_at}
 						<div class="mt-2 flex flex-wrap gap-x-3 text-xs text-gray-500 dark:text-gray-400">
-							<span class={item.review_status === 'returned'
-								? 'font-medium text-rose-600 dark:text-rose-400'
-								: ''}
+							<span
+								class={item.review_status === 'returned'
+									? 'font-medium text-rose-600 dark:text-rose-400'
+									: ''}
 							>
 								{item.review_status === 'returned'
 									? $i18n.t('Resubmit before')

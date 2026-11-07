@@ -1,0 +1,63 @@
+{
+  "review": {
+    "id": "c1a27dce-4379-446c-bafd-3f7f43786095",
+    "submission_id": "b2c73012-e7c5-4849-b1c8-717049095d38",
+    "assignment_id": "1e3e5af5-4f58-43f6-a68e-f4327e02547e",
+    "reviewer_id": "53dcc648-63ac-4917-a265-c02686515e68",
+    "review_status": "reviewed",
+    "score": 90,
+    "reflection_score": null,
+    "prompt_score": null,
+    "overall_comment": "隔离验收：更正总分为90，保持已批改和只读。",
+    "rubric_scores": null,
+    "returned_comment": "",
+    "resubmit_due_at": null,
+    "challenge_followup": false,
+    "reviewed_at": 1793989276,
+    "created_at": 1793989035,
+    "updated_at": 1793989276
+  },
+  "history": [
+    {
+      "id": "761f0e47-6b85-41eb-b00b-738c8392d25d",
+      "submission_id": "b2c73012-e7c5-4849-b1c8-717049095d38",
+      "evidence_snapshot_id": "6f10e2dc-892a-4dd4-8f87-84e90ef65d83",
+      "review_revision": 1,
+      "assignment_id": "1e3e5af5-4f58-43f6-a68e-f4327e02547e",
+      "reviewer_id": "53dcc648-63ac-4917-a265-c02686515e68",
+      "review_status": "reviewed",
+      "score": 84,
+      "reflection_score": null,
+      "prompt_score": null,
+      "rubric_scores": null,
+      "overall_comment": "隔离验收：仅总分完成批改，无反思和无提问均不适用。",
+      "returned_comment": "",
+      "resubmit_due_at": null,
+      "reviewed_at": 1793989035,
+      "created_at": 1793989035
+    },
+    {
+      "id": "564f6d6c-70de-43bc-87c7-029b0d7af3f6",
+      "submission_id": "b2c73012-e7c5-4849-b1c8-717049095d38",
+      "evidence_snapshot_id": "6f10e2dc-892a-4dd4-8f87-84e90ef65d83",
+      "review_revision": 2,
+      "assignment_id": "1e3e5af5-4f58-43f6-a68e-f4327e02547e",
+      "reviewer_id": "53dcc648-63ac-4917-a265-c02686515e68",
+      "review_status": "reviewed",
+      "score": 90,
+      "reflection_score": null,
+      "prompt_score": null,
+      "rubric_scores": null,
+      "overall_comment": "隔离验收：更正总分为90，保持已批改和只读。",
+      "returned_comment": "",
+      "resubmit_due_at": null,
+      "reviewed_at": 1793989276,
+      "created_at": 1793989276
+    }
+  ],
+  "prompt_count": 0,
+  "scoring_mode": "total",
+  "reflection": {
+    "items": []
+  }
+}

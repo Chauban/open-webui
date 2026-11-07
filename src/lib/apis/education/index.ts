@@ -188,7 +188,7 @@ export const getTeacherClassroomAssignments = async (token: string, classroomId:
 
 export type CoachingStyle = 'socratic' | 'balanced' | 'hands_off';
 /** 作业形式:从零写作 / 修订初稿(学生先交课外写好的初稿,再和 AI 对话修改)。 */
-export type TaskMode = 'from_scratch' | 'revise_draft';
+export type TaskMode = 'from_scratch' | 'revise_draft' | 'revise_argument';
 
 /** 思考档位:model_default 不发档位,按模型自己的设定(含管理员保存在模型上的档位)。 */
 export type ThinkingSetting = 'model_default' | 'off' | 'low' | 'medium' | 'high';
@@ -197,6 +197,8 @@ export type ThinkingControl = 'admin' | 'teacher' | 'student';
 export type AiStepKey =
 	| 'coaching_chat'
 	| 'first_read'
+	| 'revision_review'
+	| 'whole_review'
 	| 'reader_check'
 	| 'image_parsing'
 	| 'class_insight';
@@ -248,6 +250,8 @@ export type RetryScope = {
 export type AutoRetryPolicy = { personal_writing: boolean };
 export type AiStepPolicy = {
 	coaching_chat: { control: ThinkingControl; default: ThinkingSetting };
+	revision_review: PlatformStepPolicy;
+	whole_review: PlatformStepPolicy;
 	first_read: PlatformStepPolicy;
 	reader_check: PlatformStepPolicy;
 	image_parsing: PlatformStepPolicy;
@@ -264,6 +268,7 @@ export const createAssignment = async (
 		score_max: number;
 		coaching_style: CoachingStyle;
 		task_mode?: TaskMode;
+		scoring_mode?: ScoringMode;
 		challenge_enabled?: boolean;
 		challenge_rounds?: number;
 		challenge_focus_keys?: string[];
@@ -295,7 +300,9 @@ export const getTeacherAssignmentDefaults = async (
 	token: string
 ): Promise<{
 	coaching_style: CoachingStyle;
-	task_mode: TaskMode;
+	task_mode: TaskMode | null;
+	allowed_task_modes: TaskMode[];
+	teaching_configs: Record<TaskMode, TeachingConfig>;
 	rubrics: Record<TaskMode, Array<{ label: string; max_score: number }>>;
 	thinking: { control: ThinkingControl; default: ThinkingSetting };
 }> => {
@@ -383,6 +390,9 @@ export const updateAssignment = async (
 	token: string,
 	assignmentId: string,
 	payload: {
+		expected_config_revision: number;
+		change_summary?: string;
+		adopt_latest_teaching_config?: boolean;
 		title?: string;
 		description?: string;
 		classroom_id?: string;
@@ -391,6 +401,7 @@ export const updateAssignment = async (
 		score_max?: number;
 		coaching_style?: CoachingStyle;
 		task_mode?: TaskMode;
+		scoring_mode?: ScoringMode;
 		challenge_enabled?: boolean;
 		challenge_rounds?: number;
 		challenge_focus_keys?: string[];
@@ -528,65 +539,6 @@ export type RevisionDecision = 'revised' | 'partly' | 'kept';
 // 第一次通读给每个评分维度的结论:要改(提交时必须交代)、可改进(可以交代)、达标、暂缓。
 export type RevisionStatus = 'problem' | 'minor' | 'ok' | 'deferred';
 
-export type RevisionItem = {
-	item_no: number;
-	criterion_key: string;
-	status: RevisionStatus;
-	finding: string | null;
-	quoted_span: string | null;
-	decision: RevisionDecision | null;
-	reason: string | null;
-	// 挡住暂缓项的那一项(如综述定位);follow_up_at:补看补上结论 / 确认改到位的时间。
-	is_blocking: boolean;
-	follow_up_at: number | null;
-};
-
-export type RevisionItemsResult = {
-	// pending:别的请求正在通读;failed:这次没通读成,再调一次会重试。
-	status: 'ready' | 'pending' | 'failed';
-	items: RevisionItem[];
-};
-
-/**
- * 修订初稿作业的第一次通读:取已有的结论;还没通读就用 modelId 当场通读(要半分钟上下)。
- */
-export const getRevisionItems = async (token: string, sessionId: string, modelId?: string) => {
-	return fetch(`${WEBUI_API_BASE_URL}/writing-sessions/${sessionId}/revision-items`, {
-		method: 'POST',
-		headers: withAuth(token),
-		body: JSON.stringify({ model_id: modelId || null })
-	}).then(handleJson) as Promise<RevisionItemsResult>;
-};
-
-export type RevisionFollowUpResult = {
-	// not_ready:挡住暂缓项的那一项还没改到位,note 说还差在哪,暂缓项不动。
-	status: 'ready' | 'not_ready' | 'pending' | 'failed';
-	note: string | null;
-	items: RevisionItem[];
-};
-
-/** 补看:学生说挡住暂缓项的那一项改好了。平台先确认改到位,再给暂缓的几项补上结论。 */
-export const followUpRevisionItems = async (token: string, sessionId: string, modelId: string) => {
-	return fetch(`${WEBUI_API_BASE_URL}/writing-sessions/${sessionId}/revision-items/follow-up`, {
-		method: 'POST',
-		headers: withAuth(token),
-		body: JSON.stringify({ model_id: modelId })
-	}).then(handleJson) as Promise<RevisionFollowUpResult>;
-};
-
-export const updateRevisionItem = async (
-	token: string,
-	sessionId: string,
-	itemNo: number,
-	payload: { decision: RevisionDecision | null; reason: string | null }
-) => {
-	return fetch(`${WEBUI_API_BASE_URL}/writing-sessions/${sessionId}/revision-items/${itemNo}`, {
-		method: 'PATCH',
-		headers: withAuth(token),
-		body: JSON.stringify({ item_no: itemNo, ...payload })
-	}).then(handleJson) as Promise<RevisionItemsResult>;
-};
-
 // 作业写作区的导入(修订初稿交初稿前、从零写作改稿时)只解析不保存:返回正文,
 // 学生核对后自己确认初稿(submitDraftBaseline)或插进编辑器。
 export const extractImportDocument = async (token: string, sessionId: string, file: File) => {
@@ -670,16 +622,12 @@ export const submitAssignment = async (
 	assignmentId: string,
 	payload: {
 		writing_session_id: string;
+		expected_config_revision: number;
 		final_content_json: object | null;
 		final_content_html?: string;
 		final_content_text: string;
 		ai_used: boolean;
 		reflection_answers: ReflectionAnswer[];
-		revision_decisions?: Array<{
-			item_no: number;
-			decision: RevisionDecision | null;
-			reason: string | null;
-		}>;
 		data_completeness: {
 			version_data_complete: boolean;
 			editor_operations_complete: boolean;
@@ -712,6 +660,8 @@ export const saveSubmissionReview = async (
 	token: string,
 	submissionId: string,
 	payload: {
+		expected_final_version_id: string;
+		expected_review_revision: number;
 		review_status: string;
 		score?: number | null;
 		/** 教师给反思打的 1—5 分；标为「已批改」时必填。 */
@@ -1213,3 +1163,81 @@ export const getSubmissionChallenge = async (
 		headers: withAuth(token)
 	}).then(handleJson);
 };
+
+export type ScoringMode = 'dimensions' | 'total';
+export type TeachingConfig = {
+	task_mode: TaskMode;
+	version: number;
+	created_at: number;
+	standards: string;
+	prompt: string;
+	default_description: string;
+	scoring_mode: ScoringMode;
+	score_max: number;
+	rubric_schema: { criteria: Array<{ key: string; label: string; max_score: number }> };
+	reflection_questions: ReflectionQuestion[];
+};
+export type TeacherTaskAccess = {
+	allowed_task_modes: TaskMode[];
+	default_task_mode: TaskMode | null;
+};
+export const getTeacherTaskAccess = (token: string, userId: string): Promise<TeacherTaskAccess> =>
+	fetch(`${WEBUI_API_BASE_URL}/users/${userId}/assignment-types`, {
+		headers: withAuth(token)
+	}).then(handleJson);
+export const getTeachingConfigs = (token: string): Promise<Record<TaskMode, TeachingConfig>> =>
+	fetch(`${WEBUI_API_BASE_URL}/configs/education/types`, { headers: withAuth(token) }).then(
+		handleJson
+	);
+export const saveTeachingConfig = (
+	token: string,
+	config: TeachingConfig
+): Promise<TeachingConfig> => {
+	const { task_mode, version, created_at, ...payload } = config;
+	return fetch(`${WEBUI_API_BASE_URL}/configs/education/types/${task_mode}`, {
+		method: 'PUT',
+		headers: withAuth(token),
+		body: JSON.stringify({ ...payload, expected_version: version })
+	}).then(handleJson);
+};
+export type ReadingPurpose = 'first_read' | 'revision_review' | 'whole_review';
+export type RevisionReading = {
+	id: string;
+	sequence_no: number;
+	purpose: ReadingPurpose;
+	source_text: string;
+	source_version_id: string | null;
+	source_hash: string;
+	status: 'running' | 'ready' | 'failed';
+	created_at: number;
+	completed_at: number | null;
+	model_id: string | null;
+	thinking: string | null;
+	context: {
+		teaching_version: number;
+		description_version: number;
+		title: string;
+		description: string | null;
+	};
+	feedback: {
+		understanding: string;
+		strength: { quote: string; feedback: string } | null;
+		focus: Array<{ quote: string; feedback: string }>;
+		overview: string;
+	} | null;
+};
+export const getRevisionReadings = (token: string, sessionId: string): Promise<RevisionReading[]> =>
+	fetch(`${WEBUI_API_BASE_URL}/writing-sessions/${sessionId}/readings`, {
+		headers: withAuth(token)
+	}).then(handleJson);
+export const requestRevisionReading = (
+	token: string,
+	sessionId: string,
+	purpose: ReadingPurpose,
+	modelId: string
+): Promise<RevisionReading> =>
+	fetch(`${WEBUI_API_BASE_URL}/writing-sessions/${sessionId}/readings`, {
+		method: 'POST',
+		headers: withAuth(token),
+		body: JSON.stringify({ purpose, model_id: modelId })
+	}).then(handleJson);

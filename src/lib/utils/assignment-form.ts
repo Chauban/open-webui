@@ -16,6 +16,7 @@ import {
 export type RubricCriterionDraft = { key: string; label: string; maxScore: string };
 
 export type AssignmentDraft = {
+	scoringMode: 'dimensions' | 'total';
 	title: string;
 	description: string;
 	dueAt: string;
@@ -38,6 +39,7 @@ export const draftThinkingFrom = (params?: AssignmentModelParams | null) => ({
 });
 
 export type AssignmentPayload = {
+	scoring_mode: 'dimensions' | 'total';
 	title: string;
 	description: string;
 	due_at: number;
@@ -71,7 +73,7 @@ export const buildAssignmentPayload = (
 	if (!Number.isInteger(scoreMax) || scoreMax <= 0) {
 		return { error: t('Maximum score must be a positive whole number.') };
 	}
-	const criteria = draft.rubricCriteria.map((criterion) => ({
+	const criteria = (draft.scoringMode === 'total' ? [] : draft.rubricCriteria).map((criterion) => ({
 		key: criterion.key.trim(),
 		label: criterion.label.trim(),
 		max_score: Number(criterion.maxScore)
@@ -84,12 +86,19 @@ export const buildAssignmentPayload = (
 	) {
 		return { error: t('Every rubric criterion needs a name and a positive whole-number maximum.') };
 	}
-	if (criteria.reduce((sum, criterion) => sum + criterion.max_score, 0) !== scoreMax) {
+	if (
+		draft.scoringMode !== 'total' &&
+		(!criteria.length ||
+			criteria.reduce((sum, criterion) => sum + criterion.max_score, 0) !== scoreMax)
+	) {
 		return { error: t('Rubric maximum scores must add up to the assignment maximum.') };
 	}
 
 	// 修订初稿作业结构上没有质疑式读者(后端同样拒绝)。
-	const challengeEnabled = draft.taskMode === 'from_scratch' && draft.challengeEnabled;
+	const challengeEnabled =
+		draft.taskMode === 'from_scratch' &&
+		draft.scoringMode === 'dimensions' &&
+		draft.challengeEnabled;
 
 	const reflectionQuestions = normalizeReflectionQuestions(draft.reflectionQuestions);
 	const reflectionError = getReflectionQuestionsError(reflectionQuestions);
@@ -102,6 +111,7 @@ export const buildAssignmentPayload = (
 
 	return {
 		payload: {
+			scoring_mode: draft.scoringMode,
 			title: draft.title.trim(),
 			description: draft.description.trim(),
 			due_at: Math.floor(new Date(draft.dueAt).getTime() / 1000),
@@ -138,7 +148,10 @@ export const getDefaultRubricCriteria = (
 ): RubricCriterionDraft[] => {
 	const configured = rubrics?.[taskMode] ?? [];
 	const criteria = configured.length
-		? configured.map((criterion) => ({ label: criterion.label, maxScore: String(criterion.max_score) }))
+		? configured.map((criterion) => ({
+				label: criterion.label,
+				maxScore: String(criterion.max_score)
+			}))
 		: [
 				{ label: t('Ideas'), maxScore: '34' },
 				{ label: t('Structure'), maxScore: '33' },
@@ -156,3 +169,22 @@ export const isSameRubric = (a: RubricCriterionDraft[], b: RubricCriterionDraft[
 		(criterion, index) =>
 			criterion.label.trim() === b[index].label.trim() && criterion.maxScore === b[index].maxScore
 	);
+
+export const applyTeachingDefaults = (
+	draft: AssignmentDraft,
+	config: import('$lib/apis/education').TeachingConfig
+): AssignmentDraft => ({
+	...draft,
+	taskMode: config.task_mode,
+	description: config.default_description,
+	scoringMode: config.scoring_mode,
+	scoreMax: String(config.score_max),
+	rubricCriteria: config.rubric_schema.criteria.map((c) => ({
+		key: c.key,
+		label: c.label,
+		maxScore: String(c.max_score)
+	})),
+	reflectionQuestions: structuredClone(config.reflection_questions),
+	challengeEnabled: false,
+	challengeFocusKeys: []
+});

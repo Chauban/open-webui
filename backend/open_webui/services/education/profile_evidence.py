@@ -485,15 +485,16 @@ def build_metric_projection(
         else None
     )
     reflection_quality = _quality_from_teacher_score(
-        review_event.reflection_score if review_event else None
+        review_event.reflection_score if review_event and review_event.review_status != 'pending' else None
     )
     prompt_quality = _quality_from_teacher_score(
-        review_event.prompt_score if review_event else None
+        review_event.prompt_score if review_event and review_event.review_status != 'pending' else None
     )
     score_complete = bool(
         review_event
         and review_event.score is not None
-        and review_event.rubric_scores is not None
+        and review_event.review_status != 'pending'
+        and (not facts.assignment.rubric_schema.criteria or review_event.rubric_scores is not None)
     )
     scoring_status = (
         "complete"
@@ -525,92 +526,71 @@ def build_metric_projection(
         round_no=facts.round_no,
         submitted_at=facts.submitted_at,
         data_completeness=StudentProfileDataCompleteness(
-            version_data="complete" if version_complete else "missing",
-            editor_operations="complete" if editor_complete else "missing",
-            source_tracking="complete" if source_complete else "missing",
+            version_data='complete' if version_complete else 'missing',
+            editor_operations='complete' if editor_complete else 'missing',
+            source_tracking='complete' if source_complete else 'missing',
             scoring=scoring_status,
         ),
         total_chars=len(facts.document.content_text),
         score=review_event.score if score_complete else None,
         score_max=facts.assignment.score_max,
-        normalized_score=(
-            round(review_event.score / facts.assignment.score_max * 100, 2)
-            if score_complete
-            else None
-        ),
+        normalized_score=(round(review_event.score / facts.assignment.score_max * 100, 2) if score_complete else None),
         rubric=review_event.rubric_scores if score_complete else None,
-        review_status=review_event.review_status if review_event else "pending",
+        review_status=review_event.review_status if review_event else 'pending',
         inserted_chars=inserted_chars if version_complete else None,
         revised_chars=revised_chars if version_complete else None,
         revision_depth=revision_depth,
         writing_span_seconds=writing_span_seconds,
         active_writing_seconds=(
             _estimate_active_writing_seconds(
-                [
-                    operation.occurred_at_ms // 1000
-                    for operation in facts.editor_operations
-                ]
+                [operation.occurred_at_ms // 1000 for operation in facts.editor_operations]
             )
             or 0
             if editor_complete
             else None
         ),
         lead_time_seconds=(
-            facts.assignment.effective_due_at
-            - facts.capture_manifest.version_window_started_at
+            facts.assignment.effective_due_at - facts.capture_manifest.version_window_started_at
             if facts.assignment.effective_due_at is not None and version_complete
             else None
         ),
         end_loaded_ratio=end_loaded_ratio,
         deadline_window_ratio=deadline_ratio,
         process_index=(
-            _compute_process_index(
-                revision_depth, writing_span_seconds, end_loaded_ratio
-            )
-            if version_complete
-            else None
+            _compute_process_index(revision_depth, writing_span_seconds, end_loaded_ratio) if version_complete else None
         ),
-        typed_ratio=(float(summary.get("typed_ratio", 0)) if source_complete else None),
+        typed_ratio=(float(summary.get('typed_ratio', 0)) if source_complete else None),
         ai_ratio=ai_ratio,
-        unknown_ratio=(
-            float(summary.get("unknown_ratio", 0)) if source_complete else None
-        ),
+        unknown_ratio=(float(summary.get('unknown_ratio', 0)) if source_complete else None),
         prompt_count=prompt_count,
         reflection_quality=reflection_quality,
         prompt_quality=prompt_quality,
         collaboration_index=_compute_collaboration_index(
-            prompt_count, prompt_quality, reflection_quality
+            prompt_count,
+            prompt_quality,
+            reflection_quality,
+            reflection_applicable=any(
+                item.text or item.selected or item.other_text for item in facts.reflection.reflection.items
+            ),
         ),
-        burst_count=(int(summary.get("burst_count", 0)) if editor_complete else None),
+        burst_count=(int(summary.get('burst_count', 0)) if editor_complete else None),
         suspected_unmarked_import_count=(
-            int(summary.get("suspected_unmarked_import_count", 0))
-            if source_complete
-            else None
+            int(summary.get('suspected_unmarked_import_count', 0)) if source_complete else None
         ),
         # 作业没开试读时这四项全是 None：那是「不适用」，不是「表现差」。
         challenge_status=(facts.challenge.status if facts.challenge.enabled else None),
         challenge_answer_ratio=(
-            int(
-                round(
-                    facts.challenge.answered_rounds
-                    / facts.challenge.planned_rounds
-                    * 100
-                )
-            )
-            if facts.challenge.enabled
-            and facts.challenge.status == "completed"
-            and facts.challenge.planned_rounds > 0
+            int(round(facts.challenge.answered_rounds / facts.challenge.planned_rounds * 100))
+            if facts.challenge.enabled and facts.challenge.status == 'completed' and facts.challenge.planned_rounds > 0
             else None
         ),
         challenge_unresolved_count=(
             facts.challenge.unresolved_count
-            if facts.challenge.enabled and facts.challenge.status == "completed"
+            if facts.challenge.enabled and facts.challenge.status == 'completed'
             else None
         ),
         challenge_revised=(
-            facts.challenge.revised_after
-            if facts.challenge.enabled and facts.challenge.status == "completed"
-            else None
+            facts.challenge.revised_after if facts.challenge.enabled and facts.challenge.status == 'completed' else None
         ),
     )
     round_progress = None

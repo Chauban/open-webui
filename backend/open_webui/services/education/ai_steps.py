@@ -28,8 +28,12 @@ from open_webui.utils.thinking import THINKING_LEVEL_PARAM, ThinkingSupport
 
 log = logging.getLogger(__name__)
 
-StepKey = Literal["coaching_chat", "first_read", "reader_check", "image_parsing", "class_insight"]
-PlatformStepKey = Literal["first_read", "reader_check", "image_parsing", "class_insight"]
+StepKey = Literal[
+    'coaching_chat', 'first_read', 'revision_review', 'whole_review', 'reader_check', 'image_parsing', 'class_insight'
+]
+PlatformStepKey = Literal[
+    'first_read', 'revision_review', 'whole_review', 'reader_check', 'image_parsing', 'class_insight'
+]
 # 管理员没给这一步指定模型时用谁的：学生在写作区选的 / 教师触发时选的 / 没有可回落的（必须指定）。
 ModelSource = Literal["student_chat_model", "teacher_chat_model", "admin_model"]
 
@@ -44,17 +48,21 @@ class AiStep(BaseModel):
 
 AI_STEPS: tuple[AiStep, ...] = (
     AiStep(
-        key="coaching_chat",
-        model_source="student_chat_model",
+        key='coaching_chat',
+        model_source='student_chat_model',
         model_configurable=False,
         teacher_controllable=True,
     ),
     # 修订初稿的第一次通读，以及暂缓项的补看：补看按通读的结论复核，两者必须同一个模型、同一种想法。
-    AiStep(key="first_read", model_source="student_chat_model", model_configurable=True, teacher_controllable=False),
-    AiStep(key="reader_check", model_source="student_chat_model", model_configurable=True, teacher_controllable=False),
+    AiStep(key='first_read', model_source='student_chat_model', model_configurable=True, teacher_controllable=False),
+    AiStep(
+        key='revision_review', model_source='student_chat_model', model_configurable=True, teacher_controllable=False
+    ),
+    AiStep(key='whole_review', model_source='student_chat_model', model_configurable=True, teacher_controllable=False),
+    AiStep(key='reader_check', model_source='student_chat_model', model_configurable=True, teacher_controllable=False),
     # 图片识别没有可回落的模型：没指定就不提供图片导入。
-    AiStep(key="image_parsing", model_source="admin_model", model_configurable=True, teacher_controllable=False),
-    AiStep(key="class_insight", model_source="teacher_chat_model", model_configurable=True, teacher_controllable=False),
+    AiStep(key='image_parsing', model_source='admin_model', model_configurable=True, teacher_controllable=False),
+    AiStep(key='class_insight', model_source='teacher_chat_model', model_configurable=True, teacher_controllable=False),
 )
 AI_STEPS_BY_KEY = {step.key: step for step in AI_STEPS}
 
@@ -126,6 +134,8 @@ class EducationAiStepPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     coaching_chat: CoachingChatPolicy
+    revision_review: PlatformStepPolicy
+    whole_review: PlatformStepPolicy
     first_read: PlatformStepPolicy
     reader_check: PlatformStepPolicy
     image_parsing: PlatformStepPolicy
@@ -178,10 +188,17 @@ async def resolve_step_model(
     return StepModel(model_id=requested_model_id, fixed=False)
 
 
-async def call_step_model(request, user, step: PlatformStepKey, model: StepModel, messages: list[dict]):
+async def call_step_model(
+    request,
+    user,
+    step: PlatformStepKey,
+    model: StepModel,
+    messages: list[dict],
+    policy: Optional[EducationAiStepPolicy] = None,
+):
     """平台步骤的单次非流式模型调用：按该步骤的思考档位发出；管理员指定的模型跳过模型访问控制。"""
 
-    policy = await get_ai_step_policy()
+    policy = policy or await get_ai_step_policy()
     payload = {
         "model": model.model_id,
         "messages": messages,

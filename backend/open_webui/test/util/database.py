@@ -45,7 +45,7 @@ if sys.platform == "win32" and _server_url():
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 
-def _run_migrations(database_url: str) -> None:
+def _run_migrations(database_url: str, revision: str = 'head') -> None:
     import open_webui.env as env
 
     config = Config(str(BACKEND_ROOT / "open_webui" / "alembic.ini"))
@@ -56,7 +56,7 @@ def _run_migrations(database_url: str) -> None:
     original = env.DATABASE_URL
     env.DATABASE_URL = database_url
     try:
-        command.upgrade(config, "head")
+        command.upgrade(config, revision)
     finally:
         env.DATABASE_URL = original
 
@@ -143,3 +143,26 @@ def engine_kwargs(database_url: str) -> dict:
     if database_url.startswith("sqlite"):
         return {"connect_args": {"check_same_thread": False}}
     return {}
+
+
+@contextmanager
+def migration_database_at(revision: str) -> Iterator[str]:
+    """An isolated pre-upgrade database for testing migrations with populated data."""
+    server = _server_url()
+    if server:
+        name = f'rightwrite_test_migration_{uuid.uuid4().hex}'
+        engine = _admin_engine(server)
+        try:
+            with engine.connect() as connection:
+                connection.execute(text(f'CREATE DATABASE "{name}"'))
+            url = _database_url(server, name)
+            _run_migrations(url, revision)
+            yield url
+        finally:
+            engine.dispose()
+            _drop_pg_database(server, name)
+    else:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
+            url = f'sqlite:///{Path(directory).as_posix()}/migration.db'
+            _run_migrations(url, revision)
+            yield url

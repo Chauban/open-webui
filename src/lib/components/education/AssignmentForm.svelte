@@ -5,6 +5,9 @@
 	import { get } from 'svelte/store';
 
 	import { config } from '$lib/stores';
+	import { TASK_TYPES, isRevision } from '$lib/utils/task-types';
+	import { applyTeachingDefaults } from '$lib/utils/assignment-form';
+	import type { TeachingConfig } from '$lib/apis/education';
 
 	import type {
 		ReflectionQuestionSet,
@@ -36,6 +39,13 @@
 	// 大多沿用上次的配置,默认折叠成一行摘要。
 
 	export let draft: AssignmentDraft;
+	export let allowedTaskModes: TaskMode[] = [];
+	export let teachingConfigs: Partial<Record<TaskMode, TeachingConfig>> = {};
+	export let teachingSnapshot: TeachingConfig | null = null;
+	$: shownTeaching =
+		teachingSnapshot?.task_mode === draft.taskMode
+			? teachingSnapshot
+			: teachingConfigs[draft.taskMode];
 	export let classrooms: Array<{ classroom: { id: string; name: string } }> = [];
 	/** 新建:可多选班级,一次发到多个班。编辑:单选。 */
 	export let multiClassroom = false;
@@ -50,7 +60,6 @@
 	/** 有学生交了初稿或已有提交后,作业形式锁定(后端同样拒绝)。 */
 	export let taskModeLocked = false;
 	/** 只有新建作业传:管理员按作业形式设的默认评分维度。作业设置页不传,改形式不碰已有维度。 */
-	export let rubricDefaults: DefaultRubrics | null = null;
 	/** 管理员对辅导对话思考档位的下放方式与默认;仅管理员时表单不显示思考设置。 */
 	export let thinkingPolicy: { control: ThinkingControl; default: ThinkingSetting } | null = null;
 
@@ -58,11 +67,12 @@
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
 
 	// 管理员可以关掉辅导风格(怎么辅导全写在任务说明里),这时表单不出现档位。
-	$: coachingEnabled = $config?.features?.enable_education_coaching_styles ?? true;
+	$: coachingEnabled =
+		!isRevision(draft.taskMode) && ($config?.features?.enable_education_coaching_styles ?? true);
 	// 修订初稿作业没有试读，第 3 节标题里就不提「试读」;档位关了、思考也没下放时这一节没东西可设，整节不出现。
 	$: thinkingDelegated = !!thinkingPolicy && thinkingPolicy.control !== 'admin';
 	$: hasCoachingSettings = coachingEnabled || thinkingDelegated;
-	$: hasReaderCheck = draft.taskMode !== 'revise_draft';
+	$: hasReaderCheck = !isRevision(draft.taskMode) && draft.scoringMode === 'dimensions';
 	$: aiSectionLabel =
 		hasCoachingSettings && hasReaderCheck
 			? 'AI Coaching & Reader Check'
@@ -79,24 +89,14 @@
 	const COACHING_TITLES = { socratic: 'Socratic', balanced: 'Balanced', hands_off: 'Hands-off' };
 	// 两种形式的差别在于作业开始时初稿是否已经存在。修订初稿作业没有提交前试读:
 	// 左侧对话本身就是按维度诊断与追问,提交前再质疑一次是重复。
-	const TASK_MODES = [
-		{
-			key: 'from_scratch',
-			title: 'Write from scratch',
-			hint: 'Students start from a blank page and write with the AI coach.'
-		},
-		{
-			key: 'revise_draft',
-			title: 'Revise a draft',
-			hint: 'Students first paste or upload the draft they wrote outside class; it is frozen as the starting point, and the AI chat unlocks only after that. There is no pre-submission reader check.'
-		}
-	] as const;
+	const TASK_MODES = TASK_TYPES;
 
 	let aiOpen = expandAll;
 	// 反思题折起来只剩一行摘要,老师以为题没了;它是提交那一刻学生要答的,默认展开。
 	let reflectionOpen = true;
 
-	$: isReviseDraft = draft.taskMode === 'revise_draft';
+	$: if (draft.scoringMode === 'dimensions') draft.scoreMax = rubricTotal(draft.rubricCriteria);
+	$: isReviseDraft = isRevision(draft.taskMode);
 	$: taskModeHint = TASK_MODES.find((mode) => mode.key === draft.taskMode)?.hint ?? '';
 	$: aiSummary = [
 		...(coachingEnabled ? [t(COACHING_TITLES[draft.coachingStyle])] : []),
@@ -112,7 +112,7 @@
 				])
 	].join(' · ');
 	$: reflectionSummary = isReviseDraft
-		? t('{{count}} reflection questions, plus the revision list', {
+		? t('{{count}} reflection questions', {
 				count: draft.reflectionQuestions.length
 			})
 		: t('{{count}} reflection questions, plus "Did you use AI?"', {
@@ -124,22 +124,17 @@
 	// 评分维度同理：还是原形式的默认维度、满分也没改时，换成新形式的默认（修订初稿的
 	// 第一次通读按评分维度逐项下结论，实例会把这一份设成提示词里的标准）。
 	const chooseTaskMode = (taskMode: TaskMode) => {
+		if (taskMode === draft.taskMode || !allowedTaskModes.includes(taskMode)) return;
+		const next = teachingConfigs[taskMode];
+		if (!next) return;
 		if (
-			rubricDefaults &&
-			!hasSubmissions &&
-			taskMode !== draft.taskMode &&
-			isSameRubric(draft.rubricCriteria, getDefaultRubricCriteria(rubricDefaults, draft.taskMode, t)) &&
-			draft.scoreMax === rubricTotal(draft.rubricCriteria)
-		) {
-			draft.rubricCriteria = getDefaultRubricCriteria(rubricDefaults, taskMode, t);
-			draft.scoreMax = rubricTotal(draft.rubricCriteria);
-		}
-		draft.taskMode = taskMode;
-		draft.reflectionQuestions = adaptDefaultReflectionQuestions(
-			draft.reflectionQuestions,
-			t,
-			taskMode
-		);
+			!window.confirm(
+				t('切换类型会采用目标类型的教学规则、默认说明、评分与反思，请确认替换这些字段。')
+			)
+		)
+			return;
+		draft = applyTeachingDefaults(draft, next);
+		teachingSnapshot = null;
 	};
 
 	const toggleClassroom = (id: string) => {
@@ -175,6 +170,28 @@
 		<EduCard padding="lg">
 			<section id="assignment-basics" class="grid scroll-mt-4 gap-4">
 				<h2 class="text-base font-semibold">1 · {$i18n.t('Basics')}</h2>
+				<div>
+					<div class="mb-2 text-sm font-medium">{$i18n.t('Assignment type')}</div>
+					<div class="flex flex-wrap gap-2">
+						{#each TASK_MODES.filter((mode) => allowedTaskModes.includes(mode.key) || (currentAssignmentId && mode.key === draft.taskMode)) as mode}
+							<button
+								type="button"
+								class={eduSegmentClass(draft.taskMode === mode.key)}
+								aria-pressed={draft.taskMode === mode.key}
+								disabled={taskModeLocked || !allowedTaskModes.includes(mode.key)}
+								on:click={() => chooseTaskMode(mode.key)}
+							>
+								{$i18n.t(mode.title)}
+							</button>
+						{/each}
+					</div>
+					<div class="mt-2 text-xs text-gray-400">{$i18n.t(taskModeHint)}</div>
+					{#if taskModeLocked}
+						<div class="mt-1 text-xs text-gray-400">
+							{$i18n.t('The assignment type is locked once a student has started.')}
+						</div>
+					{/if}
+				</div>
 				<div>
 					<div class="mb-2 flex items-center justify-between">
 						<div class="text-sm font-medium">{$i18n.t('Classroom')}</div>
@@ -234,39 +251,45 @@
 						class="min-h-32 w-full {EDU_FIELD_CLASS}"
 						placeholder={$i18n.t('Write a short academic argument.')}
 					></textarea>
+					<p class="mt-1 text-xs text-gray-500">
+						{$i18n.t('填写本次题目、材料范围及完成要求；AI 的辅导方式由该作业类型统一配置。')}
+					</p>
 				</div>
 				<div class="md:max-w-sm">
 					<div class="mb-2 text-sm font-medium">{$i18n.t('Due At')}</div>
-					<EduDateTimeField bind:value={draft.dueAt} required className="w-full {EDU_FIELD_CLASS}" />
-				</div>
-				<div>
-					<div class="mb-2 text-sm font-medium">{$i18n.t('Assignment type')}</div>
-					<div class="flex flex-wrap gap-2">
-						{#each TASK_MODES as mode}
-							<button
-								type="button"
-								class={eduSegmentClass(draft.taskMode === mode.key)}
-								aria-pressed={draft.taskMode === mode.key}
-								disabled={taskModeLocked}
-								on:click={() => chooseTaskMode(mode.key)}
-							>
-								{$i18n.t(mode.title)}
-							</button>
-						{/each}
-					</div>
-					<div class="mt-2 text-xs text-gray-400">{$i18n.t(taskModeHint)}</div>
-					{#if taskModeLocked}
-						<div class="mt-1 text-xs text-gray-400">
-							{$i18n.t('The assignment type is locked once a student has started.')}
-						</div>
-					{/if}
+					<EduDateTimeField
+						bind:value={draft.dueAt}
+						required
+						className="w-full {EDU_FIELD_CLASS}"
+					/>
 				</div>
 			</section>
 		</EduCard>
 
+		{#if shownTeaching}
+			<EduCard padding="lg">
+				<h2 class="font-semibold">{$i18n.t('AI 辅导说明')} · v{shownTeaching.version}</h2>
+				<p class="mt-2 whitespace-pre-wrap text-sm">{shownTeaching.standards}</p>
+				<p class="mt-2 text-sm text-gray-500">
+					{$i18n.t('学生可按需讨论、修改与复看，并自主结束提交，无需 AI 认可。')}
+				</p>
+				<details class="mt-2 text-sm">
+					<summary>{$i18n.t('查看辅导方式')}</summary>
+					<p class="whitespace-pre-wrap">{shownTeaching.prompt}</p>
+				</details>
+			</EduCard>
+		{/if}
+
 		<EduCard padding="lg">
 			<section id="assignment-scoring" class="grid scroll-mt-4 gap-4">
 				<h2 class="text-base font-semibold">2 · {$i18n.t('Scoring')}</h2>
+				<p class="text-sm text-gray-500">
+					{$i18n.t('评分设置用于教师评阅，AI 按本作业类型的教学规则辅导。')}
+				</p>
+				<select bind:value={draft.scoringMode} disabled={hasSubmissions} class={EDU_FIELD_CLASS}>
+					<option value="dimensions">{$i18n.t('按维度评分')}</option>
+					<option value="total">{$i18n.t('仅总分与总评')}</option>
+				</select>
 				<div class="md:max-w-xs">
 					<div class="mb-2 text-sm font-medium">{$i18n.t('Maximum Score')}</div>
 					<input
@@ -284,14 +307,16 @@
 						</div>
 					{/if}
 				</div>
-				<RubricCriteriaEditor
-					bind:criteria={draft.rubricCriteria}
-					scoreMax={draft.scoreMax}
-					disabled={hasSubmissions}
-					lockedHint={hasSubmissions
-						? $i18n.t('Rubric criteria are locked after the first submission.')
-						: ''}
-				/>
+				{#if draft.scoringMode === 'dimensions'}
+					<RubricCriteriaEditor
+						bind:criteria={draft.rubricCriteria}
+						scoreMax={draft.scoreMax}
+						disabled={hasSubmissions}
+						lockedHint={hasSubmissions
+							? $i18n.t('Rubric criteria are locked after the first submission.')
+							: ''}
+					/>
+				{/if}
 			</section>
 		</EduCard>
 
@@ -326,7 +351,7 @@
 								bind:studentsChoose={draft.studentsChooseThinking}
 							/>
 						{/if}
-						{#if !isReviseDraft}
+						{#if hasReaderCheck}
 							<ChallengeSettings
 								criteria={draft.rubricCriteria}
 								bind:enabled={draft.challengeEnabled}
@@ -368,6 +393,7 @@
 						questionSets={reflectionQuestionSets}
 						notice={reflectionNotice}
 						taskMode={draft.taskMode}
+						defaultQuestions={teachingConfigs[draft.taskMode]?.reflection_questions ?? null}
 						{currentAssignmentId}
 						{hasSubmissions}
 					/>

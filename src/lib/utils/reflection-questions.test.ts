@@ -31,10 +31,10 @@ describe('teacher reflection questions', () => {
 	});
 
 	// 修订初稿：改了什么/改在哪/为什么接受或拒绝建议，修改清单和初稿终稿对比里都有了。
-	test('revise-draft defaults skip what the revision list already asks', () => {
+	test('literature reflection defaults are independent from the coaching process', () => {
 		const defaults = getDefaultReflectionQuestions(t, 'revise_draft');
 		expect(defaults.map((question) => question.prompt)).toEqual([
-			'Besides the revision list, what in this draft are you still not happy with, and why?'
+			'你觉得这份文献综述还有哪里没写好？为什么？'
 		]);
 		expect(getReflectionQuestionsError(normalizeReflectionQuestions(defaults))).toBeNull();
 

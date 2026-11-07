@@ -81,7 +81,9 @@ from open_webui.tasks import clear_response_stream, save_response_stream
 from open_webui.utils.access_control import has_connection_access, has_permission
 from open_webui.utils.access_control.files import get_owner_accessible_folder_files
 from open_webui.utils.access_control.folders import has_folder_access
-from open_webui.services.education.revision_items import build_first_read_context
+from open_webui.services.education.revision_reading import current_revision_chat_context
+from open_webui.services.education.task_types import is_revision
+from open_webui.models.education import Education
 from open_webui.services.education.writing_access import ensure_writing_session_writable
 from open_webui.services.education.writing_context import (
     build_current_text_context,
@@ -2577,7 +2579,34 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             )
 
         if folder and folder.data:
-            if 'system_prompt' in folder.data:
+            assignment_context = (
+                Education.get_assignment_by_id(writing_session.assignment_id) if is_assignment_writing else None
+            )
+            if assignment_context and is_revision(assignment_context.task_mode):
+                previous_reply_id = (metadata.get('user_message') or {}).get('parentId')
+                prior = (
+                    await Chats.get_message_by_id_and_message_id(chat_id, previous_reply_id)
+                    if chat_id and previous_reply_id
+                    else None
+                )
+                context, context_versions = current_revision_chat_context(
+                    writing_session,
+                    str(get_last_user_message(form_data.get('messages', [])) or ''),
+                    (prior.get('meta') or {}).get('education_context') if prior else None,
+                )
+                metadata['education_context'] = context_versions
+                if chat_id and metadata.get('message_id'):
+                    stored_message = await Chats.get_message_by_id_and_message_id(chat_id, metadata['message_id'])
+                    if stored_message:
+                        await Chats.upsert_message_to_chat_by_id_and_message_id(
+                            chat_id,
+                            metadata['message_id'],
+                            {'meta': {**(stored_message.get('meta') or {}), 'education_context': context_versions}},
+                        )
+                form_data['messages'] = add_or_update_system_message(
+                    context, form_data.get('messages', []), append=True
+                )
+            elif 'system_prompt' in folder.data:
                 form_data = await apply_system_prompt_to_body(folder.data['system_prompt'], form_data, metadata, user)
             if 'files' in folder.data:
                 if metadata.get('params', {}).get('function_calling') == 'legacy':
@@ -2595,14 +2624,10 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         # 当前提问的父消息就是模型上一次的回复,据此判断这之后学生改没改稿。
         # 修订初稿作业在正文前面先附第一次通读的结论表,首轮回复按它写。
         if writing_session:
-            first_read = build_first_read_context(writing_session)
-            if first_read:
-                form_data['messages'] = add_or_update_system_message(
-                    first_read, form_data.get('messages', []), append=True
-                )
             form_data['messages'] = add_or_update_system_message(
                 await build_current_text_context(
                     writing_session,
+                    captured_text=(metadata.get('education_context') or {}).get('source_text'),
                     chat_id=metadata.get('chat_id'),
                     previous_reply_id=(metadata.get('user_message') or {}).get('parentId'),
                 ),

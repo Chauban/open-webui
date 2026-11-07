@@ -10,7 +10,6 @@ from mcp.shared.auth import OAuthMetadata
 from open_webui.config import (
     BannerModel,
     DEFAULT_EDUCATION_COACHING_PROMPTS,
-    DEFAULT_EDUCATION_TASK_PROMPTS,
 )
 from open_webui.env import AIOHTTP_CLIENT_SESSION_SSL, AIOHTTP_CLIENT_TIMEOUT
 from open_webui.events import EVENTS, publish_event
@@ -90,10 +89,7 @@ MODELS_CONFIG_KEYS = {
 }
 EDUCATION_CONFIG_KEYS = {
     'EDUCATION_COACHING_PROMPTS': 'education.coaching_prompts',
-    'EDUCATION_TASK_PROMPTS': 'education.task_prompts',
     'EDUCATION_DEFAULT_COACHING_STYLE': 'education.default_coaching_style',
-    'EDUCATION_DEFAULT_TASK_MODE': 'education.default_task_mode',
-    'EDUCATION_DEFAULT_RUBRICS': 'education.default_rubrics',
     'EDUCATION_ENABLE_RETURN': 'education.enable_return',
     'EDUCATION_ENABLE_COACHING_STYLES': 'education.enable_coaching_styles',
     'EDUCATION_CHALLENGE_PROMPTS': 'education.challenge_prompts',
@@ -843,31 +839,9 @@ class EducationCoachingPromptsForm(BaseModel):
     hands_off: str
 
 
-class EducationTaskPromptsForm(BaseModel):
-    """按作业形式追加的任务说明；留空的形式不追加任何说明。"""
-
-    from_scratch: str
-    revise_draft: str
-
-
-class DefaultRubricCriterion(BaseModel):
-    label: str = Field(min_length=1, max_length=100)
-    max_score: int = Field(gt=0)
-
-
-class EducationDefaultRubricsForm(BaseModel):
-    """新建作业预填的评分维度;空列表表示用内置的三项。上限与作业评分维度一致(8 项)。"""
-
-    from_scratch: list[DefaultRubricCriterion] = Field(max_length=8)
-    revise_draft: list[DefaultRubricCriterion] = Field(max_length=8)
-
-
 class EducationConfigForm(BaseModel):
     EDUCATION_COACHING_PROMPTS: EducationCoachingPromptsForm
-    EDUCATION_TASK_PROMPTS: EducationTaskPromptsForm
     EDUCATION_DEFAULT_COACHING_STYLE: CoachingStyle
-    EDUCATION_DEFAULT_TASK_MODE: TaskMode
-    EDUCATION_DEFAULT_RUBRICS: EducationDefaultRubricsForm
     EDUCATION_ENABLE_RETURN: bool
     EDUCATION_ENABLE_COACHING_STYLES: bool
     # 各 AI 步骤的模型与思考档位(含图片识别模型)、辅导对话思考的下放方式,见 services/education/ai_steps.py。
@@ -889,7 +863,6 @@ class EducationConfigResponse(EducationConfigForm):
     """
 
     EDUCATION_COACHING_PROMPT_DEFAULTS: EducationCoachingPromptsForm
-    EDUCATION_TASK_PROMPT_DEFAULTS: EducationTaskPromptsForm
     EDUCATION_AI_STEPS: list[AiStep]
     EDUCATION_AI_STEP_VIEWS: list[StepView]
     EDUCATION_RETRY_SCOPES: list[RetryScope]
@@ -901,7 +874,6 @@ class EducationConfigResponse(EducationConfigForm):
 async def get_education_config_values(request: Request, user) -> dict:
     values = await get_config_values(EDUCATION_CONFIG_KEYS)
     values['EDUCATION_COACHING_PROMPT_DEFAULTS'] = DEFAULT_EDUCATION_COACHING_PROMPTS
-    values['EDUCATION_TASK_PROMPT_DEFAULTS'] = DEFAULT_EDUCATION_TASK_PROMPTS
     values['EDUCATION_AI_STEPS'] = list(AI_STEPS)
     values['EDUCATION_RETRY_SCOPES'] = list(RETRY_SCOPES)
     models = await available_models(request, user)
@@ -1016,3 +988,29 @@ async def get_banners(
     user=Depends(get_verified_user),
 ):
     return await Config.get('ui.banners')
+
+
+from open_webui.models.education_types import TeachingConfigSnapshot, TeachingConfigUpdate
+from open_webui.models.education import get_db_context
+from open_webui.services.education.teaching_config import (
+    latest_teaching_config,
+    publish_teaching_config,
+    EducationConflict,
+)
+from open_webui.services.education.task_types import TASK_MODES
+
+
+@router.get('/education/types', response_model=dict[TaskMode, TeachingConfigSnapshot])
+async def get_teaching_type_configs(user=Depends(get_admin_user)):
+    with get_db_context() as db:
+        return {mode: latest_teaching_config(mode, db) for mode in TASK_MODES}
+
+
+@router.put('/education/types/{task_mode}', response_model=TeachingConfigSnapshot)
+def update_teaching_type_config(task_mode: TaskMode, form_data: TeachingConfigUpdate, user=Depends(get_admin_user)):
+    with get_db_context() as db:
+        try:
+            return publish_teaching_config(task_mode, form_data, db)
+        except EducationConflict as error:
+            db.rollback()
+            raise HTTPException(409, str(error)) from error

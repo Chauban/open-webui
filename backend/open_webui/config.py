@@ -2779,6 +2779,8 @@ DEFAULT_EDUCATION_TASK_PROMPTS = {
 DEFAULT_EDUCATION_AI_STEPS = {
     'coaching_chat': {'control': 'admin', 'default': 'model_default'},
     'first_read': {'model': None, 'thinking': 'model_default'},
+    'revision_review': {'model': None, 'thinking': 'model_default'},
+    'whole_review': {'model': None, 'thinking': 'model_default'},
     'reader_check': {'model': None, 'thinking': 'model_default'},
     'image_parsing': {'model': None, 'thinking': 'off'},
     'class_insight': {'model': None, 'thinking': 'model_default'},

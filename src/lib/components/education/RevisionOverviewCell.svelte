@@ -8,9 +8,10 @@
 	// 修订初稿作业一行的修改清单概况(提交列表、本次分析共用)。数据是提交时冻存的那一轮。
 	// 「终稿与初稿相同」「说改了、原句未动」只是提示老师去看一眼，不是判定，所以都用灰色。
 	export let overview: {
-		problem_count: number;
-		decisions: { revised: number; partly: number; kept: number };
-		claimed_untouched: number;
+		reading_count?: number;
+		problem_count?: number;
+		decisions?: { revised: number; partly: number; kept: number };
+		claimed_untouched?: number;
 		unchanged_from_draft: boolean;
 	} | null = null;
 
@@ -19,15 +20,22 @@
 
 {#if !overview}
 	<span class="text-gray-300 dark:text-gray-600">—</span>
+{:else if overview.reading_count !== undefined}
+	<div class="text-xs">
+		{$i18n.t('已保存 {{count}} 条阅读意见', { count: overview.reading_count })}
+	</div>
+	{#if overview.unchanged_from_draft}<EduBadge soft tone="gray"
+			>{$i18n.t('Same as first draft')}</EduBadge
+		>{/if}
 {:else}
 	<div class="whitespace-nowrap text-xs">
 		{overview.problem_count === 0
 			? $i18n.t('Nothing marked to fix')
 			: $i18n.t('{{count}} to fix: revised {{revised}} · partly {{partly}} · kept {{kept}}', {
 					count: overview.problem_count,
-					revised: overview.decisions.revised,
-					partly: overview.decisions.partly,
-					kept: overview.decisions.kept
+					revised: overview.decisions?.revised,
+					partly: overview.decisions?.partly,
+					kept: overview.decisions?.kept
 				})}
 	</div>
 	{#if overview.unchanged_from_draft || overview.claimed_untouched}

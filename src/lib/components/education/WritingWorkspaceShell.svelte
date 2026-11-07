@@ -1,4 +1,16 @@
 <script lang="ts">
+	import {
+		reflectionAnswerSignature,
+		retainApplicableReflectionDrafts
+	} from '$lib/utils/reflection-questions';
+	import { isRevision } from '$lib/utils/task-types';
+	import RevisionReadings from './RevisionReadings.svelte';
+	import {
+		getRevisionReadings,
+		requestRevisionReading,
+		type RevisionReading,
+		type ReadingPurpose
+	} from '$lib/apis/education';
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 	import type { WritingVersionTrigger } from '$lib/apis/education/types';
@@ -24,9 +36,6 @@
 	import ReflectionAnswerForm from '$lib/components/education/ReflectionAnswerForm.svelte';
 	import DraftBaselineStep from '$lib/components/education/DraftBaselineStep.svelte';
 	import EditorImportDialog from '$lib/components/education/EditorImportDialog.svelte';
-	import RevisionList from '$lib/components/education/RevisionList.svelte';
-	import FirstReadProgress from '$lib/components/education/FirstReadProgress.svelte';
-	import FollowUpBar from '$lib/components/education/FollowUpBar.svelte';
 	import ThinkingSwitch from '$lib/components/education/ThinkingSwitch.svelte';
 	import EduActionMenu from '$lib/components/education/EduActionMenu.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
@@ -55,14 +64,11 @@
 		createEditorOperations,
 		createProvenanceSegments,
 		createWritingVersion,
-		followUpRevisionItems,
-		getRevisionItems,
 		getWritingProcessSummary,
 		resetDraftBaseline,
 		setWritingSessionActiveChat,
 		submitAssignment,
-		getCurrentAssignmentChallenge,
-		type RevisionItem
+		getCurrentAssignmentChallenge
 	} from '$lib/apis/education';
 	import { updateFolderById } from '$lib/apis/folders';
 	import { updateNoteById } from '$lib/apis/notes';
@@ -171,7 +177,7 @@
 	// 修订初稿作业:还没交初稿时只显示初稿步骤,编辑器、左侧对话和提交都锁着(后端同样拒绝)。
 	$: needsDraftBaseline =
 		isAssignment &&
-		assignment?.task_mode === 'revise_draft' &&
+		isRevision(assignment?.task_mode) &&
 		!writingSession?.draft_baseline_at &&
 		!isReadOnly;
 	$: canSubmitAssignment = isAssignment && !isPastDue && !isGraded && !needsDraftBaseline;
@@ -179,14 +185,14 @@
 	// 刚确认初稿那一下直接替学生发出去，保证每份对话都从诊断开始；之后再进来(没聊过)只预填。
 	let autoStartDiagnosis = false;
 	const onDraftBaselineSubmitted = async () => {
-		autoStartDiagnosis = true;
+		autoStartDiagnosis = false;
 		await load();
 	};
 	// 交作业之前可以撤回初稿重来:基线、正文、写作过程和本作业的对话一起删掉。
 	// 交过一次(含退回重交)基线就锁定。
 	$: canWithdrawDraft =
 		isAssignment &&
-		assignment?.task_mode === 'revise_draft' &&
+		isRevision(assignment?.task_mode) &&
 		!!writingSession?.draft_baseline_at &&
 		!isReadOnly &&
 		!isSubmitted &&
@@ -226,10 +232,6 @@
 		autoStartDiagnosis = false;
 		if (revisionTimer) clearTimeout(revisionTimer);
 		revisionTimer = null;
-		revisionItems = [];
-		revisionStatus = null;
-		followUpStatus = 'idle';
-		followUpNote = null;
 		platformMessage = null;
 		await goto(projectBaseUrl, { replaceState: true });
 		await load();
@@ -239,158 +241,62 @@
 		toast.success($i18n.t('First draft withdrawn. Submit your first draft again.'));
 	};
 
-	// --- 第一次通读(修订初稿作业) -------------------------------------------
-	// 学生交了初稿后、和 AI 说第一句之前,服务端先按评分维度逐项下结论(要半分钟上下),
-	// 首轮回复按这张结论表写。所以首轮之前要等通读:对话锁着、右栏显示进度,
-	// 通读完才发出首轮那句话。结论表就是修改清单,只在提交弹窗里给学生看。
-	let revisionItems: RevisionItem[] = [];
-	let revisionStatus: 'ready' | 'pending' | 'failed' | null = null;
-	let revisionShowMissing = false;
+	let readings: RevisionReading[] = [];
+	let readingBusy = false;
 	let revisionTimer: ReturnType<typeof setTimeout> | null = null;
-	let revisionRunning = false;
-	$: hasRevisionList =
-		isAssignment && assignment?.task_mode === 'revise_draft' && !!writingSession?.draft_baseline_at;
-	$: revisionCriteriaLabels = Object.fromEntries(
-		(assignment?.rubric_schema?.criteria ?? []).map((criterion) => [criterion.key, criterion.label])
-	);
-	// 还没开始对话时才要等通读;之前就聊过的会话照常对话,通读在后台补上。
-	$: awaitingFirstRead =
-		hasRevisionList &&
-		!isReadOnly &&
-		revisionStatus !== 'ready' &&
-		!currentChatId &&
-		!writingSession?.active_chat_id;
-
-	const refreshRevisionItems = async () => {
-		if (revisionTimer) clearTimeout(revisionTimer);
-		revisionTimer = null;
-		if (!hasRevisionList || !writingSession?.id) {
-			revisionItems = [];
-			revisionStatus = null;
-			return;
-		}
-		if (revisionStatus === 'ready' || revisionRunning) return;
-		// 通读用学生接下来对话的那个模型;它由文件夹配置异步选上,还没选上就等一下。
-		if (!selectedModelId) {
-			revisionTimer = setTimeout(() => void refreshRevisionItems(), 500);
-			return;
-		}
-		revisionRunning = true;
-		revisionStatus = 'pending';
-		const baselineAt = writingSession.draft_baseline_at;
-		let result: Awaited<ReturnType<typeof getRevisionItems>> | null = null;
-		try {
-			result = await getRevisionItems(localStorage.token, writingSession.id, selectedModelId);
-		} catch (error) {
-			result = null;
-		} finally {
-			revisionRunning = false;
-		}
-		// 通读期间学生撤回了初稿(或撤回后又交了一份):这次结果属于旧初稿,丢掉,按现在的初稿重来。
-		if (writingSession?.draft_baseline_at !== baselineAt) {
-			revisionStatus = null;
-			void refreshRevisionItems();
-			return;
-		}
-		revisionItems = result?.items ?? [];
-		revisionStatus = result?.status ?? 'failed';
-		if (revisionStatus === 'ready' && !currentChatId && !writingSession?.active_chat_id) {
-			// 学生正等着第一轮反馈:通读一完就替他发出首轮那句话,不用再点发送。
-			autoStartDiagnosis = true;
-		}
-		// 另一个标签页正在通读:隔几秒再问。
-		if (revisionStatus === 'pending') {
-			revisionTimer = setTimeout(() => void refreshRevisionItems(), 4000);
-		}
-	};
-
-	// --- 补看 -----------------------------------------------------------------
-	// 第一次通读时某一项(如综述定位)出了问题,另几项暂缓。学生改好那一项后点「改好了，接着看」:
-	// 平台先确认改到位,再给暂缓的几项补上结论,然后替学生在对话里说一句「请接着看」,
-	// AI 按补全后的结论表回复。补看期间对话锁着。
-	let followUpStatus: 'idle' | 'running' | 'not_ready' | 'failed' = 'idle';
-	let followUpNote: string | null = null;
 	let platformMessage: { text: string; nonce: number } | null = null;
-	$: deferredRevisionItems = revisionItems.filter((item) => item.status === 'deferred');
-	$: blockingRevisionItem = revisionItems.find((item) => item.is_blocking) ?? null;
-	$: blockingRevisionLabel = blockingRevisionItem
-		? (revisionCriteriaLabels[blockingRevisionItem.criterion_key] ??
-			blockingRevisionItem.criterion_key)
-		: '';
-	$: canFollowUp =
-		hasRevisionList &&
-		revisionStatus === 'ready' &&
-		!isReadOnly &&
-		!!blockingRevisionItem &&
-		deferredRevisionItems.length > 0;
-
-	const runFollowUp = async () => {
-		if (!writingSession?.id || followUpStatus === 'running') return;
+	$: hasRevisionCoaching =
+		isAssignment && isRevision(assignment?.task_mode) && !!writingSession?.draft_baseline_at;
+	const runReading = async (purpose: ReadingPurpose) => {
+		if (readingBusy || !writingSession?.id || isReadOnly) return;
 		if (!selectedModelId) {
 			toast.error($i18n.t('Please select a model.'));
 			return;
 		}
-		followUpStatus = 'running';
-		followUpNote = null;
+		readingBusy = true;
+		const baseline = writingSession.draft_baseline_at;
 		try {
-			// 补看读的是最近一次保存的正文:先把编辑器里还没存的改动存掉。
-			await flushDraftBeforeChat();
-			const result = await followUpRevisionItems(
-				localStorage.token,
-				writingSession.id,
-				selectedModelId
-			);
-			revisionItems = result.items;
-			followUpNote = result.note;
-			if (result.status === 'ready') {
-				followUpStatus = 'idle';
-				platformMessage = {
-					text: $i18n.t(
-						'I have fixed "{{blocking}}". Please go on with the items that were waiting.',
-						{
-							blocking: blockingRevisionLabel
-						}
-					),
-					nonce: Date.now()
-				};
-			} else {
-				followUpStatus = result.status === 'not_ready' ? 'not_ready' : 'failed';
-			}
+			if (purpose !== 'first_read') await flushDraftBeforeChat();
+			await requestRevisionReading(localStorage.token, writingSession.id, purpose, selectedModelId);
+			if (writingSession.draft_baseline_at === baseline)
+				readings = await getRevisionReadings(localStorage.token, writingSession.id);
+			if (readings.some((record) => record.status === 'running'))
+				revisionTimer = setTimeout(() => void refreshRevisionItems(), 4000);
 		} catch (error) {
-			followUpStatus = 'failed';
 			toast.error(resolveErrorMessage(error, t));
+		} finally {
+			readingBusy = false;
 		}
 	};
-
+	const refreshRevisionItems = async () => {
+		if (!hasRevisionCoaching || !writingSession?.id) return;
+		try {
+			readings = await getRevisionReadings(localStorage.token, writingSession.id);
+		} catch (error) {
+			toast.error(resolveErrorMessage(error, t));
+			return;
+		}
+		if (readings.some((r) => r.status === 'running') && !isReadOnly)
+			revisionTimer = setTimeout(() => void refreshRevisionItems(), 4000);
+		if (!isReadOnly && !readingBusy && !readings.some((r) => r.purpose === 'first_read')) {
+			if (!selectedModelId) {
+				revisionTimer = setTimeout(() => void refreshRevisionItems(), 700);
+				return;
+			}
+			await runReading('first_read');
+		}
+	};
+	const discussReading = (text: string) => {
+		platformMessage = { text, nonce: Date.now() };
+	};
 	$: sameAsDraft =
 		isAssignment &&
-		assignment?.task_mode === 'revise_draft' &&
+		isRevision(assignment?.task_mode) &&
 		Boolean(writingSession?.draft_baseline_at) &&
 		noteText.replace(/\s+/g, '') ===
 			(writingSession?.draft_baseline_text ?? '').replace(/\s+/g, '');
 
-	// 只有「要改」的必须交代;「可改进」的可填可不填。
-	const getRevisionError = () => {
-		if (revisionStatus !== 'ready') return null;
-		const mustAnswer = revisionItems.filter((item) => item.status === 'problem');
-		if (mustAnswer.some((item) => !item.decision)) {
-			return 'Mark how you handled every item on the revision list';
-		}
-		if (mustAnswer.some((item) => item.decision !== 'revised' && !(item.reason ?? '').trim())) {
-			return 'Explain the items you did not fully revise';
-		}
-		return null;
-	};
-	$: diagnosisPrompt =
-		isAssignment &&
-		assignment?.task_mode === 'revise_draft' &&
-		writingSession?.draft_baseline_at &&
-		!isReadOnly &&
-		revisionStatus === 'ready' &&
-		!currentChatId &&
-		!writingSession?.active_chat_id
-			? $i18n.t('Please read my first draft against the rubric and point out the main problems.')
-			: '';
+	const diagnosisPrompt = '';
 	// 写作构成只在作业定稿后给学生看:写作中实时显示会让学生盯着比例重敲粘贴内容来刷数,
 	// 数据先被毁掉。个人写作区教师看不到,没有刷数动机,照常显示。
 	$: showComposition = !isAssignment || isReadOnly;
@@ -399,21 +305,9 @@
 	$: lockedDetailsCollapsed = isAssignment && isReadOnly && !showLockedDetails;
 	$: chatReadOnlyHint = needsDraftBaseline
 		? $i18n.t('Submit your first draft on the right to unlock the AI chat.')
-		: followUpStatus === 'running'
-			? $i18n.t('Reading the items that were waiting. The AI goes on when it is done.')
-			: awaitingFirstRead
-				? revisionStatus === 'failed'
-					? $i18n.t('The first read-through did not finish. Try again on the right.')
-					: $i18n.t(
-							'Reading your draft against the rubric. The AI gives its first feedback when it is done.'
-						)
-				: !isReadOnly
-					? ''
-					: !currentChatId && !writingSession?.active_chat_id
-						? $i18n.t('No AI conversation for this assignment.')
-						: isGraded
-							? $i18n.t('Graded. The conversation is view-only.')
-							: $i18n.t('Past the deadline. The conversation is view-only.');
+		: isReadOnly
+			? $i18n.t('Graded. The conversation is view-only.')
+			: '';
 	// 进来时直接载入上次那段对话,不落在空白新对话上:
 	// - 定稿后左栏不能再开新对话,空着没有意义,学生用过 AI 就载入那次对话供回看;
 	// - 修订初稿作业写作中,首轮通读那段对话是改稿的主线,学生隔天回来在空白对话里接着问,
@@ -426,7 +320,7 @@
 	const openLastChat = async () => {
 		const activeChatId = writingSession?.active_chat_id;
 		if (currentChatId || !activeChatId) return;
-		if (!isReadOnly && assignment?.task_mode !== 'revise_draft') return;
+		if (!isReadOnly && !isRevision(assignment?.task_mode)) return;
 		// 对话可能被学生删了:载入不存在的对话会被带回首页,先确认它还在。
 		const exists = await getChatById(localStorage.token, activeChatId)
 			.then(() => true)
@@ -473,7 +367,7 @@
 
 	const getReflectionDraftKey = () => `education:reflection-draft:${assignment?.id ?? ''}`;
 	// 修订初稿作业不问「用了 AI 吗」：首轮通读是平台替学生发起的，一定用了（后端同样这样记）。
-	$: asksAiUsage = !(isAssignment && assignment?.task_mode === 'revise_draft');
+	$: asksAiUsage = !(isAssignment && isRevision(assignment?.task_mode));
 
 	// 草稿按题目 id 存；教师中途改了题，对不上的旧答案提交时自然被丢弃。
 	const loadReflectionDraft = () => {
@@ -486,7 +380,13 @@
 			if (asksAiUsage) {
 				aiUsage = draft?.aiUsage === 'used' || draft?.aiUsage === 'none' ? draft.aiUsage : null;
 			}
-			reflectionDrafts = draft?.answers && typeof draft.answers === 'object' ? draft.answers : {};
+			reflectionDrafts = Object.fromEntries(
+				Object.entries((draft?.answers ?? {}) as typeof reflectionDrafts).filter(
+					([id]) =>
+						draft?.questionSignatures?.[id] ===
+						reflectionAnswerSignature(reflectionQuestions.find((q) => q.id === id))
+				)
+			);
 		} catch (error) {
 			console.error(error);
 		}
@@ -497,7 +397,13 @@
 		try {
 			localStorage.setItem(
 				getReflectionDraftKey(),
-				JSON.stringify({ aiUsage, answers: reflectionDrafts })
+				JSON.stringify({
+					aiUsage,
+					answers: reflectionDrafts,
+					questionSignatures: Object.fromEntries(
+						reflectionQuestions.map((q) => [q.id, reflectionAnswerSignature(q)])
+					)
+				})
 			);
 		} catch (error) {
 			console.error(error);
@@ -913,12 +819,30 @@
 		}
 	};
 
+	const refreshSubmissionSettings = async () => {
+		const workspace = await loadWorkspace();
+		const previousQuestions = assignment?.reflection_questions ?? [];
+		const next = workspace.assignment;
+		const changed = assignment?.config_revision !== next.config_revision;
+		reflectionDrafts = retainApplicableReflectionDrafts(
+			previousQuestions,
+			next.reflection_questions,
+			reflectionDrafts
+		);
+		assignment = next;
+		review = workspace.review;
+		effectiveDueAt = workspace.effective_due_at;
+		if (changed) toast.info($i18n.t('作业设置已更新，请重新核对要求与反思题。'));
+		saveReflectionDraft();
+	};
 	const openSubmitFlow = async () => {
-		if (!canSubmitAssignment) return;
-		revisionShowMissing = false;
-		if (hasRevisionList && revisionStatus !== 'ready') {
-			void refreshRevisionItems();
+		try {
+			await refreshSubmissionSettings();
+		} catch (error) {
+			toast.error(resolveErrorMessage(error, t));
+			return;
 		}
+		if (!canSubmitAssignment) return;
 		if (!challengeEnabled || challengeSettledThisRound) {
 			showSubmitModal = true;
 			return;
@@ -951,18 +875,6 @@
 
 	const submit = async () => {
 		if (!canSubmitAssignment || isSubmitting) return;
-		// 和弹窗里的顺序一致:修改清单在上,反思题在下。
-		const revisionError = getRevisionError();
-		if (revisionError) {
-			revisionShowMissing = true;
-			toast.error($i18n.t(revisionError));
-			// 清单长时漏标的那条常在弹窗下面看不到，滚过去。
-			await tick();
-			document
-				.querySelector('[data-revision-missing]')
-				?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-			return;
-		}
 		const reflectionError = getReflectionAnswersError(
 			reflectionQuestions,
 			aiUsage,
@@ -983,21 +895,12 @@
 
 			await submitAssignment(localStorage.token, assignment.id, {
 				writing_session_id: writingSession.id,
+				expected_config_revision: assignment.config_revision,
 				final_content_json: noteJson,
 				final_content_html: noteHtml,
 				final_content_text: noteText,
 				ai_used: aiUsage === 'used',
 				reflection_answers: buildReflectionAnswers(reflectionQuestions, aiUsage, reflectionDrafts),
-				revision_decisions:
-					revisionStatus === 'ready'
-						? revisionItems
-								.filter((item) => item.status === 'problem' || item.status === 'minor')
-								.map((item) => ({
-									item_no: item.item_no,
-									decision: item.decision,
-									reason: (item.reason ?? '').trim() || null
-								}))
-						: [],
 				data_completeness: {
 					version_data_complete: true,
 					editor_operations_complete: true,
@@ -1009,6 +912,8 @@
 			toast.success($i18n.t('Assignment submitted'));
 			await goto('/me/writing');
 		} catch (error) {
+			if (String(error?.detail ?? '').includes('settings changed'))
+				await refreshSubmissionSettings();
 			toast.error(resolveErrorMessage(error, t));
 		} finally {
 			isSubmitting = false;
@@ -1040,7 +945,6 @@
 			currentChatId = $page.url.searchParams.get('chat') ?? '';
 			await selectedFolder.set(workspaceProject);
 			await refreshChallenge();
-			revisionStatus = null;
 			void refreshRevisionItems();
 			loaded = true;
 		} catch (error) {
@@ -1125,13 +1029,16 @@
 	<Chat
 		chatIdProp={currentChatId}
 		{projectBaseUrl}
-		responseInsertHandler={isReadOnly ? null : insertAssistantContent}
+		responseInsertHandler={isReadOnly || isRevision(assignment?.task_mode)
+			? null
+			: insertAssistantContent}
 		responseCopyHandler={copyAssistantContentWithSource}
 		onToolCallCompleted={() => void refreshProcessSummary()}
 		onSelectedModelsChange={(ids) => (selectedModelId = ids?.[0] ?? '')}
 		beforeSend={flushDraftBeforeChat}
+		allowFollowUps={!isRevision(assignment?.task_mode)}
 		responseInsertLabel={'Insert to Writing'}
-		readOnly={isReadOnly || needsDraftBaseline || awaitingFirstRead || followUpStatus === 'running'}
+		readOnly={isReadOnly || needsDraftBaseline}
 		{platformMessage}
 		readOnlyHint={chatReadOnlyHint}
 		prefillPrompt={diagnosisPrompt}
@@ -1274,22 +1181,14 @@
 								onDetailChange={onChallengeDetailChange}
 								readonly={isReadOnly}
 							/>
-							{#if awaitingFirstRead}
-								<FirstReadProgress
-									status={revisionStatus}
-									criteria={Object.values(revisionCriteriaLabels)}
-									onRetry={() => refreshRevisionItems()}
-								/>
-							{/if}
-							{#if canFollowUp}
-								<FollowUpBar
-									status={followUpStatus}
-									blockingLabel={blockingRevisionLabel}
-									deferredLabels={deferredRevisionItems.map(
-										(item) => revisionCriteriaLabels[item.criterion_key] ?? item.criterion_key
-									)}
-									note={followUpNote}
-									onFollowUp={runFollowUp}
+							{#if hasRevisionCoaching}
+								<RevisionReadings
+									records={readings}
+									currentText={noteText}
+									readonly={isReadOnly}
+									busy={readingBusy}
+									onRead={runReading}
+									onDiscuss={discussReading}
 								/>
 							{/if}
 						{/if}
@@ -1460,22 +1359,14 @@
 								onDetailChange={onChallengeDetailChange}
 								readonly={isReadOnly}
 							/>
-							{#if awaitingFirstRead}
-								<FirstReadProgress
-									status={revisionStatus}
-									criteria={Object.values(revisionCriteriaLabels)}
-									onRetry={() => refreshRevisionItems()}
-								/>
-							{/if}
-							{#if canFollowUp}
-								<FollowUpBar
-									status={followUpStatus}
-									blockingLabel={blockingRevisionLabel}
-									deferredLabels={deferredRevisionItems.map(
-										(item) => revisionCriteriaLabels[item.criterion_key] ?? item.criterion_key
-									)}
-									note={followUpNote}
-									onFollowUp={runFollowUp}
+							{#if hasRevisionCoaching}
+								<RevisionReadings
+									records={readings}
+									currentText={noteText}
+									readonly={isReadOnly}
+									busy={readingBusy}
+									onRead={runReading}
+									onDiscuss={discussReading}
 								/>
 							{/if}
 						{/if}
@@ -1595,16 +1486,33 @@
 			弹窗高度卡在视口内：题目由教师自定、数量不定，只让中间的题目区滚动，
 			标题和「提交作业」按钮始终留在可见处。之前整块跟着内容长高，矮屏上按钮被挤出屏幕点不到。
 		-->
-		<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+		<div
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="submission-reflection-title"
+			tabindex="-1"
+			class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+		>
 			<div
 				class="flex max-h-[calc(100dvh-2rem)] w-full max-w-xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl dark:bg-gray-850"
 			>
 				<div class="shrink-0 px-6 pb-3 pt-6">
-					<h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100">
-						{$i18n.t('Reflection Before Submitting Assignment')}
+					<h2
+						id="submission-reflection-title"
+						class="text-xl font-semibold text-gray-900 dark:text-gray-100"
+					>
+						{$i18n.t(
+							reflectionQuestions.length
+								? 'Reflection Before Submitting Assignment'
+								: '确认提交作业'
+						)}
 					</h2>
 					<p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-						{$i18n.t('Complete your reflection before submitting your assignment.')}
+						{$i18n.t(
+							reflectionQuestions.length
+								? '请核对反思题并确认提交；选答题可以留空。'
+								: '核对正文后即可提交。'
+						)}
 					</p>
 				</div>
 
@@ -1619,18 +1527,7 @@
 							)}
 						</div>
 					{/if}
-					{#if hasRevisionList}
-						<div class="mb-4">
-							<RevisionList
-								sessionId={writingSession.id}
-								bind:items={revisionItems}
-								status={revisionStatus}
-								criteriaLabels={revisionCriteriaLabels}
-								showMissing={revisionShowMissing}
-								onRetry={() => refreshRevisionItems()}
-							/>
-						</div>
-					{/if}
+
 					<ReflectionAnswerForm
 						questions={reflectionQuestions}
 						askAiUsage={asksAiUsage}

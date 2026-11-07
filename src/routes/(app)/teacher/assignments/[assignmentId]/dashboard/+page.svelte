@@ -7,7 +7,11 @@
 	import { get } from 'svelte/store';
 	import { toast } from 'svelte-sonner';
 
-	import { generateChallengeInsight, getTeacherAssignment, getTeacherDashboard } from '$lib/apis/education';
+	import {
+		generateChallengeInsight,
+		getTeacherAssignment,
+		getTeacherDashboard
+	} from '$lib/apis/education';
 	import type { ChallengeInsight } from '$lib/apis/education';
 	import { getRewriteLevelLabel, resolveErrorMessage } from '$lib/utils/education';
 	import { educationNotificationSummary, models } from '$lib/stores';
@@ -68,7 +72,7 @@
 		{ key: 'external', label: 'External paste', numeric: true },
 		{ key: 'prompts', label: 'Prompts', numeric: true },
 		{ key: 'signals', label: 'Process Signals', numeric: true },
-		{ key: 'revision', label: 'Revision list', numeric: true }
+		{ key: 'revision', label: '修订记录', numeric: true }
 	];
 	$: isReviseDraft = taskMode === 'revise_draft';
 	$: columns = isReviseDraft ? REVISE_COLUMNS : COLUMNS;
@@ -118,7 +122,10 @@
 	$: rewriteLevels = Object.entries(
 		(dashboard?.distributions?.rewrite_levels ?? {}) as Record<string, number>
 	);
-	$: rewriteTotal = Math.max(1, rewriteLevels.reduce((sum, [, count]) => sum + count, 0));
+	$: rewriteTotal = Math.max(
+		1,
+		rewriteLevels.reduce((sum, [, count]) => sum + count, 0)
+	);
 	$: flagged = (dashboard?.items ?? [])
 		.filter((item) => signalScore(item) > 0)
 		.sort((a, b) => signalScore(b) - signalScore(a))
@@ -127,7 +134,9 @@
 		const left = sortValue(a, sortKey);
 		const right = sortValue(b, sortKey);
 		const order =
-			typeof left === 'string' ? left.localeCompare(right as string) : (left as number) - (right as number);
+			typeof left === 'string'
+				? left.localeCompare(right as string)
+				: (left as number) - (right as number);
 		return sortDesc ? -order : order;
 	});
 
@@ -203,7 +212,9 @@
 			{:else}
 				{#if firstRead}
 					<EduCard class="mb-6">
-						<div class="text-sm font-semibold">{$i18n.t('First read-through across the class')}</div>
+						<div class="text-sm font-semibold">
+							{$i18n.t('First read-through across the class')}
+						</div>
 						<!-- 每个评分维度：第一次通读判了多少人要改，这些人提交时怎么交代的。按人数，每人取最新一轮。 -->
 						<div class="mt-1 text-xs text-gray-400">
 							{$i18n.t('{{count}} submissions with a revision list', {
@@ -221,7 +232,9 @@
 										<th class="py-2 pr-4 text-right font-medium">{$i18n.t('To fix')}</th>
 										<th class="py-2 pr-4 text-right font-medium">{$i18n.t('Could improve')}</th>
 										<th class="py-2 pr-4 text-right font-medium">{$i18n.t('Meets')}</th>
-										<th class="py-2 pr-4 font-medium">{$i18n.t('How the "to fix" ones were handled')}</th>
+										<th class="py-2 pr-4 font-medium"
+											>{$i18n.t('How the "to fix" ones were handled')}</th
+										>
 									</tr>
 								</thead>
 								<tbody>
@@ -231,8 +244,12 @@
 											<td class="py-2.5 pr-4 text-right tabular-nums font-medium">
 												{row.statuses.problem}
 											</td>
-											<td class="py-2.5 pr-4 text-right tabular-nums text-gray-500">{row.statuses.minor}</td>
-											<td class="py-2.5 pr-4 text-right tabular-nums text-gray-500">{row.statuses.ok}</td>
+											<td class="py-2.5 pr-4 text-right tabular-nums text-gray-500"
+												>{row.statuses.minor}</td
+											>
+											<td class="py-2.5 pr-4 text-right tabular-nums text-gray-500"
+												>{row.statuses.ok}</td
+											>
 											<td class="py-2.5 pr-4 text-xs text-gray-600 dark:text-gray-300">
 												{#if row.statuses.problem > 0}
 													{$i18n.t('revised {{revised}} · partly {{partly}} · kept {{kept}}', {
@@ -369,59 +386,65 @@
 				{/if}
 
 				{#if showRewrite || flagged.length > 0}
-				<div
-					class="mb-6 grid gap-4 {flagged.length > 0 && showRewrite ? 'lg:grid-cols-[0.9fr_1.1fr]' : ''}"
-				>
-					{#if showRewrite}
-					<EduCard>
-						<div class="mb-4 text-sm font-semibold">{$i18n.t('Rewrite Distribution')}</div>
-						{#if rewriteLevels.every(([, count]) => count === 0)}
-							<EduEmpty>{$i18n.t('No tracked import segments yet.')}</EduEmpty>
-						{:else}
-							<div class="space-y-3">
-								{#each rewriteLevels as [level, count]}
-									<div>
-										<div
-											class="mb-1 flex items-center justify-between text-sm text-gray-700 dark:text-gray-300"
-										>
-											<span>{getRewriteLevelLabel(level, t)}</span>
-											<span class="tabular-nums">{count}</span>
-										</div>
-										<div class="h-2 rounded-full bg-gray-100 dark:bg-gray-800">
-											<div
-												class="h-2 rounded-full bg-black dark:bg-gray-100"
-												style={`width: ${(count / rewriteTotal) * 100}%`}
-											></div>
-										</div>
+					<div
+						class="mb-6 grid gap-4 {flagged.length > 0 && showRewrite
+							? 'lg:grid-cols-[0.9fr_1.1fr]'
+							: ''}"
+					>
+						{#if showRewrite}
+							<EduCard>
+								<div class="mb-4 text-sm font-semibold">{$i18n.t('Rewrite Distribution')}</div>
+								{#if rewriteLevels.every(([, count]) => count === 0)}
+									<EduEmpty>{$i18n.t('No tracked import segments yet.')}</EduEmpty>
+								{:else}
+									<div class="space-y-3">
+										{#each rewriteLevels as [level, count]}
+											<div>
+												<div
+													class="mb-1 flex items-center justify-between text-sm text-gray-700 dark:text-gray-300"
+												>
+													<span>{getRewriteLevelLabel(level, t)}</span>
+													<span class="tabular-nums">{count}</span>
+												</div>
+												<div class="h-2 rounded-full bg-gray-100 dark:bg-gray-800">
+													<div
+														class="h-2 rounded-full bg-black dark:bg-gray-100"
+														style={`width: ${(count / rewriteTotal) * 100}%`}
+													></div>
+												</div>
+											</div>
+										{/each}
 									</div>
-								{/each}
-							</div>
+								{/if}
+							</EduCard>
 						{/if}
-					</EduCard>
-					{/if}
 
-					{#if flagged.length > 0}
-						<EduCard>
-							<div class="text-sm font-semibold">{$i18n.t('Look at these first')}</div>
-							<EduEvidenceDisclaimer class="mb-4 mt-1.5" />
-							<div class="space-y-2">
-								{#each flagged as item}
-									<a
-										href={`/teacher/submissions/${item.submission_id}`}
-										class="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-gray-200 px-4 py-3 text-sm transition hover:border-gray-400 dark:border-gray-800 dark:hover:border-gray-600"
-									>
-										<span class="font-medium text-gray-900 dark:text-gray-100">{item.student_name}</span>
-										<EduRiskBadges summary={item.risk_summary} />
-									</a>
-								{/each}
-							</div>
-						</EduCard>
-					{/if}
-				</div>
+						{#if flagged.length > 0}
+							<EduCard>
+								<div class="text-sm font-semibold">{$i18n.t('Look at these first')}</div>
+								<EduEvidenceDisclaimer class="mb-4 mt-1.5" />
+								<div class="space-y-2">
+									{#each flagged as item}
+										<a
+											href={`/teacher/submissions/${item.submission_id}`}
+											class="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-gray-200 px-4 py-3 text-sm transition hover:border-gray-400 dark:border-gray-800 dark:hover:border-gray-600"
+										>
+											<span class="font-medium text-gray-900 dark:text-gray-100"
+												>{item.student_name}</span
+											>
+											<EduRiskBadges summary={item.risk_summary} />
+										</a>
+									{/each}
+								</div>
+							</EduCard>
+						{/if}
+					</div>
 				{/if}
 
 				<EduCard padding="none">
-					<div class="border-b border-gray-100 px-4 py-3 text-sm font-semibold dark:border-gray-800">
+					<div
+						class="border-b border-gray-100 px-4 py-3 text-sm font-semibold dark:border-gray-800"
+					>
 						{$i18n.t('How each submission was written')}
 					</div>
 					<div class="overflow-x-auto">
@@ -471,14 +494,20 @@
 												{item.student_name}
 											</a>
 										</td>
-										<td class="px-4 py-3 text-right tabular-nums">{item.source_stats.user_typed_chars ?? 0}</td>
+										<td class="px-4 py-3 text-right tabular-nums"
+											>{item.source_stats.user_typed_chars ?? 0}</td
+										>
 										{#if isReviseDraft}
 											<td class="px-4 py-3 text-right tabular-nums">
 												{item.risk_summary?.external_paste_chars ?? 0}
 											</td>
 										{:else}
-											<td class="px-4 py-3 text-right tabular-nums">{item.source_stats.ai_inserted_chars ?? 0}</td>
-											<td class="px-4 py-3 text-right tabular-nums">{item.source_stats.ai_pasted_chars ?? 0}</td>
+											<td class="px-4 py-3 text-right tabular-nums"
+												>{item.source_stats.ai_inserted_chars ?? 0}</td
+											>
+											<td class="px-4 py-3 text-right tabular-nums"
+												>{item.source_stats.ai_pasted_chars ?? 0}</td
+											>
 										{/if}
 										<td class="px-4 py-3 text-right tabular-nums">{item.prompt_count}</td>
 										<td class="px-4 py-3">

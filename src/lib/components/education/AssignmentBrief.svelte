@@ -13,7 +13,7 @@
 	$: criteria = assignment?.rubric_schema?.criteria ?? [];
 </script>
 
-{#if assignment && (description || criteria.length > 0)}
+{#if assignment}
 	<div class="mt-3 rounded-2xl bg-stone-50 dark:bg-gray-900 px-3 py-2">
 		<button
 			type="button"
@@ -31,12 +31,24 @@
 			{:else}
 				<span class="flex-1"></span>
 			{/if}
-			<span class="shrink-0 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300">
+			<span
+				class="shrink-0 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
+			>
 				{$i18n.t(expanded ? 'Collapse' : 'Expand')}
 			</span>
 		</button>
 
 		{#if expanded}
+			<p class="mt-2 text-xs text-gray-500">
+				{$i18n.t('要求版本')}
+				{assignment.description_version} · {new Date(assignment.updated_at * 1000).toLocaleString()}
+			</p>
+			{#if assignment.change_summary}<p class="text-xs text-gray-500">
+					{assignment.change_summary}
+				</p>{/if}
+			{#if assignment.scoring_mode === 'total'}<p class="text-xs">
+					{$i18n.t('仅总分与总评')} · {assignment.score_max}
+				</p>{/if}
 			{#if description}
 				<div
 					class="mt-1.5 whitespace-pre-wrap text-xs leading-relaxed text-gray-600 dark:text-gray-300"

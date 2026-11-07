@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { isRevision } from '$lib/utils/task-types';
 	// 提交前反思的出题器：新建作业页与作业详情页共用。
 	//
 	// 不同作业要问的反思不一样，所以题目归教师定。为了不让教师每次从零写：
@@ -53,6 +54,7 @@
 	export let notice = '';
 	export let hasSubmissions = false;
 	export let taskMode: TaskMode = 'from_scratch';
+	export let defaultQuestions: ReflectionQuestion[] | null = null;
 
 	const KINDS: Array<{ key: ReflectionQuestionKind; label: string }> = [
 		{ key: 'single_choice', label: 'Single choice' },
@@ -67,7 +69,7 @@
 
 	let showPreview = false;
 	let previewAiUsage: AiUsage = null;
-	$: isReviseDraft = taskMode === 'revise_draft';
+	$: isReviseDraft = isRevision(taskMode);
 	$: if (isReviseDraft) previewAiUsage = 'used';
 	let previewDrafts: ReflectionAnswerDrafts = {};
 	let showRecommended = false;
@@ -188,7 +190,9 @@
 
 	const resetToDefaults = () => {
 		replaceWith(
-			getDefaultReflectionQuestions(t, taskMode),
+			defaultQuestions
+				? cloneReflectionQuestions(defaultQuestions)
+				: getDefaultReflectionQuestions(t, taskMode),
 			t('Restored the recommended questions.')
 		);
 	};
@@ -212,7 +216,7 @@
 	<div class="text-xs leading-relaxed text-gray-400">
 		{#if isReviseDraft}
 			{$i18n.t(
-				'In a revise-the-draft assignment, the AI questions the draft against the rubric in the chat; at submission students first account for each item on the revision list; what they changed and where, you can see by comparing the first and final drafts. Ask here only what none of these show, such as what they see wrong beyond the revision list. Whether their sources are real and were checked against the original is already pressed in the chat and on the revision list, so it is not a default question; add it from the recommended questions if you want a tally. "Did you use AI?" is not asked: the platform starts the first read-through, so they always did.'
+				'反思题在学生提交时回答，不进入 AI 辅导上下文。可增删题目、调整必答；删除全部题目后无需反思即可提交。'
 			)}
 		{:else}
 			{$i18n.t(
@@ -240,7 +244,7 @@
 			<div class="mb-4 text-xs text-gray-400">
 				{$i18n.t('What students see')}
 				{#if isReviseDraft}
-					· {$i18n.t('Students see the revision list first, then these questions.')}
+					· {$i18n.t('这些题目在提交时回答。')}
 				{/if}
 			</div>
 			<ReflectionAnswerForm
@@ -505,7 +509,7 @@
 					class="rounded-2xl border border-dashed border-gray-300 px-4 py-6 text-center text-xs text-gray-400 dark:border-gray-700"
 				>
 					{isReviseDraft
-						? $i18n.t('No reflection questions. Students will only account for the revision list.')
+						? $i18n.t('没有反思题，学生可直接确认提交。')
 						: $i18n.t('No reflection questions. Students will only be asked whether they used AI.')}
 				</div>
 			{/each}

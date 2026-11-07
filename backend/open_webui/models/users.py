@@ -262,7 +262,11 @@ class UserRoleUpdateForm(BaseModel):
     role: str
 
 
+from open_webui.models.education_types import TeacherTaskAccessForm
+
+
 class UserUpdateForm(BaseModel):
+    assignment_types: TeacherTaskAccessForm | None = None
     role: str | None = None
     name: str | None = None
     email: str | None = None

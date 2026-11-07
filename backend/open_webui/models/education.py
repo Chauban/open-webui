@@ -47,12 +47,13 @@ COACHING_STYLES = ("socratic", "balanced", "hands_off")
 # 作业形式:作业开始时初稿是否已经存在。修订初稿作业里学生先显式提交课外写好的
 # 初稿,冻结为基线,再和 AI 对话修改;结构上没有质疑式读者(对话本身就是诊断与追问)。
 # 每段形式各对应一段管理员可改写的任务说明(config 的 education.task_prompts)。
-TaskMode = Literal["from_scratch", "revise_draft"]
+from open_webui.services.education.task_types import TaskMode, TASK_MODES, is_revision
+
 # 思考档位：model_default 不发档位，按模型自己的设定。步骤与下放规则见 services/education/ai_steps.py。
 ThinkingSetting = Literal["model_default", "off", "low", "medium", "high"]
 # 辅导对话的思考档位由谁定：管理员 / 教师按作业 / 教师按作业并可交给学生开关。
 ThinkingControl = Literal["admin", "teacher", "student"]
-TASK_MODES = ("from_scratch", "revise_draft")
+
 # 初稿最短字数(去掉空白后的字符数)。
 DRAFT_BASELINE_MIN_CHARS = 200
 # 提交前质疑环节。辅导档位管的是「AI 帮多少」,质疑管的是「交之前挑多狠、挑哪几个维度」,
@@ -96,21 +97,24 @@ class SubmissionAlreadyReviewedError(Exception):
 class Assignment(Base):
     __tablename__ = "assignment"
     __table_args__ = (
-        CheckConstraint("score_max > 0", name="assignment_score_max_check"),
+        CheckConstraint('score_max > 0', name='assignment_score_max_check'),
+        CheckConstraint("scoring_mode IN ('dimensions', 'total')", name='assignment_scoring_mode_check'),
+        CheckConstraint(
+            'config_revision > 0 AND description_version > 0 AND reflection_version > 0',
+            name='assignment_config_revision_check',
+        ),
         CheckConstraint(
             "coaching_style IN ('socratic', 'balanced', 'hands_off')",
-            name="assignment_coaching_style_check",
+            name='assignment_coaching_style_check',
+        ),
+        CheckConstraint('challenge_rounds IN (2, 3)', name='assignment_challenge_rounds_check'),
+        CheckConstraint(
+            "task_mode IN ('from_scratch', 'revise_draft', 'revise_argument')",
+            name='assignment_task_mode_check',
         ),
         CheckConstraint(
-            "challenge_rounds IN (2, 3)", name="assignment_challenge_rounds_check"
-        ),
-        CheckConstraint(
-            "task_mode IN ('from_scratch', 'revise_draft')",
-            name="assignment_task_mode_check",
-        ),
-        CheckConstraint(
-            "NOT (task_mode = 'revise_draft' AND challenge_enabled)",
-            name="assignment_revise_draft_no_challenge_check",
+            "(task_mode = 'from_scratch' OR NOT challenge_enabled)",
+            name='assignment_revise_draft_no_challenge_check',
         ),
     )
 
@@ -123,6 +127,12 @@ class Assignment(Base):
     score_max = Column(Integer, nullable=False)
     coaching_style = Column(Text, nullable=False, default="balanced")
     task_mode = Column(Text, nullable=False, default="from_scratch")
+    scoring_mode = Column(Text, nullable=False, default='dimensions')
+    teaching_config = Column(JSONField, nullable=False)
+    config_revision = Column(Integer, nullable=False, default=1)
+    description_version = Column(Integer, nullable=False, default=1)
+    reflection_version = Column(Integer, nullable=False, default=1)
+    change_summary = Column(Text, nullable=True)
     challenge_enabled = Column(Boolean, nullable=False, default=False)
     challenge_rounds = Column(Integer, nullable=False, default=3)
     challenge_focus_keys = Column(JSONField, nullable=False, default=list)
@@ -900,7 +910,7 @@ class RubricCriterion(BaseModel):
 
 
 class RubricSchema(BaseModel):
-    criteria: list[RubricCriterion] = Field(min_length=1, max_length=8)
+    criteria: list[RubricCriterion] = Field(max_length=8)
 
     @model_validator(mode="after")
     def validate_unique_keys(self):
@@ -1123,6 +1133,12 @@ class AssignmentModel(BaseModel):
     score_max: int
     coaching_style: CoachingStyle
     task_mode: TaskMode
+    scoring_mode: Literal['dimensions', 'total']
+    teaching_config: dict
+    config_revision: int
+    description_version: int
+    reflection_version: int
+    change_summary: Optional[str] = None
     challenge_enabled: bool
     challenge_rounds: int
     challenge_focus_keys: list[str] = Field(default_factory=list)
@@ -1165,7 +1181,7 @@ def validate_task_mode_challenge(
 ) -> None:
     """修订初稿作业结构上没有质疑式读者:左侧对话本身就是按维度诊断与追问。"""
 
-    if task_mode != "revise_draft":
+    if not is_revision(task_mode):
         return
     if challenge_enabled or any(key.strip() for key in focus_keys or []):
         raise ValueError("Revise-draft assignments have no pre-submission read-through")
@@ -1503,6 +1519,7 @@ class EducationNotificationModel(BaseModel):
 
 
 class AssignmentCreateForm(BaseModel):
+    model_config = ConfigDict(extra='forbid')
     title: str
     description: Optional[str] = None
     classroom_ids: list[str] = Field(default_factory=list)
@@ -1510,6 +1527,7 @@ class AssignmentCreateForm(BaseModel):
     score_max: int = Field(gt=0, le=10000)
     coaching_style: CoachingStyle = "balanced"
     task_mode: TaskMode = "from_scratch"
+    scoring_mode: Literal['dimensions', 'total'] = 'dimensions'
     challenge_enabled: bool = False
     challenge_rounds: int = 3
     challenge_focus_keys: list[str] = Field(default_factory=list)
@@ -1524,7 +1542,10 @@ class AssignmentCreateForm(BaseModel):
 
     @model_validator(mode="after")
     def validate_rubric_total(self):
-        if self.rubric_schema.total_score != self.score_max:
+        if self.scoring_mode == 'total':
+            if self.rubric_schema.criteria:
+                raise ValueError('Total-only scoring has no rubric criteria')
+        elif not self.rubric_schema.criteria or self.rubric_schema.total_score != self.score_max:
             raise ValueError(
                 "Rubric maximum scores must add up to assignment maximum score"
             )
@@ -1544,6 +1565,7 @@ class AssignmentCreateForm(BaseModel):
 
 
 class AssignmentUpdateForm(BaseModel):
+    model_config = ConfigDict(extra='forbid')
     title: Optional[str] = None
     description: Optional[str] = None
     classroom_id: Optional[str] = None
@@ -1551,6 +1573,10 @@ class AssignmentUpdateForm(BaseModel):
     score_max: Optional[int] = Field(default=None, gt=0, le=10000)
     coaching_style: Optional[CoachingStyle] = None
     task_mode: Optional[TaskMode] = None
+    scoring_mode: Optional[Literal['dimensions', 'total']] = None
+    expected_config_revision: int = Field(gt=0)
+    adopt_latest_teaching_config: bool = False
+    change_summary: Optional[str] = Field(default=None, max_length=1000)
     challenge_enabled: Optional[bool] = None
     challenge_rounds: Optional[int] = None
     # 焦点 key 要对着「更新后」的 rubric 校验,而 rubric 可能不在本次请求里,
@@ -1580,6 +1606,7 @@ class AssignmentUpdateForm(BaseModel):
         if (
             self.score_max is not None
             and self.rubric_schema is not None
+            and self.scoring_mode != 'total'
             and self.rubric_schema.total_score != self.score_max
         ):
             raise ValueError(
@@ -1683,6 +1710,7 @@ class ClassroomResponse(BaseModel):
 
 
 class TeacherAssignmentListItem(BaseModel):
+    writing_count: int = 0
     assignment: AssignmentModel
     classroom: Optional[ClassroomModel] = None
     student_count: int = 0
@@ -1742,35 +1770,12 @@ class DraftBaselineForm(BaseModel):
     text: str = Field(max_length=200_000)
 
 
-class RevisionDecisionForm(BaseModel):
-    """学生对修改清单里一条(要改或可改进)的处理。可以先只选不写理由,提交时再校验。"""
-
-    model_config = ConfigDict(extra="forbid")
-
-    item_no: int = Field(ge=1)
-    decision: Optional[RevisionDecision] = None
-    reason: Optional[str] = Field(default=None, max_length=2000)
 
 
-class RevisionItemsResponse(BaseModel):
-    status: Literal["ready", "pending", "failed"]
-    items: list[RevisionItemModel]
 
 
-class RevisionFollowUpResponse(BaseModel):
-    """补看的结果。not_ready:那一项还没改到位,note 说还差在哪,暂缓项保持不变。"""
-
-    status: Literal["ready", "not_ready", "pending", "failed"]
-    note: Optional[str] = None
-    items: list[RevisionItemModel]
 
 
-class RevisionItemsStartForm(BaseModel):
-    """开始第一次通读。用学生接下来要对话的那个模型。"""
-
-    model_config = ConfigDict(extra="forbid")
-
-    model_id: Optional[str] = Field(default=None, max_length=256)
 
 
 class VersionCreateForm(BaseModel):
@@ -1862,6 +1867,7 @@ class SubmissionCreateForm(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     writing_session_id: str = Field(min_length=1)
+    expected_config_revision: int = Field(gt=0)
     final_content_json: Optional[dict] = None
     final_content_html: Optional[str] = None
     final_content_text: str = Field(max_length=1_000_000)
@@ -1870,16 +1876,14 @@ class SubmissionCreateForm(BaseModel):
     reflection_answers: list[ReflectionAnswerForm] = Field(
         default_factory=list, max_length=REFLECTION_MAX_QUESTIONS
     )
-    # 修订初稿作业:修改清单里各条的处理,随提交一起落库,免得最后一次修改还在路上。
-    revision_decisions: list[RevisionDecisionForm] = Field(
-        default_factory=list, max_length=20
-    )
     data_completeness: SubmissionEvidenceCompleteness
 
 
 class SubmissionReviewForm(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    expected_final_version_id: str = Field(min_length=1)
+    expected_review_revision: int = Field(ge=0)
     review_status: Literal["pending", "reviewed", "returned"] = "reviewed"
     score: Optional[int] = Field(default=None, ge=0)
     reflection_score: Optional[int] = Field(default=None, ge=1, le=5)
@@ -1980,6 +1984,8 @@ class SubmissionDetailResponse(BaseModel):
     # prompt_timeline 是整个写作会话的对话;这个是本轮证据里学生发出的消息数,
     # 批改时要不要打提问质量按它判断,和后端校验同一口径。
     round_prompt_count: int
+    review_revision: int = 0
+    review_history: list[dict] = Field(default_factory=list)
     micro_reflection: MicroReflectionModel
     review: Optional[SubmissionReviewModel] = None
     note: dict
@@ -2978,12 +2984,32 @@ class EducationTable:
         assignment_id: str,
         form_data: AssignmentUpdateForm,
         db: Optional[Session] = None,
+        teaching_config: Optional[dict] = None,
     ) -> Optional[AssignmentModel]:
         with get_db_context(db) as db:
             assignment = db.get(Assignment, assignment_id)
             if assignment is None:
                 return None
 
+            description_changed = any(
+                getattr(form_data, key) != getattr(assignment, key)
+                for key in ('title', 'description')
+                if key in form_data.model_fields_set
+            )
+            reflection_changed = (
+                form_data.reflection_questions is not None
+                and [q.model_dump() for q in form_data.reflection_questions] != assignment.reflection_questions
+            )
+            if teaching_config is not None:
+                assignment.teaching_config = teaching_config
+            if form_data.scoring_mode is not None:
+                assignment.scoring_mode = form_data.scoring_mode
+            assignment.config_revision += 1
+            if description_changed:
+                assignment.description_version += 1
+                assignment.change_summary = form_data.change_summary
+            if reflection_changed:
+                assignment.reflection_version += 1
             if "title" in form_data.model_fields_set:
                 title = (form_data.title or "").strip()
                 if not title:
@@ -3062,8 +3088,13 @@ class EducationTable:
         classroom_id: str,
         form_data: AssignmentCreateForm,
         db: Optional[Session] = None,
+        teaching_config: Optional[dict] = None,
     ) -> AssignmentModel:
         with get_db_context(db) as db:
+            if teaching_config is None:
+                from open_webui.services.education.teaching_config import latest_teaching_config
+
+                teaching_config = latest_teaching_config(form_data.task_mode, db)
             now = int(time.time())
             assignment_title = form_data.title.strip()
             classroom_id = classroom_id.strip()
@@ -3083,12 +3114,12 @@ class EducationTable:
                 score_max=form_data.score_max,
                 coaching_style=form_data.coaching_style,
                 task_mode=form_data.task_mode,
+                scoring_mode=form_data.scoring_mode,
+                teaching_config=teaching_config,
                 challenge_enabled=form_data.challenge_enabled,
                 challenge_rounds=form_data.challenge_rounds,
                 challenge_focus_keys=list(form_data.challenge_focus_keys),
-                reflection_questions=[
-                    question.model_dump() for question in form_data.reflection_questions
-                ],
+                reflection_questions=[question.model_dump() for question in form_data.reflection_questions],
                 rubric_schema=form_data.rubric_schema.model_dump(),
                 model_params=form_data.model_params.model_dump(),
                 created_at=now,
@@ -3572,7 +3603,10 @@ class EducationTable:
                 db.rollback()
                 return None
 
+            from open_webui.models.education_types import RevisionReading
+
             for model in (
+                RevisionReading,
                 WritingVersion,
                 ProvenanceSegment,
                 EditorOperation,
@@ -3593,182 +3627,11 @@ class EducationTable:
             db.refresh(session)
             return WritingSessionModel.model_validate(session)
 
-    def claim_revision_items(
-        self, session_id: str, stale_after: int, db: Optional[Session] = None
-    ) -> bool:
-        """占位开始第一次通读。已通读完、或别的请求正在通读(占位未过期)时返回 False。
 
-        占位要单独提交:通读要调模型,不能把一个没提交的事务夹在模型调用两头。
-        """
-        with get_db_context(db) as db:
-            now = int(time.time())
-            claimed = (
-                db.query(WritingSession)
-                .filter(
-                    WritingSession.id == session_id,
-                    WritingSession.draft_baseline_at.is_not(None),
-                    WritingSession.revision_items_generated_at.is_(None),
-                    (
-                        WritingSession.revision_items_claimed_at.is_(None)
-                        | (WritingSession.revision_items_claimed_at < now - stale_after)
-                    ),
-                )
-                .update(
-                    {WritingSession.revision_items_claimed_at: now},
-                    synchronize_session=False,
-                )
-            )
-            db.commit()
-            return claimed == 1
 
-    def release_revision_items_claim(
-        self, session_id: str, db: Optional[Session] = None
-    ) -> None:
-        with get_db_context(db) as db:
-            db.query(WritingSession).filter(
-                WritingSession.id == session_id,
-                WritingSession.revision_items_generated_at.is_(None),
-            ).update(
-                {WritingSession.revision_items_claimed_at: None},
-                synchronize_session=False,
-            )
-            db.commit()
 
-    def store_revision_items(
-        self,
-        session_id: str,
-        baseline_text: str,
-        items: list[dict],
-        model_id: str,
-        db: Optional[Session] = None,
-    ) -> Optional[list[RevisionItemModel]]:
-        """落库通读结论并标记通读完成。只成功一次;已通读过就原样返回已有的。
 
-        baseline_text 是这次通读读的那份初稿。通读要半分钟,期间学生可能撤回初稿、
-        又交了不一样的一份:这时结论属于旧初稿,不落库,返回 None。
-        """
-        with get_db_context(db) as db:
-            now = int(time.time())
-            done = (
-                db.query(WritingSession)
-                .filter(
-                    WritingSession.id == session_id,
-                    WritingSession.draft_baseline_text == baseline_text,
-                    WritingSession.revision_items_generated_at.is_(None),
-                )
-                .update(
-                    {
-                        WritingSession.revision_items_generated_at: now,
-                        WritingSession.revision_items_claimed_at: None,
-                        WritingSession.revision_items_model_id: model_id,
-                    },
-                    synchronize_session=False,
-                )
-            )
-            if done != 1:
-                db.rollback()
-                session = db.get(WritingSession, session_id)
-                if session is None or session.draft_baseline_text != baseline_text:
-                    return None
-                return self.get_revision_items(session_id, db=db)
-            for index, item in enumerate(items, start=1):
-                db.add(
-                    RevisionItem(
-                        id=str(uuid.uuid4()),
-                        writing_session_id=session_id,
-                        item_no=index,
-                        criterion_key=item["criterion_key"],
-                        status=item["status"],
-                        finding=item.get("finding"),
-                        quoted_span=item.get("quoted_span"),
-                        is_blocking=bool(item.get("is_blocking")),
-                        decision=None,
-                        reason=None,
-                        decided_at=None,
-                        created_at=now,
-                    )
-                )
-            db.commit()
-            return self.get_revision_items(session_id, db=db)
 
-    def claim_revision_follow_up(
-        self, session_id: str, stale_after: int, db: Optional[Session] = None
-    ) -> bool:
-        """占位开始补看。和第一次通读共用一个占位:两者都要调模型,不能同时进行。"""
-        with get_db_context(db) as db:
-            now = int(time.time())
-            claimed = (
-                db.query(WritingSession)
-                .filter(
-                    WritingSession.id == session_id,
-                    WritingSession.revision_items_generated_at.is_not(None),
-                    (
-                        WritingSession.revision_items_claimed_at.is_(None)
-                        | (WritingSession.revision_items_claimed_at < now - stale_after)
-                    ),
-                )
-                .update(
-                    {WritingSession.revision_items_claimed_at: now},
-                    synchronize_session=False,
-                )
-            )
-            db.commit()
-            return claimed == 1
-
-    def release_revision_follow_up_claim(
-        self, session_id: str, db: Optional[Session] = None
-    ) -> None:
-        with get_db_context(db) as db:
-            db.query(WritingSession).filter(
-                WritingSession.id == session_id,
-                WritingSession.revision_items_generated_at.is_not(None),
-            ).update(
-                {WritingSession.revision_items_claimed_at: None},
-                synchronize_session=False,
-            )
-            db.commit()
-
-    def apply_revision_follow_up(
-        self, session_id: str, items: list[dict], model_id: str, db: Optional[Session] = None
-    ) -> list[RevisionItemModel]:
-        """补看通过:给暂缓的几项补上结论,并记下那一项已确认改到位。
-
-        只改仍是暂缓的条目;别的请求已经补过就原样返回。完成后放掉占位。
-        """
-        with get_db_context(db) as db:
-            now = int(time.time())
-            rows = {
-                row.criterion_key: row
-                for row in db.query(RevisionItem)
-                .filter(RevisionItem.writing_session_id == session_id)
-                .all()
-            }
-            deferred = [row for row in rows.values() if row.status == "deferred"]
-            if deferred:
-                for item in items:
-                    row = rows.get(item["criterion_key"])
-                    if row is None or row.status != "deferred":
-                        continue
-                    row.status = item["status"]
-                    row.finding = item.get("finding")
-                    row.quoted_span = item.get("quoted_span")
-                    row.follow_up_at = now
-                for row in rows.values():
-                    if row.is_blocking:
-                        row.follow_up_at = now
-            db.query(WritingSession).filter(WritingSession.id == session_id).update(
-                {
-                    WritingSession.revision_items_claimed_at: None,
-                    **(
-                        {WritingSession.revision_follow_up_model_id: model_id}
-                        if deferred
-                        else {}
-                    ),
-                },
-                synchronize_session=False,
-            )
-            db.commit()
-            return self.get_revision_items(session_id, db=db)
 
     def get_revision_items(
         self, session_id: str, db: Optional[Session] = None
@@ -3782,39 +3645,6 @@ class EducationTable:
             )
             return [RevisionItemModel.model_validate(row) for row in rows]
 
-    def set_revision_decisions(
-        self,
-        session_id: str,
-        decisions: list[tuple[int, Optional[str], Optional[str]]],
-        commit: bool = True,
-        db: Optional[Session] = None,
-    ) -> list[RevisionItemModel]:
-        """写入学生对若干条的处理 (item_no, decision, reason)。
-
-        不存在的条目号、或对达标/暂缓的条目表态,抛 ValueError。
-        """
-        with get_db_context(db) as db:
-            now = int(time.time())
-            rows = {
-                row.item_no: row
-                for row in db.query(RevisionItem)
-                .filter(RevisionItem.writing_session_id == session_id)
-                .all()
-            }
-            for item_no, decision, reason in decisions:
-                row = rows.get(item_no)
-                if row is None or row.status not in REVISION_DECIDABLE_STATUSES:
-                    raise ValueError("Unknown revision item")
-                row.decision = decision
-                row.reason = reason
-                row.decided_at = now if decision else None
-            if commit:
-                db.commit()
-            else:
-                db.flush()
-            return [
-                RevisionItemModel.model_validate(rows[key]) for key in sorted(rows)
-            ]
 
     def assignment_has_draft_baseline(
         self, assignment_id: str, db: Optional[Session] = None
@@ -4851,6 +4681,16 @@ class EducationTable:
                 db.flush()
             db.refresh(event)
             return SubmissionReviewEventModel.model_validate(event)
+
+    def get_submission_review_history(self, submission_id, db=None):
+        with get_db_context(db) as db:
+            rows = (
+                db.query(SubmissionReviewEvent)
+                .filter_by(submission_id=submission_id)
+                .order_by(SubmissionReviewEvent.review_revision)
+                .all()
+            )
+            return [SubmissionReviewEventModel.model_validate(row) for row in rows]
 
     def get_latest_submission_review_event(
         self,

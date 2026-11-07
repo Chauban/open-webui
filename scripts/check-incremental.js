@@ -2,6 +2,12 @@ import { spawnSync } from 'node:child_process';
 
 const focusPrefixes = [
 	'src/lib/apis/education/',
+	'src/lib/components/admin/Settings/TeachingTypes.svelte',
+	'src/lib/components/admin/Settings/Education.svelte',
+	'src/lib/components/admin/Users/UserList/EditUserModal.svelte',
+	'src/lib/utils/assignment-form',
+	'src/lib/utils/task-types',
+	'src/lib/utils/ai-steps',
 	'src/lib/components/education/',
 	'src/lib/utils/submission-review',
 	'src/routes/(app)/teacher/',
@@ -38,6 +44,7 @@ const run = (command, args) => {
 	const result = spawnSync(executable, executableArgs, {
 		cwd: process.cwd(),
 		encoding: 'utf8',
+		maxBuffer: 32 * 1024 * 1024,
 		shell: false
 	});
 
@@ -69,8 +76,10 @@ const stderr = (checkResult.stderr || '')
 		(line) => line.trim() === '' || !filteredStderrPatterns.some((pattern) => pattern.test(line))
 	)
 	.join('\n');
+const rootPrefix = process.cwd().replaceAll('\\', '/') + '/';
 const diagnosticLines = stdout
 	.split(/\r?\n/)
+	.map((line) => line.replaceAll('\\\\', '/').replaceAll(rootPrefix, ''))
 	.filter((line) => /\s(ERROR|WARNING)\s"/.test(line));
 
 const relevantDiagnostics = diagnosticLines.filter((line) =>

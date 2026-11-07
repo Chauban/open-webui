@@ -35,7 +35,7 @@ export const createReflectionQuestion = (kind: ReflectionQuestionKind): Reflecti
 	show_when: 'always'
 });
 
-const TASK_MODES: TaskMode[] = ['from_scratch', 'revise_draft'];
+const TASK_MODES: TaskMode[] = ['from_scratch', 'revise_draft', 'revise_argument'];
 
 // 两种作业形式要问的反思不一样：
 // - 从零写作：用没用 AI、AI 帮了什么、改了什么，只有学生自己知道，要学生自报。
@@ -62,7 +62,7 @@ type RecommendedQuestion = {
 const RECOMMENDED_QUESTIONS: RecommendedQuestion[] = [
 	{
 		defaultFor: ['from_scratch'],
-		hiddenFor: ['revise_draft'],
+		hiddenFor: ['revise_draft', 'revise_argument'],
 		kind: 'multi_choice',
 		prompt: 'What did AI help you with?',
 		options: [
@@ -81,21 +81,21 @@ const RECOMMENDED_QUESTIONS: RecommendedQuestion[] = [
 	},
 	{
 		defaultFor: ['from_scratch'],
-		hiddenFor: ['revise_draft'],
+		hiddenFor: ['revise_draft', 'revise_argument'],
 		kind: 'text',
 		prompt: 'What did you change?',
 		placeholder: 'Describe the concrete revision you made.'
 	},
 	{
 		defaultFor: ['from_scratch'],
-		hiddenFor: ['revise_draft'],
+		hiddenFor: ['revise_draft', 'revise_argument'],
 		kind: 'text',
 		prompt: 'Where did you make this change?',
 		placeholder: 'For example: paragraph 2, the conclusion, or the evidence section.'
 	},
 	{
 		defaultFor: ['from_scratch'],
-		hiddenFor: ['revise_draft'],
+		hiddenFor: ['revise_draft', 'revise_argument'],
 		kind: 'text',
 		prompt: 'Why did you make this judgement?',
 		placeholder: 'Explain why you accepted, rejected, or changed the suggestion or feedback.'
@@ -118,22 +118,21 @@ const RECOMMENDED_QUESTIONS: RecommendedQuestion[] = [
 		// 修改清单列的是 AI 通读指出的问题;这道题只问清单之外、学生自己看出来的,
 		// 两处不重复,也让老师看到学生离开 AI 还能不能自己挑出毛病。
 		defaultFor: ['revise_draft'],
-		hiddenFor: ['from_scratch'],
+		hiddenFor: ['from_scratch', 'revise_argument'],
 		kind: 'text',
-		prompt: 'Besides the revision list, what in this draft are you still not happy with, and why?',
-		placeholder: 'No need to repeat items on the revision list. If nothing, write "nothing".'
+		prompt: '你觉得这份文献综述还有哪里没写好？为什么？'
 	},
 	{
 		// 修订初稿作业里学生多半照抄清单上没改完的那一条,所以只留给从零写作。
 		defaultFor: [],
-		hiddenFor: ['revise_draft'],
+		hiddenFor: ['revise_draft', 'revise_argument'],
 		kind: 'text',
 		prompt: 'Against the rubric, which part of this draft is weakest now, and why?',
 		placeholder: 'Name one part and say what it still lacks.'
 	},
 	{
 		defaultFor: [],
-		hiddenFor: ['revise_draft'],
+		hiddenFor: ['revise_draft', 'revise_argument'],
 		kind: 'text',
 		prompt: 'Which AI suggestion did you not adopt, and why?',
 		placeholder: 'Name the suggestion and your reason.',
@@ -141,7 +140,7 @@ const RECOMMENDED_QUESTIONS: RecommendedQuestion[] = [
 	},
 	{
 		defaultFor: [],
-		hiddenFor: ['revise_draft'],
+		hiddenFor: ['revise_draft', 'revise_argument'],
 		kind: 'single_choice',
 		prompt: 'How much of your final draft did AI shape?',
 		options: ['Hardly any', 'Some parts', 'Most of it'],
@@ -149,7 +148,7 @@ const RECOMMENDED_QUESTIONS: RecommendedQuestion[] = [
 	},
 	{
 		defaultFor: [],
-		hiddenFor: ['revise_draft'],
+		hiddenFor: ['revise_draft', 'revise_argument'],
 		kind: 'single_choice',
 		prompt: 'Why did you choose not to use AI?',
 		options: ['I did not need it', 'I wanted to practise on my own', 'I do not trust its answers'],
@@ -170,6 +169,23 @@ const RECOMMENDED_QUESTIONS: RecommendedQuestion[] = [
 		placeholder: 'For example: finding evidence, or structuring the argument.'
 	}
 ];
+
+RECOMMENDED_QUESTIONS.push(
+	{
+		defaultFor: ['revise_argument'],
+		hiddenFor: ['from_scratch', 'revise_draft'],
+		kind: 'text',
+		prompt:
+			'请从最终稿中选一句，说明它怎样帮助读者从证据走向观点。你现在为什么认为这一步能够成立？也可以说明仍不能成立及你的疑问。'
+	},
+	{
+		defaultFor: ['revise_argument'],
+		hiddenFor: ['from_scratch', 'revise_draft'],
+		kind: 'text',
+		required: false,
+		prompt: '你还有哪一点拿不准，或者与 AI 的意见不同？希望老师重点看哪里？'
+	}
+);
 
 const materialize = (item: RecommendedQuestion, t: Translate): ReflectionQuestion => ({
 	id: newReflectionQuestionId(),
@@ -376,3 +392,29 @@ export const buildReflectionAnswers = (
 				text: null
 			};
 		});
+
+/** Only changes to the question's meaning invalidate an answer. */
+export const reflectionAnswerSignature = (question?: ReflectionQuestion) =>
+	question
+		? JSON.stringify({
+				kind: question.kind,
+				prompt: question.prompt,
+				options: question.options,
+				allow_other: question.allow_other
+			})
+		: null;
+
+export const retainApplicableReflectionDrafts = (
+	oldQuestions: ReflectionQuestion[],
+	newQuestions: ReflectionQuestion[],
+	drafts: ReflectionAnswerDrafts
+): ReflectionAnswerDrafts =>
+	Object.fromEntries(
+		Object.entries(drafts).filter(([id]) => {
+			const before = oldQuestions.find((question) => question.id === id);
+			const after = newQuestions.find((question) => question.id === id);
+			return (
+				before && after && reflectionAnswerSignature(before) === reflectionAnswerSignature(after)
+			);
+		})
+	);

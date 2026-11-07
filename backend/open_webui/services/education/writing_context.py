@@ -26,7 +26,9 @@ def is_draft_baseline_missing(session, db=None) -> bool:
     if session.scope != "assignment" or session.draft_baseline_at is not None:
         return False
     assignment = Education.get_assignment_by_id(session.assignment_id, db=db)
-    return assignment is not None and assignment.task_mode == "revise_draft"
+    from open_webui.services.education.task_types import is_revision
+
+    return assignment is not None and is_revision(assignment.task_mode)
 
 
 def normalize_draft_paragraphs(text: str) -> list[str]:
@@ -258,6 +260,7 @@ async def build_current_text_context(
     chat_id: str | None = None,
     previous_reply_id: str | None = None,
     db=None,
+    captured_text: str | None = None,
 ) -> str:
     """要追加到系统提示末尾的学生当前正文,连同它改没改过的状态。
 
@@ -267,9 +270,12 @@ async def build_current_text_context(
     笔记用自己的短会话读取,读完即释放,不把数据库事务带进之后的模型调用。
     """
 
-    note = await Notes.get_note_by_id(session.note_id)
-    content = ((note.data or {}).get("content") or {}) if note else {}
-    text = (content.get("md") or "").strip()
+    if captured_text is None:
+        note = await Notes.get_note_by_id(session.note_id)
+        content = ((note.data or {}).get('content') or {}) if note else {}
+        text = (content.get('md') or '').strip()
+    else:
+        text = captured_text.strip()
     if not text:
         return "【学生当前正文】右侧编辑器里还没有内容。"
 
@@ -290,9 +296,10 @@ async def build_current_text_context(
             session.id, previous_reply.created_at, db=db
         )
         # 初稿确认时不存版本;那之前没有版本,模型上次看到的就是初稿(从零写作则是空稿)。
-        seen_text = (
-            version.note_snapshot_text if version else (baseline or "")
-        )
+        recorded_context = (previous_reply.meta or {}).get('education_context') or {}
+        seen_text = recorded_context.get('source_text')
+        if seen_text is None:
+            seen_text = version.note_snapshot_text if version else (baseline or '')
         changes = describe_text_changes(normalize_draft_paragraphs(seen_text), paragraphs)
         if changes:
             status.append("自你上一次回复以来，学生改了这些地方：")
@@ -301,14 +308,14 @@ async def build_current_text_context(
             status.append("自你上一次回复以来：没有新的改动。")
 
     return (
-        "【学生当前正文】以下是学生右侧编辑器里最近一次保存的全文。"
-        "学生会边聊边改稿，但不一定每轮都改；改没改、改了哪里以下面的说明为准，不要自己推测。"
-        "它和你之前回复里引用过的句子不一样时，那是改动前的旧版本，不是你记错了；"
-        "谈论正文时一律以这一版为准。改动和你期待的不一样时，照实说你看到他改了什么。"
-        "只有说明里写着没有新的改动、学生却说改好了，才是还没保存，"
-        "请他等编辑器显示已保存后再发。\n"
-        + "".join(f"{line}\n" for line in status)
-        + f"<<<\n{text}\n>>>"
+        '【学生当前正文】以下是学生右侧编辑器里最近一次保存的全文。'
+        '学生会边聊边改稿，但不一定每轮都改；改没改、改了哪里以下面的说明为准，不要自己推测。'
+        '它和你之前回复里引用过的句子不一样时，那是改动前的旧版本，不是你记错了；'
+        '谈论正文时一律以这一版为准。改动和你期待的不一样时，照实说你看到他改了什么。'
+        '如果学生说已修改但保存稿没有变化，说明你目前读到的仍是这一保存版本；'
+        '可请他核对保存状态，不把未看到的改动当作已阅读。\n'
+        + ''.join(f'{line}\n' for line in status)
+        + f'<<<\n{text}\n>>>'
     )
 
 

@@ -1125,6 +1125,12 @@ async def chat_completion(
                 student_thinking_choice = (form_data.get('params') or {}).get(THINKING_LEVEL_PARAM)
                 form_data = strip_chat_request_overrides(form_data, NO_CHAT_OVERRIDES)
                 writing_assignment = Education.get_assignment_by_id(writing_session.assignment_id)
+                from open_webui.services.education.task_types import is_revision
+
+                if is_revision(writing_assignment.task_mode) and tasks:
+                    # Generic follow-up suggestions can invite ghostwriting or restart
+                    # a discussion the student has chosen to end.
+                    tasks = {key: value for key, value in tasks.items() if key != TASKS.FOLLOW_UP_GENERATION}
                 coaching_thinking = resolve_coaching_thinking(
                     await get_ai_step_policy(), writing_assignment.model_params, student_thinking_choice
                 )

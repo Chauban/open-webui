@@ -16,12 +16,10 @@ from open_webui.test.apps.webui.routers.test_education_smoke import (
     _DRAFT_MD,
     UserContext,
     _fake_challenge_model,
-    _fake_diagnosis,
     _respond,
     _revise_draft_with_baseline,
     _setup_challenge_assignment,
     _start_challenge,
-    _start_first_read,
     _submit_body,
     education_client,  # noqa: F401  pytest fixture
 )
@@ -76,13 +74,35 @@ _ALL_OK = {
 
 
 def _first_read_model(client, teacher, student, SessionLocal):
+    from unittest.mock import patch
+    import json
+    from open_webui.models.education_types import RevisionReading
+
     _, session_id = _revise_draft_with_baseline(client, teacher, student)
-    with _fake_diagnosis(_ALL_OK) as calls:
-        res = _start_first_read(client, session_id)
+    calls = []
+
+    async def fake(request, user, step, model, messages, policy=None):
+        calls.append(model.model_id)
+        return {
+            'choices': [
+                {
+                    'message': {
+                        'content': json.dumps(
+                            {'understanding': 'Draft', 'strength': None, 'focus': [], 'overview': 'Read'}
+                        )
+                    }
+                }
+            ]
+        }
+
+    with patch('open_webui.services.education.revision_reading.call_step_model', fake):
+        res = client.post(
+            f'/api/v1/writing-sessions/{session_id}/readings', json={'purpose': 'first_read', 'model_id': 'test-model'}
+        )
         assert res.json()['status'] == 'ready', res.text
     with SessionLocal() as db:
-        recorded = db.get(WritingSession, session_id).revision_items_model_id
-    return calls[0]['model_id'], recorded, session_id
+        recorded = db.query(RevisionReading).filter_by(writing_session_id=session_id).one().model_id
+    return calls[0], recorded, session_id
 
 
 def test_first_read_follows_the_student_until_the_admin_picks_a_model(education_client):
@@ -107,7 +127,7 @@ def test_first_read_uses_the_admin_model_and_freezes_it(education_client):
     assert submit.status_code == 200, submit.text
     with SessionLocal() as db:
         stats = db.get(Submission, submit.json()['submission_id']).stats_json
-    assert stats['revision_items']['models'] == {'first_read': 'diagnosis-model', 'follow_up': None}
+    assert stats['revision_readings'][0]['model_id'] == 'diagnosis-model'
 
 
 def test_deleted_admin_model_falls_back_to_the_student_pick(education_client):

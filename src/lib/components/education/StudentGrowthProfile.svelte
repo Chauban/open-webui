@@ -420,109 +420,110 @@
 {:else}
 	<div class="space-y-8">
 		<div class="space-y-3">
-		<nav
-			class="flex gap-1 overflow-x-auto border-b border-gray-200 pb-px dark:border-gray-800"
-			aria-label={$i18n.t('Growth profile sections')}
-		>
-			{#each visibleSections as section}
-				<button
-					type="button"
-					class="shrink-0 rounded-t-lg px-3 py-2 text-sm font-medium transition {activeSection ===
-					section.key
-						? 'bg-gray-100 text-gray-900 dark:bg-gray-800 dark:text-white'
-						: 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'}"
-					aria-pressed={activeSection === section.key}
-					on:click={() => (activeSection = section.key)}
-				>
-					{$i18n.t(section.label)}
-				</button>
-			{/each}
-		</nav>
-		<!--
+			<nav
+				class="flex gap-1 overflow-x-auto border-b border-gray-200 pb-px dark:border-gray-800"
+				aria-label={$i18n.t('Growth profile sections')}
+			>
+				{#each visibleSections as section}
+					<button
+						type="button"
+						class="shrink-0 rounded-t-lg px-3 py-2 text-sm font-medium transition {activeSection ===
+						section.key
+							? 'bg-gray-100 text-gray-900 dark:bg-gray-800 dark:text-white'
+							: 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'}"
+						aria-pressed={activeSection === section.key}
+						on:click={() => (activeSection = section.key)}
+					>
+						{$i18n.t(section.label)}
+					</button>
+				{/each}
+			</nav>
+			<!--
 			筛选放在分区标签下面、就近作用于内容;改了就生效,不再要点「应用」。
 			指标版本对大多数人只有一个,只有真出现多个版本时才露出来。
 		-->
-		<!-- 默认只露时间范围;按作业/轮次/指标版本筛是少数情况,收进「更多筛选」 -->
-		<div class="flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
-			<div class="flex items-center gap-1.5">
-				<span>{$i18n.t('Date range')}</span>
-				<input
-					class={EDU_FILTER_FIELD_CLASS}
-					type="date"
-					aria-label={$i18n.t('Start date')}
-					bind:value={startDate}
-					on:change={applyFilters}
-				/>
-				<span class="text-gray-400">–</span>
-				<input
-					class={EDU_FILTER_FIELD_CLASS}
-					type="date"
-					aria-label={$i18n.t('End date')}
-					bind:value={endDate}
-					on:change={applyFilters}
-				/>
-			</div>
-			<button
-				type="button"
-				class="rounded-full px-3 py-1.5 transition hover:bg-gray-100 dark:hover:bg-gray-800 {showMoreFilters ||
-				assignmentFilter ||
-				roundFilter
-					? 'text-gray-900 dark:text-gray-100'
-					: ''}"
-				aria-expanded={showMoreFilters}
-				on:click={() => (showMoreFilters = !showMoreFilters)}
-			>
-				{$i18n.t('More filters')}{#if assignmentFilter || roundFilter} ·
-					{[assignmentFilter, roundFilter].filter(Boolean).length}{/if}
-			</button>
-			{#if startDate || endDate || assignmentFilter || roundFilter || (variant === 'teacher' && metricVersionFilter !== profile.active_metric_version)}
-				<EduButton variant="link" on:click={clearFilters}>{$i18n.t('Clear')}</EduButton>
-			{/if}
-		</div>
-		{#if showMoreFilters}
+			<!-- 默认只露时间范围;按作业/轮次/指标版本筛是少数情况,收进「更多筛选」 -->
 			<div class="flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
-				<select
-					class="max-w-56 {EDU_FILTER_FIELD_CLASS}"
-					aria-label={$i18n.t('Assignment')}
-					bind:value={assignmentFilter}
-					on:change={applyFilters}
-				>
-					<option value="">{$i18n.t('All Assignments')}</option>
-					{#each assignmentOptions as item}
-						<option value={item.assignment.id}>{item.assignment.title}</option>
-					{/each}
-				</select>
-				<select
-					class={EDU_FILTER_FIELD_CLASS}
-					aria-label={$i18n.t('Round')}
-					bind:value={roundFilter}
-					on:change={applyFilters}
-				>
-					<option value="">{$i18n.t('All rounds')}</option>
-					{#each roundOptions as round}
-						<option value={round}>{$i18n.t('Round {{round}}', { round })}</option>
-					{/each}
-				</select>
-				<!-- 指标版本是给教师/开发核对口径用的,学生端不出现 -->
-				{#if variant === 'teacher' && profile.available_metric_versions.length > 1}
-					<select
+				<div class="flex items-center gap-1.5">
+					<span>{$i18n.t('Date range')}</span>
+					<input
 						class={EDU_FILTER_FIELD_CLASS}
-						aria-label={$i18n.t('Metric version')}
-						bind:value={metricVersionFilter}
+						type="date"
+						aria-label={$i18n.t('Start date')}
+						bind:value={startDate}
 						on:change={applyFilters}
-					>
-						{#each profile.available_metric_versions as version}
-							<option value={version}
-								>{version} · {$i18n.t(
-									version === profile.active_metric_version ? 'Current' : 'Historical'
-								)}</option
-							>
-						{/each}
-					</select>
+					/>
+					<span class="text-gray-400">–</span>
+					<input
+						class={EDU_FILTER_FIELD_CLASS}
+						type="date"
+						aria-label={$i18n.t('End date')}
+						bind:value={endDate}
+						on:change={applyFilters}
+					/>
+				</div>
+				<button
+					type="button"
+					class="rounded-full px-3 py-1.5 transition hover:bg-gray-100 dark:hover:bg-gray-800 {showMoreFilters ||
+					assignmentFilter ||
+					roundFilter
+						? 'text-gray-900 dark:text-gray-100'
+						: ''}"
+					aria-expanded={showMoreFilters}
+					on:click={() => (showMoreFilters = !showMoreFilters)}
+				>
+					{$i18n.t('More filters')}{#if assignmentFilter || roundFilter}
+						·
+						{[assignmentFilter, roundFilter].filter(Boolean).length}{/if}
+				</button>
+				{#if startDate || endDate || assignmentFilter || roundFilter || (variant === 'teacher' && metricVersionFilter !== profile.active_metric_version)}
+					<EduButton variant="link" on:click={clearFilters}>{$i18n.t('Clear')}</EduButton>
 				{/if}
 			</div>
-		{/if}
-		{#if profile.timeline_pagination.total > profile.timeline_pagination.limit}
+			{#if showMoreFilters}
+				<div class="flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+					<select
+						class="max-w-56 {EDU_FILTER_FIELD_CLASS}"
+						aria-label={$i18n.t('Assignment')}
+						bind:value={assignmentFilter}
+						on:change={applyFilters}
+					>
+						<option value="">{$i18n.t('All Assignments')}</option>
+						{#each assignmentOptions as item}
+							<option value={item.assignment.id}>{item.assignment.title}</option>
+						{/each}
+					</select>
+					<select
+						class={EDU_FILTER_FIELD_CLASS}
+						aria-label={$i18n.t('Round')}
+						bind:value={roundFilter}
+						on:change={applyFilters}
+					>
+						<option value="">{$i18n.t('All rounds')}</option>
+						{#each roundOptions as round}
+							<option value={round}>{$i18n.t('Round {{round}}', { round })}</option>
+						{/each}
+					</select>
+					<!-- 指标版本是给教师/开发核对口径用的,学生端不出现 -->
+					{#if variant === 'teacher' && profile.available_metric_versions.length > 1}
+						<select
+							class={EDU_FILTER_FIELD_CLASS}
+							aria-label={$i18n.t('Metric version')}
+							bind:value={metricVersionFilter}
+							on:change={applyFilters}
+						>
+							{#each profile.available_metric_versions as version}
+								<option value={version}
+									>{version} · {$i18n.t(
+										version === profile.active_metric_version ? 'Current' : 'Historical'
+									)}</option
+								>
+							{/each}
+						</select>
+					{/if}
+				</div>
+			{/if}
+			{#if profile.timeline_pagination.total > profile.timeline_pagination.limit}
 				<div class="flex flex-wrap items-center justify-end gap-2 text-xs text-gray-500">
 					<span>
 						{profile.timeline_pagination.offset + 1}–{Math.min(
@@ -824,7 +825,9 @@
 					{#if latest}
 						<div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
 							{#each completenessItems as item}
-								<div class="rounded-lg border border-gray-200 px-3 py-2 text-xs dark:border-gray-800">
+								<div
+									class="rounded-lg border border-gray-200 px-3 py-2 text-xs dark:border-gray-800"
+								>
 									<div class="font-medium">{$i18n.t(item.label)}</div>
 									<div
 										class={item.status === 'complete'
@@ -1294,7 +1297,7 @@
 						</p>
 						<p>
 							{$i18n.t(
-								'Collaboration Index = average of prompt quality and reflection quality. Submissions with no AI conversation fall back to reflection quality only, so using little AI is neither penalised nor rewarded. Prompt count is shown for reference and does not count.'
+								'Collaboration Index averages the applicable teacher-rated qualities. With no student questions, only reflection applies; with no reflection answers, only question quality applies. With neither, the index is not applicable. Counts are for reference only.'
 							)}
 						</p>
 						<p>
