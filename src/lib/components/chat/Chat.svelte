@@ -3220,6 +3220,10 @@
 	};
 
 	const handleForkChat = async (messageId: string | null = null) => {
+		if (revisionMode) {
+			toast.info($i18n.t('Continue in this assignment conversation.'));
+			return;
+		}
 		if (!$chatId || !history?.currentId) {
 			toast.message($i18n.t('No chat to fork'));
 			return;
@@ -4536,6 +4540,7 @@
 							title={$chatTitle}
 							shareEnabled={!!history.currentId}
 							{initNewChat}
+							allowNewChat={!revisionMode}
 							scrollToTop={!isNearTop ? scrollToTop : null}
 							{archiveChatHandler}
 							{deleteChatHandler}
@@ -4635,7 +4640,7 @@
 										{addMessages}
 										{onToolCallResolved}
 										allowDelete={!(generating || taskIds?.length)}
-										forkHandler={handleForkChat}
+										forkHandler={revisionMode ? null : handleForkChat}
 										topPadding={!embedded && !revisionMode}
 										bottomPadding={files.length > 0}
 										{onSelect}
@@ -4686,7 +4691,7 @@
 										{embedded}
 										compactHandler={handleManualCompact}
 										statusHandler={handleStatusCommand}
-										forkHandler={handleForkChat}
+										forkHandler={revisionMode ? null : handleForkChat}
 										{toolApprovalMode}
 										onToolApprovalModeChange={handleToolApprovalModeChange}
 										{generating}
@@ -4778,7 +4783,7 @@
 										{embedded}
 										compactHandler={handleManualCompact}
 										statusHandler={handleStatusCommand}
-										forkHandler={handleForkChat}
+										forkHandler={revisionMode ? null : handleForkChat}
 										{toolApprovalMode}
 										onToolApprovalModeChange={handleToolApprovalModeChange}
 										{generating}

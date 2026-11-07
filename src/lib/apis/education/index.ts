@@ -1241,3 +1241,54 @@ export const requestRevisionReading = (
 		headers: withAuth(token),
 		body: JSON.stringify({ purpose, model_id: modelId })
 	}).then(handleJson);
+
+export type ProcessSnapshot = {
+	id: string;
+	kind: 'initial' | 'empty_start' | 'round_start' | 'version' | 'reading' | 'final';
+	created_at: number | null;
+	version_no: number | null;
+	trigger_type: string | null;
+	major: boolean;
+	used_by_ai: boolean;
+	text?: string;
+};
+export type SubmissionProcess = {
+	snapshots: ProcessSnapshot[];
+	event_snapshots: Record<string, string>;
+	default_before_id: string;
+	default_after_id: string;
+	final_version_id: string;
+	round_no: number;
+};
+export type ProcessComparison = {
+	before: ProcessSnapshot & { text: string };
+	after: ProcessSnapshot & { text: string };
+	blocks: Array<{ op: string; old_text: string; new_text: string }>;
+	unchanged: boolean;
+	final_version_id: string;
+};
+export const getSubmissionProcess = async (
+	token: string,
+	id: string,
+	finalVersionId: string
+): Promise<SubmissionProcess> => {
+	const params = new URLSearchParams({ expected_final_version_id: finalVersionId });
+	const res = await fetch(`${WEBUI_API_BASE_URL}/teacher/submissions/${id}/process?${params}`, {
+		headers: withAuth(token)
+	});
+	return handleJson(res);
+};
+export const compareSubmissionProcess = async (
+	token: string,
+	id: string,
+	finalVersionId: string,
+	before: string,
+	after: string
+): Promise<ProcessComparison> => {
+	const params = new URLSearchParams({ expected_final_version_id: finalVersionId, before, after });
+	const res = await fetch(
+		`${WEBUI_API_BASE_URL}/teacher/submissions/${id}/process/compare?${params}`,
+		{ headers: withAuth(token) }
+	);
+	return handleJson(res);
+};

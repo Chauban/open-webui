@@ -1034,7 +1034,7 @@
 		revisionBaselineText={writingSession?.draft_baseline_text ?? ''}
 		reserveWorkspaceActions={narrowLayout}
 		readOnlyHint={chatReadOnlyHint}
-		disableContextActions={false}
+		disableContextActions={isRevision(assignment?.task_mode)}
 		allowAssignmentWorkspaceChat={isAssignment}
 		lockModelOverrides={isAssignment}
 		extraRequestParams={showThinkingSwitch && !thinkingAlwaysOn && !thinkingOn

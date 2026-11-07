@@ -1,20 +1,24 @@
 <script lang="ts">
 	import { isRevision } from '$lib/utils/task-types';
-	import RevisionReadings from '$lib/components/education/RevisionReadings.svelte';
+	import TeacherProcessPanel from '$lib/components/education/TeacherProcessPanel.svelte';
+	import ProcessDraftView from '$lib/components/education/ProcessDraftView.svelte';
+	import { initialProcessState, type ProcessInspection } from '$lib/utils/process-review';
+	import type { SubmissionProcess } from '$lib/apis/education';
+	import { teacherConversationEvents } from '$lib/utils/teacher-writing-process';
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
-	import { getContext, onMount } from 'svelte';
+	import { getContext, onMount, tick } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import TextDiffBlocks from '$lib/components/education/TextDiffBlocks.svelte';
-	import DOMPurify from 'dompurify';
-	import { marked } from 'marked';
 	import { page } from '$app/stores';
+	import { createLatestRequestGate } from '$lib/utils/latest-request';
 	import { goto } from '$app/navigation';
 	import { get } from 'svelte/store';
 	import { config, models, user } from '$lib/stores';
 
 	import {
 		getSubmissionAnalysisSegmentDetail,
+		compareSubmissionProcess,
 		getSubmissionRoundDiff,
 		getSubmissionDraftDiff,
 		getSubmissionVersions,
@@ -107,14 +111,6 @@
 		}
 		return { meta: item.event_type, label: item.label ?? '', inserted_length: null };
 	};
-	const getTimelineRoleLabel = (value: string) =>
-		(
-			({
-				user: t('User'),
-				assistant: t('AI'),
-				system: t('System')
-			}) as Record<string, string>
-		)[value] || value;
 	const reviewStatusOptions = [
 		{ value: 'pending', label: 'Pending Review' },
 		{ value: 'reviewed', label: 'Reviewed' },
@@ -173,10 +169,6 @@
 	let saving = false;
 	let showAllVersions = false;
 	let showCoachingPrompt = false;
-	let showUserTimeline = true;
-	let showAssistantTimeline = true;
-	let showAnalysisTimeline = true;
-	let showAutosaveTimeline = false;
 	let activeSegmentId = '';
 	let activeSegmentDetail = null;
 
@@ -184,7 +176,67 @@
 	let activeTab: 'review' | 'analysis' | 'reflection' = 'review';
 	let expandedSegmentId = '';
 	let lastSavedAt: Date | null = null;
-	let expandedTimelineIds: Set<number> = new Set();
+	let processState = initialProcessState();
+	let processCatalog: SubmissionProcess | null = null;
+	let processInspection: ProcessInspection | null = null;
+	let processPanel: TeacherProcessPanel;
+	let timelineSection: HTMLDivElement;
+	let documentPanel: HTMLDivElement;
+	const processRequests = createLatestRequestGate();
+	const inspectProcess = async ({
+		beforeId,
+		afterId,
+		mode
+	}: {
+		beforeId: string;
+		afterId: string;
+		mode: 'snapshot' | 'compare';
+	}) => {
+		const request = processRequests.next();
+		const id = detail.submission.id,
+			version = detail.submission.final_version_id;
+		processInspection = { mode, loading: true, error: '', comparison: null };
+		docView = 'process';
+		try {
+			const comparison = await compareSubmissionProcess(
+				localStorage.token,
+				id,
+				version,
+				beforeId,
+				afterId
+			);
+			if (
+				!processRequests.isLatest(request) ||
+				detail?.submission.id !== id ||
+				detail.submission.final_version_id !== version
+			)
+				return;
+			processInspection = { mode, loading: false, error: '', comparison };
+			if (activeTab === 'analysis' && docView === 'process' && window.innerWidth < 1024)
+				await tick().then(() =>
+					documentPanel?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+				);
+		} catch (error) {
+			if (processRequests.isLatest(request))
+				processInspection = {
+					mode,
+					loading: false,
+					error: resolveErrorMessage(error, t),
+					comparison: null
+				};
+		}
+	};
+	const openWritingProcess = async (overall = false) => {
+		activeTab = 'analysis';
+		await tick();
+		timelineSection?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+		if (overall) await processPanel?.showOverall();
+	};
+	$: overallSelected =
+		docView === 'process' &&
+		processInspection?.mode === 'compare' &&
+		processState.beforeId === processCatalog?.default_before_id &&
+		processState.afterId === processCatalog?.default_after_id;
 	let resubmitDueLocal = '';
 	let challengeFollowup = false;
 	let returnMode = false;
@@ -347,37 +399,19 @@
 			: [])
 	];
 	$: isReviseDraft = isRevision(detail?.assignment?.task_mode);
-	$: filteredPromptTimeline = (detail?.prompt_timeline ?? []).filter((item) => {
-		if (item.role === 'user') return showUserTimeline;
-		if (item.role === 'assistant') return showAssistantTimeline;
-		return true;
-	});
-	$: unifiedTimeline = [
-		...analysisTimeline
-			.filter((item) => {
-				const triggerType = item.source_type ?? item.trigger_type ?? item.event_type;
-				if (triggerType === 'autosave') return showAutosaveTimeline;
-				return showAnalysisTimeline;
-			})
-			.map((item) => ({
-				kind: 'analysis',
-				role: null,
-				...describeAnalysisEvent(item),
-				created_at: item.created_at
-			})),
-		...filteredPromptTimeline.map((item) => ({
-			kind: 'prompt',
-			role: item.role,
-			label: typeof item.content === 'string' ? item.content : JSON.stringify(item.content),
-			// 修订初稿的首轮诊断是平台替学生发的，标出来，别当成学生自己问的。
-			meta: item.auto_started
-				? t('Sent automatically by the platform')
-				: getTimelineRoleLabel(item.role),
-			thinking_level: item.thinking_level ?? null,
-			created_at: item.created_at,
-			inserted_length: null
-		}))
-	].sort((a, b) => (a.created_at ?? 0) - (b.created_at ?? 0));
+	$: conversationEvents = teacherConversationEvents(
+		detail?.prompt_timeline ?? [],
+		detail?.submission?.stats_json?.revision_readings ?? [],
+		detail?.submission?.stats_json?.chat_contexts ?? [],
+		t
+	);
+	$: editingEvents = analysisTimeline
+		.filter((item) => item.event_type !== 'version')
+		.map((item, index) => ({
+			key: `analysis:${index}`,
+			...describeAnalysisEvent(item),
+			created_at: item.created_at
+		}));
 
 	$: lastSavedStr = lastSavedAt ? formatEpochTime(Math.floor(lastSavedAt.getTime() / 1000)) : null;
 
@@ -612,10 +646,14 @@
 
 	// 初稿 → 终稿:老师要看的是从第一稿到这一轮的完整修改，退回重交后起点仍是最初那份初稿。
 	// 修订初稿作业批改时最常看的就是它，所以放在左栏正文上方切换，进页面就取回。
-	let docView: 'final' | 'draft' = 'final';
+	let docView: 'final' | 'process' = 'final';
 	let draftDiffFor = '';
-	$: if (isReviseDraft && detail?.submission?.id && draftDiffFor !== detail.submission.id) {
-		draftDiffFor = detail.submission.id;
+	$: if (
+		isReviseDraft &&
+		detail?.submission?.id &&
+		draftDiffFor !== `${detail.submission.id}:${detail.submission.final_version_id}`
+	) {
+		draftDiffFor = `${detail.submission.id}:${detail.submission.final_version_id}`;
 		draftDiffData = null;
 		docView = 'final';
 		loadDraftDiff();
@@ -624,7 +662,6 @@
 	let draftDiffLoading = false;
 	let draftDiffSeq = 0;
 	const loadDraftDiff = async () => {
-		if (draftDiffLoading) return;
 		const seq = ++draftDiffSeq;
 		draftDiffLoading = true;
 		try {
@@ -637,19 +674,6 @@
 		} finally {
 			draftDiffLoading = false;
 		}
-	};
-
-	// AI 回复是 Markdown;修订初稿作业里一条诊断动辄上千字,原样显示 ## 和 ** 读起来很吃力。
-	const renderMarkdown = (text: string) =>
-		DOMPurify.sanitize(marked.parse(text ?? '', { async: false }) as string);
-
-	const toggleTimelineItem = (idx: number) => {
-		if (expandedTimelineIds.has(idx)) {
-			expandedTimelineIds.delete(idx);
-		} else {
-			expandedTimelineIds.add(idx);
-		}
-		expandedTimelineIds = expandedTimelineIds;
 	};
 
 	const focusSegment = async (segmentId: string) => {
@@ -687,7 +711,11 @@
 		expandedSegmentId = '';
 		activeSegmentId = '';
 		activeSegmentDetail = null;
-		expandedTimelineIds = new Set();
+		processRequests.next();
+		processState = initialProcessState();
+		processCatalog = null;
+		processInspection = null;
+		docView = 'final';
 		fullVersions = null;
 		try {
 			const response = await getTeacherSubmissionDetail(localStorage.token, id);
@@ -764,8 +792,8 @@
 	</svelte:fragment>
 
 	{#if loaded && detail}
-		<!-- h-full + overflow-hidden prevents the shell's overflow-y-auto from activating -->
-		<div class="flex h-full flex-col overflow-hidden">
+		<!-- Desktop panels scroll independently; narrow screens use the shell's page scroll. -->
+		<div class="flex flex-col lg:h-full lg:overflow-hidden">
 			{#if conflictDraft}
 				<section
 					class="mb-3 shrink-0 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm dark:border-amber-900 dark:bg-gray-850"
@@ -900,36 +928,39 @@
 
 			<!-- ── Main two-column body ── -->
 			<div
-				class="min-h-0 flex-1 grid grid-cols-1 gap-3 overflow-hidden p-4 lg:grid-cols-[1.2fr_0.8fr]"
+				class="grid grid-cols-1 gap-3 p-4 lg:min-h-0 lg:flex-1 lg:overflow-hidden lg:grid-cols-[1.2fr_0.8fr]"
 			>
 				<!-- LEFT: Article panel (internal scroll) -->
 				<div
+					bind:this={documentPanel}
 					class="flex flex-col overflow-hidden rounded-3xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850"
 				>
 					<!-- Article header (fixed) -->
 					<div class="shrink-0 border-b border-gray-100 dark:border-gray-800 px-6 pt-5 pb-4">
-						<div class="flex items-center justify-between">
-							{#if isReviseDraft}
-								<div
-									class="flex items-center gap-1 rounded-full bg-gray-100 p-0.5 text-sm dark:bg-gray-800"
+						<div class="flex flex-wrap items-center justify-between gap-2">
+							<div class="flex flex-wrap gap-2 text-sm">
+								<EduButton
+									size="sm"
+									variant={docView === 'final' ? 'primary' : 'secondary'}
+									on:click={() => (docView = 'final')}>{$i18n.t('Final Submission')}</EduButton
 								>
-									{#each [{ key: 'final', label: 'Final Submission' }, { key: 'draft', label: 'First draft → final' }] as view}
-										<button
-											type="button"
-											class="rounded-full px-3 py-1 font-medium transition {docView === view.key
-												? 'bg-white text-gray-950 shadow-sm dark:bg-gray-700 dark:text-gray-100'
-												: 'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'}"
-											on:click={() => (docView = view.key as 'draft' | 'final')}
-										>
-											{$i18n.t(view.label)}
-										</button>
-									{/each}
-								</div>
-							{:else}
-								<div class="text-sm font-semibold text-gray-950 dark:text-gray-100">
-									{$i18n.t('Final Submission')}
-								</div>
-							{/if}
+								<EduButton
+									size="sm"
+									variant={overallSelected ? 'primary' : 'secondary'}
+									on:click={() => openWritingProcess(true)}
+									>{$i18n.t(isReviseDraft ? 'First draft → final' : '从起点到提交')}</EduButton
+								>
+								{#if processInspection && !overallSelected}<EduButton
+										size="sm"
+										variant={docView === 'process' ? 'primary' : 'secondary'}
+										on:click={() => (docView = 'process')}>{$i18n.t('当前过程稿件')}</EduButton
+									>{/if}
+								{#if docView === 'process'}<span class="lg:hidden"
+										><EduButton size="sm" on:click={() => openWritingProcess()}
+											>{$i18n.t('回到过程记录')}</EduButton
+										></span
+									>{/if}
+							</div>
 							{#if docView === 'final'}
 								<label
 									class="flex cursor-pointer items-center gap-2 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
@@ -945,33 +976,25 @@
 						</div>
 					</div>
 					<!-- Article body (scrollable) -->
-					<div class="flex-1 overflow-y-auto px-6 py-5">
+					<div class="px-6 py-5 lg:flex-1 lg:overflow-y-auto">
 						<div class="rounded-2xl bg-stone-50 dark:bg-gray-900 p-5">
-							{#if docView === 'draft'}
-								{#if draftDiffLoading && !draftDiffData}
-									<div class="text-sm text-gray-400">{$i18n.t('Loading...')}</div>
-								{:else if draftDiffData?.has_baseline}
-									<TextDiffBlocks blocks={draftDiffData.blocks} />
-								{:else}
-									<div class="text-sm text-gray-400">
-										{$i18n.t('No first draft was submitted.')}
-									</div>
-								{/if}
+							{#if docView === 'process'}
+								<ProcessDraftView
+									inspection={processInspection}
+									source={conversationEvents.find((event) => event.key === processState.selectedKey)
+										?.source ?? null}
+								/>
 							{:else if highlight}
 								<SourceHighlightedText
 									json={detail.final_version.note_snapshot_json}
-									text={detail.final_version.note_snapshot_text ??
-										detail.note?.data?.content?.md ??
-										''}
+									text={detail.final_version.note_snapshot_text ?? ''}
 									segments={analysisHighlights}
 									{activeSegmentId}
 								/>
 							{:else}
 								<SourceHighlightedText
 									json={detail.final_version.note_snapshot_json}
-									text={detail.final_version.note_snapshot_text ??
-										detail.note?.data?.content?.md ??
-										''}
+									text={detail.final_version.note_snapshot_text ?? ''}
 									segments={[]}
 								/>
 							{/if}
@@ -993,7 +1016,11 @@
 								tab.key
 									? 'text-gray-950 dark:text-gray-100'
 									: 'text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}"
-								on:click={() => (activeTab = tab.key)}
+								on:click={() => {
+									activeTab = tab.key;
+									if (tab.key === 'review') docView = 'final';
+									else if (tab.key === 'analysis' && processInspection) docView = 'process';
+								}}
 							>
 								{tab.label}
 								{#if activeTab === tab.key}
@@ -1006,10 +1033,13 @@
 					</div>
 
 					<!-- Tab content (scrollable) -->
-					<div class="min-h-0 flex-1 overflow-y-auto">
+					<div class="lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
 						<!-- ── 评分 tab ── -->
 						{#if activeTab === 'review'}
 							<div class="space-y-4 p-5">
+								<EduButton variant="link" on:click={() => openWritingProcess()}
+									>{$i18n.t('查看写作过程')}</EduButton
+								>
 								{#if isHistoricalRound}
 									<div
 										class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-700 dark:text-amber-300"
@@ -1554,166 +1584,17 @@
 								<!-- 提交前读者试读 -->
 								<ChallengeRounds detail={challengeDetail} {criteriaLabels} />
 
-								<!-- Timeline -->
-								<div>
-									<div class="mb-3 flex items-center justify-between">
-										<div>
-											<div class="text-sm font-semibold text-gray-950 dark:text-gray-100">
-												{$i18n.t('Writing Process Timeline')}
-											</div>
-											<div class="mt-0.5 text-xs text-gray-400">
-												{$i18n.t('Prompts, text changes and analysis events combined')}
-											</div>
-										</div>
-										<div
-											class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500 dark:text-gray-400"
-										>
-											<label class="inline-flex cursor-pointer items-center gap-1.5">
-												<input
-													type="checkbox"
-													bind:checked={showUserTimeline}
-													class="accent-blue-500"
-												/>
-												<span class="text-blue-600">{$i18n.t('User')}</span>
-											</label>
-											<label class="inline-flex cursor-pointer items-center gap-1.5">
-												<input
-													type="checkbox"
-													bind:checked={showAssistantTimeline}
-													class="accent-purple-500"
-												/>
-												<span class="text-purple-600">{$i18n.t('AI')}</span>
-											</label>
-											<label class="inline-flex cursor-pointer items-center gap-1.5">
-												<input
-													type="checkbox"
-													bind:checked={showAnalysisTimeline}
-													class="accent-gray-500"
-												/>
-												<span>{$i18n.t('Writing Events')}</span>
-											</label>
-											<label class="inline-flex cursor-pointer items-center gap-1.5 opacity-60">
-												<input
-													type="checkbox"
-													bind:checked={showAutosaveTimeline}
-													class="accent-gray-400"
-												/>
-												<span>{$i18n.t('Autosave')}</span>
-											</label>
-										</div>
-									</div>
-									{#if unifiedTimeline.length === 0}
-										<div
-											class="rounded-2xl bg-gray-50 dark:bg-gray-800 px-4 py-4 text-sm text-gray-400"
-										>
-											{$i18n.t('No analysis timeline available yet.')}
-										</div>
-									{:else}
-										<div class="space-y-2">
-											{#each unifiedTimeline as item, i}
-												{@const isUser = item.kind === 'prompt' && item.role === 'user'}
-												{@const isAI = item.kind === 'prompt' && item.role === 'assistant'}
-												{@const isExpanded = expandedTimelineIds.has(i)}
-												{@const isLong = item.run
-													? Boolean(item.run.inserted_text || item.run.deleted_text)
-													: (item.label?.length ?? 0) > 200}
-												<div
-													class="rounded-r-2xl rounded-l-none border-l-[3px] bg-gray-50 dark:bg-gray-800 px-4 py-3 text-sm {isUser
-														? 'border-blue-400'
-														: isAI
-															? 'border-purple-400'
-															: 'border-gray-300 dark:border-gray-700'}"
-												>
-													<div class="mb-1 flex items-center justify-between gap-2 text-[10px]">
-														<span
-															class="font-semibold {isUser
-																? 'text-blue-500'
-																: isAI
-																	? 'text-purple-500'
-																	: 'text-gray-400'}"
-														>
-															{item.kind === 'prompt'
-																? item.meta
-																: (item.meta ??
-																	item.kind)}{#if isAI && showReplyThinking && item.thinking_level}
-																· {$i18n.t('Thinking: {{level}}', {
-																	level: $i18n.t(THINKING_SETTING_TEXT[item.thinking_level])
-																})}{/if}
-														</span>
-														{#if item.created_at}
-															<span class="text-gray-400 tabular-nums">
-																{formatEpochTime(
-																	item.created_at
-																)}{#if item.run && formatEpochTime(item.run.ended_at) !== formatEpochTime(item.created_at)}–{formatEpochTime(
-																		item.run.ended_at
-																	)}{/if}
-															</span>
-														{/if}
-													</div>
-													{#if isAI}
-														<div
-															class="prose prose-sm dark:prose-invert max-w-none break-words prose-headings:my-2 prose-headings:text-sm prose-headings:font-semibold text-gray-800 dark:text-gray-200 {isExpanded
-																? ''
-																: 'max-h-[4.5rem] overflow-hidden'}"
-														>
-															{@html renderMarkdown(item.label)}
-														</div>
-													{:else if item.run}
-														<div class="text-gray-800 dark:text-gray-200">{item.label}</div>
-														{#if isExpanded}
-															<div class="mt-2 space-y-1.5 text-xs">
-																{#if item.run.inserted_text}
-																	<div class="whitespace-pre-wrap break-words">
-																		<span class="text-emerald-600 dark:text-emerald-400"
-																			>{$i18n.t('Wrote')}</span
-																		>
-																		<span class="text-gray-700 dark:text-gray-300"
-																			>{item.run.inserted_text}</span
-																		>
-																	</div>
-																{/if}
-																{#if item.run.deleted_text}
-																	<div class="whitespace-pre-wrap break-words">
-																		<span class="text-rose-600 dark:text-rose-400"
-																			>{$i18n.t('Removed')}</span
-																		>
-																		<span class="text-gray-500 line-through"
-																			>{item.run.deleted_text}</span
-																		>
-																	</div>
-																{/if}
-															</div>
-														{/if}
-													{:else}
-														<div
-															class="whitespace-pre-wrap break-words text-gray-800 dark:text-gray-200 {isExpanded
-																? ''
-																: 'line-clamp-3'}"
-														>
-															{item.label}
-														</div>
-													{/if}
-													{#if item.inserted_length}
-														<div class="mt-1 text-xs text-gray-400">
-															{$i18n.t('+{{count}} chars', { count: item.inserted_length })}
-														</div>
-													{/if}
-													{#if isLong}
-														<button
-															class="mt-1.5 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-															on:click={() => toggleTimelineItem(i)}
-														>
-															{isExpanded
-																? $i18n.t('Collapse')
-																: item.run
-																	? $i18n.t('Show what changed')
-																	: $i18n.t('Expand full text')}
-														</button>
-													{/if}
-												</div>
-											{/each}
-										</div>
-									{/if}
+								<div bind:this={timelineSection}>
+									<TeacherProcessPanel
+										bind:this={processPanel}
+										submissionId={detail.submission.id}
+										finalVersionId={detail.submission.final_version_id}
+										events={conversationEvents}
+										{editingEvents}
+										bind:state={processState}
+										bind:catalog={processCatalog}
+										onInspect={inspectProcess}
+									/>
 								</div>
 
 								<!-- Previous-round diff -->
@@ -1744,9 +1625,6 @@
 							<div class="space-y-4 p-5">
 								<!-- 修订初稿作业:第一次通读的逐项结论与学生的处理 -->
 								{#if isReviseDraft}
-									{#each detail.submission.stats_json?.revision_readings ?? [] as record (record.id)}
-										<RevisionReadings {record} readonly />
-									{/each}
 									<RevisionItemsReview
 										sheet={detail?.submission?.stats_json?.revision_items ?? null}
 										{criteriaLabels}

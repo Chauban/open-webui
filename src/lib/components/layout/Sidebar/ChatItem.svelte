@@ -76,6 +76,7 @@
 	export let selected = false;
 	export let shiftKey = false;
 	export let readonly = false;
+	export let singleConversation = false;
 
 	export let ownerName: string | null = null;
 	export let ownerUserId: string | null = null;
@@ -337,6 +338,10 @@
 	let y = 0;
 
 	const onDragStart = (event) => {
+		if (singleConversation) {
+			event.preventDefault();
+			return;
+		}
 		event.stopPropagation();
 		openPreview = false;
 
@@ -592,7 +597,7 @@
 	id="sidebar-chat-group"
 	bind:this={itemElement}
 	class=" w-full {className} relative group"
-	draggable={!confirmEdit && !readonly}
+	draggable={!confirmEdit && !readonly && !singleConversation}
 	on:mouseenter={() => {
 		mouseOver = true;
 	}}
@@ -685,7 +690,7 @@
 		</LinkPreview.Root>
 	{/if}
 
-	{#if !readonly}
+	{#if !readonly && !singleConversation}
 		<div
 			id="sidebar-chat-item-menu"
 			class="{$mobile

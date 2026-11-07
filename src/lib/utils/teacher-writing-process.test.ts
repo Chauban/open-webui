@@ -1,0 +1,73 @@
+import { expect, test } from 'vitest';
+import type { RevisionReading } from '$lib/apis/education';
+import { teacherConversationEvents, teacherPromptLabel } from './teacher-writing-process';
+const t = (s: string) => s;
+const reading = {
+	id: 'r1',
+	purpose: 'first_read',
+	created_at: 1,
+	source_text: '初稿',
+	thinking: 'low',
+	context: { description_version: 1, teaching_version: 1 },
+	feedback: {
+		understanding: '我读到的判断',
+		strength: null,
+		focus: [{ quote: '原句', feedback: '证据问题' }],
+		overview: '概览'
+	}
+} as RevisionReading;
+test('初读与后续交流合在同一时间线，冻结快照优先且不使用当前正文', () => {
+	const prompts = [
+		{ id: 'u', role: 'user', content: '我的说明', created_at: 2 },
+		{
+			id: 'a',
+			role: 'assistant',
+			content: '修改反馈',
+			created_at: 3,
+			education_context: { source_text: '不能覆盖冻结稿' }
+		}
+	];
+	const events = teacherConversationEvents(
+		prompts,
+		[reading],
+		[{ message_id: 'a', source_text: '本轮冻结的改稿', called_at: 3 }],
+		t
+	);
+	expect(events.map((e) => e.key)).toEqual(['reading:r1', 'prompt:u', 'prompt:a']);
+	expect(events[0].source?.text).toBe('初稿');
+	expect(events[2].source?.text).toBe('本轮冻结的改稿');
+	expect(events[0].label).toContain('证据问题');
+	expect(events[1].source).toBeNull();
+});
+test('区分快捷请求、自己输入的说明和未记录具体动作的预设消息', () => {
+	expect(
+		teacherPromptLabel(
+			{ id: 'u', role: 'user', content: '', revision_review_requested: true, auto_started: true },
+			t
+		)
+	).toBe('学生请求查看修改（快捷按钮）');
+	expect(
+		teacherPromptLabel(
+			{ id: 'u', role: 'user', content: '说明', revision_review_requested: true },
+			t
+		)
+	).toBe('学生说明并请求查看修改');
+	expect(teacherPromptLabel({ id: 'u', role: 'user', content: '', auto_started: true }, t)).toBe(
+		'平台预设消息'
+	);
+	expect(teacherPromptLabel({ id: 'u', role: 'user', content: '问题' }, t)).toBe('Student');
+});
+test('空稿可查看，未记录的稿件不补造；同秒初读在问题前', () => {
+	const events = teacherConversationEvents(
+		[
+			{ id: 'a', role: 'assistant', content: '反馈', created_at: 1 },
+			{ id: 'b', role: 'assistant', content: '另一条', created_at: 2 }
+		],
+		[reading],
+		[{ message_id: 'b', source_text: '' }],
+		t
+	);
+	expect(events[0].key).toBe('reading:r1');
+	expect(events[1].source).toBeNull();
+	expect(events[2].source?.text).toBe('');
+});

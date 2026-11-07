@@ -38,6 +38,13 @@ from sqlalchemy import (
     text,
     update,
 )
+from fastapi import HTTPException
+from open_webui.services.education.single_conversation import (
+    claim_revision_conversation,
+    reject_revision_folder_change,
+    reject_revision_chat_copy,
+    reject_revision_bulk_change,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -535,6 +542,7 @@ class ChatTable:
         timer_at: int | None = None,
     ) -> ChatModel | None:
         async with get_async_db_context(db) as session:
+            await claim_revision_conversation(session, form_data.folder_id, user_id, id)
             chat = ChatModel(
                 **{
                     'id': id,
@@ -651,6 +659,8 @@ class ChatTable:
         db: AsyncSession | None = None,
     ) -> list[ChatModel]:
         async with get_async_db_context(db) as session:
+            for form in chat_import_forms:
+                await reject_revision_chat_copy(session, form.folder_id, lock=True)
             # Validate folder_id references — clear any that don't exist
             folder_ids = {f.folder_id for f in chat_import_forms if f.folder_id}
             existing = set()
@@ -858,9 +868,8 @@ class ChatTable:
         """Replace a chat's tags. Runs after every completion with tag
         generation enabled, so only the meta column is read and written,
         never the chat blob."""
-    def update_chat_meta_by_id(
-        self, id: str, meta: dict, db: Optional[Session] = None
-    ) -> Optional[ChatModel]:
+
+    def update_chat_meta_by_id(self, id: str, meta: dict, db: Optional[Session] = None) -> Optional[ChatModel]:
         try:
             with get_db_context(db) as db:
                 chat_item = db.get(Chat, id)
@@ -1398,21 +1407,27 @@ class ChatTable:
         try:
             async with get_async_db_context(db) as session:
                 chat = await session.get(Chat, id)
+                await reject_revision_chat_copy(session, chat.folder_id, lock=True)
                 chat.archived = not chat.archived
                 chat.folder_id = None
                 chat.updated_at = int(time.time())
                 chat.last_read_at = int(time.time())
                 await session.commit()
                 return ChatModel.model_validate(chat)
+        except HTTPException:
+            raise
         except Exception:
             return None
 
     async def archive_all_chats_by_user_id(self, user_id: str, db: AsyncSession | None = None) -> bool:
         try:
             async with get_async_db_context(db) as session:
+                await reject_revision_bulk_change(session, user_id)
                 await session.execute(update(Chat).filter_by(user_id=user_id).values(archived=True))
                 await session.commit()
                 return True
+        except HTTPException:
+            raise
         except Exception:
             return False
 
@@ -2281,6 +2296,7 @@ class ChatTable:
         try:
             async with get_async_db_context(db) as session:
                 chat = await session.get(Chat, id)
+                await reject_revision_folder_change(session, chat.folder_id, folder_id)
                 chat.folder_id = folder_id
                 chat.updated_at = int(time.time())
                 chat.last_read_at = int(time.time())
@@ -2292,6 +2308,8 @@ class ChatTable:
                     chat.archived = False
                 await session.commit()
                 return ChatModel.model_validate(chat)
+        except HTTPException:
+            raise
         except Exception:
             return None
 
@@ -2556,12 +2574,15 @@ class ChatTable:
     ) -> bool:
         try:
             async with get_async_db_context(db) as session:
+                await reject_revision_folder_change(session, folder_id, new_folder_id)
                 await session.execute(
                     update(Chat).filter_by(user_id=user_id, folder_id=folder_id).values(folder_id=new_folder_id)
                 )
                 await session.commit()
 
                 return True
+        except HTTPException:
+            raise
         except Exception:
             return False
 

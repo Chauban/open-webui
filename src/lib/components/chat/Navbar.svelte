@@ -40,6 +40,7 @@
 	const i18n = getContext('i18n');
 
 	export let initNewChat: Function;
+	export let allowNewChat = true;
 	export let readOnly: boolean = false;
 	export let shareEnabled: boolean = false;
 	export let scrollTop = 0;
@@ -72,14 +73,16 @@
 
 <ShareChatModal bind:show={showShareChatModal} chatId={$chatId} />
 
-<button
-	id="new-chat-button"
-	class="hidden"
-	on:click={() => {
-		initNewChat();
-	}}
-	aria-label="New Chat"
-/>
+{#if allowNewChat}
+	<button
+		id="new-chat-button"
+		class="hidden"
+		on:click={() => {
+			initNewChat();
+		}}
+		aria-label="New Chat"
+	/>
+{/if}
 
 <nav
 	class="sticky top-0 z-30 w-full {$mobile
@@ -217,7 +220,7 @@
 						{/if}
 					{/if}
 
-					{#if $mobile && !$temporaryChatEnabled && chat && chat.id}
+					{#if allowNewChat && $mobile && !$temporaryChatEnabled && chat && chat.id}
 						<Tooltip content={$i18n.t('New Chat')}>
 							<button
 								class="flex size-6 {$showSidebar

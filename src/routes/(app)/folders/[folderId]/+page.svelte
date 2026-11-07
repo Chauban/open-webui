@@ -35,6 +35,16 @@
 			await selectedFolder.set(folder);
 		}
 
+		if (
+			$selectedFolder?.meta?.mode === 'assignment_writing' &&
+			$selectedFolder.meta.assignment_id
+		) {
+			await goto(`/assignments/${$selectedFolder.meta.assignment_id}/write`, {
+				replaceState: true
+			});
+			return;
+		}
+
 		ready = true;
 	});
 

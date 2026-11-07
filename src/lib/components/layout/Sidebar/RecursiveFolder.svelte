@@ -620,7 +620,7 @@
 			await selectedFolder.set({ ...folders[folderId], ...folder });
 		}
 
-		await goto(`/folders/${folderId}`);
+		await goto(folderHref ?? `/folders/${folderId}`);
 
 		if ($mobile) {
 			showSidebar.set(!$showSidebar);
@@ -914,7 +914,9 @@
 							showExport={!lockFolders}
 							showDelete={!lockFolders}
 							showClose={allowMenuWhenLocked}
-							closeLabel={closeFolderLabelBuilder ? closeFolderLabelBuilder(currentFolder) : closeFolderLabel}
+							closeLabel={closeFolderLabelBuilder
+								? closeFolderLabelBuilder(currentFolder)
+								: closeFolderLabel}
 							onEdit={() => {
 								showFolderModal = true;
 							}}
@@ -1015,7 +1017,8 @@
 							id={chat.id}
 							title={chat.title}
 							createdAt={chat.created_at}
-							folderId={folderId}
+							{folderId}
+							singleConversation={currentFolder?.meta?.single_conversation === true}
 							href={chatHrefBuilder ? chatHrefBuilder(chat, currentFolder) : null}
 							{clearSelectedProjectOnChatClick}
 							updatedAt={chat.updated_at}

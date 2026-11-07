@@ -1195,6 +1195,7 @@ async def get_prompt_timeline(session, db: Session) -> list[dict]:
                     [
                         {
                             'id': message.id,
+                            'chat_id': chat_id,
                             'role': message.role,
                             'content': message.content,
                             'created_at': message.created_at,
@@ -1203,6 +1204,7 @@ async def get_prompt_timeline(session, db: Session) -> list[dict]:
                             'output': message.output,
                             'usage': message.usage,
                             'auto_started': _is_auto_started(message.meta),
+                            'revision_review_requested': (message.meta or {}).get('revision_review_requested') is True,
                             'thinking_level': _thinking_level(message.meta),
                             'education_context': (message.meta or {}).get('education_context'),
                         }
@@ -1219,6 +1221,7 @@ async def get_prompt_timeline(session, db: Session) -> list[dict]:
                 [
                     {
                         'id': message.get('id'),
+                        'chat_id': chat_id,
                         'role': message.get('role'),
                         'content': message.get('content'),
                         'created_at': message.get('timestamp'),
@@ -1227,6 +1230,8 @@ async def get_prompt_timeline(session, db: Session) -> list[dict]:
                         'output': message.get('output'),
                         'usage': message.get('usage'),
                         'auto_started': _is_auto_started(message.get('meta')),
+                        'revision_review_requested': (message.get('meta') or {}).get('revision_review_requested')
+                        is True,
                         'thinking_level': _thinking_level(message.get('meta')),
                         'education_context': (message.get('meta') or {}).get('education_context'),
                     }

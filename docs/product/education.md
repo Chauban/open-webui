@@ -55,6 +55,11 @@ Right Write 基于 Open WebUI v0.11.2。前端使用 Svelte 5、SvelteKit 2、Ty
 
 ## Task Modes & Writing Context
 
+- `single_conversation.py` 管理修订作业的单对话边界。`Chats.insert_new_chat` 在同一事务中锁定作业/写作会话、检查现有对话并绑定 `chat_id / active_chat_id`；SQLite 与 PostgreSQL 都通过实际写锁串行首条创建，普通聊天与从零写作不限制数量。
+- 模型写入口同时拦截导入、移入/移出与归档；API 拒绝复制/分支、直接删除及会清掉修订记录的全量聊天清理。撤回初稿和显式维护仍走原有授权操作。已有多个对话的从零作业不能直接切换成修订类型，须先处理多余对话。
+- 作业文件夹 meta 的 `single_conversation` 仅用于隐藏菜单与拖拽，后端依据真实作业类型校验，不信任客户端标记。文件夹地址跳回作业工作区，刷新继续原对话。
+- 多对话清理不会在读取、启动或迁移中自动运行。维护入口为 `scripts/education/consolidate_revision_chats.py`：显式指定 DATABASE_URL 生成计划；停服并验证数据库备份后，携带 `--apply --backup` 执行。执行前重新核对计划中的记录，变动即拒绝；在同一事务删除多余 chat/chat_message/chat_file/shared_chat，更新当前对话指针，保留提交冻结事实、正文和成绩。
+
 - 作业类型集中登记在 `services/education/task_types.py`：`from_scratch / revise_draft / revise_argument`。后两者都需确认基线、使用自主修订辅导且禁止读者试读；模型与数据库共同校验。
 - 修订初稿须先明确确认初稿，再解锁正文编辑和 AI 对话；初稿至少 200 个非空白字符。导入支持 `.docx`、`.doc`、`.txt`、`.md`，文件上限 10 MB；也可导入照片（JPG / PNG / WebP，一次最多 8 张，单张 10 MB、合计 30 MB），由管理员选定的识图模型逐张转录、只转录不改写。PDF 在学生浏览器里读取（pdf.js，不上传 PDF、服务端不解析）：文字页直接取文字并还原段落、去掉页眉页脚与页码；扫描页渲染成图后走同一条识图路径，同样受 8 页上限。服务端提取正文供学生核对，不将导入文件或图片存入文件库。从零写作作业可在编辑器里用同一组导入，识别结果经预览后插入，记为外部粘贴并注明来自导入。导入只限作业的学生本人。
 - `draft_baseline_text` / `draft_baseline_at` 保存确认基线；确认后不可直接改写，可在尚未提交时通过专用撤回初稿接口重来。退回重交保留最初基线，不能借改稿覆盖它。
@@ -64,6 +69,10 @@ Right Write 基于 Open WebUI v0.11.2。前端使用 Svelte 5、SvelteKit 2、Ty
 - 每轮修订聊天把服务端捕获的当前稿作为正文材料附在本轮模型请求末尾，与本轮问题相邻；深复制消息，不修改学生原消息和聊天历史。system 中仍维护教学标准与规则，评分与反思不进入模型。仅点击预设复看且未写说明时标记 auto_started，带自己说明时保留真实学生提问属性。
 - 修改复看与“整体再看看”等自然语言请求沿用当前聊天的模型/思考设置和辅导上下文，不再提供两个独立复看按钮；教师评分与反思仍不进入修订上下文。
 - `WritingWorkspaceShell.svelte` 管理统一工作区；发送前等待正文保存（最多 5 秒，失败提示学生），后端从最近已保存正文注入每轮上下文及改动说明，不能依赖静态文件夹提示词或模型自发调用工具取得正文。
+- 教师批改的 `teacherConversationEvents` 从冻结 `prompt_timeline / revision_readings / chat_contexts` 组装交流。`TeacherProcessPanel` 提供过程回放和任意两稿对照，左侧 `ProcessDraftView` 展示当时稿件或按句差异；同一父页面保存选择、展开状态、时间筛选与评分草稿。中间自动保存默认隐藏，实际供 AI 阅读的版本保留在主要节点中；详细编辑记录单独折叠。
+- `process_review.py` 仅使用提交冻结 evidence 与 stats 构建目录；`GET .../process` 返回不含正文的目录，`GET .../process/compare` 按需读取两份全文及差异。两接口验证所属教师与 `expected_final_version_id`，重交冲突返回 409，目录外版本返回 404；`GET .../versions` 同样截止到该次提交的 final version。前端后发请求优先，旧响应不覆盖新选择。
+- AI 回复按消息 id 绑定真实上下文；学生消息通过明确的 parent/chat 关系关联，同一提问的多次生成若使用不同稿件则不替其猜选。版本 id 与正文同时吻合才复用保存节点，否则保留独立阅读快照。空正文保留为空，不读取实时正文补造。回放中间版本来自当前轮，前轮过程使用现有轮次切换；起点到提交对比仍可使用最初确认的初稿。不新增数据库迁移，不重写历史证据。
+- `get_prompt_timeline` 为新提交保留 `revision_review_requested` 标记；快捷预设与学生说明分别展示，`auto_started` 对提问评分适用性的原有规则不变。画像证据 schema、评分口径和历史快照均不改写。旧提交缺少具体操作标记时只显示“平台预设消息”，不猜测按钮来源。
 - 教师批改和本次分析读取提交时冻结的 `stats_json.revision_items` 与 `stats_json.coaching`；初稿到终稿按句对比。“说改了但原句未动”只是核查提示，可能在别处作等效修改，不能自动判错。
 - 学生的任何对话都禁止读写记忆；作业对话还禁用检索聊天记录与记忆的内置工具。修改模型工具或聊天中间件时必须保持这些权限边界。
 - 模型参数与系统提示的覆盖由服务端执行（`utils/access_control/chat.py`）：`/api/chat/completions`、`/openai/chat/completions` 与 Anthropic 兼容的 `/api/v1/messages` 按 `chat.controls` 且 `chat.params` / `chat.system_prompt` 去掉请求里的参数（含顶层的 `temperature`、`thinking` 等，只留流水线字段和 `tool_approval_mode`）与 system / developer 消息。原样转发给服务商、无法逐项去除的接口（`/openai/responses`、默认关闭的 `/openai/{path}`）只对两样都能设的用户开放，其余 403；`/api/v1/messages` 遇原生 Anthropic 连接时，受限用户改走转换后的对话流水线。保存用户设置时同样去掉 `ui.params`、`ui.system`；文件夹系统提示按 `chat.system_prompt`。作业写作区的学生一律去掉，与权限无关；只有辅导对话的思考档位由服务端另行算出（见下）。频道、自动化、子代理、定时器经 `CHAT_COMPLETION_HANDLER` 发出的请求由平台拼成，不经此去除。组权限按最宽松合并，要收回学生须在默认权限里关掉、再给教师组打开。

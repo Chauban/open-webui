@@ -568,7 +568,10 @@ async def _ensure_assignment_project(assignment, session, db: Session):
             session.owner_user_id,
             FolderForm(
                 name=assignment.title,
-                meta=_make_assignment_project_meta(assignment.id, session.id),
+                meta={
+                    **_make_assignment_project_meta(assignment.id, session.id),
+                    'single_conversation': is_revision(assignment.task_mode),
+                },
                 data=desired_data,
             ),
             db=db,
@@ -581,7 +584,10 @@ async def _ensure_assignment_project(assignment, session, db: Session):
             db=db,
         )
     else:
-        desired_meta = _make_assignment_project_meta(assignment.id, session.id)
+        desired_meta = {
+            **_make_assignment_project_meta(assignment.id, session.id),
+            'single_conversation': is_revision(assignment.task_mode),
+        }
         desired_name = assignment.title
         # 系统提示每次都按最新作业信息覆盖：老师改了要求要能同步过来。
         if (
@@ -908,6 +914,11 @@ async def update_assignment(
     if assignment.config_revision != form_data.expected_config_revision:
         raise HTTPException(409, 'Assignment settings changed; reload before saving')
     next_mode = form_data.task_mode or assignment.task_mode
+    if next_mode != assignment.task_mode and is_revision(next_mode):
+        from open_webui.services.education.single_conversation import reject_conversion_with_multiple_chats
+
+        reject_conversion_with_multiple_chats(db, assignment.id)
+
     if (
         next_mode != assignment.task_mode
         and user.role != 'admin'
@@ -3381,7 +3392,47 @@ async def get_submission_versions(
     db: Session = Depends(get_session),
 ):
     session = _get_workspace_session_or_404(scope.submission.writing_session_id, db)
-    return [WritingVersionSummaryModel.model_validate(version) for version in Education.get_versions(session.id, db=db)]
+    final = Education.get_version_by_id(scope.submission.final_version_id, db=db)
+    return [
+        WritingVersionSummaryModel.model_validate(version)
+        for version in Education.get_versions(session.id, db=db)
+        if final and version.version_no <= final.version_no
+    ]
+
+
+def _submission_process_catalog(scope, expected_final_version_id, db):
+    from open_webui.services.education.process_review import build_process_catalog
+
+    if scope.submission.final_version_id != expected_final_version_id:
+        raise HTTPException(409, 'The submission changed. Reload it before viewing the writing process.')
+    evidence = Education.get_latest_profile_evidence_snapshot(scope.submission.id, db=db)
+    if evidence is None or evidence.evidence_json.document.final_version_id != expected_final_version_id:
+        raise HTTPException(409, 'Submission evidence snapshot is missing')
+    return build_process_catalog(evidence.evidence_json.model_dump(mode='json'), scope.submission.stats_json)
+
+
+@router.get('/teacher/submissions/{submission_id}/process')
+async def get_submission_process(
+    expected_final_version_id: str,
+    scope: TeacherSubmissionScope = Depends(require_teacher_submission),
+    db: Session = Depends(get_session),
+):
+    from open_webui.services.education.process_review import catalog_metadata
+
+    return catalog_metadata(_submission_process_catalog(scope, expected_final_version_id, db))
+
+
+@router.get('/teacher/submissions/{submission_id}/process/compare')
+async def compare_submission_process(
+    before: str,
+    after: str,
+    expected_final_version_id: str,
+    scope: TeacherSubmissionScope = Depends(require_teacher_submission),
+    db: Session = Depends(get_session),
+):
+    from open_webui.services.education.process_review import compare_snapshots
+
+    return compare_snapshots(_submission_process_catalog(scope, expected_final_version_id, db), before, after)
 
 
 @router.get('/teacher/submissions/{submission_id}/diff')
