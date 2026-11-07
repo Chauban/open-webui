@@ -184,7 +184,9 @@
 	const buildWritingProjects = (folderList) => {
 		const writingFolderList = [
 			...dedupeAssignmentProjects(folderList.filter(isAssignmentProject)),
-			...folderList.filter(isPersonalWritingProject)
+			...folderList.filter(
+				(folder) => isPersonalWritingProject(folder) && $user?.education_role !== 'student'
+			)
 		].filter((folder) => !isSidebarClosedWriting(folder));
 
 		const next = {};

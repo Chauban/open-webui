@@ -84,7 +84,10 @@ from open_webui.utils.access_control.folders import has_folder_access
 from open_webui.services.education.revision_reading import current_revision_chat_context
 from open_webui.services.education.task_types import is_revision
 from open_webui.models.education import Education
-from open_webui.services.education.writing_access import ensure_writing_session_writable
+from open_webui.services.education.writing_access import (
+    ensure_writing_session_writable,
+    ensure_writing_session_access,
+)
 from open_webui.services.education.writing_context import (
     build_current_text_context,
     get_folder_writing_session,
@@ -2571,6 +2574,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         writing_session = get_folder_writing_session(folder, user.id) if folder else None
         is_assignment_writing = bool(writing_session) and writing_session.scope == 'assignment'
         if writing_session:
+            await ensure_writing_session_access(user, writing_session)
             ensure_writing_session_writable(writing_session)
         if writing_session and is_draft_baseline_missing(writing_session):
             raise HTTPException(

@@ -7,6 +7,17 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from open_webui.models.education import Education
+from open_webui.services.education.identity import get_education_role
+
+
+async def ensure_personal_writing_allowed(user) -> None:
+    if await get_education_role(user) == "student":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Personal writing is disabled for students")
+
+
+async def ensure_writing_session_access(user, session) -> None:
+    if session.scope == "personal":
+        await ensure_personal_writing_allowed(user)
 
 
 def load_submission_rounds_with_reviews(assignment, student_id: str, db=None):

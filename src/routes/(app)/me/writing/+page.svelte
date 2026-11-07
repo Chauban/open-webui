@@ -240,10 +240,7 @@
 		}
 		const { role } = result;
 		if (role === 'student') {
-			const hasPendingAssignments = groupAssignmentItems(home?.assignment_items).todo.length > 0;
-			// 还没加入班级的学生要先落在作业页，邀请码入口就在这一屏。
-			const hasClassroom = (home?.classrooms ?? []).length > 0;
-			activeTab = hasPendingAssignments || !hasClassroom ? 'assignment' : 'personal';
+			activeTab = 'assignment';
 		} else {
 			activeTab = 'personal';
 		}
@@ -326,12 +323,6 @@
 							{#if assignmentGroups.todo.length > 0}
 								<span class="ml-1 tabular-nums opacity-70">{assignmentGroups.todo.length}</span>
 							{/if}
-						</button>
-						<button
-							class={eduSegmentClass(activeTab === 'personal')}
-							on:click={() => (activeTab = 'personal')}
-						>
-							{$i18n.t('Personal Writing')}
 						</button>
 					</div>
 					<!-- 入班后班级只是一条身份信息,不再单独占一张卡;换班规则放进悬停提示 -->
@@ -450,7 +441,7 @@
 				{/if}
 			{/if}
 
-			{#if !isStudent || activeTab === 'personal'}
+			{#if !isStudent}
 				<div class="mb-3 flex items-center justify-between gap-4">
 					<div>
 						<h2 class="text-base font-semibold">{$i18n.t('My Writing')}</h2>

@@ -30,7 +30,7 @@ Right Write 基于 Open WebUI v0.11.2。前端使用 Svelte 5、SvelteKit 2、Ty
 - `routers/education.py`：HTTP、身份权限、资源装配与事务入口；`models/education.py`：严格数据模型、数据库约束与仓储。
 - `services/education/identity.py`：教学身份，使用 `education-teacher` / `education-student` 用户组；平台角色 `user.role` 与教学身份不是同一字段，管理员通过平台角色获权。
 - `writing_context.py`：初稿解析、基线及当前正文；`revision_reading.py`：自主阅读与上下文；`teaching_config.py`：版本、授权及事务锁；`revision_items.py`：历史冻结清单只读汇总。
-- `writing_access.py`：统一有效截止时间及写作状态校验。作业已批改返回 409，超过有效截止返回 400；写入路由、对话入口和模型调用共用校验。对话入口在创建聊天或保存消息之前检查，个人写作继续允许写入。
+- `writing_access.py`：统一有效截止时间及写作状态校验。作业已批改返回 409，超过有效截止返回 400；写入路由、对话入口和模型调用共用校验。对话入口在创建聊天或保存消息之前检查，个人写作不受作业截止限制，但学生身份已关闭个人会话访问与写入。
 - `challenge.py` / `challenge_insight.py`：提交前 AI 读者试读及维度聚合；`analysis.py`：来源、过程指标及分析缓存。
 - `profile_evidence.py` / `profile_snapshots.py`：冻结证据；`profile.py` / `profile_aggregates.py`：画像指标和聚合投影；`profile_recompute.py`：显式批量重算。细节参见 [画像投影说明](../../backend/open_webui/services/education/PROFILE_PROJECTIONS.md)。
 
@@ -95,3 +95,7 @@ Right Write 基于 Open WebUI v0.11.2。前端使用 Svelte 5、SvelteKit 2、Ty
 - 批改携带 `expected_final_version_id / expected_review_revision`，冲突返回 409。已发布评阅拒绝存为 pending；更正追加事件、重建当前版本投影，正文仍只读。
 - 无反思回答、无学生提问对应质量项不适用。仅总分不生成空分项零分。画像指标版本提升为 `2026-11-07.1`，证据 schema 保持原有结构；新算法的上线激活与重算仍须显式执行。
 - 迁移 `d7e9f1a3b5c8` 保留提交、反思、评阅及证据原文，迁移当时为既有作业绑定教学快照；旧教师保留从零写作及已布置类型，段落论证默认未授权。退回开关不变。正式执行前核查授权清单并备份。
+
+## 2026-11-07 学生个人写作暂时关闭
+
+学生写作首页固定展示作业写作，隐藏个人写作分段及侧边栏个人写作项目；首页最近写作不返回个人稿件。服务端拒绝学生新建、打开及操作个人写作会话，也拒绝通过已有对话或项目文件夹继续发起个人写作 AI 对话（403）。已有个人稿件和对话保留，不删除。作业写作、提交、批改和成长画像继续开放。教师保持侧边栏无入口、接口仍可用的现状，管理员不受影响。未新增管理员开关。

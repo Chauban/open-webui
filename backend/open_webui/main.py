@@ -139,7 +139,10 @@ from open_webui.models.channels import Channels
 from open_webui.models.chats import ChatForm, Chats
 from open_webui.models.folders import Folders
 from open_webui.models.education import Education
-from open_webui.services.education.writing_access import ensure_writing_session_writable
+from open_webui.services.education.writing_access import (
+    ensure_writing_session_writable,
+    ensure_writing_session_access,
+)
 from open_webui.services.education.ai_steps import (
     get_ai_step_policy,
     resolve_coaching_thinking,
@@ -1114,6 +1117,7 @@ async def chat_completion(
         writing_folder = await Folders.get_folder_by_id(writing_folder_id) if writing_folder_id else None
         writing_session = get_folder_writing_session(writing_folder, user.id) if writing_folder else None
         if writing_session:
+            await ensure_writing_session_access(user, writing_session)
             ensure_writing_session_writable(writing_session)
 
         # Read before the fallback below can rebind model to a different one.

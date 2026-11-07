@@ -167,6 +167,8 @@ from open_webui.services.education.revision_items import (
 from open_webui.services.education.identity import get_education_role
 from open_webui.services.education.writing_access import (
     ensure_writing_session_writable,
+    ensure_personal_writing_allowed,
+    ensure_writing_session_access,
     get_effective_due_at as _get_effective_due_at,
     load_submission_rounds_with_reviews as _load_submission_rounds_with_reviews,
     resolve_effective_due_at as _resolve_effective_due_at,
@@ -757,7 +759,7 @@ async def require_teacher_submission(
     return TeacherSubmissionScope(submission=submission, assignment=assignment)
 
 
-def require_owned_writing_session(
+async def require_owned_writing_session(
     session_id: str,
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
@@ -765,6 +767,7 @@ def require_owned_writing_session(
     """路径含 {session_id} 的写作接口:会话必须属于当前用户。"""
     session = _get_workspace_session_or_404(session_id, db)
     _ensure_workspace_session_owner(user, session)
+    await ensure_writing_session_access(user, session)
     return session
 
 
@@ -2140,6 +2143,8 @@ async def get_writing_home(
     personal_items = []
     recent_items = []
     for session in sessions:
+        if session.scope == 'personal' and education_role == 'student':
+            continue
         if session.scope == 'personal':
             item = await _build_personal_workspace_item(session, db)
             if item is not None:
@@ -2210,6 +2215,7 @@ async def create_personal_writing(
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
+    await ensure_personal_writing_allowed(user)
     title = (form_data.title or '').strip() or 'Untitled Writing'
     note = await Notes.insert_new_note(user.id, _make_personal_note(title), db=db)
     if note is None:

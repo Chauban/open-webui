@@ -2770,9 +2770,9 @@ def test_chat_completion_rejects_reviewed_writing_before_persisting(education_cl
         assert db.get(Chat, chat.id).chat['history']['messages'] == {}
 
 
-def test_personal_writing_autosave_stays_writable(education_client):
-    client, _, _, student, _, _ = education_client
-    UserContext.current_user = student
+def test_teacher_personal_writing_autosave_stays_writable(education_client):
+    client, teacher, _, _, _, _ = education_client
+    UserContext.current_user = teacher
     workspace = client.post('/api/v1/me/writing/personal', json={'title': 'Personal writing'}).json()
     session_id = workspace['writing_session']['id']
     response = client.post(
@@ -7284,8 +7284,8 @@ def test_text_import_is_only_for_the_assignment_student_while_writable(education
         res = client.post(image_url, files=[("files", ("p.png", _png_bytes("red"), "image/png"))])
         assert res.status_code == 403, res.text
 
-    # 个人写作区没有导入
-    UserContext.current_user = student
+    # 教师个人写作区没有导入，学生个人写作已关闭
+    UserContext.current_user = teacher
     personal_res = client.post("/api/v1/me/writing/personal", json={"title": "Mine"})
     assert personal_res.status_code == 200, personal_res.text
     personal = personal_res.json()
@@ -7295,6 +7295,7 @@ def test_text_import_is_only_for_the_assignment_student_while_writable(education
     )
     assert res.status_code == 400, res.text
 
+    UserContext.current_user = student
     # 过了截止不能导入
     def set_due(due_at):
         with SessionLocal() as db:
@@ -7741,3 +7742,60 @@ def test_image_import_reports_busy_after_retries(education_client):
     assert res.status_code == 503, res.text
     assert res.json()["detail"] == "The image model is busy right now. Wait a minute, then import again."
     assert len(calls) == 4
+
+
+@pytest.mark.parametrize("new_chat", [False, True])
+def test_student_personal_writing_disabled(education_client, monkeypatch, new_chat):
+    import open_webui.main as webui_main
+
+    client, teacher, _, student, _, SessionLocal = education_client
+    monkeypatch.setattr(internal_db, "SessionLocal", SessionLocal)
+    _prepare_assignment_flow(client, teacher, student)
+    UserContext.current_user = teacher
+    response = client.post("/api/v1/me/writing/personal", json={"title": "Existing draft"})
+    assert response.status_code == 200, response.text
+    workspace = response.json()
+    session_id = workspace["writing_session"]["id"]
+    # Seed an existing student draft without allowing students to create new ones.
+    with SessionLocal() as db:
+        db.get(WritingSession, session_id).owner_user_id = student.id
+        db.get(Note, workspace["note"]["id"]).user_id = student.id
+        db.get(Folder, workspace["project"]["id"]).user_id = student.id
+        db.commit()
+    UserContext.current_user = student
+    assert client.post("/api/v1/me/writing/personal", json={"title": "Denied"}).status_code == 403
+    home = client.get("/api/v1/me/writing/home").json()
+    assert home["personal_items"] == []
+    assert len(home["assignment_items"]) == 1
+    assert all(item["project_mode"] == "assignment_writing" for item in home["recent_items"])
+    assert client.get(f"/api/v1/writing/{session_id}/workspace").status_code == 403
+    for endpoint, payload in _WRITING_WRITE_REQUESTS:
+        response = client.post(f"/api/v1/writing-sessions/{session_id}/{endpoint}", json=payload)
+        assert response.status_code == 403, response.text
+    chat = asyncio.run(Chats.insert_new_chat(
+        str(uuid.uuid4()), student.id,
+        ChatForm(chat={"title": "Old chat", "history": {"messages": {}}, "messages": []},
+                 folder_id=workspace["project"]["id"]),
+    ))
+    monkeypatch.setattr(webui_main, "BYPASS_MODEL_ACCESS_CONTROL", True)
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(MODELS={"guard-test-model": {"id": "guard-test-model"}})),
+        headers={}, state=SimpleNamespace(),
+    )
+    body = {
+        "model": "guard-test-model", "stream": False,
+        "messages": [{"role": "user", "content": "Blocked"}],
+        "user_message": {"id": "probe", "role": "user", "content": "Blocked"},
+        "id": "reply", "parent_id": None if new_chat else "previous",
+        "chat_id": None if new_chat else chat.id,
+        "folder_id": workspace["project"]["id"] if new_chat else None,
+    }
+    with SessionLocal() as db:
+        before = (db.query(Chat).count(), db.query(ChatMessage).count())
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(webui_main.chat_completion(request, body, student))
+    assert error.value.status_code == 403
+    with SessionLocal() as db:
+        assert (db.query(Chat).count(), db.query(ChatMessage).count()) == before
+        assert db.get(WritingSession, session_id) is not None
+        assert db.get(Note, workspace["note"]["id"]) is not None
