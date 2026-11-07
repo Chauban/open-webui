@@ -3,38 +3,12 @@
 
 	export let content: unknown = '';
 
-	const getErrorMessage = (value: unknown): string => {
-		if (typeof value === 'string') {
-			return value;
-		}
-
-		if (typeof value === 'object' && value !== null) {
-			const error = 'error' in value ? value.error : null;
-
-			if (
-				typeof error === 'object' &&
-				error !== null &&
-				'message' in error &&
-				typeof error.message === 'string'
-			) {
-				return error.message;
-			}
-
-			if ('detail' in value && typeof value.detail === 'string') {
-				return value.detail;
-			}
-
-			if ('message' in value && typeof value.message === 'string') {
-				return value.message;
-			}
-
-			return JSON.stringify(value) ?? String(value);
-		}
-
-		return JSON.stringify(value) ?? String(value);
-	};
-
-	$: message = getErrorMessage(content) || 'Error submitting message';
+	import { getContext } from 'svelte';
+	import type { Writable } from 'svelte/store';
+	import type { i18n as I18nType } from 'i18next';
+	import { readableChatError } from '$lib/utils/chat-error';
+	const i18n = getContext<Writable<I18nType>>('i18n');
+	$: message = readableChatError(content, $i18n.t);
 </script>
 
 <div

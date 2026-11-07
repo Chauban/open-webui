@@ -21,6 +21,7 @@
 	} from '$lib/utils/text-import';
 	import { buildPdfText, type PdfPage } from '$lib/utils/pdf-text';
 	import EduButton from './EduButton.svelte';
+	import Tooltip from '$lib/components/common/Tooltip.svelte';
 
 	// 作业写作区的两个导入按钮:Word/文本文件由后端直接解析,照片交给管理员选定的识图模型转录;
 	// PDF 在浏览器里读,扫描页渲染成图后走同一条识图路径。
@@ -221,12 +222,28 @@
 		>
 			{reading === 'images' ? $i18n.t('Reading images...') : $i18n.t('Import from images')}
 		</EduButton>
+		<Tooltip
+			content={$i18n.t(
+				'Supports .docx, .doc, .txt, .md and .pdf. A PDF is read in your browser; scanned pages go through image import.'
+			) +
+				'\n\n' +
+				$i18n.t(
+					imageImportEnabled
+						? 'Images: photos or scans of a handwritten or printed draft (JPG, PNG or WebP), up to 8 at a time, read in file-name order. The AI only transcribes, so check the text carefully.'
+						: 'Image import is not available: your administrator has not chosen an image parsing model.'
+				)}
+			allowHTML={false}
+			tippyOptions={{ trigger: 'mouseenter focusin click', maxWidth: 340 }}
+		>
+			<button
+				type="button"
+				class="rounded-full px-2 py-1 text-xs text-gray-500 underline decoration-dotted underline-offset-4 focus-visible:outline focus-visible:outline-2 dark:text-gray-400"
+				data-testid={imageImportEnabled ? 'import-help' : 'image-import-unavailable'}
+			>
+				{$i18n.t('Import help')}
+			</button>
+		</Tooltip>
 	</div>
-	<p class="text-xs text-gray-500 dark:text-gray-400">
-		{$i18n.t(
-			'Supports .docx, .doc, .txt, .md and .pdf. A PDF is read in your browser; scanned pages go through image import.'
-		)}
-	</p>
 	{#if reading === 'pdf' && pdfProgress}
 		<p class="text-xs text-sky-600 dark:text-sky-400" role="status">
 			{$i18n.t('Reading the PDF: page {{page}} of {{total}}', pdfProgress)}
@@ -234,18 +251,6 @@
 	{:else if reading === 'images'}
 		<p class="text-xs text-sky-600 dark:text-sky-400" role="status">
 			{$i18n.t('The AI is transcribing your images. This can take up to a minute.')}
-		</p>
-	{:else if imageImportEnabled}
-		<p class="text-xs text-gray-500 dark:text-gray-400">
-			{$i18n.t(
-				'Images: photos or scans of a handwritten or printed draft (JPG, PNG or WebP), up to 8 at a time, read in file-name order. The AI only transcribes, so check the text carefully.'
-			)}
-		</p>
-	{:else}
-		<p class="text-xs text-gray-500 dark:text-gray-400" data-testid="image-import-unavailable">
-			{$i18n.t(
-				'Image import is not available: your administrator has not chosen an image parsing model.'
-			)}
 		</p>
 	{/if}
 </div>

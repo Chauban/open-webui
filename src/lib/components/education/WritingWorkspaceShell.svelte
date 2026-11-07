@@ -181,11 +181,9 @@
 		!writingSession?.draft_baseline_at &&
 		!isReadOnly;
 	$: canSubmitAssignment = isAssignment && !isPastDue && !isGraded && !needsDraftBaseline;
-	// 交完初稿后的第一句由平台给出:先让 AI 按评分标准诊断一遍，学生不用对着空输入框想该问什么。
-	// 刚确认初稿那一下直接替学生发出去，保证每份对话都从诊断开始；之后再进来(没聊过)只预填。
-	let autoStartDiagnosis = false;
+	// 确认后回到对话阅读开场；不替学生自动发送提问。
 	const onDraftBaselineSubmitted = async () => {
-		autoStartDiagnosis = false;
+		showMobileDraft = false;
 		await load();
 	};
 	// 交作业之前可以撤回初稿重来:基线、正文、写作过程和本作业的对话一起删掉。
@@ -229,10 +227,9 @@
 		showMobileDraft = false;
 		// 撤回后回到第一步,通读结论、补看和「替学生发首轮」都作废。不先清掉的话,跳回作业页、
 		// 重新加载完之前开场白会被当成新对话自动发出去,留下一段没有初稿的空对话。
-		autoStartDiagnosis = false;
 		if (revisionTimer) clearTimeout(revisionTimer);
 		revisionTimer = null;
-		platformMessage = null;
+		composeRequest = null;
 		await goto(projectBaseUrl, { replaceState: true });
 		await load();
 		withdrawingDraft = false;
@@ -244,7 +241,9 @@
 	let readings: RevisionReading[] = [];
 	let readingBusy = false;
 	let revisionTimer: ReturnType<typeof setTimeout> | null = null;
-	let platformMessage: { text: string; nonce: number } | null = null;
+	let composeRequest: { text: string; nonce: number } | null = null;
+	let composeNonce = 0;
+	let workspaceChat: Chat;
 	$: hasRevisionCoaching =
 		isAssignment && isRevision(assignment?.task_mode) && !!writingSession?.draft_baseline_at;
 	const runReading = async (purpose: ReadingPurpose) => {
@@ -254,6 +253,7 @@
 			return;
 		}
 		readingBusy = true;
+		void workspaceChat?.revealReading();
 		const baseline = writingSession.draft_baseline_at;
 		try {
 			if (purpose !== 'first_read') await flushDraftBeforeChat();
@@ -287,7 +287,8 @@
 		}
 	};
 	const discussReading = (text: string) => {
-		platformMessage = { text, nonce: Date.now() };
+		showMobileDraft = false;
+		composeRequest = { text, nonce: ++composeNonce };
 	};
 	$: sameAsDraft =
 		isAssignment &&
@@ -296,7 +297,6 @@
 		noteText.replace(/\s+/g, '') ===
 			(writingSession?.draft_baseline_text ?? '').replace(/\s+/g, '');
 
-	const diagnosisPrompt = '';
 	// 写作构成只在作业定稿后给学生看:写作中实时显示会让学生盯着比例重敲粘贴内容来刷数,
 	// 数据先被毁掉。个人写作区教师看不到,没有刷数动机,照常显示。
 	$: showComposition = !isAssignment || isReadOnly;
@@ -1027,6 +1027,7 @@
 		编辑器根节点带 min-w-full,会盖掉 prose 自带的 65ch 上限,只能在外面限宽。
 	-->
 	<Chat
+		bind:this={workspaceChat}
 		chatIdProp={currentChatId}
 		{projectBaseUrl}
 		responseInsertHandler={isReadOnly || isRevision(assignment?.task_mode)
@@ -1039,10 +1040,10 @@
 		allowFollowUps={!isRevision(assignment?.task_mode)}
 		responseInsertLabel={'Insert to Writing'}
 		readOnly={isReadOnly || needsDraftBaseline}
-		{platformMessage}
+		{composeRequest}
+		showConversationIntro={hasRevisionCoaching}
+		reserveWorkspaceActions={narrowLayout}
 		readOnlyHint={chatReadOnlyHint}
-		prefillPrompt={diagnosisPrompt}
-		autoSendPrefill={autoStartDiagnosis}
 		disableContextActions={false}
 		allowAssignmentWorkspaceChat={isAssignment}
 		lockModelOverrides={isAssignment}
@@ -1055,6 +1056,11 @@
 		rightPanelMaxWidth={null}
 		rightPanelClassName="hidden lg:flex"
 	>
+		<svelte:fragment slot="conversation-intro" let:hasMessages>
+			<RevisionReadings records={readings} currentText={noteText} readonly={isReadOnly} busy={readingBusy}
+				{hasMessages} onRead={runReading} onDiscuss={discussReading}
+				onEdit={() => { if (narrowLayout) showMobileDraft = true; else editor?.commands.focus(); }} />
+		</svelte:fragment>
 		<svelte:fragment slot="input-accessory">
 			{#if showThinkingSwitch}
 				<ThinkingSwitch bind:on={thinkingOn} alwaysOn={thinkingAlwaysOn} />
@@ -1065,7 +1071,7 @@
 			class="h-full w-full flex-col border-l border-gray-200 dark:border-gray-800 bg-stone-50 dark:bg-gray-900 lg:flex"
 		>
 			<div
-				class="border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-5 py-4"
+				class="shrink-0 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-5 py-4 {needsDraftBaseline ? 'max-h-[40%] overflow-y-auto' : ''}"
 			>
 				<div class="mx-auto w-full {WRITING_COLUMN}">
 					<div class="flex items-start justify-between gap-4">
@@ -1176,21 +1182,14 @@
 					{:else}
 						{#if isAssignment}
 							<AssignmentBrief {assignment} />
+							{#if hasRevisionCoaching && !isReadOnly && !isSubmitted}
+								<p class="mt-2 text-xs leading-relaxed text-gray-500">{$i18n.t('初稿已保存，还未交作业。你可以边聊边改，完成后点击「提交作业」。')}</p>
+							{/if}
 							<ChallengeChecklist
 								detail={challengeDetail}
 								onDetailChange={onChallengeDetailChange}
 								readonly={isReadOnly}
 							/>
-							{#if hasRevisionCoaching}
-								<RevisionReadings
-									records={readings}
-									currentText={noteText}
-									readonly={isReadOnly}
-									busy={readingBusy}
-									onRead={runReading}
-									onDiscuss={discussReading}
-								/>
-							{/if}
 						{/if}
 						<EduDataNotice {scope} collapsible class="mt-3" />
 						{#if isAssignment && isReadOnly}
@@ -1206,10 +1205,10 @@
 				</div>
 			</div>
 			<div
-				class="min-h-0 flex-1 overflow-y-auto px-5 py-5 {needsDraftBaseline ? 'flex flex-col' : ''}"
+				class="min-h-0 flex-1 overflow-y-auto px-5 py-5 {needsDraftBaseline ? 'flex flex-col !overflow-hidden' : ''}"
 			>
 				<div
-					class="mx-auto w-full {WRITING_COLUMN} {needsDraftBaseline ? 'flex flex-1 flex-col' : ''}"
+					class="mx-auto w-full {WRITING_COLUMN} {needsDraftBaseline ? 'flex min-h-0 flex-1 flex-col' : ''}"
 				>
 					{#if isAssignment && review}
 						<ReviewResultCard {review} {assignment} onRevise={null} />
@@ -1318,7 +1317,7 @@
 				on:click|stopPropagation
 			>
 				<div
-					class="border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-5 py-4"
+					class="shrink-0 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-5 py-4 {needsDraftBaseline ? 'max-h-[40%] overflow-y-auto' : ''}"
 				>
 					<div class="flex items-start justify-between gap-4">
 						<div class="min-w-0 flex-1">
@@ -1329,6 +1328,11 @@
 								{isAssignment ? assignment?.title : noteTitle}
 							</div>
 						</div>
+						{#if canSubmitAssignment}
+							<EduButton size="sm" variant="primary" on:click={() => { showMobileDraft = false; loadReflectionDraft(); void openSubmitFlow(); }}>
+								{$i18n.t(isSubmitted ? 'Resubmit Assignment' : 'Submit Assignment')}
+							</EduButton>
+						{/if}
 						{#if canWithdrawDraft}
 							<EduActionMenu items={withdrawDraftMenu} />
 						{/if}
@@ -1338,7 +1342,7 @@
 								showMobileDraft = false;
 							}}
 						>
-							{$i18n.t('Close')}
+							{$i18n.t('返回对话')}
 						</EduButton>
 					</div>
 					{#if lockedDetailsCollapsed}
@@ -1354,21 +1358,14 @@
 					{:else}
 						{#if isAssignment}
 							<AssignmentBrief {assignment} />
+							{#if hasRevisionCoaching && !isReadOnly && !isSubmitted}
+								<p class="mt-2 text-xs leading-relaxed text-gray-500">{$i18n.t('初稿已保存，还未交作业。你可以边聊边改，完成后点击「提交作业」。')}</p>
+							{/if}
 							<ChallengeChecklist
 								detail={challengeDetail}
 								onDetailChange={onChallengeDetailChange}
 								readonly={isReadOnly}
 							/>
-							{#if hasRevisionCoaching}
-								<RevisionReadings
-									records={readings}
-									currentText={noteText}
-									readonly={isReadOnly}
-									busy={readingBusy}
-									onRead={runReading}
-									onDiscuss={discussReading}
-								/>
-							{/if}
 						{/if}
 						<EduDataNotice {scope} collapsible class="mt-3" />
 						{#if isAssignment && isReadOnly}
@@ -1384,7 +1381,7 @@
 				</div>
 				<div
 					class="min-h-0 flex-1 overflow-y-auto px-5 py-5 {needsDraftBaseline
-						? 'flex flex-col'
+						? 'flex flex-col !overflow-hidden'
 						: ''}"
 				>
 					{#if isAssignment && review}

@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { v4 as uuidv4 } from 'uuid';
 	import { toast } from 'svelte-sonner';
+	import { readableChatError } from '$lib/utils/chat-error';
+	import { appendDiscussionPrompt } from '$lib/utils/revision-conversation';
 
 	import { getContext, onDestroy, onMount, tick } from 'svelte';
 	import { fade } from 'svelte/transition';
@@ -235,6 +237,24 @@
 	$: if (platformMessage && platformMessage.nonce !== sentPlatformNonce) {
 		void sendPlatformMessage(platformMessage);
 	}
+
+	// 教学阅读作为对话开场展示；只预填学生明确选择的引用，绝不自动发送。
+	export let showConversationIntro = false;
+	export let reserveWorkspaceActions = false;
+	export const revealReading = async () => {
+		await tick();
+		messagesContainerElement?.scrollTo({ top: 0, behavior: 'instant' });
+	};
+	export let composeRequest: { text: string; nonce: number } | null = null;
+	let composedNonce = 0;
+	const composeDiscussion = async (request: { text: string; nonce: number }) => {
+		composedNonce = request.nonce;
+		await tick();
+		if (readOnly || !(await waitFor(() => !!messageInput && !!document.getElementById('chat-input'), 30))) return;
+		await messageInput.setText(appendDiscussionPrompt(prompt, request.text));
+		messageInput.focus();
+	};
+	$: if (composeRequest && composeRequest.nonce !== composedNonce) void composeDiscussion(composeRequest);
 
 	// The workspace clears chatIdProp to start a fresh conversation in place;
 	// upstream only reacts to a non-empty chatIdProp.
@@ -3751,21 +3771,9 @@
 		).catch(async (error) => {
 			console.log(error);
 
-			let errorMessage = error;
-			if (error?.error?.message) {
-				errorMessage = error.error.message;
-			} else if (error?.message) {
-				errorMessage = error.message;
-			}
-
-			if (typeof errorMessage === 'object') {
-				errorMessage = $i18n.t(`Uh-oh! There was an issue with the response.`);
-			}
-
-			toast.error(`${errorMessage}`);
-			responseMessage.error = {
-				content: error
-			};
+			const errorMessage = readableChatError(error, $i18n.t);
+			toast.error(errorMessage);
+			responseMessage.error = { content: errorMessage };
 
 			responseMessage.done = true;
 
@@ -3841,36 +3849,10 @@
 	};
 
 	const handleOpenAIError = async (error, responseMessage) => {
-		let errorMessage = '';
-		let innerError;
+		const errorMessage = readableChatError(error, $i18n.t);
+		toast.error(errorMessage);
+		responseMessage.error = { content: errorMessage };
 
-		if (error) {
-			innerError = error;
-		}
-
-		console.error(innerError);
-		if ('detail' in innerError) {
-			// FastAPI error
-			toast.error(innerError.detail);
-			errorMessage = innerError.detail;
-		} else if ('error' in innerError) {
-			// OpenAI error
-			if ('message' in innerError.error) {
-				toast.error(innerError.error.message);
-				errorMessage = innerError.error.message;
-			} else {
-				toast.error(innerError.error);
-				errorMessage = innerError.error;
-			}
-		} else if ('message' in innerError) {
-			// OpenAI error
-			toast.error(innerError.message);
-			errorMessage = innerError.message;
-		}
-
-		responseMessage.error = {
-			content: $i18n.t(`Uh-oh! There was an issue with the response.`) + '\n' + errorMessage
-		};
 		responseMessage.done = true;
 
 		if (responseMessage.statusHistory) {
@@ -4530,8 +4512,8 @@
 							}}
 						/>
 					{/if}
-					<div id="chat-pane" class="flex flex-col flex-auto z-10 w-full @container overflow-auto">
-						{#if ($settings?.landingPageMode === 'chat' && !$selectedFolder) || createMessagesList(history, history.currentId).length > 0}
+					<div id="chat-pane" class="flex min-h-0 flex-col flex-auto z-10 w-full @container overflow-auto {reserveWorkspaceActions ? 'pb-20' : ''}">
+						{#if showConversationIntro || ($settings?.landingPageMode === 'chat' && !$selectedFolder) || createMessagesList(history, history.currentId).length > 0}
 							<div
 								class=" pb-2.5 flex flex-col justify-between w-full flex-auto overflow-auto h-0 max-w-full z-10 scrollbar-hidden"
 								id="messages-container"
@@ -4543,7 +4525,9 @@
 									isNearTop = messagesContainerElement.scrollTop <= 100;
 								}}
 							>
-								<div class=" h-full w-full flex flex-col">
+								<div class="w-full flex flex-col {showConversationIntro ? '' : 'h-full'}">
+									{#if showConversationIntro}<slot name="conversation-intro" hasMessages={createMessagesList(history, history.currentId).length > 0} />{/if}
+									{#if !showConversationIntro || createMessagesList(history, history.currentId).length > 0}
 									<Messages
 										bind:this={messagesRef}
 										chatId={$chatId}
@@ -4560,7 +4544,7 @@
 										}}
 										bind:selectedModels
 										{atSelectedModel}
-										className={embedded ? 'h-full flex pt-4' : 'h-full flex pt-18'}
+										className={showConversationIntro ? 'flex pt-4' : embedded ? 'h-full flex pt-4' : 'h-full flex pt-18'}
 										{sendMessage}
 										{showMessage}
 										{submitMessage}
@@ -4572,11 +4556,12 @@
 										{onToolCallResolved}
 										allowDelete={!(generating || taskIds?.length)}
 										forkHandler={handleForkChat}
-										topPadding={!embedded}
+										topPadding={!embedded && !showConversationIntro}
 										bottomPadding={files.length > 0}
 										{onSelect}
 										{onInsertToNote}
 									/>
+									{/if}
 								</div>
 							</div>
 

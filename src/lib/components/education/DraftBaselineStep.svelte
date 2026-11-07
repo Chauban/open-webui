@@ -46,10 +46,13 @@
 						{ name: info.names[0], count: info.scannedPages }
 					)
 				: info.kind === 'images'
-				? t('Read the text from {{count}} image(s). Check it against your draft before confirming.', {
-						count: info.names.length
-					})
-				: t('Read from {{name}}. Check the text before confirming.', { name: info.names[0] })
+					? t(
+							'Read the text from {{count}} image(s). Check it against your draft before confirming.',
+							{
+								count: info.names.length
+							}
+						)
+					: t('Read from {{name}}. Check the text before confirming.', { name: info.names[0] })
 		);
 	};
 
@@ -72,41 +75,49 @@
 	};
 </script>
 
-<!-- 撑满外层滚动区的高度:正文框吃掉剩余空间,确认按钮落在底部;外层太矮时退回滚动 -->
-<section class="flex min-h-0 flex-1 flex-col gap-3">
-	<div>
-		<h3 class="text-sm font-semibold text-gray-900 dark:text-gray-100">
-			{$i18n.t('Step 1: Submit your first draft')}
-		</h3>
-		<p class="mt-1 text-sm text-gray-600 dark:text-gray-300">
-			{$i18n.t(
-				'Paste the first draft you wrote outside class here, or import it from a Word or PDF file or from photos of the pages. Once confirmed it is saved as the starting point of your revision. If you confirm the wrong text, withdraw it from the "…" menu at the top right before you submit.'
-			)}
-		</p>
-		<p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-			{$i18n.t('The editor and the AI chat unlock after you confirm.')}
-		</p>
+<!-- 内容独立滚动，确认栏不参与滚动，低高度窗口中也保持可见。 -->
+<section class="flex min-h-0 flex-1 flex-col">
+	<div class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pb-3">
+		<div>
+			<h3 class="text-sm font-semibold text-gray-900 dark:text-gray-100">
+				{$i18n.t('Step 1: Submit your first draft')}
+			</h3>
+			<p class="mt-1 text-sm text-gray-600 dark:text-gray-300">
+				{$i18n.t(
+					'Paste the first draft you wrote outside class here, or import it from a Word or PDF file or from photos of the pages. Once confirmed it is saved as the starting point of your revision. If you confirm the wrong text, withdraw it from the "…" menu at the top right before you submit.'
+				)}
+			</p>
+			<p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+				{$i18n.t('The editor and the AI chat unlock after you confirm.')}
+			</p>
+		</div>
+		<TextImportActions
+			bind:this={importer}
+			bind:busy={importing}
+			{sessionId}
+			disabled={submitting}
+			{onImported}
+		/>
+		<textarea
+			bind:value={text}
+			class="min-h-40 w-full flex-1 resize-none {EDU_FIELD_CLASS} {dragging
+				? 'ring-2 ring-sky-400 dark:ring-sky-500'
+				: ''}"
+			placeholder={$i18n.t('Paste your first draft here, or drop a file in')}
+			disabled={busy}
+			on:dragover|preventDefault={() => (dragging = true)}
+			on:dragleave={() => (dragging = false)}
+			on:drop|preventDefault={onDrop}
+		></textarea>
 	</div>
-	<TextImportActions
-		bind:this={importer}
-		bind:busy={importing}
-		{sessionId}
-		disabled={submitting}
-		{onImported}
-	/>
-	<textarea
-		bind:value={text}
-		class="min-h-64 w-full flex-1 resize-none {EDU_FIELD_CLASS} {dragging
-			? 'ring-2 ring-sky-400 dark:ring-sky-500'
-			: ''}"
-		placeholder={$i18n.t('Paste your first draft here, or drop a file in')}
-		disabled={busy}
-		on:dragover|preventDefault={() => (dragging = true)}
-		on:dragleave={() => (dragging = false)}
-		on:drop|preventDefault={onDrop}
-	></textarea>
-	<div class="flex flex-wrap items-center justify-between gap-3">
-		<div class="text-xs tabular-nums {tooShort ? 'text-gray-500 dark:text-gray-400' : 'text-emerald-600 dark:text-emerald-400'}">
+	<div
+		class="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-gray-200 bg-stone-50 pt-3 pb-[env(safe-area-inset-bottom)] dark:border-gray-700 dark:bg-gray-900"
+	>
+		<div
+			class="text-xs tabular-nums {tooShort
+				? 'text-gray-500 dark:text-gray-400'
+				: 'text-emerald-600 dark:text-emerald-400'}"
+		>
 			{$i18n.t('{{count}} / {{min}} characters at least', { count: charCount, min: MIN_CHARS })}
 		</div>
 		<EduButton variant="primary" disabled={tooShort || busy} on:click={confirm}>

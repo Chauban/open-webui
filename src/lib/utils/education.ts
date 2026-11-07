@@ -2,6 +2,7 @@
 // 这些函数都要翻译，所以由调用方把 t 传进来（页面各自持有 i18n context）。
 
 import i18next from 'i18next';
+import { readableChatError } from './chat-error';
 
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 
@@ -174,7 +175,7 @@ export const formatShortDate = (epoch: number | null | undefined) =>
  */
 export const resolveErrorMessage = (error: unknown, t: Translate) => {
 	const detail = (error as { detail?: unknown } | null)?.detail ?? error;
-	if (typeof detail === 'string') return t(detail);
+	if (typeof detail === 'string') return readableChatError(detail, t);
 	// FastAPI 请求体校验失败(422)给的是一组 {loc, msg, type}，对学生没有可读信息；
 	// 实际多半是页面停在部署前的旧版本，所以直接提示刷新。
 	if (Array.isArray(detail)) {

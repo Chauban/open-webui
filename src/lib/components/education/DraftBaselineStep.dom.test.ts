@@ -204,3 +204,16 @@ test('扫描页超过 8 页时不调识图,也不填框', async () => {
 		).value
 	).toBe('');
 });
+
+test('导入说明按需显示，支持聚焦和点击，不常驻占用正文高度', async () => {
+	render(DraftBaselineStep, { props: { sessionId: 'session-1', onSubmitted: vi.fn() }, context });
+	const help = screen.getByRole('button', { name: 'Import help' });
+	expect(screen.queryByRole('tooltip')).toBeNull();
+	await fireEvent.focusIn(help);
+	await waitFor(() => expect(screen.getByRole('tooltip').textContent).toContain('Supports .docx'));
+	await fireEvent.focusOut(help);
+	await fireEvent.click(help);
+	await waitFor(() =>
+		expect(screen.getByRole('tooltip').textContent).toContain('up to 8 at a time')
+	);
+});
