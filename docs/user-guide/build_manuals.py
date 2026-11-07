@@ -1,6 +1,7 @@
 from pathlib import Path
 from io import BytesIO
 import re
+import argparse
 from xml.sax.saxutils import escape
 from PIL import Image as PILImage
 from reportlab.pdfgen import canvas
@@ -36,8 +37,12 @@ IMAGES={
  'teacher-new-entry.png':((0,0,1650,460),145),
  'teacher-create-complete.png':((422,218,1604,1274),310),
  'teacher-publish.png':((422,260,1605,1274),255),
- 'teacher-queue.png':((80,0,1630,540),145),
- 'teacher-review-filled.png':((1017,380,1630,1255),315),
+ 'teacher-queue.png':((80,0,1630,540),100),
+ 'teacher-review-filled.png':((1017,380,1630,1255),300),
+ 'teacher-process-conversation.png':((1287,382,2074,1430),385),
+ 'teacher-process-changes.png':((85,380,2075,1150),215),
+ 'teacher-process-compare.png':((1287,650,2075,1040),190),
+ 'teacher-reflection-review.png':((1318,670,2045,1010),150),
  'student-open-assignment.png':((0,0,1650,625),175),
  'student-open-existing.png':((0,0,1650,620),195),
  'student-feedback.png':((755,0,1645,440),245),
@@ -102,4 +107,9 @@ def create(name):
  pdf=pdfium.PdfDocument(str(dest))
  for i,p in enumerate(pdf):p.render(scale=1.3).to_pil().save(QA/f'{name}-{i+1}.png')
  print(f'{dest} | {len(pdf)} pages | {dest.stat().st_size} bytes')
-for name in ['教师使用手册','学生使用手册']:create(name)
+if __name__ == '__main__':
+ parser=argparse.ArgumentParser(description='从手册源文件更新同目录 PDF')
+ parser.add_argument('--audience',choices=['teacher','student','all'],default='all')
+ audience=parser.parse_args().audience
+ for key,name in [('teacher','教师使用手册'),('student','学生使用手册')]:
+  if audience in (key,'all'):create(name)
