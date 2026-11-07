@@ -186,6 +186,11 @@
 						{/each}
 					</div>
 					<div class="mt-2 text-xs text-gray-400">{$i18n.t(taskModeHint)}</div>
+					{#if allowedTaskModes.length < TASK_MODES.length && !taskModeLocked}
+						<p class="mt-2 text-xs text-gray-500">
+							{$i18n.t('可布置的作业类型由管理员设置。如需其他类型，请联系管理员。')}
+						</p>
+					{/if}
 					{#if taskModeLocked}
 						<div class="mt-1 text-xs text-gray-400">
 							{$i18n.t('The assignment type is locked once a student has started.')}

@@ -8,6 +8,7 @@
 		type TeachingConfig
 	} from '$lib/apis/education';
 	import { TASK_TYPES } from '$lib/utils/task-types';
+	import { EDU_FIELD_CLASS, eduSegmentClass } from '$lib/components/education/styles';
 	import { resolveErrorMessage } from '$lib/utils/education';
 	import {
 		getReflectionQuestionsError,
@@ -72,8 +73,8 @@
 		{#each TASK_TYPES as type}
 			<button
 				type="button"
-				class="rounded-lg border px-3 py-2 text-sm"
-				class:font-bold={selected === type.key}
+				class={eduSegmentClass(selected === type.key)}
+				aria-pressed={selected === type.key}
 				disabled={busy || !configs[type.key]}
 				on:click={() => select(type.key)}>{$i18n.t(type.title)}</button
 			>
@@ -83,25 +84,25 @@
 		<p class="text-xs">{$i18n.t('当前版本')} {draft.version}</p>
 		<label class="block text-sm"
 			>{$i18n.t('教学目标与判断标准')}<textarea
-				class="mt-1 min-h-32 w-full rounded-lg dark:bg-gray-800"
+				class="mt-1 min-h-32 w-full resize-y {EDU_FIELD_CLASS}"
 				bind:value={draft.standards}
 			></textarea></label
 		>
 		<label class="block text-sm"
 			>{$i18n.t('辅导提示词')}<textarea
-				class="mt-1 min-h-48 w-full rounded-lg dark:bg-gray-800"
+				class="mt-1 min-h-48 w-full resize-y {EDU_FIELD_CLASS}"
 				bind:value={draft.prompt}
 			></textarea></label
 		>
 		<label class="block text-sm"
 			>{$i18n.t('默认作业说明')}<textarea
-				class="mt-1 min-h-32 w-full rounded-lg dark:bg-gray-800"
+				class="mt-1 min-h-32 w-full resize-y {EDU_FIELD_CLASS}"
 				bind:value={draft.default_description}
 			></textarea></label
 		>
 		<label class="block text-sm"
 			>{$i18n.t('默认评分设置')}<select
-				class="ml-3 rounded-lg dark:bg-gray-800"
+				class="ml-3 {EDU_FIELD_CLASS}"
 				bind:value={draft.scoring_mode}
 				><option value="dimensions">{$i18n.t('按维度评分')}</option><option value="total"
 					>{$i18n.t('仅总分与总评')}</option
@@ -116,7 +117,7 @@
 					min="1"
 					max="10000"
 					bind:value={draft.score_max}
-					class="w-24 rounded-lg dark:bg-gray-800"
+					class="w-24 {EDU_FIELD_CLASS}"
 				/></label
 			>
 		{:else}
@@ -124,13 +125,13 @@
 				<div class="flex gap-2">
 					<input
 						aria-label={$i18n.t('Criterion name')}
-						class="min-w-0 flex-1 rounded-lg dark:bg-gray-800"
+						class="min-w-0 flex-1 {EDU_FIELD_CLASS}"
 						bind:value={row.label}
 					/><input
 						aria-label={$i18n.t('Maximum Score')}
 						type="number"
 						min="1"
-						class="w-20 rounded-lg dark:bg-gray-800"
+						class="w-24 {EDU_FIELD_CLASS}"
 						bind:value={row.max_score}
 					/><button
 						type="button"
