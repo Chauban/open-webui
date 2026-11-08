@@ -33,6 +33,7 @@ from open_webui.routers.education import (
 from open_webui.services.education import teaching_comparisons as comparisons
 from open_webui.services.education import teaching_preparations as preparations
 from open_webui.services.education import teaching_trials as trials
+from open_webui.services.education import teaching_search
 from open_webui.services.education.ai_steps import available_models, get_ai_step_policy
 from open_webui.services.education.teaching_runtime import model_policy, validate_binding
 from open_webui.utils.auth import get_admin_user, get_verified_user
@@ -71,6 +72,7 @@ async def teaching_models(request: Request, user=Depends(teacher)):
     policy = await model_policy()
     models = await available_models(request, user)
     return {
+        'search_available': await teaching_search.available(),
         'policy': policy.model_dump(),
         'recommended_thinking': (await get_ai_step_policy()).coaching_chat.default,
         'models': [
@@ -84,6 +86,22 @@ async def teaching_models(request: Request, user=Depends(teacher)):
             if model_id in models
         ],
     }
+
+
+@router.get('/admin/teaching-search')
+async def get_teaching_search(user=Depends(get_admin_user)):
+    return {
+        'policy': (await teaching_search.policy()).model_dump(),
+        'connections': await teaching_search.connection_options(),
+    }
+
+
+@router.put('/admin/teaching-search')
+async def set_teaching_search(form: teaching_search.SearchPolicy, user=Depends(get_admin_user)):
+    if form.enabled and not await teaching_search.api_key(form):
+        raise HTTPException(400, '请选择已配置密钥的 DeepSeek 官方连接。')
+    await Config.upsert({'education.teaching_search': form.model_dump()})
+    return form
 
 
 @router.put('/admin/teaching-models')

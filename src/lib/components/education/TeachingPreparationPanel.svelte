@@ -22,6 +22,7 @@
 		config_revision: number;
 	} | null = null;
 	let ai: AiCandidate = {
+		web_search: false,
 		prompt: template.prompt,
 		model_id: '',
 		thinking: 'model_default',
@@ -42,6 +43,7 @@
 	}[] = [];
 	let busy = false;
 	let loading = true;
+	let searchAvailable = false;
 	let initializationFailed = false;
 	$: unavailable = busy || loading || initializationFailed;
 	let status = '';
@@ -72,11 +74,13 @@
 	onMount(async () => {
 		try {
 			const options = await teachingApi<{
+				search_available?: boolean;
 				models: typeof models;
 				recommended_thinking: AiCandidate['thinking'];
 				policy: { recommended_model_id: string | null };
 			}>('/teacher/teaching-models');
 			models = options.models;
+			searchAvailable = options.search_available === true;
 			ai.model_id =
 				options.policy.recommended_model_id ?? (models.length === 1 ? models[0].id : '');
 			ai.thinking = options.recommended_thinking;
@@ -256,6 +260,23 @@
 		></label
 	>
 	<p class="text-sm text-gray-500">{$i18n.t('用于初次阅读、交流和修改复看。学生不能逐轮更换。')}</p>
+	<label class="flex items-center gap-2">
+		<input
+			type="checkbox"
+			checked={ai.web_search === true}
+			on:change={(event) => {
+				ai.web_search = event.currentTarget.checked;
+			}}
+			disabled={unavailable || (!searchAvailable && !ai.web_search)}
+		/>
+		{$i18n.t('允许按需搜索资料')}
+	</label>
+	<p class="text-sm text-gray-500">
+		{$i18n.t('独立于辅导提示词。关闭后不再搜索，历史对话中的资料仍保留。保存并发布后生效。')}
+	</p>
+	{#if !searchAvailable}<p class="text-sm text-amber-700">
+			{$i18n.t('管理员尚未开启资料搜索，当前可关闭已有设置。')}
+		</p>{/if}
 	{#if !models.length}<p role="alert">
 			{$i18n.t('管理员尚未开放教学模型，请先配置教学模型清单。')}
 		</p>{/if}
@@ -277,6 +298,7 @@
 	{#if versions.length}<details>
 			<summary>{$i18n.t('历史辅导版本')}</summary>{#each versions as version}<div class="my-2">
 					v{version.revision} · {version.config.ai.model_id} · {version.change_summary}
+					· {$i18n.t(version.config.ai.web_search ? '资料搜索开启' : '资料搜索关闭')}
 					<button
 						class="underline"
 						type="button"

@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 const focusPrefixes = [
 	'src/lib/apis/education/',
 	'src/lib/components/admin/Settings/TeachingTypes.svelte',
+	'src/lib/components/admin/Settings/TeachingSearch.svelte',
 	'src/lib/components/admin/Settings/Education.svelte',
 	'src/lib/components/admin/Users/UserList/EditUserModal.svelte',
 	'src/lib/utils/assignment-form',

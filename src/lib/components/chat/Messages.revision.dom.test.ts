@@ -14,7 +14,11 @@ vi.mock('$lib/stores', () => ({
 	temporaryChatEnabled: readable(false)
 }));
 vi.mock('$lib/stores/chatList', () => ({ refreshChatList: vi.fn() }));
-vi.mock('$lib/utils', () => ({ copyToClipboard: vi.fn(), extractCurlyBraceWords: () => [] }));
+vi.mock('$lib/utils', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/utils')>()),
+	copyToClipboard: vi.fn(),
+	extractCurlyBraceWords: () => []
+}));
 import Messages from './Messages.svelte';
 afterEach(cleanup);
 const context = new Map([['i18n', readable({ t: (s: string) => s })]]);

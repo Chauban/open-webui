@@ -109,6 +109,10 @@ async def run_comparison(request, user, work_id, form, db):
         state.pop('submission_preview', None)
     configs = []
     for candidate in payload.candidates:
+        if candidate.web_search:
+            from open_webui.services.education.teaching_search import ensure_available
+
+            await ensure_available()
         binding = await resolve_binding(request, user, candidate)
         config = dict(
             ai=candidate.model_dump(),

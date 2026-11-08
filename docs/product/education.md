@@ -27,6 +27,10 @@ Right Write 基于 Open WebUI v0.11.2。前端使用 Svelte 5、SvelteKit 2、Ty
 
 ## Backend Boundaries
 
+- `teaching_search.py` 是段落论证可选检索执行层：`AiCandidate.web_search` 为独立严格布尔字段，默认 false，存于现有 JSON 配置，无新增表或数据回填。`education.teaching_search` 存管理员服务开关和官方连接编号，密钥沿用连接设置，仅后端读取。
+- `utils.chat` 仅在可信教学绑定开启搜索时进入工具循环；在全局 inlet 过滤之后由服务端提供 `search_sources/read_source`，过滤器仍不得自行注入工具。关闭分支保持原模型请求。检索轮次沿用发起调用的 AI 步骤，实际发送及响应归入同一次教学证据；Responses 适配保留 function call 和续传输出项。
+- 搜索限定 DeepSeek 官方端点，读取仅接受本轮检索所得公开 URL，限时、限次数、限正文长度。工具来源文字作为不可信数据，逐字匹配只证明出现在本次返回文本，不证明史料真实性。`context.source_search` 保存实际查询、来源、截取正文、匹配结果和失败状态，不保存密钥。最终回答仍经原教学过滤和存储流程；管理员撤回服务只阻止新检索，不改写旧证据。
+
 - `routers/education.py`：HTTP、身份权限、资源装配与事务入口；`models/education.py`：严格数据模型、数据库约束与仓储。
 - `services/education/identity.py`：教学身份，使用 `education-teacher` / `education-student` 用户组；平台角色 `user.role` 与教学身份不是同一字段，管理员通过平台角色获权。
 - `writing_context.py`：初稿解析、基线及当前正文；`revision_reading.py`：自主阅读与上下文；`teaching_config.py`：版本、授权及事务锁；`revision_items.py`：历史冻结清单只读汇总。

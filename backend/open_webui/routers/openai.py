@@ -1465,6 +1465,15 @@ def convert_responses_result(response: dict) -> dict:
     output_items = response.get('output', [])
 
     content = ''
+    tool_calls = [
+        {
+            'id': item.get('call_id', ''),
+            'type': 'function',
+            'function': {'name': item.get('name', ''), 'arguments': item.get('arguments', '{}')},
+        }
+        for item in output_items
+        if item.get('type') == 'function_call'
+    ]
     for item in output_items:
         if item.get('type') == 'message':
             for part in item.get('content', []):
@@ -1481,8 +1490,11 @@ def convert_responses_result(response: dict) -> dict:
                 'message': {
                     'role': 'assistant',
                     'content': content,
+                    **({'tool_calls': tool_calls, 'output': output_items} if tool_calls else {}),
                 },
-                'finish_reason': 'stop',
+                'finish_reason': (
+                    ('length' if response.get('status') == 'incomplete' else 'tool_calls') if tool_calls else 'stop'
+                ),
             }
         ],
         'usage': response.get('usage', {}),

@@ -4,7 +4,7 @@ from typing import Literal
 
 from open_webui.internal.db import Base, JSONField
 from open_webui.models.education import AssignmentCreateForm, ThinkingSetting
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 from sqlalchemy import BigInteger, CheckConstraint, Column, Integer, Text, UniqueConstraint
 
 
@@ -32,6 +32,7 @@ class AiCandidate(StrictModel):
     model_id: str = Field(min_length=1, max_length=256)
     thinking: ThinkingSetting = 'model_default'
     template_version: int = Field(gt=0)
+    web_search: StrictBool = False
 
     @model_validator(mode='after')
     def nonempty_prompt(self):

@@ -7,6 +7,7 @@ export type AiCandidate = {
 	model_id: string;
 	thinking: ThinkingSetting;
 	template_version: number;
+	web_search?: boolean;
 };
 export type Preparation = {
 	id: string;

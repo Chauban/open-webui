@@ -95,3 +95,68 @@ test('初读支持连续回复和超过两处反馈，不要求复述或肯定�
 	});
 	for (const i of [1, 2, 3]) expect(screen.getByText(`建议 ${i}`)).toBeTruthy();
 });
+
+test('连续阅读反馈渲染标题、强调、列表、引用、表格和链接', () => {
+	const { container } = render(RevisionReadings, {
+		props: {
+			record: {
+				...record('ready'),
+				feedback: {
+					understanding: '',
+					strength: null,
+					focus: [],
+					overview: [
+						'### 1. 诊断表格',
+						'',
+						'* **观点（Claim）：合格**',
+						'  * 文本：围绕身体管理展开。',
+						'',
+						'> 请补充原始出处。',
+						'',
+						'| 项目 | 判断 |',
+						'| --- | --- |',
+						'| 证据 | 待核对 |',
+						'',
+						'[参考资料](https://example.com/source)'
+					].join('\n')
+				}
+			}
+		},
+		context
+	});
+	expect(screen.getByRole('heading', { level: 3, name: '1. 诊断表格' })).toBeTruthy();
+	expect(container.querySelector('strong')?.textContent).toBe('观点（Claim）：合格');
+	expect(container.querySelector('ul ul li')?.textContent).toContain('文本：围绕身体管理展开。');
+	expect(container.querySelector('blockquote')?.textContent).toContain('请补充原始出处。');
+	expect(screen.getByRole('columnheader', { name: '项目' })).toBeTruthy();
+	expect(screen.getByRole('cell', { name: '待核对' })).toBeTruthy();
+	expect(screen.getByRole('link', { name: '参考资料' }).getAttribute('href')).toBe(
+		'https://example.com/source'
+	);
+	expect(container.textContent).not.toContain('###');
+	expect(container.textContent).not.toContain('**');
+});
+
+test('各段反馈均渲染格式，引用的学生原句仍按原文展示', () => {
+	const { container } = render(RevisionReadings, {
+		props: {
+			record: {
+				...record('ready'),
+				feedback: {
+					understanding: '**理解**',
+					strength: { quote: '', feedback: '**优点**' },
+					focus: [{ quote: '**学生原句**', feedback: '**建议**' }],
+					overview: '**总结**'
+				}
+			}
+		},
+		context
+	});
+	expect(Array.from(container.querySelectorAll('strong'), (node) => node.textContent)).toEqual([
+		'理解',
+		'优点',
+		'建议',
+		'总结'
+	]);
+	expect(container.querySelector('blockquote')?.textContent?.trim()).toBe('**学生原句**');
+});

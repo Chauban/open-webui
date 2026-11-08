@@ -62,6 +62,42 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+test('资料搜索默认关闭，开关保存不修改教师提示词', async () => {
+	let saved;
+	api.mockImplementation(async (path, method, body) => {
+		if (path === '/teacher/teaching-models')
+			return {
+				models: [{ id: 'A', name: '模型 A', capabilities: {}, thinking_support: {} }],
+				policy: { recommended_model_id: 'A' },
+				recommended_thinking: 'medium',
+				search_available: true
+			};
+		if (method === 'POST' || method === 'PUT') {
+			saved = {
+				id: 'prep-search',
+				revision: (saved?.revision ?? 0) + 1,
+				assignment_id: null,
+				payload: JSON.parse(JSON.stringify(body.payload)),
+				published: null
+			};
+		}
+		return { ...saved, coverage: { stages: [] }, trials: [] };
+	});
+	render(TeachingPreparationPanel, { props: { draft: structuredClone(draft), template }, context });
+	await screen.findByRole('option', { name: '模型 A' });
+	const checkbox = screen.getByRole('checkbox', { name: '允许按需搜索资料' }) as HTMLInputElement;
+	expect(checkbox.checked).toBe(false);
+	await fireEvent.click(checkbox);
+	await fireEvent.click(screen.getByRole('button', { name: '保存准备稿' }));
+	await screen.findByText('已保存');
+	expect(saved.payload.ai.web_search).toBe(true);
+	expect(saved.payload.ai.prompt).toBe(template.prompt);
+	await fireEvent.click(checkbox);
+	await fireEvent.click(screen.getByRole('button', { name: '保存准备稿' }));
+	await waitFor(() => expect(saved.payload.ai.web_search).toBe(false));
+	expect(saved.payload.ai.prompt).toBe(template.prompt);
+});
+
 test('准备稿允许缺少班级和截止，保存不发布作业', async () => {
 	let saved;
 	api.mockImplementation(async (path, method, body) => {

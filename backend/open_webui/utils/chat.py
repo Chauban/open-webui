@@ -288,11 +288,16 @@ async def generate_chat_completion(
             return await generate_function_chat_completion(
                 request, form_data, user=user, models=models
             )
-        response = await generate_openai_chat_completion(
-            request=request,
-            form_data=form_data,
-            user=user,
-        )
+        if teaching and teaching['ai'].get('web_search', False):
+            from open_webui.services.education.teaching_search import execute
+
+            response = await execute(request, user, form_data, generate_openai_chat_completion)
+        else:
+            response = await generate_openai_chat_completion(
+                request=request,
+                form_data=form_data,
+                user=user,
+            )
         if teaching:
             from open_webui.services.education.teaching_filters import finish
             response = await finish(request, response)

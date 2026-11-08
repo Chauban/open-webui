@@ -37,6 +37,7 @@
 	let input: Input = { title: '', description: '', candidates: [], sample: '' };
 	let preparation: Preparation | null = null;
 	let models: Model[] = [];
+	let searchAvailable = false;
 	let groups: Group[] = [];
 	let lanes: Lane[] = [];
 	let plans: Plan[] = [];
@@ -139,8 +140,11 @@
 				preparation = await teachingApi<Preparation>(
 					`/teacher/teaching-preparations/${$page.url.searchParams.get('preparation') ?? seed.preparation_id}`
 				);
-				const options = await teachingApi<{ models: Model[] }>('/teacher/teaching-models');
+				const options = await teachingApi<{ models: Model[]; search_available?: boolean }>(
+					'/teacher/teaching-models'
+				);
 				models = options.models;
+				searchAvailable = options.search_available === true;
 				work = await teachingApi<Work>('/teacher/teaching-workbenches', 'POST', {
 					trial_id: seed.id,
 					preparation_id: preparation.id
@@ -429,7 +433,24 @@
 									>{/each}{/if}
 						</select></label
 					>
+					<label class="flex items-center gap-2">
+						<input
+							type="checkbox"
+							checked={candidate.web_search === true}
+							on:change={(event) => {
+								candidate.web_search = event.currentTarget.checked;
+							}}
+							disabled={busy || (!searchAvailable && !candidate.web_search)}
+						/>
+						{modelName(candidate.model_id)} · {$i18n.t('允许按需搜索资料')}
+					</label>
 				{/each}
+				<p class="text-sm text-gray-500">
+					{$i18n.t('搜索开关独立于提示词。修改后请重新测试，旧结果保留原设置。')}
+				</p>
+				{#if !searchAvailable}<p class="text-sm text-amber-700">
+						{$i18n.t('管理员尚未开启资料搜索，当前可关闭已有设置。')}
+					</p>{/if}
 				<label
 					>{$i18n.t('试教样稿')}<textarea
 						class="min-h-40 w-full {EDU_FIELD_CLASS}"
@@ -542,7 +563,11 @@
 								<h3 class="break-words text-base font-semibold">
 									{modelName(lane.trial.config.ai.model_id)}
 								</h3>
-								<p class="mt-1 text-xs text-gray-500">{$i18n.t(lane.trial.config.ai.thinking)}</p>
+								<p class="mt-1 text-xs text-gray-500">
+									{$i18n.t(lane.trial.config.ai.thinking)} · {$i18n.t(
+										lane.trial.config.ai.web_search ? '资料搜索开启' : '资料搜索关闭'
+									)}
+								</p>
 								<p class="mt-2 text-xs" class:text-red-600={outcome.status === 'failed'}>
 									{$i18n.t(lane.busy ? '正在生成…' : outcome.label)}
 								</p>
@@ -663,6 +688,7 @@
 						<h3>{plan.config.title}</h3>
 						<p class="whitespace-pre-wrap">{plan.config.description}</p>
 						<p class="whitespace-pre-wrap">{plan.config.ai.prompt}</p>
+						<p>{$i18n.t(plan.config.ai.web_search ? '资料搜索开启' : '资料搜索关闭')}</p>
 						<div class="flex gap-4">
 							<button on:click={() => loadPlan(plan)}>{$i18n.t('加载继续试教')}</button><button
 								disabled={!!preparation.published}
@@ -684,6 +710,7 @@
 							<p class="whitespace-pre-wrap">{preparation.payload.assignment.description}</p>
 							<p>{preparation.payload.ai.model_id}</p>
 							<p class="whitespace-pre-wrap">{preparation.payload.ai.prompt}</p>
+							<p>{$i18n.t(preparation.payload.ai.web_search ? '资料搜索开启' : '资料搜索关闭')}</p>
 						</div>
 						<div>
 							<h3>{adopting.name}</h3>
@@ -691,6 +718,7 @@
 							<p class="whitespace-pre-wrap">{adopting.config.description}</p>
 							<p>{adopting.config.ai.model_id}</p>
 							<p class="whitespace-pre-wrap">{adopting.config.ai.prompt}</p>
+							<p>{$i18n.t(adopting.config.ai.web_search ? '资料搜索开启' : '资料搜索关闭')}</p>
 						</div>
 					</div>
 					{#if !preparation.assignment_id}<label

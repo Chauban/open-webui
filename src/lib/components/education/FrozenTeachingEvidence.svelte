@@ -5,7 +5,7 @@
 		revisions: {
 			id: string;
 			revision: number;
-			config: { ai: { prompt: string; model_id: string; thinking: string } };
+			config: { ai: { prompt: string; model_id: string; thinking: string; web_search?: boolean } };
 			change_summary: string;
 		}[];
 		calls: { id: string; revision_id: string; context: Record<string, unknown> }[];
@@ -24,6 +24,9 @@
 					)} · {version.change_summary}</summary
 				>
 				<pre class="whitespace-pre-wrap text-sm">{version.config.ai.prompt}</pre>
+				<p class="text-sm">
+					{$i18n.t(version.config.ai.web_search ? '资料搜索开启' : '资料搜索关闭')}
+				</p>
 				{#each evidence.calls.filter((call) => call.revision_id === version.id) as call}<details
 						class="my-2"
 					>

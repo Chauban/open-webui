@@ -55,6 +55,7 @@ def execution_version():
     paths = (
         'services/education/teaching_runtime.py',
         'services/education/teaching_filters.py',
+        'services/education/teaching_search.py',
         'services/education/revision_reading.py',
         'services/education/ai_steps.py',
         'utils/thinking.py',

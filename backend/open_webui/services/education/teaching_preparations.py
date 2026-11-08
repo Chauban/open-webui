@@ -120,6 +120,10 @@ def save_preparation(user, preparation_id, form, db):
 
 async def resolve_preparation(request, user, row, db):
     payload = PreparationPayload.model_validate(row.payload)
+    if payload.ai.web_search:
+        from open_webui.services.education.teaching_search import ensure_available
+
+        await ensure_available()
     assignment = authorize_preparation(user, row.assignment_id, db)
     binding = await resolve_binding(request, user, payload.ai)
     validation_environment = fingerprint(binding)

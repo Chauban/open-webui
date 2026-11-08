@@ -9,6 +9,7 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Switch from '$lib/components/common/Switch.svelte';
 	import TeachingTypes from './TeachingTypes.svelte';
+	import TeachingSearch from './TeachingSearch.svelte';
 	import EducationAiStepSettings from './EducationAiStepSettings.svelte';
 	import EducationAutoRetrySettings from './EducationAutoRetrySettings.svelte';
 	import EducationStudentLimits from './EducationStudentLimits.svelte';
@@ -64,6 +65,7 @@
 		<button type="button" on:click={load}>{$i18n.t('Retry')}</button>
 	{:else if values}
 		<TeachingTypes />
+		<TeachingSearch />
 		<section class="space-y-4 rounded-xl border border-gray-200 p-4 dark:border-gray-700">
 			<div class="flex items-center justify-between gap-4">
 				<div>
