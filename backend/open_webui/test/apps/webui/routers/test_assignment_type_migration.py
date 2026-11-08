@@ -65,7 +65,39 @@ def test_populated_upgrade_preserves_facts_authorizes_existing_types_and_keeps_r
                     ),
                 ],
             )
+        _run_migrations(url, 'd7e9f1a3b5c8')
+        with engine.begin() as connection:
+            original = json.loads(
+                connection.execute(
+                    text("SELECT payload FROM teaching_configuration WHERE task_mode='revise_draft' AND version=1")
+                ).scalar_one()
+            )
+            customized = {**original, 'standards': 'Teacher custom standards', 'prompt': 'Teacher custom coaching'}
+            connection.execute(
+                text(
+                    'INSERT INTO teaching_configuration (task_mode, version, payload, created_at) '
+                    'VALUES (:mode, 2, :payload, 3)'
+                ),
+                {'mode': 'revise_draft', 'payload': json.dumps(customized)},
+            )
         _run_migrations(url)
+        with engine.connect() as connection:
+            rows = connection.execute(
+                text(
+                    "SELECT version, payload FROM teaching_configuration "
+                    "WHERE task_mode='revise_draft' ORDER BY version"
+                )
+            ).all()
+            assert len(rows) == 2
+            for row, before in zip(rows, (original, customized)):
+                merged = json.loads(row.payload)
+                assert 'standards' not in merged
+                assert merged['prompt'].startswith('教学目标与判断标准\n' + before['standards'] + '\n\n' + before['prompt'])
+                assert '辅导方式（可编辑）' in merged['prompt']
+                assert '不同阶段的辅导方式（可编辑）' in merged['prompt']
+                assert {k: v for k, v in merged.items() if k != 'prompt'} == {
+                    k: v for k, v in before.items() if k not in ('standards', 'prompt')
+                }
         with engine.connect() as connection:
             assert (
                 connection.execute(text("SELECT stats_json FROM submission WHERE id='submitted'")).scalar() == historic
@@ -75,7 +107,8 @@ def test_populated_upgrade_preserves_facts_authorizes_existing_types_and_keeps_r
             ).one()
             assert row.task_mode == 'revise_draft' and row.scoring_mode == 'dimensions'
             snapshot = json.loads(row.teaching_config)
-            assert snapshot['standards'] == 'Existing literature standards'
+            assert 'standards' not in snapshot
+            assert snapshot['prompt'].startswith('教学目标与判断标准\nExisting literature standards\n\n')
             assert snapshot['version'] == 1
             access = connection.execute(
                 text(

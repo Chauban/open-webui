@@ -1559,9 +1559,17 @@ async def generate_chat_completion(
 
     model_id = form_data.get('model')
     model_info = await Models.get_model_by_id(model_id)
+    from open_webui.services.education.teaching_runtime import authorized_binding, record_provider_request
+    teaching = authorized_binding(request, model_id)
+    if teaching:
+        # Resource authorization happened before capture. Never merge live model
+        # parameters or silently fall back after that immutable capture.
+        payload['model'] = model_id = teaching['binding']['base_model_id']
 
     # Check model info and override the payload
-    if model_info:
+    if teaching:
+        pass
+    elif model_info:
         if model_info.base_model_id:
             base_model_id = (
                 request.base_model_id if hasattr(request, 'base_model_id') else model_info.base_model_id
@@ -1697,6 +1705,7 @@ async def generate_chat_completion(
     if not is_streaming_request:
         payload.pop('stream_options', None)
 
+    teaching_payload = payload if teaching else None
     payload = JSONCodec.dumps(payload)
 
     r = None
@@ -1713,15 +1722,19 @@ async def generate_chat_completion(
 
         async def send():
             nonlocal head
-            response = await session.request(
-                method='POST',
-                url=request_url,
-                data=payload,
-                headers=headers,
-                cookies=cookies,
-                ssl=AIOHTTP_CLIENT_SESSION_SSL,
-                timeout=budget.timeout if retry_transient else get_client_timeout(stream=is_streaming_request),
-            )
+            attempt = record_provider_request(request, teaching_payload) if teaching_payload is not None else None
+            try:
+                response = await session.request(
+                    method='POST', url=request_url, data=payload, headers=headers, cookies=cookies,
+                    ssl=AIOHTTP_CLIENT_SESSION_SSL,
+                    timeout=budget.timeout if retry_transient else get_client_timeout(stream=is_streaming_request),
+                )
+                if attempt is not None:
+                    attempt.update(http_status=response.status)
+            except BaseException as error:
+                if attempt is not None:
+                    attempt.update(error_type=type(error).__name__)
+                raise
             if not retry_transient or response.status >= 400:
                 return response
             try:

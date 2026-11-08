@@ -6,8 +6,43 @@ import {
 	hasDraftChanges,
 	revisionReviewPrompt
 } from './revision-conversation';
+import { mergeReadingHistory } from './revision-conversation';
 const reading = (id: string, time: number, text: string, status = 'ready') =>
 	({ id, created_at: time, source_text: text, status }) as RevisionReading;
+
+test('真实初读消息和阅读证据只展示一次', () => {
+	const record = {
+		...reading('r', 1, '原稿'),
+		context: {
+			message_id: 'reading-r',
+			chat_id: 'chat',
+			teaching_version: 1,
+			description_version: 1,
+			title: '作业',
+			description: ''
+		}
+	};
+	const rows = revisionTimeline([{ id: 'reading-r', timestamp: 1, role: 'assistant' }], [record]);
+	expect(rows).toHaveLength(1);
+	expect(rows[0].kind).toBe('reading');
+	expect(rows[0].key).toBe('message:reading-r');
+});
+
+test('刷新阅读历史不会抹掉请求期间新写入的消息', () => {
+	const local = {
+		currentId: 'new',
+		messages: { old: { childrenIds: ['new'] }, new: { content: '刚发出的消息' } }
+	};
+	const saved = {
+		currentId: 'reading',
+		messages: { old: { childrenIds: ['reading'] }, reading: { content: '初读意见' } }
+	};
+	const merged = mergeReadingHistory(local, saved);
+	expect(merged.currentId).toBe('new');
+	expect(merged.messages.old.childrenIds).toEqual(['reading', 'new']);
+	expect(merged.messages.reading.content).toBe('初读意见');
+	expect(local.messages.old.childrenIds).toEqual(['new']);
+});
 test('初读、消息、复看按时间连接，后续反馈不会替换旧消息；刷新排序一致', () => {
 	const messages = [
 		{ id: 'u1', timestamp: 2 },

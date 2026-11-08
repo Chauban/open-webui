@@ -5,6 +5,7 @@ export type ReadingContext = {
 	called_at?: number;
 	description_version?: number;
 	teaching_version?: number;
+	ai_revision?: number;
 	purpose?: string;
 };
 type Prompt = {
@@ -24,6 +25,7 @@ export type SourceSnapshot = {
 	createdAt?: number;
 	descriptionVersion?: number;
 	teachingVersion?: number;
+	aiRevision?: number;
 };
 export type TeacherConversationEvent = {
 	key: string;
@@ -58,7 +60,16 @@ export const teacherConversationEvents = (
 	const byId = new Map(contexts.map((context) => [context.message_id, context]));
 	const events: TeacherConversationEvent[] = prompts.map((item) => {
 		const context = byId.get(item.id) ?? item.education_context;
-		const meta = teacherPromptLabel(item, t);
+		const linkedReading = readings.find(
+			(record) =>
+				record.context.message_id &&
+				(item.id === record.context.message_id ||
+					item.id === `${record.context.chat_id}-${record.context.message_id}`)
+		);
+		const capturedStep = context?.purpose ?? linkedReading?.purpose;
+		const meta =
+			teacherPromptLabel(item, t) +
+			(context?.ai_revision ? ` · ${t('辅导版本')} v${context.ai_revision}` : '');
 		return {
 			key: `prompt:${item.id}`,
 			kind: 'prompt',
@@ -68,7 +79,14 @@ export const teacherConversationEvents = (
 			created_at: item.created_at ?? 0,
 			thinking_level: item.thinking_level ?? null,
 			model_id: item.role === 'assistant' ? (item.model_id ?? null) : null,
-			ai_step: item.role === 'assistant' ? 'coaching_chat' : null,
+			ai_step:
+				item.role === 'assistant'
+					? capturedStep === 'first_read' ||
+						capturedStep === 'revision_review' ||
+						capturedStep === 'whole_review'
+						? capturedStep
+						: 'coaching_chat'
+					: null,
 			inserted_length: null,
 			source:
 				item.role === 'assistant' && typeof context?.source_text === 'string'
@@ -77,14 +95,24 @@ export const teacherConversationEvents = (
 							text: context.source_text,
 							createdAt: context.called_at ?? item.created_at,
 							descriptionVersion: context.description_version,
-							teachingVersion: context.teaching_version
+							teachingVersion: context.teaching_version,
+							aiRevision: context.ai_revision
 						}
 					: null
 		};
 	});
 	for (const record of readings) {
 		if (!record.feedback) continue;
-		const { understanding, strength, focus } = record.feedback;
+		if (
+			record.context.message_id &&
+			events.some(
+				(event) =>
+					event.key === `prompt:${record.context.message_id}` ||
+					event.key === `prompt:${record.context.chat_id}-${record.context.message_id}`
+			)
+		)
+			continue;
+		const { understanding, strength, focus, overview } = record.feedback;
 		const label = [
 			understanding,
 			strength?.feedback,
@@ -92,7 +120,8 @@ export const teacherConversationEvents = (
 				[item.quote ? `> ${item.quote.replaceAll('\n', '\n> ')}` : '', item.feedback]
 					.filter(Boolean)
 					.join('\n\n')
-			)
+			),
+			overview
 		]
 			.filter(Boolean)
 			.join('\n\n');

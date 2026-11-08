@@ -32,6 +32,7 @@
 	import { onDestroy } from 'svelte';
 	import { replaceTokens, processResponseContent } from '$lib/utils';
 	import { user } from '$lib/stores';
+	import { normalizeMarkdownTables } from '$lib/utils/markdown-tables';
 
 	import MarkdownTokens from './Markdown/MarkdownTokens.svelte';
 
@@ -74,7 +75,7 @@
 		if (processed === lastParsedContent) return;
 		lastParsedContent = processed;
 
-		tokens = marked.lexer(processed);
+		tokens = marked.lexer(normalizeMarkdownTables(processed));
 	};
 
 	// done 也要作为依赖:最后一段内容常在 done 还为假时到达、排进动画帧,done 随后变真时

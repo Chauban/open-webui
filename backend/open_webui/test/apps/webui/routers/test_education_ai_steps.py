@@ -179,8 +179,9 @@ def test_call_step_model_sends_the_step_setting(monkeypatch):
     async def fake_policy():
         return policy
 
-    async def fake_generate(request, form_data, user, bypass_filter=False):
+    async def fake_generate(request, form_data, user, bypass_filter=False, bypass_system_prompt=False):
         sent.append((form_data, bypass_filter))
+        assert bypass_system_prompt == (form_data["model"] == "m" and len(sent) == 1)
         return {'ok': True}
 
     monkeypatch.setattr(ai_steps, 'get_ai_step_policy', fake_policy)

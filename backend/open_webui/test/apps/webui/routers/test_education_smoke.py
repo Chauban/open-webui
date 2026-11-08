@@ -2925,6 +2925,16 @@ def test_notifications_flow(education_client):
     UserContext.current_user = student
     summary = client.get("/api/v1/me/notifications/summary").json()
     assert summary["by_type"].get("review_completed") == 1
+    assert summary["by_assignment"][assignment["id"]]["review_completed"] == 1
+    assert "submission_created" not in summary["by_assignment"][assignment["id"]]
+
+    # Opening another assignment must not clear this assignment's feedback.
+    client.post(
+        "/api/v1/me/notifications/mark-read",
+        json={"assignment_id": "another-assignment"},
+    )
+    summary = client.get("/api/v1/me/notifications/summary").json()
+    assert summary["by_assignment"][assignment["id"]]["review_completed"] == 1
 
     # 按作业上下文标已读
     marked = client.post(
@@ -2934,6 +2944,7 @@ def test_notifications_flow(education_client):
     assert marked["marked"] >= 2  # assignment_published + review_completed
     summary = client.get("/api/v1/me/notifications/summary").json()
     assert summary["total"] == 0
+    assert summary["by_assignment"] == {}
 
 
 def test_returned_review_sends_return_notification(education_client):
@@ -2955,6 +2966,7 @@ def test_returned_review_sends_return_notification(education_client):
     UserContext.current_user = student
     summary = client.get("/api/v1/me/notifications/summary").json()
     assert summary["by_type"].get("submission_returned") == 1
+    assert summary["by_assignment"][assignment["id"]]["submission_returned"] == 1
 
 
 def test_my_assignment_submissions_returns_rounds_with_content_and_review(

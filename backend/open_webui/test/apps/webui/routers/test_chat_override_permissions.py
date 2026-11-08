@@ -207,23 +207,26 @@ def test_assignment_chat_drops_student_overrides_even_when_permitted(education_c
     assert captured['overrides'] == NO_CHAT_OVERRIDES
     sent = captured['form_data']
     assert 'temperature' not in sent and 'thinking' not in sent
-    assert sent['params'] == {'tool_approval_mode': 'ask'}
+    assert sent['params'] == {'tool_approval_mode': 'ask', 'thinking_level': 'medium'}
     assert all(message['role'] != 'system' for message in sent['messages'])
     assert sent['folder_id'] == project_id
 
 
 def test_chat_outside_assignments_follows_permissions(education_client, monkeypatch):
-    client, _, _, student, _, SessionLocal = education_client
+    client, teacher, _, student, _, SessionLocal = education_client
     monkeypatch.setattr(internal_db, 'SessionLocal', SessionLocal)
     UserContext.current_user = student
     personal = client.post('/api/v1/me/writing/personal', json={'title': '随笔'})
+    assert personal.status_code == 403, personal.text
+    UserContext.current_user = teacher
+    personal = client.post('/api/v1/me/writing/personal', json={'title': '教师随笔'})
     assert personal.status_code == 200, personal.text
 
     for body in (
         _request_body(parent_id=None),
         _request_body(parent_id=None, folder_id=personal.json()['project']['id']),
     ):
-        assert _capture_chat_completion(monkeypatch, student, body)['overrides'] == ALL_CHAT_OVERRIDES
+        assert _capture_chat_completion(monkeypatch, teacher, body)['overrides'] == ALL_CHAT_OVERRIDES
 
     _restrict_students_grant_teachers(SessionLocal)
     captured = _capture_chat_completion(monkeypatch, student, _request_body(parent_id=None))

@@ -316,7 +316,7 @@ export const getTeacherAssignmentDefaults = async (
 export const getTeacherAssignmentAiSettings = async (
 	token: string,
 	assignmentId: string
-): Promise<{ steps: AiStepView[]; coaching_thinking: CoachingThinking }> => {
+): Promise<{ steps: AiStepView[]; coaching_thinking: CoachingThinking; fixed_by_assignment?: boolean }> => {
 	return fetch(`${WEBUI_API_BASE_URL}/teacher/assignments/${assignmentId}/ai-settings`, {
 		method: 'GET',
 		headers: withAuth(token)
@@ -1169,7 +1169,6 @@ export type TeachingConfig = {
 	task_mode: TaskMode;
 	version: number;
 	created_at: number;
-	standards: string;
 	prompt: string;
 	default_description: string;
 	scoring_mode: ScoringMode;
@@ -1214,6 +1213,8 @@ export type RevisionReading = {
 	model_id: string | null;
 	thinking: string | null;
 	context: {
+		chat_id?: string;
+		message_id?: string;
 		teaching_version: number;
 		description_version: number;
 		title: string;

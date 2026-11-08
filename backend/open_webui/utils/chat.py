@@ -153,6 +153,11 @@ async def generate_chat_completion(
     bypass_system_prompt: bool = False,
 ):
     log.debug('generate_chat_completion: %s', form_data)
+    from open_webui.services.education.teaching_runtime import authorized_binding
+    teaching = authorized_binding(request, form_data.get('model'))
+    if teaching:
+        from open_webui.services.education.teaching_filters import prepare
+        form_data = await prepare(request, user, form_data)
     if BYPASS_MODEL_ACCESS_CONTROL:
         bypass_filter = True
 
@@ -160,6 +165,7 @@ async def generate_chat_completion(
     # downstream route handlers (openai) can read them without exposing
     # them as query parameters.
     request.state.bypass_filter = bypass_filter
+    bypass_system_prompt = bypass_system_prompt or getattr(request.state, 'education_revision_context', False)
     request.state.bypass_system_prompt = bypass_system_prompt
 
     if hasattr(request.state, 'metadata'):
@@ -196,7 +202,8 @@ async def generate_chat_completion(
         return await generate_direct_chat_completion(request, form_data, user=user, models=models)
     else:
         # Check if user has access to the model
-        if not bypass_filter and user.role == 'user':
+        from open_webui.services.education.teaching_runtime import authorized_binding
+        if not bypass_filter and not authorized_binding(request, model_id) and user.role == 'user':
             try:
                 await check_model_access(user, model)
             except Exception as e:
@@ -281,11 +288,15 @@ async def generate_chat_completion(
             return await generate_function_chat_completion(
                 request, form_data, user=user, models=models
             )
-        return await generate_openai_chat_completion(
+        response = await generate_openai_chat_completion(
             request=request,
             form_data=form_data,
             user=user,
         )
+        if teaching:
+            from open_webui.services.education.teaching_filters import finish
+            response = await finish(request, response)
+        return response
 
 
 chat_completion = generate_chat_completion

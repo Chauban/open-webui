@@ -2,6 +2,7 @@
 	import { isRevision } from '$lib/utils/task-types';
 	import TeacherProcessPanel from '$lib/components/education/TeacherProcessPanel.svelte';
 	import TeacherModelSummary from '$lib/components/education/TeacherModelSummary.svelte';
+	import FrozenTeachingEvidence from '$lib/components/education/FrozenTeachingEvidence.svelte';
 	import ProcessDraftView from '$lib/components/education/ProcessDraftView.svelte';
 	import { initialProcessState, type ProcessInspection } from '$lib/utils/process-review';
 	import type { AiStepKey, SubmissionProcess } from '$lib/apis/education';
@@ -1373,6 +1374,7 @@
 						{:else if activeTab === 'analysis'}
 							<div class="space-y-5 p-5">
 								<TeacherModelSummary usage={roundModelUsage} />
+								<FrozenTeachingEvidence evidence={detail?.submission?.stats_json?.teaching_evidence ?? null} />
 								<!-- Segments -->
 								<div>
 									<div class="mb-3 flex items-center justify-between">

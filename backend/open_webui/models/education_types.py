@@ -59,8 +59,7 @@ class TeachingConfiguration(Base):
 
 class TeachingConfigForm(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    standards: str = Field(min_length=1, max_length=30000)
-    prompt: str = Field(min_length=1, max_length=30000)
+    prompt: str = Field(min_length=1, max_length=65000)
     default_description: str = Field(max_length=30000)
     scoring_mode: Literal['dimensions', 'total']
     score_max: int = Field(gt=0, le=10000)

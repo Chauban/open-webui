@@ -7,6 +7,7 @@
 		lastReadDraft,
 		revisionReviewPrompt
 	} from '$lib/utils/revision-conversation';
+	import { mergeReadingHistory } from '$lib/utils/revision-conversation';
 	import type { RevisionReading, ReadingPurpose } from '$lib/apis/education';
 
 	import { getContext, onDestroy, onMount, tick } from 'svelte';
@@ -161,6 +162,9 @@
 	export let disableContextActions = false;
 	export let allowAssignmentWorkspaceChat = false;
 	export let lockModelOverrides = false;
+	export let fixedTeachingModel: Model | null = null;
+	$: chatModels = fixedTeachingModel ? [fixedTeachingModel] : $models;
+	$: if (fixedTeachingModel) { selectedModels = [fixedTeachingModel.id]; atSelectedModel = undefined; }
 	// RightWrite: 写作区额外附在请求参数里的值(作业里学生关掉思考时的 thinking_level)。
 	// 服务端只认它允许的那几个,见 main.py 的作业写作分支。
 	export let extraRequestParams: Record<string, unknown> = {};
@@ -202,7 +206,7 @@
 		if (autoSendPrefill) {
 			const modelReady = () =>
 				selectedModels.length > 0 &&
-				selectedModels.every((modelId) => $models.some((model) => model.id === modelId));
+				selectedModels.every((modelId) => chatModels.some((model) => model.id === modelId));
 			if (await waitFor(modelReady, 100)) {
 				if (hasMessages()) return;
 				// 草稿正是这句开场(之前预填留下的)就清掉，免得发完还留在输入框、再被存成草稿。
@@ -235,7 +239,7 @@
 		const ready = () =>
 			!readOnly &&
 			selectedModels.length > 0 &&
-			selectedModels.every((modelId) => $models.some((model) => model.id === modelId));
+			selectedModels.every((modelId) => chatModels.some((model) => model.id === modelId));
 		if (!(await waitFor(ready, 100))) return;
 		await submitPrompt(message.text, [], { meta: { auto_started: true } });
 	};
@@ -247,6 +251,29 @@
 	export let revisionMode = false;
 	export let reserveWorkspaceActions = false;
 	export let revisionReadings: RevisionReading[] = [];
+	let readingHistorySync = '';
+	$: if (revisionMode && chatIdProp && revisionReadings.length) {
+		const key = revisionReadings
+			.filter((record) => record.status === 'ready' && record.context?.chat_id === chatIdProp)
+			.map((record) => record.context.message_id)
+			.join(',');
+		if (key && key !== readingHistorySync) {
+			readingHistorySync = key;
+			void syncReadingHistory(chatIdProp);
+		}
+	}
+	const syncReadingHistory = async (id: string) => {
+		try {
+			const saved = await getChatById(localStorage.token, id);
+			if (chatIdProp === id && saved?.chat?.history) {
+				history = mergeReadingHistory(history, saved.chat.history);
+			}
+		} catch (error) {
+			console.error('Could not refresh reading conversation', error);
+			toast.error($i18n.t('Something went wrong. Please try again.'));
+		}
+	};
+
 	export let readingBusy = false;
 	export let revisionResponseBusy = false;
 	$: revisionResponseBusy =
@@ -360,7 +387,7 @@
 	let contextUsage = null;
 
 	const getAvailableModelIds = () =>
-		$models.filter((m) => !(m?.info?.meta?.hidden ?? false)).map((m) => m.id);
+		chatModels.filter((m) => !(m?.info?.meta?.hidden ?? false)).map((m) => m.id);
 	const getDefaultModelIds = () =>
 		$config?.default_models ? $config.default_models.split(',') : [];
 	const normalizeSelectedModels = (modelIds: string[] = []) => {
@@ -389,7 +416,7 @@
 
 		if (
 			chatIdProp === '' &&
-			$models.length > 0 &&
+			chatModels.length > 0 &&
 			!selectedModels?.some((modelId) => modelId) &&
 			!modelSearchParam
 		) {
@@ -432,7 +459,7 @@
 		}
 
 		const modelId = atSelectedModel?.id ?? selectedModels.find((id) => id);
-		const model = $models.find((item) => item.id === modelId);
+		const model = chatModels.find((item) => item.id === modelId);
 		const threshold = Number(model?.info?.params?.compact_token_threshold);
 		return Number.isFinite(threshold) && threshold > 0 ? threshold : null;
 	};
@@ -505,7 +532,7 @@
 		const currentModels = atSelectedModel?.id ? [atSelectedModel.id] : selectedModels;
 		const allModelsSupportWebSearch =
 			currentModels.filter(
-				(model) => $models.find((m) => m.id === model)?.info?.meta?.capabilities?.web_search ?? true
+				(model) => chatModels.find((m) => m.id === model)?.info?.meta?.capabilities?.web_search ?? true
 			).length === currentModels.length;
 
 		webSearchActive = Boolean(
@@ -1180,7 +1207,7 @@
 				return;
 			}
 
-			const model = atSelectedModel ?? $models.find((m) => m.id === selectedModels[0]);
+			const model = atSelectedModel ?? chatModels.find((m) => m.id === selectedModels[0]);
 			if (model) {
 				// Set Default Tools
 				if (model?.info?.meta?.toolIds) {
@@ -2201,7 +2228,7 @@
 			await temporaryChatEnabled.set(false);
 		}
 
-		const availableModels = $models
+		const availableModels = chatModels
 			.filter((m) => !(m?.info?.meta?.hidden ?? false))
 			.map((m) => m.id);
 
@@ -2231,7 +2258,7 @@
 			)?.split(',');
 
 			if (urlModels.length === 1) {
-				if (!$models.find((m) => m.id === urlModels[0])) {
+				if (!chatModels.find((m) => m.id === urlModels[0])) {
 					// Model not found; open model selector and prefill
 					await openModelSelectorWithSearch(urlModels[0]);
 				} else {
@@ -2245,7 +2272,7 @@
 
 			// Unavailable models filtering
 			selectedModels = selectedModels.filter((modelId) =>
-				$models.map((m) => m.id).includes(modelId)
+				chatModels.map((m) => m.id).includes(modelId)
 			);
 		} else {
 			if ($selectedFolder?.data?.model_ids) {
@@ -2412,7 +2439,7 @@
 		}
 
 		selectedModels = selectedModels.map((modelId) =>
-			$models.map((m) => m.id).includes(modelId) ? modelId : ''
+			chatModels.map((m) => m.id).includes(modelId) ? modelId : ''
 		);
 
 		await tick();
@@ -2755,7 +2782,7 @@
 				...(m.sources ? { sources: m.sources } : {})
 			})),
 			...(event ? { event: event } : {}),
-			model_item: $models.find((m) => m.id === modelId),
+			model_item: chatModels.find((m) => m.id === modelId),
 			chat_id: _chatId,
 			session_id: $socket?.id,
 			id: responseMessageId
@@ -2809,7 +2836,7 @@
 			toast.error($i18n.t('Model not selected'));
 		} else {
 			const modelId = selectedModels[0];
-			const model = $models.filter((m) => m.id === modelId).at(0);
+			const model = chatModels.filter((m) => m.id === modelId).at(0);
 
 			if (!model) {
 				toast.error($i18n.t('Model not found'));
@@ -2869,7 +2896,7 @@
 	};
 
 	const addMessages = async ({ modelId, parentId, messages }) => {
-		const model = $models.filter((m) => m.id === modelId).at(0);
+		const model = chatModels.filter((m) => m.id === modelId).at(0);
 
 		let parentMessage = history.messages[parentId];
 		let currentParentId = parentMessage ? parentMessage.id : null;
@@ -3204,7 +3231,7 @@
 			return;
 		}
 
-		const model = $models.find((model) => model.id === modelId);
+		const model = chatModels.find((model) => model.id === modelId);
 		if (!model) {
 			toast.error(`Model not found: ${modelId}`);
 			messageInput?.setText('');
@@ -3280,7 +3307,7 @@
 		console.log('submitHandler', userPrompt, $chatId);
 
 		const _selectedModels = selectedModels.map((modelId) =>
-			$models.map((m) => m.id).includes(modelId) ? modelId : ''
+			chatModels.map((m) => m.id).includes(modelId) ? modelId : ''
 		);
 
 		if (!equal(selectedModels, _selectedModels)) {
@@ -3322,7 +3349,7 @@
 			toast.error($i18n.t('Model not selected'));
 			return;
 		}
-		const form = getChatVariablesForm(selectedModelIds, chatVariables, $models);
+		const form = getChatVariablesForm(selectedModelIds, chatVariables, chatModels);
 		if (form.conflicts.length > 0) {
 			showChatVariablesModal = true;
 			toast.error($i18n.t('Chat Variables have conflicting model definitions'));
@@ -3465,7 +3492,7 @@
 		// it, duplicate models collapse into one another when the chat is reloaded.
 		const messageIdsList: Array<{ model_id: string; message_id: string; modelIdx: number }> = [];
 		for (const [_modelIdx, modelId] of selectedModelIds.entries()) {
-			const model = $models.filter((m) => m.id === modelId).at(0);
+			const model = chatModels.filter((m) => m.id === modelId).at(0);
 
 			if (model) {
 				let responseMessageId = uuidv4();
@@ -3537,7 +3564,7 @@
 
 		// Vision capability check
 		for (const mid of selectedModelIds) {
-			const model = $models.filter((m) => m.id === mid).at(0);
+			const model = chatModels.filter((m) => m.id === mid).at(0);
 			if (model) {
 				const hasImages = createMessagesList(_history, parentId).some((message) =>
 					message.files?.some(
@@ -3561,7 +3588,7 @@
 
 		// Single request — backend fans out to all models
 		const primaryModelId = selectedModelIds[0];
-		const primaryModel = $models.filter((m) => m.id === primaryModelId).at(0);
+		const primaryModel = chatModels.filter((m) => m.id === primaryModelId).at(0);
 		const primaryResponseMessageId = messageIdsList[0]?.message_id;
 
 		if (primaryModel && primaryResponseMessageId) {
@@ -3815,7 +3842,7 @@
 					)
 				},
 				...(useChatVariablesFallback ? { chat_variables: chatVariables } : {}),
-				model_item: $models.find((m) => m.id === model.id),
+				model_item: chatModels.find((m) => m.id === model.id),
 
 				session_id: $socket?.id,
 				chat_id: _chatId || undefined,
@@ -4065,7 +4092,7 @@
 			responseMessage.done = false;
 			await tick();
 
-			const model = $models
+			const model = chatModels
 				.filter((m) => m.id === (responseMessage?.selectedModelId ?? responseMessage.model))
 				.at(0);
 
@@ -4368,7 +4395,7 @@
 
 <audio id="audioElement" style="display: none;"></audio>
 
-{#if getChatVariablesForm(selectedModelIds, chatVariables, $models).conflicts.length > 0}
+{#if getChatVariablesForm(selectedModelIds, chatVariables, chatModels).conflicts.length > 0}
 	<Modal bind:show={showChatVariablesModal} size="md">
 		<div>
 			<div class="flex justify-between px-4 pt-3 pb-1 dark:text-gray-300">
@@ -4388,7 +4415,7 @@
 					{$i18n.t('Selected models define incompatible Chat Variables.')}
 				</div>
 				<div class="flex flex-col gap-1">
-					{#each getChatVariablesForm(selectedModelIds, chatVariables, $models).conflicts as conflict}
+					{#each getChatVariablesForm(selectedModelIds, chatVariables, chatModels).conflicts as conflict}
 						<div class="rounded-lg border border-red-200 px-3 py-2 text-xs dark:border-red-900/60">
 							<div class="font-medium text-red-600 dark:text-red-400">{conflict.key}</div>
 							<div class="mt-1 text-gray-500 dark:text-gray-400">
@@ -4404,7 +4431,7 @@
 	<InputVariablesModal
 		bind:show={showChatVariablesModal}
 		title={$i18n.t('Chat Variables')}
-		variables={getChatVariablesForm(selectedModelIds, chatVariables, $models).variables}
+		variables={getChatVariablesForm(selectedModelIds, chatVariables, chatModels).variables}
 		onSave={saveChatVariables}
 	/>
 {/if}
@@ -4668,6 +4695,7 @@
 								>
 									<slot name="input-accessory" />
 									<MessageInput
+										fixedModelName={fixedTeachingModel?.name ?? fixedTeachingModel?.id ?? null}
 										{revisionAction}
 										bind:this={messageInput}
 										{history}
@@ -4761,6 +4789,7 @@
 								<div id={embedded ? messageInputDropzoneId : undefined} class="pb-2 z-10">
 									<slot name="input-accessory" />
 									<MessageInput
+										fixedModelName={fixedTeachingModel?.name ?? fixedTeachingModel?.id ?? null}
 										bind:this={messageInput}
 										{history}
 										{taskIds}
@@ -4911,7 +4940,7 @@
 						chatUser={chatOwner}
 						modelId={selectedModelIds?.at(0) ?? null}
 						models={selectedModelIds.reduce((a, e, i, arr) => {
-							const model = $models.find((m) => m.id === e);
+							const model = chatModels.find((m) => m.id === e);
 							if (model) {
 								return [...a, model];
 							}

@@ -21,6 +21,22 @@ const reading = {
 		overview: '概览'
 	}
 } as RevisionReading;
+
+test('真实阅读消息在教师过程记录中不与阅读证据重复', () => {
+	const linked = {
+		...reading,
+		context: { ...reading.context, chat_id: 'chat', message_id: 'reading-r1' }
+	};
+	const events = teacherConversationEvents(
+		[{ id: 'chat-reading-r1', role: 'assistant', content: '已入历史的初读意见', created_at: 1 }],
+		[linked],
+		[],
+		t
+	);
+	expect(events).toHaveLength(1);
+	expect(events[0].label).toBe('已入历史的初读意见');
+	expect(events[0].ai_step).toBe('first_read');
+});
 test('初读与后续交流合在同一时间线，冻结快照优先且不使用当前正文', () => {
 	const prompts = [
 		{ id: 'u', role: 'user', content: '我的说明', created_at: 2 },
@@ -42,7 +58,23 @@ test('初读与后续交流合在同一时间线，冻结快照优先且不使�
 	expect(events[0].source?.text).toBe('初稿');
 	expect(events[2].source?.text).toBe('本轮冻结的改稿');
 	expect(events[0].label).toContain('证据问题');
+	expect(events[0].label).toContain('概览');
 	expect(events[1].source).toBeNull();
+});
+
+test('教师过程记录保留按提示词生成的连续回复', () => {
+	const events = teacherConversationEvents(
+		[],
+		[
+			{
+				...reading,
+				feedback: { understanding: '', strength: null, focus: [], overview: '完整回复' }
+			}
+		],
+		[],
+		t
+	);
+	expect(events[0].label).toBe('完整回复');
 });
 
 test('逐次模型切换与平台阅读分开汇总，缺失模型不按其他回复猜补', () => {

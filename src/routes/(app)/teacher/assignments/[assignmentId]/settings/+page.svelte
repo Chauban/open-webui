@@ -23,6 +23,7 @@
 	import AssignmentAiSummary from '$lib/components/education/AssignmentAiSummary.svelte';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import AssignmentForm from '$lib/components/education/AssignmentForm.svelte';
+	import TeachingPreparationPanel from '$lib/components/education/TeachingPreparationPanel.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import Modal from '$lib/components/common/Modal.svelte';
 	import { taskTypeLabel } from '$lib/utils/task-types';
@@ -44,7 +45,9 @@
 	const assignmentId = $page.params.assignmentId;
 
 	let allowedTaskModes: import('$lib/apis/education').TaskMode[] = [];
-	let teachingConfigs = {};
+	let teachingConfigs: Partial<
+		Record<import('$lib/apis/education').TaskMode, import('$lib/apis/education').TeachingConfig>
+	> = {};
 	let changeSummary = '';
 	let showSaveConfirm = false;
 	let pendingPayload: Parameters<typeof updateAssignment>[2] | null = null;
@@ -249,9 +252,9 @@
 		{:else if loadError}
 			<EduStateCard tone="error">{loadError}</EduStateCard>
 		{:else if draft}
-			{#key aiSummaryVersion}
-				<AssignmentAiSummary {assignmentId} />
-			{/key}
+			{#if draft.taskMode !== 'revise_argument'}{#key aiSummaryVersion}
+					<AssignmentAiSummary {assignmentId} />
+				{/key}{/if}
 			<div class="mb-4 grid gap-2 text-sm">
 				<label
 					>{$i18n.t('变更说明（学生已开始后修改要求时必填）')}<textarea
@@ -259,7 +262,7 @@
 						bind:value={changeSummary}
 					></textarea></label
 				>
-				{#if !item.task_mode_locked}<label
+				{#if !item.task_mode_locked && draft.taskMode !== 'revise_argument'}<label
 						><input type="checkbox" bind:checked={adoptLatest} />
 						{$i18n.t('采用该类型最新教学配置')}</label
 					>{/if}
@@ -286,6 +289,11 @@
 						</EduButton>
 					</div>
 
+					{#if draft.taskMode === 'revise_argument'}<TeachingPreparationPanel
+							bind:draft
+							assignment={item.assignment}
+							template={teachingConfigs.revise_argument}
+						/>{/if}
 					<EduCard class="border-red-200 dark:border-red-900/60">
 						<h2 class="text-base font-semibold text-red-700 dark:text-red-400">
 							{$i18n.t('Danger Zone')}

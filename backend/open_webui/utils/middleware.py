@@ -81,7 +81,7 @@ from open_webui.tasks import clear_response_stream, save_response_stream
 from open_webui.utils.access_control import has_connection_access, has_permission
 from open_webui.utils.access_control.files import get_owner_accessible_folder_files
 from open_webui.utils.access_control.folders import has_folder_access
-from open_webui.services.education.revision_reading import current_revision_chat_context, attach_current_revision_draft
+from open_webui.services.education.revision_reading import current_revision_chat_context, attach_current_revision_draft, revision_model_view
 from open_webui.services.education.task_types import is_revision
 from open_webui.models.education import Education
 from open_webui.services.education.writing_access import (
@@ -2464,6 +2464,25 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     if regeneration_prompt:
         form_data['messages'].append({'role': 'user', 'content': regeneration_prompt})
 
+    teaching_config = getattr(request.state, 'teaching_binding', None)
+    if teaching_config:
+        from open_webui.services.education.teaching_runtime import build_messages
+        context = request.state.teaching_evidence
+        form_data['messages'] = build_messages(teaching_config, context['purpose'], context['source_text'],
+            context['dialogue'])
+        # Both adapters intentionally expose only student text and conversation.
+        # No personal memory, model additions, files, tools or actor-dependent filters.
+        form_data = {k: v for k, v in form_data.items() if k in {
+            'model', 'messages', 'stream', 'metadata', 'temperature', 'top_p', 'top_k', 'min_p', 'seed',
+            'max_tokens', 'max_completion_tokens', 'frequency_penalty', 'presence_penalty', 'stop', 'thinking_level'}}
+        metadata['education_context'] = context
+        if chat_id and metadata.get('message_id'):
+            stored_message = await Chats.get_message_by_id_and_message_id(chat_id, metadata['message_id'])
+            if stored_message:
+                await Chats.upsert_message_to_chat_by_id_and_message_id(chat_id, metadata['message_id'],
+                    {'model': teaching_config['ai']['model_id'], 'meta': {**(stored_message.get('meta') or {}), 'education_context': context}})
+        return form_data, metadata, []
+
     if is_saved_chat_id(chat_id) and user_message_id:
         if getattr(request.state, 'direct', False) and hasattr(request.state, 'model'):
             compaction_models = {
@@ -2566,6 +2585,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         folder_id = metadata.get('folder_id', None)
 
     is_assignment_writing = False
+    is_revision_writing = False
     if folder_id and user:
         folder = await Folders.get_folder_by_id(folder_id)
         if folder and user.role != 'admin' and not await has_folder_access(user.id, folder, 'read', db=None):
@@ -2587,17 +2607,13 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                 Education.get_assignment_by_id(writing_session.assignment_id) if is_assignment_writing else None
             )
             if assignment_context and is_revision(assignment_context.task_mode):
-                previous_reply_id = (metadata.get('user_message') or {}).get('parentId')
-                prior = (
-                    await Chats.get_message_by_id_and_message_id(chat_id, previous_reply_id)
-                    if chat_id and previous_reply_id
-                    else None
-                )
-                context, context_versions = current_revision_chat_context(
-                    writing_session,
-                    str(get_last_user_message(form_data.get('messages', [])) or ''),
-                    (prior.get('meta') or {}).get('education_context') if prior else None,
-                )
+                is_revision_writing = True
+                request.state.education_revision_context = True
+                model_system_prompt = None
+                # Use a request-local model view: global model settings remain unchanged.
+                model = revision_model_view(model)
+                extra_params['__model__'] = model
+                context, context_versions = current_revision_chat_context(writing_session)
                 metadata['education_context'] = context_versions
                 if chat_id and metadata.get('message_id'):
                     stored_message = await Chats.get_message_by_id_and_message_id(chat_id, metadata['message_id'])
@@ -2612,7 +2628,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                 )
             elif 'system_prompt' in folder.data:
                 form_data = await apply_system_prompt_to_body(folder.data['system_prompt'], form_data, metadata, user)
-            if 'files' in folder.data:
+            if not is_revision_writing and 'files' in folder.data:
                 if metadata.get('params', {}).get('function_calling') == 'legacy':
                     form_data['files'] = [
                         {'type': 'folder', 'id': folder.id},
@@ -2626,8 +2642,8 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         # 写作区:每轮把右侧编辑器最近一次保存的正文追加到系统提示末尾,AI 才看得到学生在改什么。
         # 不走 apply_system_prompt_to_body,学生正文不该被当成提示词模板解析变量。
         # 当前提问的父消息就是模型上一次的回复,据此判断这之后学生改没改稿。
-        # 修订初稿作业在正文前面先附第一次通读的结论表,首轮回复按它写。
-        if writing_session:
+        # 修订作业只在本轮用户消息附一次当前稿，不再重复注入 system。
+        if writing_session and not is_revision_writing:
             form_data['messages'] = add_or_update_system_message(
                 await build_current_text_context(
                     writing_session,
@@ -3980,6 +3996,8 @@ async def outlet_filter_handler(ctx):
     For temp/API chats, messages are built from form_data plus ctx['assistant_message'].
     """
     request = ctx['request']
+    if getattr(request.state, 'teaching_binding', None):
+        return  # Already applied by the shared formal/trial provider adapter.
     user = ctx['user']
     model = ctx['model']
     metadata = ctx['metadata']
@@ -4343,7 +4361,8 @@ async def streaming_chat_response_handler(response, ctx):
     }
 
     filter_functions = (
-        await get_filter_functions(request, model, metadata.get('filter_ids', [])) if ENABLE_PLUGINS else []
+        await get_filter_functions(request, model, metadata.get('filter_ids', []))
+        if ENABLE_PLUGINS and not getattr(request.state, 'teaching_binding', None) else []
     )
 
     # Standard streaming response handler

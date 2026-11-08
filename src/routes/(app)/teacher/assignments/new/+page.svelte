@@ -21,6 +21,8 @@
 	} from '$lib/apis/education';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import AssignmentForm from '$lib/components/education/AssignmentForm.svelte';
+	import TeachingPreparationPanel from '$lib/components/education/TeachingPreparationPanel.svelte';
+	import { teachingApi, type Preparation } from '$lib/apis/education/teaching';
 	import EduButton from '$lib/components/education/EduButton.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 	import {
@@ -37,7 +39,7 @@
 		type AssignmentDraft,
 		type DefaultRubrics
 	} from '$lib/utils/assignment-form';
-	import { resolveErrorMessage } from '$lib/utils/education';
+	import { resolveErrorMessage, toLocalDateTimeInput } from '$lib/utils/education';
 
 	const i18n = getContext<Writable<i18nType>>('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
@@ -96,6 +98,8 @@
 				draft = applyTeachingDefaults(draft, teachingConfigs[assignmentDefaults.task_mode]!);
 			reflectionQuestionSets = questionSets;
 			const params = get(page).url.searchParams;
+			if (params.has('preparation'))
+				draft = applyTeachingDefaults(draft, teachingConfigs.revise_argument!);
 			const presetClassroomId = params.get('classroomId');
 			const duplicateFromId = params.get('from');
 			// 分析页上「以此为下次的质疑焦点」带过来的。放在复制之后覆盖，
@@ -160,6 +164,33 @@
 				if (initial) {
 					selectedClassroomIds = new Set([initial]);
 				}
+			}
+			const preparationId = params.get('preparation');
+			if (preparationId) {
+				const preparation = await teachingApi<Preparation>(
+					`/teacher/teaching-preparations/${preparationId}`
+				);
+				if (preparation.assignment_id !== null)
+					throw new Error('Preparation does not belong to this assignment');
+				const a = preparation.payload.assignment;
+				draft = {
+					...draft,
+					title: a.title,
+					description: a.description,
+					dueAt: a.due_at ? toLocalDateTimeInput(a.due_at) : '',
+					scoreMax: String(a.score_max),
+					scoringMode: a.scoring_mode,
+					taskMode: a.task_mode,
+					coachingStyle: a.coaching_style,
+					reflectionQuestions: a.reflection_questions,
+					rubricCriteria: a.rubric_schema.criteria.map((c) => ({
+						key: c.key,
+						label: c.label,
+						maxScore: String(c.max_score)
+					})),
+					...draftThinkingFrom(a.model_params)
+				};
+				selectedClassroomIds = new Set(a.classroom_ids);
 			}
 		} catch (error) {
 			loadError = resolveErrorMessage(error, t);
@@ -233,15 +264,25 @@
 				{reflectionNotice}
 				{thinkingPolicy}
 			>
-				<div
-					slot="footer"
-					class="sticky bottom-0 flex justify-end gap-2 border-t border-gray-100 bg-white/90 py-3 backdrop-blur dark:border-gray-850 dark:bg-gray-900/90"
-				>
-					<EduButton on:click={() => goto('/teacher/assignments')}>{$i18n.t('Cancel')}</EduButton>
-					<EduButton variant="primary" on:click={submit} disabled={saving}>
-						{saving ? $i18n.t('Creating...') : $i18n.t('Create Assignment')}
-					</EduButton>
-				</div>
+				<svelte:fragment slot="footer">
+					{#if draft.taskMode === 'revise_argument'}<TeachingPreparationPanel
+							bind:draft
+							bind:selectedClassroomIds
+							template={teachingConfigs.revise_argument!}
+						/>{/if}
+					<div
+						class="sticky bottom-0 flex justify-end gap-2 border-t border-gray-100 bg-white/90 py-3 backdrop-blur dark:border-gray-850 dark:bg-gray-900/90"
+					>
+						<EduButton on:click={() => goto('/teacher/assignments')}>{$i18n.t('Cancel')}</EduButton>
+						{#if draft.taskMode !== 'revise_argument'}<EduButton
+								variant="primary"
+								on:click={submit}
+								disabled={saving}
+							>
+								{saving ? $i18n.t('Creating...') : $i18n.t('Create Assignment')}
+							</EduButton>{/if}
+					</div>
+				</svelte:fragment>
 			</AssignmentForm>
 		{/if}
 	</div>

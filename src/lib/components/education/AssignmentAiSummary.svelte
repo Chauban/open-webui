@@ -18,6 +18,7 @@
 	let steps: AiStepView[] = [];
 	let coaching: CoachingThinking | null = null;
 	let failed = false;
+	let fixedByAssignment = false;
 
 	const COACHING_SOURCE_TEXT = {
 		admin: 'Administrator default',
@@ -33,6 +34,8 @@
 				: $i18n.t(MODEL_SOURCE_TEXT[step.model_source]);
 		}
 		if (step.model_available) return step.model_name ?? step.model_id;
+		if (fixedByAssignment && step.control === 'teacher')
+			return $i18n.t('指定辅导模型不可用，请发布新的辅导方案。');
 		return step.model_source === 'admin_model'
 			? $i18n.t('{{model}} is no longer available; image import is off', { model: step.model_id })
 			: $i18n.t('{{model}} is no longer available; using: {{fallback}}', {
@@ -46,6 +49,7 @@
 			const settings = await getTeacherAssignmentAiSettings(localStorage.token, assignmentId);
 			steps = settings.steps;
 			coaching = settings.coaching_thinking;
+			fixedByAssignment = settings.fixed_by_assignment ?? false;
 		} catch (error) {
 			console.error(error);
 			failed = true;
@@ -69,7 +73,11 @@
 								{modelLabel(step)} ·
 								{step.key === 'coaching_chat'
 									? $i18n.t(COACHING_SOURCE_TEXT[coaching.source])
-									: $i18n.t('Set by the administrator')}
+									: $i18n.t(
+											fixedByAssignment && step.control === 'teacher'
+												? 'Set for this assignment'
+												: 'Set by the administrator'
+										)}
 							</div>
 						</div>
 						<div class="shrink-0 text-right">
@@ -93,7 +101,9 @@
 				</li>
 				<li>
 					{$i18n.t(
-						'Your setting only reaches the coaching chat; the other steps follow the administrator so results stay comparable across classes.'
+						fixedByAssignment
+							? '初读、交流和修改复看统一使用教师发布的模型与思考设置。'
+							: 'Your setting only reaches the coaching chat; the other steps follow the administrator so results stay comparable across classes.'
 					)}
 				</li>
 				<li>

@@ -43,6 +43,39 @@ from open_webui.test.apps.webui.routers.test_education_smoke import (
 DRAFT = '本段提出一个需要证明的判断，理由和证据之间仍有需要解释的联系。' * 12
 
 
+@pytest.mark.parametrize('stage', ['first_read', 'coaching_chat', 'revision_review', 'whole_review'])
+def test_formal_and_trial_builder_only_attach_current_draft(stage):
+    from open_webui.services.education.teaching_runtime import build_messages
+
+    config = {'ai': {'prompt': '老师的提示词'}, 'title': '题目', 'description': '最新要求'}
+    dialogue = [{'role': 'assistant', 'content': '前面的真实反馈'},
+                {'role': 'user', 'content': '看看这次修改，整体复看一下'}]
+    messages = build_messages(config, stage, '唯一的当前稿件', dialogue)
+    raw = json.dumps(messages, ensure_ascii=False)
+    assert raw.count('唯一的当前稿件') == 1
+    assert raw.count('前面的真实反馈') == 1
+    assert '上次阅读稿' not in raw
+    assert '旧稿，仅作比较' not in raw
+    assert '本轮稿件核对' not in raw
+    assert dialogue[-1]['content'] == '看看这次修改，整体复看一下'
+
+
+def test_current_requirements_replace_prior_requirements_without_change_instructions():
+    from types import SimpleNamespace
+    from open_webui.services.education.teaching_runtime import system_context
+
+    assignment = SimpleNamespace(task_mode='revise_argument', title='当前题目', description='当前要求',
+                                 description_version=2, change_summary='旧要求改为新要求',
+                                 teaching_config={'version': 1, 'prompt': '教学提示'})
+    config = {'ai': {'prompt': '教学提示'}, 'title': assignment.title, 'description': assignment.description,
+              'description_version': 2, 'change_summary': assignment.change_summary}
+    for prompt in (revision_system_context(assignment), system_context(config)):
+        assert prompt.count('当前要求') == 1
+        assert '旧要求' not in prompt
+        assert '变更说明' not in prompt
+        assert '要求版本' not in prompt
+
+
 def setup(client, teacher, student, mode='revise_argument', scoring='dimensions', questions=None):
     UserContext.current_user = teacher
     classroom = client.post('/api/v1/classrooms', json={'name': '隔离修订验收'}).json()['classroom']
@@ -57,7 +90,19 @@ def setup(client, teacher, student, mode='revise_argument', scoring='dimensions'
         rubric_schema=_rubric_schema() if scoring == 'dimensions' else {'criteria': []},
         reflection_questions=questions or [],
     )
-    result = client.post('/api/v1/assignments', json=payload)
+    if mode == 'revise_argument':
+        client.app.state.MODELS = {'isolated-model': {'id': 'isolated-model', 'info': {'meta': {'capabilities': {'reasoning': True}}}}}
+        client.app.state.OPENAI_MODELS = {}
+        asyncio.run(Config.upsert({'education.teaching_models': {'model_ids': ['isolated-model'], 'recommended_model_id': 'isolated-model'}}))
+        template = client.get('/api/v1/teacher/assignment-defaults').json()['teaching_configs'][mode]
+        prep = client.post('/api/v1/teacher/teaching-preparations', json={'payload': {'assignment': payload,
+            'ai': {'prompt': template['prompt'], 'model_id': 'isolated-model', 'thinking': 'medium', 'template_version': template['version']}}})
+        assert prep.status_code == 200, prep.text
+        prep = prep.json()
+        result = client.post(f'/api/v1/teacher/teaching-preparations/{prep["id"]}/publish', json={
+            'expected_revision': prep['revision'], 'idempotency_key': 'publish-' + prep['id']})
+    else:
+        result = client.post('/api/v1/assignments', json=payload)
     assert result.status_code == 200, result.text
     assignment = result.json()[0]
     UserContext.current_user = student
@@ -73,7 +118,7 @@ def submit(client, assignment, sid, **extra):
     return client.post(f'/api/v1/assignments/{assignment["id"]}/submit', json={**_submit_body(sid, DRAFT), **extra})
 
 
-def model_stub(monkeypatch, feedback=None):
+def model_stub(monkeypatch, feedback=None, *, text=None):
     calls = []
 
     async def resolve(*args, **kwargs):
@@ -85,7 +130,7 @@ def model_stub(monkeypatch, feedback=None):
             'choices': [
                 {
                     'message': {
-                        'content': json.dumps(
+                        'content': text if text is not None else json.dumps(
                             feedback
                             or {
                                 'understanding': '你希望说明理由和证据的关系。',
@@ -106,6 +151,9 @@ def model_stub(monkeypatch, feedback=None):
     monkeypatch.setattr(readings, 'available_models', available)
     monkeypatch.setattr(readings, 'resolve_step_model', resolve)
     monkeypatch.setattr(readings, 'call_step_model', call)
+    async def captured_call(request, user, config, context, messages, stream=False):
+        return await readings.call_step_model(request, user, step=context['purpose'], model=StepModel(model_id=config['ai']['model_id'], fixed=True), messages=messages)
+    monkeypatch.setattr('open_webui.services.education.teaching_runtime.execute', captured_call)
     return calls
 
 
@@ -198,8 +246,162 @@ def test_reading_is_idempotent_and_revision_uses_saved_text(education_client, mo
     result = client.post(url, json={'purpose': 'revision_review'})
     assert result.status_code == 200, result.text
     assert result.json()['source_text'] == changed
-    assert json.loads(calls[-1][1]['content'])['上次阅读稿'] == DRAFT
+    assert '上次阅读稿' not in json.loads(calls[-1][1]['content'])
     assert client.get(url).json()[0]['source_text'] == DRAFT
+
+
+@pytest.mark.parametrize('mode', ['revise_draft', 'revise_argument'])
+@pytest.mark.parametrize('continuous', [True, False])
+def test_editable_prompt_controls_reading_without_hidden_teaching_rules(education_client, monkeypatch, mode, continuous):
+    client, teacher, _, student, _, factory = education_client
+    assignment, sid, _ = setup(client, teacher, student, mode=mode)
+    custom_prompt = '直接回应学生的问题。需要时给出三处建议；表达顺序由本提示词决定。'
+    with factory() as db:
+        row = db.get(Assignment, assignment['id'])
+        row.teaching_config = {**row.teaching_config, 'prompt': custom_prompt}
+        if mode == 'revise_argument':
+            from open_webui.models.teaching_trials import AssignmentAiRevision
+            revision = db.get(AssignmentAiRevision, row.current_ai_revision_id)
+            revision.config = {**revision.config, 'ai': {**revision.config['ai'], 'prompt': custom_prompt}}
+        db.commit()
+        session = Education.get_writing_session_by_id(sid, db=db)
+    response = {
+        'understanding': '',
+        'strength': None,
+        'focus': [] if continuous else [{'quote': '需要解释的联系', 'feedback': f'建议 {i}'} for i in range(3)],
+        'overview': '按老师要求直接给学生的连续回复。' if continuous else '',
+    }
+    text_response = response['overview'] or '\n\n'.join(item['feedback'] for item in response['focus'])
+    calls = model_stub(monkeypatch, response, text=text_response if mode == 'revise_argument' else None)
+    for purpose in ('first_read', 'revision_review', 'whole_review'):
+        result = client.post(f'/api/v1/writing-sessions/{sid}/readings', json={'purpose': purpose})
+        assert result.status_code == 200, result.text
+        assert result.json()['status'] == 'ready'
+        expected = (
+            {'understanding': '', 'strength': None, 'focus': [], 'overview': text_response}
+            if mode == 'revise_argument' else response
+        )
+        assert result.json()['feedback'] == expected
+    assert len(calls) == 3
+    monkeypatch.setattr(readings, 'get_db_context', factory)
+    chat, _ = readings.current_revision_chat_context(session)
+    for system in [*[messages[0]['content'] for messages in calls], chat]:
+        assert system.count(custom_prompt) == 1
+        for hidden in ('平台核心辅导规则', '先指出成立之处', '优先一处', '最多展开两处', '先指出当前稿的一处实际文字'):
+            assert hidden not in system
+
+
+def test_reading_format_requires_content_but_not_a_teaching_sequence():
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        readings.ReadingFeedback(understanding='', strength=None, focus=[], overview='  ')
+
+
+def test_first_read_is_a_real_message_in_the_next_model_request(education_client, monkeypatch):
+    from open_webui.models.chat_messages import ChatMessage
+    from open_webui.models.chats import Chat, Chats
+    from open_webui.models.education import WritingSession
+    from open_webui.utils.middleware import load_messages_from_db
+
+    client, teacher, _, student, _, factory = education_client
+    _, sid, _ = setup(client, teacher, student)
+    model_stub(monkeypatch)
+    url = f'/api/v1/writing-sessions/{sid}/readings'
+    first = client.post(url, json={'purpose': 'first_read'}).json()
+    assert first['status'] == 'ready'
+    cid, mid = first['context']['chat_id'], first['context']['message_id']
+    with factory() as db:
+        session = db.get(WritingSession, sid)
+        assert session.active_chat_id == session.chat_id == cid
+        stored = db.get(ChatMessage, f'{cid}-{mid}')
+        assert stored.role == 'assistant'
+        assert first['feedback']['overview'] in stored.content
+        assert stored.parent_id is None
+        assert db.get(Chat, cid).chat['history']['currentId'] == mid
+    assert client.post(url, json={'purpose': 'first_read'}).json()['id'] == first['id']
+    # This is the same storage write and chain loader used by ordinary chat requests.
+    asyncio.run(Chats.upsert_message_to_chat_by_id_and_message_id(cid, 'followup', {
+        'id': 'followup', 'role': 'user', 'content': '你刚才说的是什么意思？',
+        'parentId': mid, 'childrenIds': [],
+    }))
+    messages = asyncio.run(load_messages_from_db(cid, 'followup'))
+    assert [message['role'] for message in messages] == ['assistant', 'user']
+    assert first['feedback']['overview'] in messages[0]['content']
+    assert messages[-1]['content'] == '你刚才说的是什么意思？'
+    with factory() as db:
+        assert db.query(ChatMessage).filter_by(chat_id=cid, role='assistant').count() == 1
+
+
+def test_revision_context_includes_only_requested_reference_material(education_client, monkeypatch):
+    client, teacher, _, student, _, factory = education_client
+    assignment, sid, _ = setup(client, teacher, student)
+    calls = model_stub(monkeypatch)
+    result = client.post(f'/api/v1/writing-sessions/{sid}/readings', json={'purpose': 'first_read'})
+    assert result.json()['status'] == 'ready'
+    current = DRAFT + '这是本次新增的分析。'
+    assert client.post(f'/api/v1/writing-sessions/{sid}/autosave', json={'content_text': current}).status_code == 200
+    with factory() as db:
+        session = Education.get_writing_session_by_id(sid, db=db)
+    monkeypatch.setattr(readings, 'get_db_context', factory)
+    for question, has_old_draft in (
+        ('这句话如何理解？', False),
+        ('看看这次修改', False),
+        ('上次的建议是什么？', False),
+        ('看看这次修改，是否解决上次的建议？', False),
+    ):
+        context, metadata = readings.current_revision_chat_context(session)
+        assert ('旧稿' in context) is has_old_draft
+        assert '【此前阅读意见' not in context
+        assert result.json()['feedback']['overview'] not in context
+        assert current not in context
+        messages = readings.attach_current_revision_draft(
+            [{'role': 'system', 'content': context}, {'role': 'user', 'content': question}],
+            metadata['source_text'],
+        )
+        assert sum(message['content'].count(current) for message in messages) == 1
+    # Independent platform reviews also send the current draft once, without old feedback.
+    client.post(f'/api/v1/writing-sessions/{sid}/readings', json={'purpose': 'revision_review'})
+    material = json.loads(calls[-1][1]['content'])
+    assert material['当前保存稿'] == current
+    assert '上次阅读稿' not in material
+    assert '此前反馈' not in material
+
+
+def test_revision_model_settings_are_isolated_per_request():
+    model = {'info': {'params': {'system': 'unrelated persona', 'temperature': 0.4}, 'meta': {
+        'knowledge': [{'id': 'private'}], 'skillIds': ['default-skill'], 'filterIds': ['default-filter'],
+        'capabilities': {'vision': True, 'builtin_tools': True},
+    }}}
+    isolated = readings.revision_model_view(model)
+    assert isolated['info']['params'] == {'temperature': 0.4}
+    assert isolated['info']['meta']['knowledge'] == []
+    assert isolated['info']['meta']['skillIds'] == []
+    assert isolated['info']['meta']['filterIds'] == []
+    assert isolated['info']['meta']['capabilities'] == {'vision': True, 'builtin_tools': False}
+    assert model['info']['params']['system'] == 'unrelated persona'
+    assert model['info']['meta']['knowledge'] == [{'id': 'private'}]
+
+
+@pytest.mark.parametrize('revision', [False, True])
+def test_provider_boundary_bypasses_model_system_only_for_revision(monkeypatch, revision):
+    from types import SimpleNamespace
+    from open_webui.utils import chat
+
+    request = SimpleNamespace(state=SimpleNamespace(education_revision_context=revision),
+                              app=SimpleNamespace(state=SimpleNamespace(MODELS={'model': {'id': 'model'}})))
+
+    async def provider(request, form_data, user, **kwargs):
+        assert request.state.bypass_system_prompt is revision
+        assert form_data['messages'] == [{'role': 'system', 'content': 'teaching prompt'}]
+        return {'ok': True}
+
+    monkeypatch.setattr(chat, 'generate_openai_chat_completion', provider)
+    result = asyncio.run(chat.generate_chat_completion(
+        request, {'model': 'model', 'messages': [{'role': 'system', 'content': 'teaching prompt'}]},
+        SimpleNamespace(role='admin'),
+    ))
+    assert result == {'ok': True}
 
 
 def test_late_reading_does_not_change_frozen_submission(education_client, monkeypatch):
@@ -285,9 +487,10 @@ def test_changed_reflection_requires_version_and_preserves_old_snapshot(educatio
         assert evidence.evidence_json.reflection.reflection.items[0].prompt == question['prompt']
 
 
-def test_return_switch_closed_and_enabled_context_is_published_only(education_client):
+@pytest.mark.parametrize('mode', ['revise_draft', 'revise_argument'])
+def test_return_feedback_is_preserved_but_excluded_from_ai_context(education_client, monkeypatch, mode):
     client, teacher, _, student, _, factory = education_client
-    assignment, sid, _ = setup(client, teacher, student, scoring='total')
+    assignment, sid, _ = setup(client, teacher, student, mode=mode, scoring='total')
     submitted = submit(client, assignment, sid).json()
     UserContext.current_user = teacher
     url = f'/api/v1/teacher/submissions/{submitted["submission_id"]}/review'
@@ -302,6 +505,19 @@ def test_return_switch_closed_and_enabled_context_is_published_only(education_cl
         assert feedback['comment'] == body['returned_comment'] and feedback['review_revision'] == 1
     assert client.post(url, json={**body, 'returned_comment': '更正后的意见'}).status_code == 200
     UserContext.current_user = student
+    calls = model_stub(monkeypatch)
+    for purpose in ('first_read', 'revision_review', 'whole_review'):
+        result = client.post(f'/api/v1/writing-sessions/{sid}/readings', json={'purpose': purpose})
+        assert result.status_code == 200, result.text
+        assert result.json()['status'] == 'ready'
+        assert 'returned_feedback' not in result.json()['context']
+    assert len(calls) == 3
+    for excluded in (body['returned_comment'], '更正后的意见', '教师已发布退回意见'):
+        assert excluded not in json.dumps(calls, ensure_ascii=False)
+    monkeypatch.setattr(readings, 'get_db_context', factory)
+    text, context = readings.current_revision_chat_context(session)
+    assert '更正后的意见' not in text
+    assert 'returned_feedback' not in context
     result = submit(client, assignment, sid)
     assert result.status_code == 200, result.text
     with factory() as db:
@@ -314,6 +530,8 @@ def test_snapshot_version_and_database_constraints(education_client):
     assignment, sid, _ = setup(client, teacher, student)
     with factory() as db:
         current = latest_teaching_config('revise_argument', db)
+        assert 'standards' not in current
+        current['prompt'] = '仅按这一份提示词辅导学生。'
         updated = publish_teaching_config(
             'revise_argument',
             TeachingConfigUpdate(
@@ -323,6 +541,8 @@ def test_snapshot_version_and_database_constraints(education_client):
             db,
         )
         assert updated['version'] == 2
+        assert updated['prompt'] == current['prompt']
+        assert 'standards' not in updated
         assert db.get(Assignment, assignment['id']).teaching_config['version'] == 1
         schema = inspect(db.bind)
         assert {'teacher_task_access', 'teaching_configuration', 'revision_reading'} <= set(schema.get_table_names())
@@ -465,27 +685,6 @@ def test_submission_waits_for_async_writer_without_blocking_loop(education_clien
                         await asyncio.gather(request, return_exceptions=True)
 
     asyncio.run(exercise())
-
-
-def test_comparison_draft_uses_latest_conversation_snapshot():
-    from open_webui.services.education.revision_reading import comparison_draft
-
-    records = [{'created_at': 10, 'source_text': 'initial draft'}]
-    assert comparison_draft({'called_at': 20, 'source_text': 'second draft'}, records, 'baseline') == 'second draft'
-    assert comparison_draft({'called_at': 20, 'source_text': ''}, records, 'baseline') == ''
-    assert comparison_draft({'called_at': 5, 'source_text': 'old draft'}, records, 'baseline') == 'initial draft'
-    assert comparison_draft(None, [], 'baseline') == 'baseline'
-
-
-def test_comparison_context_distinguishes_current_draft_from_reference():
-    from open_webui.services.education.revision_reading import comparison_context
-
-    prompt = comparison_context('old sentence', 'new sentence')
-    assert '与上次稿件不同' in prompt
-    assert prompt.index('旧稿，仅作比较') < prompt.index('old sentence')
-    assert prompt.index('当前稿】') < prompt.index('new sentence')
-    assert '没有新改动' in comparison_context('same', 'same')
-    assert '当前正文为空' in comparison_context('old', '')
 
 
 def test_current_draft_attachment_does_not_rewrite_student_messages():

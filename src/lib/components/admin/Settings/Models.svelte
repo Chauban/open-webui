@@ -30,6 +30,8 @@
 	import { updateUserSettings } from '$lib/apis/users';
 
 	import { getModels } from '$lib/apis';
+	import { getOpenAIConfig } from '$lib/apis/openai';
+	import { groupAdminModels } from '$lib/utils/admin-model-groups';
 	import { getModelsConfig, setModelsConfig } from '$lib/apis/configs';
 	import Search from '$lib/components/icons/Search.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
@@ -92,6 +94,23 @@
 	let allModels: ModelListItem[] = [];
 
 	let filteredModels = [];
+	let groupByApi = true;
+	let apiUrls: string[] = [];
+	let collapsedApiGroups = new Set<string>();
+	const toggleApiGroup = (key: string) => {
+		const next = new Set(collapsedApiGroups);
+		if (next.has(key)) next.delete(key);
+		else next.add(key);
+		collapsedApiGroups = next;
+	};
+	$: modelGroups = groupAdminModels(filteredModels, allModels, apiUrls, $i18n.t.bind($i18n));
+	$: displayedModels = groupByApi ? modelGroups.flatMap((group) => group.models) : filteredModels;
+	$: groupHeaders = new Map(modelGroups.map((group) => [group.models[0].id, group]));
+	$: collapsedModelIds = new Set(
+		modelGroups
+			.filter((group) => collapsedApiGroups.has(group.key))
+			.flatMap((group) => group.models.map((model) => model.id))
+	);
 	let selectedModelId = null;
 
 	let showManageModal = false;
@@ -176,7 +195,8 @@
 	let searchValue = '';
 	let canReorderModels = false;
 
-	$: canReorderModels = searchValue === '' && viewOption === '' && selectedTag === '';
+	$: canReorderModels =
+		!groupByApi && searchValue === '' && viewOption === '' && selectedTag === '';
 
 	const enableAllHandler = async () => {
 		const modelsToEnable = filteredModels.filter((m) => !(m.is_active ?? true));
@@ -254,6 +274,15 @@
 
 	const init = async () => {
 		models = null;
+		apiUrls = [];
+		try {
+			const connectionConfig = await getOpenAIConfig(localStorage.token);
+			apiUrls = connectionConfig.OPENAI_API_BASE_URLS;
+		} catch {
+			toast.error(
+				$i18n.t('Could not load API addresses. Models are grouped by connection number.')
+			);
+		}
 
 		modelsConfig = await getModelsConfig(localStorage.token);
 		modelOrderList = modelsConfig?.MODEL_ORDER_LIST ?? [];
@@ -459,7 +488,7 @@
 		}
 	};
 
-	$: if (modelListElement && filteredModels) {
+	$: if (modelListElement && displayedModels && canReorderModels !== undefined) {
 		tick().then(() => {
 			initSortable();
 		});
@@ -994,6 +1023,22 @@
 				</div>
 
 				<div
+					class="flex flex-wrap items-center justify-between gap-2 px-2 py-1 text-xs text-gray-500"
+				>
+					<label class="flex shrink-0 cursor-pointer items-center gap-2">
+						<input type="checkbox" bind:checked={groupByApi} />
+						{$i18n.t('Group by API address')}
+					</label>
+					{#if groupByApi}
+						<span
+							>{$i18n.t(
+								'Use different Prefix IDs in Connections to keep duplicate model IDs separate.'
+							)}</span
+						>
+					{/if}
+				</div>
+
+				<div
 					class="my-0.5 min-h-0 flex-1 space-y-px {filteredModels.length > 0
 						? 'overflow-y-auto scrollbar-hover pr-1.5'
 						: 'overflow-hidden'}"
@@ -1001,9 +1046,33 @@
 					bind:this={modelListElement}
 				>
 					{#if filteredModels.length > 0}
-						{#each filteredModels as model, modelIdx (`${model.id}-${modelIdx}`)}
+						{#each displayedModels as model (model.id)}
+							{#if groupByApi && groupHeaders.has(model.id)}
+								{@const group = groupHeaders.get(model.id)}
+								<h3 class="pt-2 text-xs font-medium text-gray-600 dark:text-gray-300">
+									<button
+										type="button"
+										class="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-850 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+										aria-expanded={!collapsedApiGroups.has(group.key)}
+										title={$i18n.t(collapsedApiGroups.has(group.key) ? 'Expand' : 'Collapse')}
+										on:click={() => toggleApiGroup(group.key)}
+									>
+										<ChevronDown
+											className="size-3.5 shrink-0 transition-transform {collapsedApiGroups.has(
+												group.key
+											)
+												? '-rotate-90'
+												: ''}"
+										/>
+										<span class="min-w-0 break-all">{group.label}</span>
+										<span class="shrink-0 font-normal text-gray-400">({group.models.length})</span>
+									</button>
+								</h3>
+							{/if}
 							<div
-								class="flex cursor-pointer transition w-full px-2 py-1 rounded-xl hover:bg-gray-50/70 dark:hover:bg-gray-850/50 {model
+								class="{groupByApi && collapsedModelIds.has(model.id)
+									? 'hidden'
+									: 'flex'} cursor-pointer transition w-full px-2 py-1 rounded-xl hover:bg-gray-50/70 dark:hover:bg-gray-850/50 {model
 									?.meta?.hidden
 									? 'opacity-50 dark:opacity-50'
 									: ''}"
@@ -1013,7 +1082,9 @@
 									<Tooltip
 										content={canReorderModels
 											? $i18n.t('Drag to reorder')
-											: $i18n.t('Clear filters to reorder')}
+											: groupByApi
+												? $i18n.t('Turn off API grouping to reorder')
+												: $i18n.t('Clear filters to reorder')}
 									>
 										<EllipsisVertical
 											className="size-4 {canReorderModels

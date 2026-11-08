@@ -1,4 +1,16 @@
 <script lang="ts">
+	import { teachingApi } from '$lib/apis/education/teaching';
+	let teachingSummary = null;
+	let teachingNotice = '';
+	async function refreshTeachingSummary() {
+		if (assignment?.task_mode !== 'revise_argument' || !writingSession?.id) return;
+		const next = await teachingApi<any>(`/writing-sessions/${writingSession.id}/teaching-summary`);
+		const seenKey = `teaching-version:${writingSession.id}`;
+		const previous = teachingSummary?.revision ?? Number(sessionStorage.getItem(seenKey) || '1');
+		if (next && next.revision > previous) teachingNotice = '老师更新了 AI 辅导方式，接下来的交流将使用新设置。已有内容保留。';
+		if (next) sessionStorage.setItem(seenKey, String(next.revision));
+		teachingSummary = next;
+	}
 	import {
 		reflectionAnswerSignature,
 		retainApplicableReflectionDrafts
@@ -171,7 +183,7 @@
 				| undefined
 		)?.reasoning
 	);
-	$: showThinkingSwitch = isAssignment && canSwitchThinking && selectedModelThinks && !isReadOnly;
+	$: showThinkingSwitch = assignment?.task_mode !== 'revise_argument' && isAssignment && canSwitchThinking && selectedModelThinks && !isReadOnly;
 	// 关不掉思考的模型:开关不可用(写明始终开着),也不发「关」;服务端同样会退到最低档。
 	$: thinkingAlwaysOn = thinksAlways(thinkingSupportOf($models, selectedModelId));
 	// 修订初稿作业:还没交初稿时只显示初稿步骤,编辑器、左侧对话和提交都锁着(后端同样拒绝)。
@@ -239,7 +251,17 @@
 	};
 
 	let readings: RevisionReading[] = [];
+	$: if (readings.length && hasRevisionCoaching) {
+		const linkedChatId = readings.find((record) => record.context?.chat_id)?.context.chat_id;
+		if (linkedChatId && !currentChatId) {
+			void goto(`${projectBaseUrl}?chat=${linkedChatId}`, { replaceState: true });
+		}
+	}
+
 	let readingBusy = false;
+	$: readingProgressInChat =
+		readings.some((record) => record.status === 'running') ||
+		(readingBusy && readings.length === 0);
 	let chatReadingBusy = false;
 	$: readingLocked =
 		hasRevisionCoaching &&
@@ -593,6 +615,7 @@
 	// 最多等 5 秒；未保存成功就保留消息并停止发送，不能让 AI 把旧稿当成新改稿。
 	const FLUSH_BEFORE_CHAT_TIMEOUT_MS = 5000;
 	const flushDraftBeforeChat = async () => {
+		await refreshTeachingSummary();
 		if (!autoSaveTimer && !saving && !hasUnsavedFailure && unsavedOperations.length === 0) return;
 		if (autoSaveTimer) {
 			clearTimeout(autoSaveTimer);
@@ -926,6 +949,7 @@
 			effectiveDueAt = workspace.effective_due_at ?? null;
 			canSwitchThinking = workspace.can_switch_thinking ?? false;
 			writingSession = workspace.writing_session;
+			await refreshTeachingSummary().catch(error => toast.error(resolveErrorMessage(error, t)));
 			void refreshProcessSummary();
 			workspaceProject = workspace.project;
 			workspaceNote = workspace.note;
@@ -1025,6 +1049,7 @@
 		编辑器根节点带 min-w-full,会盖掉 prose 自带的 65ch 上限,只能在外面限宽。
 	-->
 	<Chat
+		fixedTeachingModel={teachingSummary}
 		chatIdProp={currentChatId}
 		{projectBaseUrl}
 		responseInsertHandler={isReadOnly || isRevision(assignment?.task_mode)
@@ -1059,6 +1084,7 @@
 		rightPanelClassName="hidden lg:flex"
 	>
 		<svelte:fragment slot="input-accessory">
+			{#if teachingNotice}<p role="status" class="px-4 py-2 text-sm text-amber-700">{$i18n.t(teachingNotice)} {teachingSummary?.change_summary}</p>{/if}
 			{#if showThinkingSwitch}
 				<ThinkingSwitch bind:on={thinkingOn} alwaysOn={thinkingAlwaysOn} />
 			{/if}
@@ -1206,7 +1232,7 @@
 					{/if}
 				</div>
 			</div>
-			<ReadingLock locked={readingLocked}>
+			<ReadingLock locked={readingLocked} showProgress={!readingProgressInChat}>
 				<div
 					class="min-h-0 flex-1 overflow-y-auto px-5 py-5 {needsDraftBaseline
 						? 'flex flex-col !overflow-hidden'

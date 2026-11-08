@@ -187,6 +187,12 @@ select {
 	-webkit-appearance: none;
 }
 
+/* Keep filter labels clear of the arrow without changing search/date field spacing. */
+select.edu-filter-field {
+	padding-right: 2.25rem;
+	background-position: right 0.5rem center;
+}
+
 .dark select {
 	color-scheme: dark;
 }

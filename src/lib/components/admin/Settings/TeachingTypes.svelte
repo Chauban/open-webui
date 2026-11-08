@@ -1,4 +1,5 @@
 <script lang="ts">
+	import TeachingModels from './TeachingModels.svelte';
 	import { getContext, onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import {
@@ -60,11 +61,12 @@
 	};
 </script>
 
+<TeachingModels />
 <section class="space-y-4 rounded-xl border border-gray-200 p-4 dark:border-gray-700">
 	<h2 class="font-medium">{$i18n.t('按作业类型配置教学')}</h2>
 	<p class="text-xs text-gray-500">
 		{$i18n.t(
-			'新建作业采用当前版本；已有学生确认初稿或提交后，教学规则固定。默认说明、评分与反思仅用于新建预填。'
+			'推荐模板用于新建预填。段落论证由教师编辑副本并发布辅导版本；其他类型沿用原有教学配置规则。'
 		)}
 	</p>
 	<p class="text-xs text-gray-500">{$i18n.t('教师可布置类型和默认类型在用户管理中逐账号设置。')}</p>
@@ -82,12 +84,6 @@
 	</div>
 	{#if draft}
 		<p class="text-xs">{$i18n.t('当前版本')} {draft.version}</p>
-		<label class="block text-sm"
-			>{$i18n.t('教学目标与判断标准')}<textarea
-				class="mt-1 min-h-32 w-full resize-y {EDU_FIELD_CLASS}"
-				bind:value={draft.standards}
-			></textarea></label
-		>
 		<label class="block text-sm"
 			>{$i18n.t('辅导提示词')}<textarea
 				class="mt-1 min-h-48 w-full resize-y {EDU_FIELD_CLASS}"

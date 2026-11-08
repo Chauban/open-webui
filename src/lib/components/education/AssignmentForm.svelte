@@ -70,7 +70,8 @@
 	$: coachingEnabled =
 		!isRevision(draft.taskMode) && ($config?.features?.enable_education_coaching_styles ?? true);
 	// 修订初稿作业没有试读，第 3 节标题里就不提「试读」;档位关了、思考也没下放时这一节没东西可设，整节不出现。
-	$: thinkingDelegated = !!thinkingPolicy && thinkingPolicy.control !== 'admin';
+	$: thinkingDelegated =
+		draft.taskMode !== 'revise_argument' && !!thinkingPolicy && thinkingPolicy.control !== 'admin';
 	$: hasCoachingSettings = coachingEnabled || thinkingDelegated;
 	$: hasReaderCheck = !isRevision(draft.taskMode) && draft.scoringMode === 'dimensions';
 	$: aiSectionLabel =
@@ -84,7 +85,10 @@
 		{ id: 'assignment-basics', label: 'Basics' },
 		{ id: 'assignment-scoring', label: 'Scoring' },
 		...(showAiSection ? [{ id: 'assignment-ai', label: aiSectionLabel }] : []),
-		{ id: 'assignment-reflection', label: 'Reflection Before Submitting' }
+		{ id: 'assignment-reflection', label: 'Reflection Before Submitting' },
+		...(draft.taskMode === 'revise_argument'
+			? [{ id: 'assignment-teaching', label: 'AI 辅导设置' }]
+			: [])
 	];
 	const COACHING_TITLES = { socratic: 'Socratic', balanced: 'Balanced', hands_off: 'Hands-off' };
 	// 两种形式的差别在于作业开始时初稿是否已经存在。修订初稿作业没有提交前试读:
@@ -145,7 +149,7 @@
 	};
 </script>
 
-<div class="lg:grid lg:grid-cols-[11rem_1fr] lg:gap-8">
+<div class="min-w-0 lg:grid lg:grid-cols-[11rem_minmax(0,1fr)] lg:gap-8">
 	<nav class="hidden lg:block" aria-label={$i18n.t('Sections')}>
 		<ol class="sticky top-4 space-y-1 text-sm">
 			{#each SECTIONS as section, index}
@@ -166,9 +170,9 @@
 		</ol>
 	</nav>
 
-	<div class="grid gap-5">
+	<div class="grid min-w-0 grid-cols-1 gap-5">
 		<EduCard padding="lg">
-			<section id="assignment-basics" class="grid scroll-mt-4 gap-4">
+			<section id="assignment-basics" class="grid min-w-0 grid-cols-1 scroll-mt-4 gap-4">
 				<h2 class="text-base font-semibold">1 · {$i18n.t('Basics')}</h2>
 				<div>
 					<div class="mb-2 text-sm font-medium">{$i18n.t('Assignment type')}</div>
@@ -257,7 +261,7 @@
 						placeholder={$i18n.t('Write a short academic argument.')}
 					></textarea>
 					<p class="mt-1 text-xs text-gray-500">
-						{$i18n.t('填写本次题目、材料范围及完成要求；AI 的辅导方式由该作业类型统一配置。')}
+						{$i18n.t('填写本次题目、材料范围及完成要求；具体辅导方式见 AI 辅导设置或说明。')}
 					</p>
 				</div>
 				<div class="md:max-w-sm">
@@ -271,10 +275,9 @@
 			</section>
 		</EduCard>
 
-		{#if shownTeaching}
+		{#if shownTeaching && draft.taskMode !== 'revise_argument'}
 			<EduCard padding="lg">
 				<h2 class="font-semibold">{$i18n.t('AI 辅导说明')} · v{shownTeaching.version}</h2>
-				<p class="mt-2 whitespace-pre-wrap text-sm">{shownTeaching.standards}</p>
 				<p class="mt-2 text-sm text-gray-500">
 					{$i18n.t('学生可按需讨论、修改与复看，并自主结束提交，无需 AI 认可。')}
 				</p>
@@ -286,7 +289,7 @@
 		{/if}
 
 		<EduCard padding="lg">
-			<section id="assignment-scoring" class="grid scroll-mt-4 gap-4">
+			<section id="assignment-scoring" class="grid min-w-0 grid-cols-1 scroll-mt-4 gap-4">
 				<h2 class="text-base font-semibold">2 · {$i18n.t('Scoring')}</h2>
 				<p class="text-sm text-gray-500">
 					{$i18n.t('评分设置用于教师评阅，AI 按本作业类型的教学规则辅导。')}

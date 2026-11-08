@@ -10,6 +10,8 @@
 	import relativeTime from 'dayjs/plugin/relativeTime';
 
 	import { getTeacherAssignments, getTeacherClassrooms } from '$lib/apis/education';
+	import { teachingApi, type Preparation } from '$lib/apis/education/teaching';
+	let preparations: Preparation[] = [];
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import EduActionMenu from '$lib/components/education/EduActionMenu.svelte';
 	import EduBadge from '$lib/components/education/EduBadge.svelte';
@@ -95,6 +97,7 @@
 
 	onMount(async () => {
 		try {
+			preparations = await teachingApi<Preparation[]>('/teacher/teaching-preparations');
 			[assignments, classrooms] = await Promise.all([
 				getTeacherAssignments(localStorage.token),
 				getTeacherClassrooms(localStorage.token)
@@ -125,6 +128,7 @@
 	</svelte:fragment>
 
 	<div class="mx-auto max-w-6xl px-4 py-6">
+		{#if preparations.length}<details class="mb-5 rounded-xl border p-4 dark:border-gray-700"><summary>{$i18n.t('准备中的作业与辅导方案')}</summary>{#each preparations as preparation}<a class="my-2 block underline" href={preparation.assignment_id ? `/teacher/assignments/${preparation.assignment_id}/settings?preparation=${preparation.id}` : `/teacher/assignments/new?preparation=${preparation.id}`}>{preparation.payload.assignment.title || $i18n.t('未命名准备稿')} · {$i18n.t(preparation.published ? '已发布' : '准备稿')}</a>{/each}</details>{/if}
 		<div class="mb-4 flex flex-wrap items-center gap-2">
 			<select class={EDU_FILTER_FIELD_CLASS} aria-label={$i18n.t('Classroom')} bind:value={selectedClassroom}>
 				<option value="all">{$i18n.t('All Classrooms')}</option>

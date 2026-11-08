@@ -1061,6 +1061,56 @@ async def chat_completion(
     if not request.app.state.MODELS:
         await get_all_models(request, user=user)
 
+    # Resolve trusted writing ownership before ordinary model ACLs/fallbacks.
+    teaching_config = None
+    teaching_context = None
+    writing_chat_id = form_data.get('chat_id') or ''
+    writing_folder_id = (
+        await Chats.get_chat_folder_id(writing_chat_id, user.id) if is_saved_chat_id(writing_chat_id) else None
+    ) or form_data.get('folder_id')
+    writing_folder = await Folders.get_folder_by_id(writing_folder_id) if writing_folder_id else None
+    writing_session = get_folder_writing_session(writing_folder, user.id) if writing_folder else None
+    if writing_session:
+        if writing_folder.id != writing_session.folder_id or (
+            is_saved_chat_id(writing_chat_id)
+            and await Chats.get_chat_folder_id(writing_chat_id, user.id) != writing_session.folder_id
+        ):
+            raise HTTPException(403, 'The conversation does not belong to this writing session')
+        await ensure_writing_session_access(user, writing_session)
+        ensure_writing_session_writable(writing_session)
+        writing_assignment = Education.get_assignment_by_id(writing_session.assignment_id) if writing_session.scope == 'assignment' else None
+        if writing_assignment and writing_assignment.task_mode == 'revise_argument':
+            if not writing_chat_id and 'parent_id' not in form_data:
+                raise HTTPException(400, 'Start or continue the saved assignment conversation')
+            from open_webui.services.education.teaching_runtime import capture_formal, validate_binding, install_binding
+            from open_webui.models.education import get_db_context
+            last_text = next((m.get('content', '') for m in reversed(form_data.get('messages', [])) if m.get('role') == 'user'), '')
+            last_text = (form_data.get('user_message') or form_data.get('parent_message') or {}).get('content', last_text)
+            if not isinstance(last_text, str) or not last_text.strip():
+                raise HTTPException(400, 'A text message is required for assignment teaching')
+            request_key = str(form_data.get('id') or (form_data.get('user_message') or {}).get('id') or uuid4())
+            def capture_teaching_request():
+                with get_db_context() as teaching_db:
+                    return capture_formal(writing_session, request_key,
+                        'coaching_chat', teaching_db, user=user, user_text=last_text)
+            from starlette.concurrency import run_in_threadpool
+            teaching_config, teaching_context = await run_in_threadpool(capture_teaching_request)
+            try:
+                await validate_binding(request, user, teaching_config)
+            except BaseException:
+                from open_webui.services.education.teaching_runtime import finish_formal
+                await run_in_threadpool(finish_formal, teaching_context, 'failed')
+                raise
+            install_binding(request, teaching_config, teaching_context)
+            form_data['model'] = teaching_config['ai']['model_id']
+            form_data.pop('model_item', None)
+            entries = form_data.get('message_ids')
+            if isinstance(entries, list) and entries:
+                form_data['message_ids'] = [{**entries[0], 'model_id': form_data['model']}]
+            elif isinstance(entries, dict) and entries:
+                form_data['message_ids'] = {form_data['model']: next(iter(entries.values()))}
+            form_data['background_tasks'] = None
+
     model_id = form_data.get('model', None)
     model_item = form_data.pop('model_item', {})
     tasks = form_data.pop('background_tasks', None)
@@ -1080,7 +1130,7 @@ async def chat_completion(
                 model_info and model_info.base_model_id and model_info.base_model_id not in request.app.state.MODELS
             )
 
-            if missing_base_model and ENABLE_CUSTOM_MODEL_FALLBACK:
+            if missing_base_model and ENABLE_CUSTOM_MODEL_FALLBACK and not teaching_config:
                 fallback_model_id = next(
                     (
                         model_id.strip()
@@ -1093,7 +1143,7 @@ async def chat_completion(
                     fallback_model = request.app.state.MODELS.get(fallback_model_id)
 
             # Check if user has access to the model
-            if not BYPASS_MODEL_ACCESS_CONTROL and (user.role != 'admin' or not BYPASS_ADMIN_ACCESS_CONTROL):
+            if not teaching_config and not BYPASS_MODEL_ACCESS_CONTROL and (user.role != 'admin' or not BYPASS_ADMIN_ACCESS_CONTROL):
                 try:
                     access_model_info = (
                         model_info.model_copy(update={'base_model_id': None})
@@ -1140,6 +1190,10 @@ async def chat_completion(
                 coaching_thinking = resolve_coaching_thinking(
                     await get_ai_step_policy(), writing_assignment.model_params, student_thinking_choice
                 )
+                if teaching_config:
+                    coaching_thinking = coaching_thinking.model_copy(update={
+                        'level': teaching_config['ai']['thinking'], 'source': 'teacher', 'students_choose': False
+                    })
                 form_data['params'].update(thinking_params(coaching_thinking.level))
                 # 记在回复上给老师看,按实际生效的记:模型没有思考控制时档位不会发出,记成模型默认;
                 # 关不掉思考的模型上「关」退到了最低档(utils/thinking.py 的 MODEL_THINKING_SUPPORT)。
@@ -1159,6 +1213,9 @@ async def chat_completion(
             default_model_params,
             model_info.params.model_dump() if model_info and model_info.params else {},
         )
+        if teaching_config:
+            model_info_params = copy.deepcopy(teaching_config['binding']['params'])
+            form_data['params'] = thinking_params(teaching_config['ai']['thinking'])
         request_params = {key: value for key, value in (form_data.get('params') or {}).items() if value is not None}
         if model_info_params or request_params:
             form_data['params'] = merge_model_params(model_info_params, request_params)
@@ -1630,9 +1687,15 @@ async def chat_completion(
         form_data['metadata'] = metadata
 
     except HTTPException:
+        if teaching_context:
+            from open_webui.services.education.teaching_runtime import finish_formal
+            await run_in_threadpool(finish_formal, teaching_context, 'failed')
         raise
     except Exception as e:
         log.warning(f'Error processing chat metadata: {e}')
+        if teaching_context:
+            from open_webui.services.education.teaching_runtime import finish_formal
+            await run_in_threadpool(finish_formal, teaching_context, 'failed')
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
@@ -1646,6 +1709,9 @@ async def chat_completion(
                 return {'status': True, 'chat_id': metadata.get('chat_id'), 'paused': True}
 
             response = await chat_completion_handler(request, form_data, user)
+            if teaching_context:
+                from open_webui.services.education.teaching_runtime import observe_formal_response
+                response = await observe_formal_response(response, teaching_context)
 
             # When the upstream provider returns an error (e.g. HTTP 400
             # content-filter, quota exceeded), generate_chat_completion
@@ -1657,8 +1723,15 @@ async def chat_completion(
 
             ctx = await build_chat_response_context(request, form_data, user, model, metadata, tasks, events)
 
-            return await process_chat_response(response, ctx)
+            result = await process_chat_response(response, ctx)
+            if teaching_context:
+                from open_webui.services.education.teaching_runtime import complete_formal_response
+                result = await complete_formal_response(result, teaching_context)
+            return result
         except asyncio.CancelledError:
+            if teaching_context:
+                from open_webui.services.education.teaching_runtime import finish_formal
+                await run_in_threadpool(finish_formal, teaching_context, 'stopped')
             log.info('Chat processing was cancelled')
             try:
 
@@ -1672,6 +1745,9 @@ async def chat_completion(
                 pass
             raise  # re-raise to ensure proper task cancellation handling
         except Exception as e:
+            if teaching_context:
+                from open_webui.services.education.teaching_runtime import finish_formal
+                await run_in_threadpool(finish_formal, teaching_context, 'failed')
             error_detail = e.detail if isinstance(e, HTTPException) else str(e)
             log.error('Error processing chat payload: %s', error_detail)
             if metadata.get('chat_id') and metadata.get('message_id'):

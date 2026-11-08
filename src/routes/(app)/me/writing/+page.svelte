@@ -270,6 +270,16 @@
 	});
 
 	$: assignmentGroups = groupAssignmentItems(home?.assignment_items ?? []);
+	$: assignmentNotifications = $educationNotificationSummary?.by_assignment ?? {};
+	const hasUnreadFeedback = (item, notifications) =>
+		(notifications[item.assignment.id]?.review_completed ?? 0) > 0 ||
+		(notifications[item.assignment.id]?.submission_returned ?? 0) > 0;
+	$: if (assignmentGroups.done.some((item) => hasUnreadFeedback(item, assignmentNotifications))) {
+		showDone = true;
+	}
+	$: if (assignmentGroups.missed.some((item) => hasUnreadFeedback(item, assignmentNotifications))) {
+		showMissed = true;
+	}
 	$: isStudent = ($user?.education_role || home?.role) === 'student';
 	// 首页顶部只留一条「接着写」:最近一份还没交的草稿。已交的不在这里重复出现。
 	$: resumeItem = (home?.recent_items ?? []).find((item) => item.status !== 'submitted') ?? null;
@@ -498,6 +508,7 @@
 
 	{#snippet assignmentCard(item)}
 		{@const action = getAssignmentAction(item)}
+		{@const notices = assignmentNotifications[item.assignment.id] ?? {}}
 		{@const countdown =
 			item.effective_due_at && needsAction(item) ? getDueCountdown(item.effective_due_at) : null}
 		<EduCard>
@@ -505,6 +516,16 @@
 				<div class="min-w-0">
 					<div class="flex flex-wrap items-center gap-2">
 						<div class="text-base font-semibold">{item.assignment.title}</div>
+						{#if notices.review_completed > 0}
+							<EduBadge soft tone="rose"
+								>{$i18n.t('Unread review')} · {notices.review_completed}</EduBadge
+							>
+						{/if}
+						{#if notices.submission_returned > 0}
+							<EduBadge soft tone="rose"
+								>{$i18n.t('Unread return notice')} · {notices.submission_returned}</EduBadge
+							>
+						{/if}
 						<!-- 修订初稿要先交初稿才能开始，进门前就让学生知道；从零写作是常态，不标。 -->
 						{#if isRevision(item.assignment.task_mode)}
 							<EduBadge soft>{$i18n.t(taskTypeLabel(item.assignment.task_mode))}</EduBadge>

@@ -27,7 +27,9 @@
 	{#if record?.status === 'running' || (!record && busy)}<ReadingProgress />
 	{:else if record?.feedback}
 		<div class="space-y-3">
-			<p class="whitespace-pre-wrap">{record.feedback.understanding}</p>
+			{#if record.feedback.understanding}<p class="whitespace-pre-wrap">
+					{record.feedback.understanding}
+				</p>{/if}
 			{#if record.feedback.strength}<p class="whitespace-pre-wrap">
 					{record.feedback.strength.feedback}
 				</p>{/if}
@@ -39,6 +41,9 @@
 					</blockquote>{/if}
 				<p class="whitespace-pre-wrap">{observation.feedback}</p>
 			{/each}
+			{#if record.feedback.overview}<p class="whitespace-pre-wrap">
+					{record.feedback.overview}
+				</p>{/if}
 		</div>
 	{:else}
 		<p>{$i18n.t('这次没能读完。你可以重试，也可以直接聊聊稿子或继续修改。')}</p>

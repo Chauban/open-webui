@@ -26,6 +26,9 @@
 		{$i18n.t('本次提交保留的只读记录')} · {formatEpoch(result.after.created_at)}
 	</p>
 	{#if inspection.mode === 'snapshot'}
+		{#if source?.aiRevision != null}<p class="mb-2 text-xs text-gray-500">
+				{$i18n.t('本次回复使用的辅导版本')} v{source.aiRevision}
+			</p>{/if}
 		{#if source?.descriptionVersion != null}<p class="mb-3 text-xs text-gray-500">
 				{$i18n.t('当时的要求版本')}
 				{source.descriptionVersion}

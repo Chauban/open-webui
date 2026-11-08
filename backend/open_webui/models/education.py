@@ -129,6 +129,7 @@ class Assignment(Base):
     task_mode = Column(Text, nullable=False, default="from_scratch")
     scoring_mode = Column(Text, nullable=False, default='dimensions')
     teaching_config = Column(JSONField, nullable=False)
+    current_ai_revision_id = Column(Text, nullable=True)
     config_revision = Column(Integer, nullable=False, default=1)
     description_version = Column(Integer, nullable=False, default=1)
     reflection_version = Column(Integer, nullable=False, default=1)
@@ -1135,6 +1136,7 @@ class AssignmentModel(BaseModel):
     task_mode: TaskMode
     scoring_mode: Literal['dimensions', 'total']
     teaching_config: dict
+    current_ai_revision_id: str | None = None
     config_revision: int
     description_version: int
     reflection_version: int
@@ -3604,6 +3606,8 @@ class EducationTable:
                 return None
 
             from open_webui.models.education_types import RevisionReading
+            from open_webui.models.teaching_trials import TeachingCall
+            db.query(TeachingCall).filter_by(session_id=session_id).delete(synchronize_session=False)
 
             for model in (
                 RevisionReading,
@@ -5694,9 +5698,18 @@ class EducationTable:
                 .all()
             )
             by_type: dict[str, int] = {}
+            by_assignment: dict[str, dict[str, int]] = {}
             for row in rows:
                 by_type[row.type] = by_type.get(row.type, 0) + 1
-            return {"total": len(rows), "by_type": by_type}
+                assignment_id = row.payload_json.get("assignment_id")
+                if assignment_id:
+                    counts = by_assignment.setdefault(assignment_id, {})
+                    counts[row.type] = counts.get(row.type, 0) + 1
+            return {
+                "total": len(rows),
+                "by_type": by_type,
+                "by_assignment": by_assignment,
+            }
 
     def mark_notifications_read(
         self,

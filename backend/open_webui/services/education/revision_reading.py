@@ -4,7 +4,6 @@ import hashlib
 import copy
 import json
 import logging
-import re
 import time
 import uuid
 import unicodedata
@@ -13,7 +12,7 @@ from typing import Literal
 from starlette.concurrency import run_in_threadpool
 from sqlalchemy import func
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from open_webui.models.education import Education, get_db_context
 from open_webui.models.education_types import RevisionReading
@@ -27,6 +26,7 @@ from open_webui.services.education.ai_steps import (
 from open_webui.services.education.challenge import _extract_json_object
 from open_webui.utils.thinking import ThinkingSupport, effective_thinking_level
 from open_webui.services.education.teaching_config import lock_assignment, revision_system_context
+from open_webui.services.education.reading_conversation import append_reading_message
 
 log = logging.getLogger(__name__)
 ReadingPurpose = Literal['first_read', 'revision_review', 'whole_review']
@@ -46,18 +46,29 @@ class ReadingObservation(BaseModel):
 
 class ReadingFeedback(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    understanding: str = Field(min_length=1, max_length=1000)
+    understanding: str = Field(max_length=1000)
     strength: ReadingObservation | None
-    focus: list[ReadingObservation] = Field(max_length=2)
-    overview: str = Field(min_length=1, max_length=4000)
+    focus: list[ReadingObservation]
+    overview: str = Field(max_length=12000)
+
+    @model_validator(mode='after')
+    def require_reply(self):
+        texts = [self.understanding, self.overview, *[item.feedback for item in self.focus]]
+        if self.strength:
+            texts.append(self.strength.feedback)
+        if not any(text.strip() for text in texts):
+            raise ValueError('Reading feedback must contain a reply')
+        return self
 
 
-FORMAT = """输出 JSON：{"understanding":"用“我读到你想说明……”向学生复述核心判断", "strength":{"quote":"原文", "feedback":"这处怎样帮助读者，值得保留什么"}, "focus":[], "overview":"简要整体阅读说明"}。
-没有可指出的成立之处，strength 为 null。focus 默认是空数组，只有确有实质问题才加入；若合理读法已使材料支持有限结论，就保持 focus 为 []，具体肯定并结束，不因措辞还能更谨慎而凑问题。有实质问题时，focus 元素为 {"quote":"原文", "feedback":"疑问与可执行动作"}。最多展开两处，不凑数。quote 必须逐字来自本次保存稿，可留空说明整体问题。无分数、无通关状态。"""
+FORMAT = """只输出 JSON，四个同级字段为 understanding（字符串）、strength（对象或 null）、focus（对象数组）、overview（字符串）。
+完整回复可放在 overview，此时 understanding 为空字符串、strength 为 null、focus 为 []；也可使用辅助字段承载内容，避免重复。内容、顺序与反馈数量遵循辅导提示词。
+strength 与 focus 的对象格式为 {"quote":"原文或空字符串", "feedback":"回复文字"}；非空 quote 必须来自当前保存稿。
+至少提供一处非空回复文字。"""
 PURPOSES = {
-    'first_read': '这是确认初稿后的初次阅读。理解核心判断，具体肯定成立之处，优先一处实质疑问。',
-    'revision_review': '看看这次修改：先对照上次阅读稿和当前稿，说清实际改了什么、旧疑问是否缓解。无新改动如实说明，不能虚构进步。',
-    'whole_review': '整段复看：通读当前全文，检查各环节是否衔接，尤其局部修改造成的不一致。先指出成立之处，再讨论实质疑问。',
+    'first_read': '【当前流程】确认初稿后的初次阅读。',
+    'revision_review': '【当前流程】修改后复看；阅读对象为当前保存的全文。',
+    'whole_review': '【当前流程】整段复看；阅读对象为当前保存的全文。',
 }
 
 
@@ -125,6 +136,9 @@ def anchor_quote(source: str, quote: str) -> str | None:
 
 
 async def read_revision(request, user, session, assignment, form, db, dialogue):
+    if assignment.task_mode == 'revise_argument':
+        from open_webui.services.education.teaching_runtime import formal_first_read
+        return await formal_first_read(request, user, session, assignment, form, db, dialogue)
     policy = await get_ai_step_policy()
     if form.purpose == 'first_read':
         model = await resolve_step_model(request, user, 'first_read', form.model_id, policy)
@@ -157,7 +171,6 @@ async def read_revision(request, user, session, assignment, form, db, dialogue):
         else ((note.data or {}).get('content') or {}).get('md', '')
     )
     version = Education.get_latest_version(session.id, db=db)
-    returned = published_return_feedback(session, db)
     context = {
         'model_id': model.model_id,
         'requested_thinking': requested_thinking,
@@ -166,8 +179,7 @@ async def read_revision(request, user, session, assignment, form, db, dialogue):
         'description_version': assignment.description_version,
         'title': assignment.title,
         'description': assignment.description,
-        'returned_feedback': returned,
-        'system': revision_system_context(assignment, returned),
+        'system': revision_system_context(assignment),
         'baseline_at': session.draft_baseline_at,
     }
     context['dialogue'] = [
@@ -175,7 +187,8 @@ async def read_revision(request, user, session, assignment, form, db, dialogue):
         for m in dialogue[-30:]
         if m.get('role') in ('user', 'assistant')
     ]
-    source_hash = hashlib.sha256(json.dumps([source, context], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    hash_context = {key: value for key, value in context.items() if key != 'dialogue'}
+    source_hash = hashlib.sha256(json.dumps([source, hash_context], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     row = (
         db.query(RevisionReading)
         .filter_by(writing_session_id=session.id, purpose=form.purpose, source_hash=source_hash)
@@ -187,22 +200,12 @@ async def read_revision(request, user, session, assignment, form, db, dialogue):
         result = serialize_reading(row)
         db.commit()
         return result
-    previous = (
-        db.query(RevisionReading)
-        .filter_by(writing_session_id=session.id, status='ready')
-        .order_by(RevisionReading.sequence_no.desc())
-        .first()
-    )
-    previous_text = previous.source_text if previous else session.draft_baseline_text
-    previous_feedback = previous.feedback if previous else None
     # Keep the actual allowlisted input for audit, never append scoring config.
     context['dialogue'] = [
         {'role': m.get('role'), 'content': m.get('content')}
         for m in dialogue[-30:]
         if m.get('role') in ('user', 'assistant')
     ]
-    context['previous_text'] = previous_text
-    context['previous_feedback'] = previous_feedback
     if row is None:
         sequence = (
             db.query(func.max(RevisionReading.sequence_no)).filter_by(writing_session_id=session.id).scalar() or 0
@@ -233,8 +236,6 @@ async def read_revision(request, user, session, assignment, form, db, dialogue):
             'content': json.dumps(
                 {
                     '当前保存稿': source,
-                    '上次阅读稿': previous_text if form.purpose != 'first_read' else None,
-                    '此前反馈': previous_feedback if form.purpose != 'first_read' else None,
                     '相关讨论': context['dialogue'],
                 },
                 ensure_ascii=False,
@@ -286,6 +287,7 @@ async def read_revision(request, user, session, assignment, form, db, dialogue):
             )
 
     def persist_reading():
+        lock_assignment(assignment.id, db)
         db.expire_all()
         row = db.get(RevisionReading, reading_id)
         # Resetting a baseline deletes its readings; a late response cannot resurrect it.
@@ -293,7 +295,7 @@ async def read_revision(request, user, session, assignment, form, db, dialogue):
             return {'status': 'failed', 'id': reading_id}
         # A stale request may have been claimed again. Its late response must not
         # replace a newer request's feedback or model attribution.
-        db.query(RevisionReading).filter(
+        changed = db.query(RevisionReading).filter(
             RevisionReading.id == reading_id,
             RevisionReading.created_at == now,
             RevisionReading.status == 'running',
@@ -306,6 +308,9 @@ async def read_revision(request, user, session, assignment, form, db, dialogue):
             },
             synchronize_session=False,
         )
+        if changed and feedback:
+            db.refresh(row)
+            append_reading_message(db, session.id, assignment, row)
         db.commit()
         row = db.query(RevisionReading).filter_by(id=reading_id).populate_existing().first()
         return serialize_reading(row) if row is not None else {'status': 'failed', 'id': reading_id}
@@ -313,40 +318,16 @@ async def read_revision(request, user, session, assignment, form, db, dialogue):
     return await run_in_threadpool(persist_reading)
 
 
-def review_purpose(text):
-    if re.search(r'(准备提交|结束|不.*复看|不.*修改|ready to submit|finish)', text, re.I):
-        return None
-    if re.search(r'(整段复看|整体复看|再通读|全文.*看|review.*whole)', text, re.I):
-        return 'whole_review'
-    if re.search(r'(看看这次修改|看.*修改|看.*改动|review.*changes)', text, re.I):
-        return 'revision_review'
-    return None
-
-
-def comparison_draft(previous_context, records, baseline):
-    """Continue from the most recent saved reading or conversation, including an empty draft."""
-    latest = records[-1] if records else None
-    if (
-        previous_context is not None
-        and isinstance(previous_context.get('source_text'), str)
-        and (latest is None or previous_context.get('called_at', 0) >= latest['created_at'])
-    ):
-        return previous_context['source_text']
-    return latest['source_text'] if latest else baseline or ''
-
-
-def comparison_context(previous, current):
-    state = '与上次稿件不同，已保存并提供新稿。' if previous != current else '与上次稿件相同，没有新改动。'
-    return (
-        '\n【本轮稿件核对】'
-        + state
-        + '下面明确区分旧稿和当前稿；不要把旧稿或先前回复中的引文当成当前稿。'
-        + '先指出当前稿的一处实际文字，再讨论变化。空字符串表示当前正文为空，不是没有收到稿件。'
-        + '\n【上次实际阅读稿：旧稿，仅作比较】\n'
-        + json.dumps(previous, ensure_ascii=False)
-        + '\n【本轮已保存全文：当前稿】\n'
-        + json.dumps(current, ensure_ascii=False)
-    )
+def revision_model_view(model):
+    """Isolate automatic model additions without changing shared model settings."""
+    result = copy.deepcopy(model)
+    info = result.setdefault('info', {})
+    info['params'] = {k: v for k, v in (info.get('params') or {}).items() if k != 'system'}
+    meta = info.setdefault('meta', {})
+    for key in ('knowledge', 'skillIds', 'filterIds'):
+        meta[key] = []
+    meta['capabilities'] = {**(meta.get('capabilities') or {}), 'builtin_tools': False}
+    return result
 
 
 def attach_current_revision_draft(messages, source_text):
@@ -367,43 +348,23 @@ def attach_current_revision_draft(messages, source_text):
     return result
 
 
-def current_revision_chat_context(session, user_text='', previous_context=None):
+def current_revision_chat_context(session):
     """Read fresh requirements on every turn; static folder prompts can be stale."""
     with get_db_context() as db:
         assignment = Education.get_assignment_by_id(session.assignment_id, db=db)
-        returned = published_return_feedback(session, db)
-        records = reading_records(session.id, db, completed_only=True)
         note = db.get(Note, session.note_id)
         source_text = ((note.data or {}).get('content') or {}).get('md', '')
         version = Education.get_latest_version(session.id, db=db)
-        purpose = review_purpose(user_text)
-        text = revision_system_context(assignment, returned)
-        if purpose:
-            text += '\n' + PURPOSES[purpose]
-            text += comparison_context(
-                comparison_draft(previous_context, records, session.draft_baseline_text), source_text
-            )
-        if previous_context and previous_context.get('description_version') != assignment.description_version:
-            text += '\n教师在上次对话后更新了作业要求，请说明变化并按本次任务背景讨论。'
-        if records:
-            latest = records[-1]
-            text += '\n【此前阅读意见，仅对所标注稿件有效；当前稿不同则重新判断】\n' + json.dumps(
-                {
-                    'source_text': latest['source_text'],
-                    'feedback': latest['feedback'],
-                    'description_version': latest['context']['description_version'],
-                },
-                ensure_ascii=False,
-            )
-            if latest['context']['description_version'] != assignment.description_version:
-                text += '\n教师已更新要求；上次阅读使用旧要求，本轮请明确说明变化。'
+        text = revision_system_context(assignment)
+        if assignment.task_mode == 'revise_argument':
+            from open_webui.services.education.teaching_runtime import assignment_config, system_context
+            text = system_context(assignment_config(assignment, db))
         return text, {
             'teaching_version': assignment.teaching_config['version'],
             'description_version': assignment.description_version,
             'description': assignment.description,
             'title': assignment.title,
-            'returned_feedback': returned,
-            'purpose': purpose or 'coaching_chat',
+            'purpose': 'coaching_chat',
             'source_version_id': version.id if version else None,
             'source_text': source_text,
             'called_at': int(time.time()),

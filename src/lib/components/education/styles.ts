@@ -8,11 +8,12 @@ export const EDU_FIELD_CLASS =
 // 列表筛选栏里的下拉 / 日期 / 搜索框：与 eduFilterClass、eduSegmentClass 同高同圆角。
 // 此前作业列表、批改队列、成长画像三处各写一套(字号、描边色、内距都不一样)。
 export const EDU_FILTER_FIELD_CLASS =
-	'rounded-full border border-gray-300 bg-white px-3 py-2 text-sm outline-none ' +
+	'edu-filter-field rounded-full border border-gray-300 bg-white px-3 py-2 text-sm outline-none ' +
 	'dark:border-gray-700 dark:bg-gray-850';
 
 // 未选中态：筛选与分段按钮共用。
-const IDLE = 'border-gray-300 bg-white text-gray-700 dark:border-gray-700 dark:bg-gray-850 dark:text-gray-300';
+const IDLE =
+	'border-gray-300 bg-white text-gray-700 dark:border-gray-700 dark:bg-gray-850 dark:text-gray-300';
 
 // 筛选区的开关按钮：选中时按语义色高亮，未选中回落到普通描边。
 const FILTER_TONES = {

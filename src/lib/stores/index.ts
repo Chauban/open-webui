@@ -37,6 +37,7 @@ export const USAGE_POOL: Writable<null | string[]> = writable(null);
 export const educationNotificationSummary: Writable<{
 	total: number;
 	by_type: Record<string, number>;
+	by_assignment: Record<string, Record<string, number>>;
 } | null> = writable(null);
 
 export const theme = writable('system');

@@ -207,11 +207,25 @@ async def call_step_model(
         # 服务商一时出错时由 OpenAI 兼容路由自动重发;图片识别逐页自己重发(draft_import),这里不叠加。
         "metadata": {RETRY_TRANSIENT_FLAG: step != "image_parsing"},
     }
-    return await generate_chat_completion(request, form_data=payload, user=user, bypass_filter=model.fixed)
+    return await generate_chat_completion(
+        request, form_data=payload, user=user, bypass_filter=model.fixed,
+        bypass_system_prompt=step in ('first_read', 'revision_review', 'whole_review'),
+    )
 
 
 class StepModelNotAllowed(ValueError):
     pass
+
+
+async def call_captured_model(request, user, step: StepKey, config, messages, stream=False):
+    """Assignment-bound execution retains the same stage registry as other teaching."""
+    if step not in ('first_read', 'coaching_chat', 'revision_review', 'whole_review'):
+        raise ValueError('This stage does not use an assignment teaching model')
+    return await generate_chat_completion(request, {
+        'model': config['ai']['model_id'], 'messages': messages, 'stream': stream,
+        **config['binding']['params'], **thinking_params(config['ai']['thinking']),
+        'metadata': {RETRY_TRANSIENT_FLAG: True},
+    }, user=user, bypass_system_prompt=True)
 
 
 def ensure_step_models_valid(

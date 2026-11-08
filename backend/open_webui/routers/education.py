@@ -842,6 +842,8 @@ async def create_assignment(
     if user.role != 'admin' and form_data.task_mode not in teacher_access(user.id, db).allowed_task_modes:
         raise HTTPException(403, 'This assignment type is not authorized for your account')
     teaching_config = latest_teaching_config(form_data.task_mode, db)
+    if form_data.task_mode == 'revise_argument':
+        raise HTTPException(409, 'Publish argument assignments from a saved teaching preparation')
     classroom_ids = list(
         dict.fromkeys(
             classroom_id.strip() for classroom_id in form_data.classroom_ids if classroom_id and classroom_id.strip()
@@ -914,6 +916,13 @@ async def update_assignment(
     if assignment.config_revision != form_data.expected_config_revision:
         raise HTTPException(409, 'Assignment settings changed; reload before saving')
     next_mode = form_data.task_mode or assignment.task_mode
+    if next_mode == 'revise_argument' and (
+        form_data.adopt_latest_teaching_config or
+        ('model_params' in form_data.model_fields_set and form_data.model_params != assignment.model_params)
+    ):
+        raise HTTPException(409, 'Publish AI changes through a teaching preparation')
+    if next_mode == 'revise_argument' and assignment.task_mode != 'revise_argument':
+        raise HTTPException(409, 'Create an argument assignment from a teaching preparation')
     if next_mode != assignment.task_mode and is_revision(next_mode):
         from open_webui.services.education.single_conversation import reject_conversion_with_multiple_chats
 
@@ -1393,6 +1402,7 @@ class AssignmentAiSettingsResponse(BaseModel):
 
     steps: list[StepView]
     coaching_thinking: CoachingThinking
+    fixed_by_assignment: bool = False
 
 
 @router.get(
@@ -1403,12 +1413,31 @@ async def get_teacher_assignment_ai_settings(
     request: Request,
     assignment: AssignmentModel = Depends(require_teacher_assignment),
     user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
 ):
     policy = await get_ai_step_policy()
     coaching = resolve_coaching_thinking(policy, assignment.model_params)
+    models = await available_models(request, user)
+    steps = describe_steps(policy, models, coaching)
+    if assignment.task_mode == 'revise_argument':
+        from open_webui.services.education.teaching_runtime import assignment_config, model_policy
+        config = assignment_config(assignment, db)
+        coaching = CoachingThinking(control='teacher', level=config['ai']['thinking'], source='teacher', students_choose=False)
+        allowed = (await model_policy()).model_ids
+        for step in steps:
+            if step.key in ('first_read', 'coaching_chat', 'revision_review', 'whole_review'):
+                step.model_source = 'teacher_chat_model'
+                step.model_id = config['ai']['model_id']
+                step.model_name = (models.get(step.model_id) or {}).get('name', step.model_id)
+                step.model_available = step.model_id in models and step.model_id in allowed
+                step.control = 'teacher'
+                step.thinking = config['ai']['thinking']
+                step.thinking_format = config['binding']['thinking_format']
+                step.quirks = []
     return {
-        'steps': describe_steps(policy, await available_models(request, user), coaching),
+        'steps': steps,
         'coaching_thinking': coaching,
+        'fixed_by_assignment': assignment.task_mode == 'revise_argument',
     }
 
 
@@ -2129,6 +2158,8 @@ async def get_assignment_workspace(
 
 
 async def _can_switch_thinking(assignment) -> bool:
+    if assignment.task_mode == 'revise_argument':
+        return False
     policy = await get_ai_step_policy()
     return resolve_coaching_thinking(policy, assignment.model_params).students_choose
 
@@ -2965,7 +2996,14 @@ async def submit_assignment(
     challenge_closing_prompt = await _get_challenge_prompt('closing')
 
     def persist_submission():
+        nonlocal prompt_timeline
         assignment = lock_assignment(assignment_id, db)
+        if assignment and assignment.task_mode == 'revise_argument':
+            from open_webui.models.teaching_trials import TeachingCall
+            completed_ids = {row.id for row in db.query(TeachingCall).filter_by(session_id=form_data.writing_session_id, status='ready').all()}
+            prompt_timeline = [message for message in prompt_timeline if message.get('role') != 'assistant'
+                or not (message.get('education_context') or {}).get('call_id')
+                or message['education_context']['call_id'] in completed_ids]
         if assignment is None:
             raise HTTPException(404, 'Assignment not found')
         if assignment.config_revision != form_data.expected_config_revision:
@@ -3091,6 +3129,11 @@ async def submit_assignment(
             # 学生可开关时每条回复实际用的档位另记在回复上（对话时间线的 thinking_level）。
             'thinking': resolve_coaching_thinking(ai_policy, assignment.model_params).model_dump(),
         }
+        if assignment.task_mode == 'revise_argument':
+            # A submitted round may span versions. Its actual prompts/thinking
+            # live in teaching_evidence, never in one misleading "last" snapshot.
+            stats['coaching']['task_prompt'] = ''
+            stats['coaching']['thinking'] = None
         # 质疑措辞同理，管理员随时可改，已交的这一轮不能跟着变。
         challenge_round_no = Education.resolve_next_submission_round_no(assignment.id, session.owner_user_id, db=db)
         challenge_session = Education.get_challenge_session_for_round(session.id, challenge_round_no, db=db)
@@ -3153,6 +3196,9 @@ async def submit_assignment(
             from open_webui.services.education.revision_reading import reading_records, published_return_feedback
 
             stats['revision_readings'] = reading_records(session.id, db, completed_only=True)
+            if assignment.task_mode == 'revise_argument':
+                from open_webui.services.education.teaching_runtime import frozen_evidence
+                stats['teaching_evidence'] = frozen_evidence(session.id, db)
             stats['returned_feedback'] = published_return_feedback(session, db)
         reflection = Education.insert_micro_reflection(
             assignment.id,
@@ -4539,3 +4585,7 @@ async def request_revision_reading(
     except ValueError as error:
         db.rollback()
         raise HTTPException(400, str(error)) from error
+
+
+from open_webui.routers.teaching_trials import router as teaching_trial_router
+router.include_router(teaching_trial_router)

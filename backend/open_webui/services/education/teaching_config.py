@@ -12,7 +12,7 @@ from open_webui.models.education_types import (
     TeachingConfigSnapshot,
     TeachingConfigUpdate,
 )
-from open_webui.services.education.task_types import TASK_MODES, REVISION_CONTRACT
+from open_webui.services.education.task_types import TASK_MODES
 
 
 class EducationConflict(ValueError):
@@ -101,19 +101,14 @@ def publish_teaching_config(task_mode, form: TeachingConfigUpdate, db):
     return latest_teaching_config(task_mode, db)
 
 
-def revision_system_context(assignment, returned_feedback=None):
+def revision_system_context(assignment):
     """Explicit allowlist: no rubric, score, reflection or generic coaching style."""
     config = assignment.teaching_config
     return '\n\n'.join(
         [
-            REVISION_CONTRACT,
             f'【教学配置】{assignment.task_mode} / v{config["version"]}',
-            f'【教学目标与判断标准】\n{config["standards"]}',
             f'【本类型辅导提示词】\n{config["prompt"]}',
-            '【本次任务背景：不改变核心辅导规则】',
-            f'标题：{assignment.title}\n要求版本：{assignment.description_version}\n{assignment.description or ""}',
-            f'要求变更说明：{assignment.change_summary or "无"}',
-            f'【教师已发布退回意见】\n{returned_feedback}' if returned_feedback else '',
-            REVISION_CONTRACT,
+            '【本次作业信息】',
+            f'标题：{assignment.title}\n{assignment.description or ""}',
         ]
     )

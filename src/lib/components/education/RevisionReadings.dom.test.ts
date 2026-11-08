@@ -45,7 +45,7 @@ test('阅读直接展示且没有流程选择；失败可重试，只读时不�
 					understanding: '我读到你想说明什么',
 					strength: null,
 					focus: [{ quote: '原句', feedback: '这一处我还不明白' }],
-					overview: '不重复显示的整体意见'
+					overview: '整体意见'
 				}
 			},
 			onRetry: retry
@@ -54,6 +54,7 @@ test('阅读直接展示且没有流程选择；失败可重试，只读时不�
 	});
 	expect(screen.getByText('我读到你想说明什么')).toBeTruthy();
 	expect(screen.getByText('这一处我还不明白')).toBeTruthy();
+	expect(screen.getByText('整体意见')).toBeTruthy();
 	for (const label of [
 		'就这处聊聊',
 		'展开完整反馈',
@@ -68,4 +69,29 @@ test('阅读直接展示且没有流程选择；失败可重试，只读时不�
 	expect(retry).toHaveBeenCalledWith('first_read');
 	await rerender({ readonly: true });
 	expect(screen.queryByRole('button', { name: '重试阅读' })).toBeNull();
+});
+
+test('初读支持连续回复和超过两处反馈，不要求复述或肯定段落', async () => {
+	const { rerender } = render(RevisionReadings, {
+		props: {
+			record: {
+				...record('ready'),
+				feedback: { understanding: '', strength: null, focus: [], overview: '老师指定的连续回复' }
+			}
+		},
+		context
+	});
+	expect(screen.getByText('老师指定的连续回复')).toBeTruthy();
+	await rerender({
+		record: {
+			...record('ready'),
+			feedback: {
+				understanding: '',
+				strength: null,
+				focus: [1, 2, 3].map((i) => ({ quote: '', feedback: `建议 ${i}` })),
+				overview: ''
+			}
+		}
+	});
+	for (const i of [1, 2, 3]) expect(screen.getByText(`建议 ${i}`)).toBeTruthy();
 });
