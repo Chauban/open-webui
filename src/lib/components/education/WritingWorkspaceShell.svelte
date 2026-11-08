@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { pollReadingProgress } from './reading-progress';
 	import { teachingApi } from '$lib/apis/education/teaching';
 	let teachingSummary = null;
 	let teachingNotice = '';
@@ -7,7 +8,8 @@
 		const next = await teachingApi<any>(`/writing-sessions/${writingSession.id}/teaching-summary`);
 		const seenKey = `teaching-version:${writingSession.id}`;
 		const previous = teachingSummary?.revision ?? Number(sessionStorage.getItem(seenKey) || '1');
-		if (next && next.revision > previous) teachingNotice = '老师更新了 AI 辅导方式，接下来的交流将使用新设置。已有内容保留。';
+		if (next && next.revision > previous)
+			teachingNotice = '老师更新了 AI 辅导方式，接下来的交流将使用新设置。已有内容保留。';
 		if (next) sessionStorage.setItem(seenKey, String(next.revision));
 		teachingSummary = next;
 	}
@@ -46,6 +48,9 @@
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 	import ReflectionAnswerForm from '$lib/components/education/ReflectionAnswerForm.svelte';
 	import ReadingLock from '$lib/components/education/ReadingLock.svelte';
+	import WritingMaterials from './WritingMaterials.svelte';
+	import { attachWritingMaterials } from '$lib/apis/education';
+	import { selectMaterial } from '$lib/types/writing-materials';
 	import DraftBaselineStep from '$lib/components/education/DraftBaselineStep.svelte';
 	import EditorImportDialog from '$lib/components/education/EditorImportDialog.svelte';
 	import ThinkingSwitch from '$lib/components/education/ThinkingSwitch.svelte';
@@ -183,7 +188,12 @@
 				| undefined
 		)?.reasoning
 	);
-	$: showThinkingSwitch = assignment?.task_mode !== 'revise_argument' && isAssignment && canSwitchThinking && selectedModelThinks && !isReadOnly;
+	$: showThinkingSwitch =
+		assignment?.task_mode !== 'revise_argument' &&
+		isAssignment &&
+		canSwitchThinking &&
+		selectedModelThinks &&
+		!isReadOnly;
 	// 关不掉思考的模型:开关不可用(写明始终开着),也不发「关」;服务端同样会退到最低档。
 	$: thinkingAlwaysOn = thinksAlways(thinkingSupportOf($models, selectedModelId));
 	// 修订初稿作业:还没交初稿时只显示初稿步骤,编辑器、左侧对话和提交都锁着(后端同样拒绝)。
@@ -195,8 +205,8 @@
 	$: canSubmitAssignment = isAssignment && !isPastDue && !isGraded && !needsDraftBaseline;
 	// 确认后回到对话阅读开场；不替学生自动发送提问。
 	const onDraftBaselineSubmitted = async () => {
-		showMobileDraft = false;
 		await load();
+		showMobileDraft = false;
 	};
 	// 交作业之前可以撤回初稿重来:基线、正文、写作过程和本作业的对话一起删掉。
 	// 交过一次(含退回重交)基线就锁定。
@@ -258,15 +268,19 @@
 		}
 	}
 
+	let stopReadingProgress: (() => void) | null = null;
 	let readingBusy = false;
+	// 工作区已收到确认稿，但辅导配置、阅读记录或模型选择可能仍在加载。
+	let preparingReading = false;
+	$: readingPending = (preparingReading && !isReadOnly) || readingBusy;
 	$: readingProgressInChat =
 		readings.some((record) => record.status === 'running') ||
-		(readingBusy && readings.length === 0);
+		(readingPending && readings.length === 0);
 	let chatReadingBusy = false;
 	$: readingLocked =
 		hasRevisionCoaching &&
 		!isReadOnly &&
-		(readingBusy || chatReadingBusy || readings.some((record) => record.status === 'running'));
+		(readingPending || chatReadingBusy || readings.some((record) => record.status === 'running'));
 	$: editorLocked = isReadOnly || readingLocked;
 	let revisionTimer: ReturnType<typeof setTimeout> | null = null;
 	$: hasRevisionCoaching =
@@ -281,7 +295,17 @@
 		const baseline = writingSession.draft_baseline_at;
 		try {
 			if (purpose !== 'first_read') await flushDraftBeforeChat();
-			await requestRevisionReading(localStorage.token, writingSession.id, purpose, selectedModelId);
+			const sessionId = writingSession.id;
+			stopReadingProgress?.();
+			stopReadingProgress = pollReadingProgress(
+				() => getRevisionReadings(localStorage.token, sessionId),
+				(records) => {
+					if (writingSession?.id === sessionId && writingSession.draft_baseline_at === baseline)
+						readings = records;
+				}
+			);
+			await requestRevisionReading(localStorage.token, sessionId, purpose, selectedModelId);
+			stopReadingProgress?.();
 			if (writingSession.draft_baseline_at === baseline)
 				readings = await getRevisionReadings(localStorage.token, writingSession.id);
 			if (readings.some((record) => record.status === 'running'))
@@ -289,6 +313,8 @@
 		} catch (error) {
 			toast.error(resolveErrorMessage(error, t));
 		} finally {
+			stopReadingProgress?.();
+			stopReadingProgress = null;
 			readingBusy = false;
 		}
 	};
@@ -297,6 +323,7 @@
 		try {
 			readings = await getRevisionReadings(localStorage.token, writingSession.id);
 		} catch (error) {
+			preparingReading = false;
 			toast.error(resolveErrorMessage(error, t));
 			return;
 		}
@@ -309,6 +336,7 @@
 			}
 			await runReading('first_read');
 		}
+		preparingReading = false;
 	};
 	$: sameAsDraft =
 		isAssignment &&
@@ -735,12 +763,20 @@
 	// 修订初稿作业的导入在交初稿那一步;从零写作没有那一步,导入直接进编辑器。
 	// 导入的文字记为外部粘贴,并在操作里注明来自文件还是照片,老师在时间线上看得到。
 	let showImportDialog = false;
+	let materialsRefresh = 0;
 	$: canImportIntoEditor = isAssignment && assignment?.task_mode === 'from_scratch' && !isReadOnly;
 
-	const insertImportedText = (text: string, mode: 'insert' | 'replace', info: ImportInfo) => {
+	const insertImportedText = async (text: string, mode: 'insert' | 'replace', info: ImportInfo) => {
 		if (editorLocked || !editor) return;
 		const html = importedTextToHtml(text);
 		if (!html) return;
+		await attachWritingMaterials(
+			localStorage.token,
+			writingSession.id,
+			info.material ? [selectMaterial(info.material)] : [],
+			mode === 'replace'
+		);
+		materialsRefresh += 1;
 		pendingSource = {
 			sourceType: 'external_paste',
 			sourceMessageId: null,
@@ -949,8 +985,11 @@
 			effectiveDueAt = workspace.effective_due_at ?? null;
 			canSwitchThinking = workspace.can_switch_thinking ?? false;
 			writingSession = workspace.writing_session;
-			await refreshTeachingSummary().catch(error => toast.error(resolveErrorMessage(error, t)));
-			void refreshProcessSummary();
+			preparingReading =
+				isAssignment &&
+				isRevision(assignment?.task_mode) &&
+				!!writingSession?.draft_baseline_at &&
+				!readings.some((record) => record.purpose === 'first_read');
 			workspaceProject = workspace.project;
 			workspaceNote = workspace.note;
 			isSubmitted = workspace.writing_session?.status === 'submitted';
@@ -965,11 +1004,15 @@
 				? provenanceSegmentsToSourceRuns(noteText, workspace.source_map)
 				: normalizeSourceRuns([], noteText.length);
 			currentChatId = $page.url.searchParams.get('chat') ?? '';
+			// 确认状态、正文与等待状态一起渲染，避免异步请求之间挂载空白可编辑稿件。
+			await refreshTeachingSummary().catch((error) => toast.error(resolveErrorMessage(error, t)));
+			void refreshProcessSummary();
 			await selectedFolder.set(workspaceProject);
 			await refreshChallenge();
 			void refreshRevisionItems();
 			loaded = true;
 		} catch (error) {
+			preparingReading = false;
 			loadError = resolveErrorMessage(error, t);
 			toast.error(loadError);
 		}
@@ -985,6 +1028,7 @@
 	});
 
 	onDestroy(() => {
+		stopReadingProgress?.();
 		if (revisionTimer) clearTimeout(revisionTimer);
 		if (
 			$selectedFolder?.meta?.mode === 'assignment_writing' ||
@@ -1064,7 +1108,7 @@
 		readOnly={isReadOnly || needsDraftBaseline}
 		revisionMode={hasRevisionCoaching}
 		revisionReadings={readings}
-		{readingBusy}
+		readingBusy={readingPending}
 		bind:revisionResponseBusy={chatReadingBusy}
 		onRetryReading={runReading}
 		revisionDraftText={noteText}
@@ -1084,7 +1128,10 @@
 		rightPanelClassName="hidden lg:flex"
 	>
 		<svelte:fragment slot="input-accessory">
-			{#if teachingNotice}<p role="status" class="px-4 py-2 text-sm text-amber-700">{$i18n.t(teachingNotice)} {teachingSummary?.change_summary}</p>{/if}
+			{#if teachingNotice}<p role="status" class="px-4 py-2 text-sm text-amber-700">
+					{$i18n.t(teachingNotice)}
+					{teachingSummary?.change_summary}
+				</p>{/if}
 			{#if showThinkingSwitch}
 				<ThinkingSwitch bind:on={thinkingOn} alwaysOn={thinkingAlwaysOn} />
 			{/if}
@@ -1232,7 +1279,13 @@
 					{/if}
 				</div>
 			</div>
-			<ReadingLock locked={readingLocked} showProgress={!readingProgressInChat}>
+			<ReadingLock
+				locked={readingLocked}
+				showProgress={!readingProgressInChat}
+				retrying={readings.some(
+					(record) => record.status === 'running' && record.context?.retrying
+				)}
+			>
 				<div
 					class="min-h-0 flex-1 overflow-y-auto px-5 py-5 {needsDraftBaseline
 						? 'flex flex-col !overflow-hidden'
@@ -1262,6 +1315,10 @@
 									</EduButton>
 								</div>
 							{/if}
+							{#if isAssignment}<WritingMaterials
+									sessionId={writingSession.id}
+									refresh={materialsRefresh}
+								/>{/if}
 							<RichTextInput
 								bind:editor
 								bind:value={noteJson}
@@ -1452,6 +1509,10 @@
 									</EduButton>
 								</div>
 							{/if}
+							{#if isAssignment}<WritingMaterials
+									sessionId={writingSession.id}
+									refresh={materialsRefresh}
+								/>{/if}
 							<RichTextInput
 								bind:editor
 								bind:value={noteJson}

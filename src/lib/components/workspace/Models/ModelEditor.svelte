@@ -9,7 +9,8 @@
 	import { getSkills } from '$lib/apis/skills';
 	import { getFunctions } from '$lib/apis/functions';
 	import { getModelsDefaults } from '$lib/apis/configs';
-	import { getBaseModelTags, getModelTags } from '$lib/apis/models';
+	import { getBaseModelTags, getModelTags, getFallbackModelOptions } from '$lib/apis/models';
+	import FallbackModelSelect from './FallbackModelSelect.svelte';
 	import { getVoices } from '$lib/apis/audio';
 
 	import AdvancedParams from '$lib/components/chat/Settings/Advanced/AdvancedParams.svelte';
@@ -58,6 +59,9 @@
 	let showAccessControlModal = false;
 
 	let loaded = false;
+	let fallbackModelId = '';
+	let fallbackOptions = [];
+	let fallbackOptionsUnavailable = false;
 
 	// ///////////
 	// model
@@ -83,6 +87,7 @@
 		base_model_id: null,
 		name: '',
 		meta: {
+			fallback_model_id: null as string | null,
 			// LICENSE covers this Open WebUI fallback logo.
 			// Do not alter, remove, obscure, or replace it except as LICENSE permits:
 			// https://docs.openwebui.com/license.
@@ -267,6 +272,7 @@
 
 		info.access_grants = accessGrants;
 		info.meta.capabilities = capabilities;
+		if ($user?.role === 'admin') info.meta.fallback_model_id = fallbackModelId || null;
 
 		if (enableDescription) {
 			info.meta.description = info.meta.description.trim() === '' ? null : info.meta.description;
@@ -390,6 +396,12 @@
 	$: modelQuirks = quirkTexts(providerQuirks, $i18n.t);
 
 	onMount(async () => {
+		if ($user?.role === 'admin') {
+			fallbackOptions = await getFallbackModelOptions(localStorage.token).catch(() => {
+				fallbackOptionsUnavailable = true;
+				return [];
+			});
+		}
 		await tools.set((await getTools(localStorage.token).catch(() => null)) ?? []);
 		skillsList = (await getSkills(localStorage.token).catch(() => null)) ?? [];
 		if (!$functions) {
@@ -419,6 +431,7 @@
 		}
 
 		if (model) {
+			fallbackModelId = model.meta?.fallback_model_id ?? '';
 			name = model.name;
 			await tick();
 
@@ -981,6 +994,14 @@
 						<hr class="my-3 border-gray-100/30 dark:border-gray-850/30" />
 
 						<div class="my-3">
+							{#if $user?.role === 'admin'}
+								<FallbackModelSelect
+									bind:value={fallbackModelId}
+									primaryId={info.base_model_id || id}
+									options={fallbackOptions}
+									unavailable={fallbackOptionsUnavailable}
+								/>
+							{/if}
 							<Capabilities bind:capabilities />
 							<ProviderQuirksPanel notes={modelQuirks} testid="model-provider-quirks" />
 						</div>

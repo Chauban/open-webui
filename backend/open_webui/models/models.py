@@ -82,6 +82,7 @@ class ModelMeta(BaseModel):
     description: str | None = Field(default=None, description='User-facing description of the model.')
     capabilities: dict | None = None
     knowledge: list[Any] | None = None
+    fallback_model_id: str | None = Field(default=None, min_length=1, max_length=256)
 
     model_config = ConfigDict(extra='allow')
 

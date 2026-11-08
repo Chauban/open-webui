@@ -9,7 +9,11 @@
 	import dayjs from '$lib/dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
 
-	import { getTeacherAssignments, getTeacherClassrooms } from '$lib/apis/education';
+	import {
+		getTeacherAssignments,
+		getTeacherClassrooms,
+		setAssignmentVisibility
+	} from '$lib/apis/education';
 	import { teachingApi, type Preparation } from '$lib/apis/education/teaching';
 	let preparations: Preparation[] = [];
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
@@ -20,11 +24,7 @@
 	import EduCard from '$lib/components/education/EduCard.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 	import { EDU_FILTER_FIELD_CLASS } from '$lib/components/education/styles';
-	import {
-		formatEpoch,
-		getClassroomDisplayName,
-		resolveErrorMessage
-	} from '$lib/utils/education';
+	import { formatEpoch, getClassroomDisplayName, resolveErrorMessage } from '$lib/utils/education';
 
 	// 作业列表:整行进入作业,每行只露「截止 · 已交 x/y · 待批改 n」这三个要处理的数,
 	// 次要操作收进「⋯」。班级页的「本班作业」也落到这里(?classroom=),不再单独一页。
@@ -42,6 +42,39 @@
 	let selectedStatus = 'all';
 	let sortBy = 'due';
 	let keyword = '';
+	let updatingVisibility = new Set<string>();
+	$: assignmentGroups = [
+		{
+			hidden: false,
+			label: 'Assignments Shown to Students',
+			items: filteredAssignments.filter((item) => !item.assignment.hidden)
+		},
+		{
+			hidden: true,
+			label: 'Hidden Assignments',
+			items: filteredAssignments.filter((item) => item.assignment.hidden)
+		}
+	];
+
+	const toggleVisibility = async (assignment) => {
+		if (updatingVisibility.has(assignment.id)) return;
+		updatingVisibility.add(assignment.id);
+		try {
+			const updated = await setAssignmentVisibility(
+				localStorage.token,
+				assignment.id,
+				!assignment.hidden
+			);
+			assignments = assignments.map((item) =>
+				item.assignment.id === updated.id ? { ...item, assignment: updated } : item
+			);
+			toast.success(t(updated.hidden ? 'Assignment hidden.' : 'Assignment visible to students.'));
+		} catch (error) {
+			toast.error(resolveErrorMessage(error, t));
+		} finally {
+			updatingVisibility.delete(assignment.id);
+		}
+	};
 
 	const isPastDue = (item) => (item.assignment.due_at ?? 0) * 1000 < Date.now();
 
@@ -85,15 +118,25 @@
 		}
 	};
 
-	const menuItems = (assignmentId: string) => [
-		{ label: 'Copy Student Link', onClick: () => copyWriteLink(assignmentId) },
-		{
-			label: 'Duplicate as New Assignment',
-			onClick: () => goto(`/teacher/assignments/new?from=${assignmentId}`)
-		},
-		{ label: 'Assignment Analysis', onClick: () => goto(`/teacher/assignments/${assignmentId}/dashboard`) },
-		{ label: 'Settings', onClick: () => goto(`/teacher/assignments/${assignmentId}/settings`) }
-	];
+	const menuItems = (assignment) => {
+		const assignmentId = assignment.id;
+		return [
+			{
+				label: assignment.hidden ? 'Show Assignment' : 'Hide Assignment',
+				onClick: () => toggleVisibility(assignment)
+			},
+			{ label: 'Copy Student Link', onClick: () => copyWriteLink(assignmentId) },
+			{
+				label: 'Duplicate as New Assignment',
+				onClick: () => goto(`/teacher/assignments/new?from=${assignmentId}`)
+			},
+			{
+				label: 'Assignment Analysis',
+				onClick: () => goto(`/teacher/assignments/${assignmentId}/dashboard`)
+			},
+			{ label: 'Settings', onClick: () => goto(`/teacher/assignments/${assignmentId}/settings`) }
+		];
+	};
 
 	onMount(async () => {
 		try {
@@ -128,15 +171,35 @@
 	</svelte:fragment>
 
 	<div class="mx-auto max-w-6xl px-4 py-6">
-		{#if preparations.length}<details class="mb-5 rounded-xl border p-4 dark:border-gray-700"><summary>{$i18n.t('准备中的作业与辅导方案')}</summary>{#each preparations as preparation}<a class="my-2 block underline" href={preparation.assignment_id ? `/teacher/assignments/${preparation.assignment_id}/settings?preparation=${preparation.id}` : `/teacher/assignments/new?preparation=${preparation.id}`}>{preparation.payload.assignment.title || $i18n.t('未命名准备稿')} · {$i18n.t(preparation.published ? '已发布' : '准备稿')}</a>{/each}</details>{/if}
+		{#if preparations.length}<details class="mb-5 rounded-xl border p-4 dark:border-gray-700">
+				<summary>{$i18n.t('准备中的作业与辅导方案')}</summary>{#each preparations as preparation}<a
+						class="my-2 block underline"
+						href={preparation.assignment_id
+							? `/teacher/assignments/${preparation.assignment_id}/settings?preparation=${preparation.id}`
+							: `/teacher/assignments/new?preparation=${preparation.id}`}
+						>{preparation.payload.assignment.title || $i18n.t('未命名准备稿')} · {$i18n.t(
+							preparation.published ? '已发布' : '准备稿'
+						)}</a
+					>{/each}
+			</details>{/if}
 		<div class="mb-4 flex flex-wrap items-center gap-2">
-			<select class={EDU_FILTER_FIELD_CLASS} aria-label={$i18n.t('Classroom')} bind:value={selectedClassroom}>
+			<select
+				class={EDU_FILTER_FIELD_CLASS}
+				aria-label={$i18n.t('Classroom')}
+				bind:value={selectedClassroom}
+			>
 				<option value="all">{$i18n.t('All Classrooms')}</option>
 				{#each classrooms as item}
-					<option value={item.classroom.id}>{getClassroomDisplayName(item.classroom.name, t)}</option>
+					<option value={item.classroom.id}
+						>{getClassroomDisplayName(item.classroom.name, t)}</option
+					>
 				{/each}
 			</select>
-			<select class={EDU_FILTER_FIELD_CLASS} aria-label={$i18n.t('Status')} bind:value={selectedStatus}>
+			<select
+				class={EDU_FILTER_FIELD_CLASS}
+				aria-label={$i18n.t('Status')}
+				bind:value={selectedStatus}
+			>
 				<option value="all">{$i18n.t('All')}</option>
 				<option value="active">{$i18n.t('Ongoing')}</option>
 				<option value="past_due">{$i18n.t('Past Due')}</option>
@@ -165,71 +228,97 @@
 					: $i18n.t('No assignments match the current filters.')}
 			</EduStateCard>
 		{:else}
-			<EduCard padding="none">
-				<div class="overflow-x-auto">
-					<table class="w-full min-w-[44rem] text-sm">
-						<thead class="bg-gray-50 text-left text-xs text-gray-500 dark:bg-gray-800 dark:text-gray-400">
-							<tr>
-								<th class="px-4 py-2.5 font-medium">{$i18n.t('Assignment')}</th>
-								<th class="px-4 py-2.5 font-medium">{$i18n.t('Due At')}</th>
-								<th class="px-4 py-2.5 text-right font-medium">{$i18n.t('Submitted')}</th>
-								<th class="px-4 py-2.5 text-right font-medium">{$i18n.t('To Review')}</th>
-								<th class="w-12"></th>
-							</tr>
-						</thead>
-						<tbody>
-							{#each filteredAssignments as item (item.assignment.id)}
-								<tr
-									class="cursor-pointer border-t border-gray-100 transition hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-800/60"
-									on:click={() => goto(`/teacher/assignments/${item.assignment.id}`)}
-								>
-									<td class="px-4 py-3">
-										<a
-											href={`/teacher/assignments/${item.assignment.id}`}
-											class="font-medium text-gray-900 hover:underline dark:text-gray-100"
-											on:click|stopPropagation
-										>
-											{item.assignment.title}
-										</a>
-										<div class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-											{item.classroom ? getClassroomDisplayName(item.classroom.name, t) : t('Unknown')}
-										</div>
-									</td>
-									<td class="whitespace-nowrap px-4 py-3" title={formatEpoch(item.assignment.due_at)}>
-										<div class={isPastDue(item) ? 'text-rose-600 dark:text-rose-400' : ''}>
-											{formatEpoch(item.assignment.due_at)}
-										</div>
-										<div class="text-xs text-gray-400">
-											{dayjs(item.assignment.due_at * 1000)
-												.locale($i18n.language)
-												.fromNow()}
-										</div>
-									</td>
-									<td class="px-4 py-3 text-right tabular-nums">
-										{item.submission_count}/{item.student_count}
-									</td>
-									<td class="px-4 py-3 text-right tabular-nums">
-										{#if item.pending_review_count > 0}
-											<a
-												href={`/teacher/assignments/${item.assignment.id}/submissions?status=pending`}
-												class="font-semibold text-amber-600 hover:underline dark:text-amber-400"
-												on:click|stopPropagation
+			{#each assignmentGroups as group}
+				{#if group.items.length > 0}
+					<section class="mb-6" aria-label={$i18n.t(group.label)}>
+						<h2 class="mb-2 text-sm font-semibold text-gray-500 dark:text-gray-400">
+							{$i18n.t(group.label)} · {group.items.length}
+						</h2>
+						<EduCard padding="none">
+							<div class="overflow-x-auto">
+								<table class="w-full min-w-[44rem] text-sm">
+									<thead
+										class="bg-gray-50 text-left text-xs text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+									>
+										<tr>
+											<th class="px-4 py-2.5 font-medium">{$i18n.t('Assignment')}</th>
+											<th class="px-4 py-2.5 font-medium">{$i18n.t('Due At')}</th>
+											<th class="px-4 py-2.5 text-right font-medium">{$i18n.t('Submitted')}</th>
+											<th class="px-4 py-2.5 text-right font-medium">{$i18n.t('To Review')}</th>
+											<th class="w-12"></th>
+										</tr>
+									</thead>
+									<tbody>
+										{#each group.items as item (item.assignment.id)}
+											<tr
+												class="cursor-pointer border-t border-gray-100 transition hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-800/60 {group.hidden
+													? 'bg-gray-50 text-gray-500 dark:bg-gray-900 dark:text-gray-400'
+													: ''}"
+												on:click={() => goto(`/teacher/assignments/${item.assignment.id}`)}
 											>
-												{item.pending_review_count}
-											</a>
-										{:else}
-											<span class="text-gray-300 dark:text-gray-600">0</span>
-										{/if}
-									</td>
-									<td class="px-2 py-3 text-right">
-										<EduActionMenu items={menuItems(item.assignment.id)} />
-									</td>
-								</tr>
-							{/each}
-						</tbody>
-					</table>
-				</div>
-			</EduCard>
+												<td class="px-4 py-3">
+													<a
+														href={`/teacher/assignments/${item.assignment.id}`}
+														class="font-medium hover:underline {group.hidden
+															? 'text-gray-500 dark:text-gray-400'
+															: 'text-gray-900 dark:text-gray-100'}"
+														on:click|stopPropagation
+													>
+														{item.assignment.title}
+													</a>
+													<div class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+														{item.classroom
+															? getClassroomDisplayName(item.classroom.name, t)
+															: t('Unknown')}
+													</div>
+												</td>
+												<td
+													class="whitespace-nowrap px-4 py-3"
+													title={formatEpoch(item.assignment.due_at)}
+												>
+													<div
+														class={!group.hidden && isPastDue(item)
+															? 'text-rose-600 dark:text-rose-400'
+															: ''}
+													>
+														{formatEpoch(item.assignment.due_at)}
+													</div>
+													<div class="text-xs text-gray-400">
+														{dayjs(item.assignment.due_at * 1000)
+															.locale($i18n.language)
+															.fromNow()}
+													</div>
+												</td>
+												<td class="px-4 py-3 text-right tabular-nums">
+													{item.submission_count}/{item.student_count}
+												</td>
+												<td class="px-4 py-3 text-right tabular-nums">
+													{#if item.pending_review_count > 0}
+														<a
+															href={`/teacher/assignments/${item.assignment.id}/submissions?status=pending`}
+															class="font-semibold hover:underline {group.hidden
+																? 'text-gray-500 dark:text-gray-400'
+																: 'text-amber-600 dark:text-amber-400'}"
+															on:click|stopPropagation
+														>
+															{item.pending_review_count}
+														</a>
+													{:else}
+														<span class="text-gray-300 dark:text-gray-600">0</span>
+													{/if}
+												</td>
+												<td class="px-2 py-3 text-right">
+													<EduActionMenu items={menuItems(item.assignment)} />
+												</td>
+											</tr>
+										{/each}
+									</tbody>
+								</table>
+							</div>
+						</EduCard>
+					</section>
+				{/if}
+			{/each}
 		{/if}
 	</div>
 </TeacherPageShell>

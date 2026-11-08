@@ -11,7 +11,9 @@
 
 {#if !status?.hidden}
 	<div class="status-description flex items-center gap-2 py-0.5 w-full text-left">
-		{#if status?.action === 'web_search' && (status?.urls || status?.items)}
+		{#if status?.action === 'model_fallback'}
+			<span class:shimmer={!done && !status?.done}>{$i18n.t('响应较慢，正在自动重试……')}</span>
+		{:else if status?.action === 'web_search' && (status?.urls || status?.items)}
 			<WebSearchResults {status}>
 				<div class="flex flex-col justify-center -space-y-0.5">
 					<div

@@ -9,6 +9,7 @@
 
 	import {
 		deleteAssignment,
+		setAssignmentVisibility,
 		getTeacherAssignment,
 		getTeacherAssignmentDefaults,
 		getTeacherClassrooms,
@@ -61,6 +62,26 @@
 	let loading = true;
 	let loadError = '';
 	let saving = false;
+	let changingVisibility = false;
+	const toggleVisibility = async () => {
+		if (changingVisibility) return;
+		changingVisibility = true;
+		try {
+			const assignment = await setAssignmentVisibility(
+				localStorage.token,
+				assignmentId,
+				!item.assignment.hidden
+			);
+			item = { ...item, assignment: { ...item.assignment, hidden: assignment.hidden } };
+			toast.success(
+				t(assignment.hidden ? 'Assignment hidden.' : 'Assignment visible to students.')
+			);
+		} catch (error) {
+			toast.error(resolveErrorMessage(error, t));
+		} finally {
+			changingVisibility = false;
+		}
+	};
 	let showDeleteConfirm = false;
 	let thinkingPolicy: { control: ThinkingControl; default: ThinkingSetting } | null = null;
 	// 保存后让 AI 设置卡重新读取生效值。
@@ -294,6 +315,25 @@
 							assignment={item.assignment}
 							template={teachingConfigs.revise_argument}
 						/>{/if}
+					<EduCard>
+						<div class="flex flex-wrap items-center justify-between gap-3">
+							<div>
+								<h2 class="text-base font-semibold">
+									{$i18n.t(item.assignment.hidden ? 'Hidden Assignment' : 'Assignment Visibility')}
+								</h2>
+								<p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+									{$i18n.t(
+										'Hidden assignments are unavailable to students. Writing and submissions are preserved, and you can show the assignment again.'
+									)}
+								</p>
+							</div>
+							<EduButton disabled={changingVisibility} on:click={toggleVisibility}
+								>{$i18n.t(
+									item.assignment.hidden ? 'Show Assignment' : 'Hide Assignment'
+								)}</EduButton
+							>
+						</div>
+					</EduCard>
 					<EduCard class="border-red-200 dark:border-red-900/60">
 						<h2 class="text-base font-semibold text-red-700 dark:text-red-400">
 							{$i18n.t('Danger Zone')}

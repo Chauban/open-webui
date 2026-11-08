@@ -10,6 +10,11 @@ vi.mock('$app/stores', async () => ({
 		url: new URL('http://localhost/teacher/teaching-trials/seed')
 	})
 }));
+vi.mock('svelte/transition', () => ({ fade: () => ({ duration: 0 }) }));
+vi.mock('$lib/utils/transitions', () => ({ flyAndScale: () => ({ duration: 0 }) }));
+vi.mock('focus-trap', () => ({
+	createFocusTrap: () => ({ activate() {}, deactivate() {}, pause() {}, unpause() {} })
+}));
 vi.mock('$app/navigation', () => ({ goto: vi.fn(async () => {}) }));
 vi.mock('$lib/apis/education/teaching', () => ({ teachingApi: api, trialAction: action }));
 const ai = {
@@ -19,6 +24,7 @@ const ai = {
 	template_version: 1
 };
 const payload = {
+	comparison_mode: 'models',
 	title: 'Test title',
 	description: 'Test requirements',
 	candidates: [ai],
@@ -173,7 +179,10 @@ test('reopening failed or stopped results shows their persisted reason, never an
 test('switching comparison history keeps responses fetched after generation', async () => {
 	const initial = { ...structuredClone(seed), state: { ...seed.state, baseline: 'sample' } };
 	const other = { ...structuredClone(initial), id: 'other' };
-	let server = { ...structuredClone(initial), state: { ...initial.state, dialogue: [] as { role: string; content: string }[] } };
+	let server = {
+		...structuredClone(initial),
+		state: { ...initial.state, dialogue: [] as { role: string; content: string }[] }
+	};
 	const original = api.getMockImplementation()!;
 	api.mockImplementation((path, ...rest) => {
 		if (path === '/teacher/teaching-trials/seed') return Promise.resolve(server);
@@ -198,4 +207,164 @@ test('switching comparison history keeps responses fetched after generation', as
 	await fireEvent.change(screen.getByLabelText('查看试教结果'), { target: { value: 'second' } });
 	await fireEvent.change(screen.getByLabelText('查看试教结果'), { target: { value: 'first' } });
 	expect(screen.getByText('这次生成已经完成')).toBeTruthy();
+});
+
+test('folding editor preserves edits and explains why changed settings cannot be sent', async () => {
+	render(Page, { context });
+	await screen.findByLabelText('辅导提示词');
+	await fireEvent.input(screen.getByLabelText('辅导提示词'), {
+		target: { value: 'new teaching prompt' }
+	});
+	await fireEvent.click(screen.getByRole('button', { name: '收起编辑区' }));
+	expect(document.getElementById('trial-editor')?.hidden).toBe(true);
+	await fireEvent.click(screen.getByRole('button', { name: '展开编辑区' }));
+	expect((screen.getByLabelText('辅导提示词') as HTMLTextAreaElement).value).toBe(
+		'new teaching prompt'
+	);
+	expect(document.getElementById('trial-send-hint')?.textContent).toContain('设置已修改');
+	await fireEvent.click(screen.getByRole('button', { name: '请直接帮我重写这一段。' }));
+	expect((screen.getByLabelText('扮演学生交流') as HTMLTextAreaElement).value).toBe(
+		'请直接帮我重写这一段。'
+	);
+	expect((screen.getByRole('button', { name: '发送' }) as HTMLButtonElement).disabled).toBe(true);
+	expect(action).not.toHaveBeenCalled();
+});
+
+test('editing only the sample keeps the conversation available and explains which draft is sent', async () => {
+	const original = api.getMockImplementation()!;
+	const started = { ...structuredClone(seed), state: { ...seed.state, baseline: 'sample' } };
+	api.mockImplementation((path, ...rest) =>
+		path.endsWith('/comparisons')
+			? Promise.resolve([{ id: 'group', payload, trials: [started] }])
+			: original(path, ...rest)
+	);
+	render(Page, { context });
+	await screen.findByLabelText('试教样稿');
+	await fireEvent.input(screen.getByLabelText('试教样稿'), { target: { value: 'revised sample' } });
+	await fireEvent.input(screen.getByLabelText('扮演学生交流'), {
+		target: { value: 'read this change' }
+	});
+	expect(document.getElementById('trial-send-hint')?.textContent).toContain('保存修改后的样稿');
+	expect((screen.getByRole('button', { name: '发送' }) as HTMLButtonElement).disabled).toBe(false);
+	expect(action).not.toHaveBeenCalled();
+});
+
+test('saving after editing retains the tested trial and adopts only after explicit confirmation', async () => {
+	const original = api.getMockImplementation()!;
+	const completed = {
+		...structuredClone(seed),
+		state: { ...seed.state, baseline: 'sample' },
+		events: [{ call: { status: 'ready' } }]
+	};
+	const plan = {
+		id: 'plan',
+		name: 'saved',
+		trial_id: 'seed',
+		config: structuredClone(seed.config)
+	};
+	api.mockImplementation((path, method, body) => {
+		if (path.endsWith('/comparisons'))
+			return Promise.resolve([{ id: 'group', payload, trials: [completed] }]);
+		if (path === '/teacher/saved-teaching-plans' && method === 'POST') return Promise.resolve(plan);
+		if (path.includes('/adopt/')) return Promise.resolve({});
+		return original(path, method, body);
+	});
+	render(Page, { context });
+	await screen.findByLabelText('辅导提示词');
+	await fireEvent.input(screen.getByLabelText('辅导提示词'), {
+		target: { value: 'untested changes' }
+	});
+	await fireEvent.click(screen.getByRole('button', { name: '保存方案' }));
+	await screen.findByLabelText('方案名称');
+	expect(screen.getByText('当前修改尚未测试，保存的是这次反馈实际使用的配置。')).toBeTruthy();
+	await fireEvent.click(screen.getByRole('button', { name: '保存' }));
+	await screen.findByText('方案已保存，可在下方「已保存方案」中使用。');
+	const request = api.mock.calls.find(
+		([path, method]) => path === '/teacher/saved-teaching-plans' && method === 'POST'
+	)![2];
+	expect(request.trial_id).toBe('seed');
+	expect(request).not.toHaveProperty('prompt');
+	await fireEvent.click(screen.getByRole('button', { name: '带回作业设置' }));
+	await screen.findByText('将方案用于作业');
+	expect(api.mock.calls.some(([path]) => path.includes('/adopt/'))).toBe(false);
+	await fireEvent.click(screen.getAllByRole('button', { name: '带回作业设置' }).at(-1)!);
+	await waitFor(() =>
+		expect(
+			api.mock.calls.some(([path]) => path === '/teacher/saved-teaching-plans/plan/adopt/prep')
+		).toBe(true)
+	);
+	expect(api.mock.calls.some(([path]) => path.includes('/publish'))).toBe(false);
+});
+
+test('prompt comparison saves two independent prompts with one model and shared settings', async () => {
+	const confirmation = vi.spyOn(window, 'confirm').mockReturnValue(true);
+	render(Page, { context });
+	await screen.findByLabelText('比较方式');
+	await fireEvent.change(screen.getByLabelText('比较方式'), { target: { value: 'prompts' } });
+	await fireEvent.input(screen.getByLabelText('辅导提示词 B'), {
+		target: { value: 'ask before advising' }
+	});
+	expect((screen.getByLabelText('辅导提示词 A') as HTMLTextAreaElement).value).toBe(ai.prompt);
+	await fireEvent.change(screen.getByLabelText('共用模型'), { target: { value: 'B' } });
+	await fireEvent.click(screen.getByRole('button', { name: '保存试教工作稿' }));
+	await screen.findByText('已保存');
+	const saved = api.mock.calls.find(
+		([path, method]) => path.endsWith('/work') && method === 'PUT'
+	)![2].payload;
+	expect(saved.comparison_mode).toBe('prompts');
+	expect(saved.candidates.map((c: typeof ai) => c.prompt)).toEqual([
+		ai.prompt,
+		'ask before advising'
+	]);
+	expect(saved.candidates.map((c: typeof ai) => c.model_id)).toEqual(['B', 'B']);
+	expect(saved.candidates.map((c: typeof ai) => c.thinking)).toEqual([
+		'model_default',
+		'model_default'
+	]);
+	confirmation.mockRestore();
+});
+
+test('same-model results have distinct labels for folding and sending', async () => {
+	const original = api.getMockImplementation()!;
+	const comparisonPayload = {
+		...payload,
+		comparison_mode: 'prompts',
+		candidates: [ai, { ...ai, prompt: 'B prompt' }]
+	};
+	const trials = ['first', 'second'].map((id, i) => ({
+		...structuredClone(seed),
+		id,
+		config: { ...seed.config, ai: comparisonPayload.candidates[i] },
+		state: { ...seed.state, baseline: 'sample' }
+	}));
+	api.mockImplementation((path, ...rest) => {
+		if (path === '/teacher/teaching-workbenches')
+			return Promise.resolve({ id: 'work', revision: 1, payload: comparisonPayload });
+		if (path.endsWith('/comparisons'))
+			return Promise.resolve([{ id: 'ab', payload: comparisonPayload, trials }]);
+		return original(path, ...rest);
+	});
+	render(Page, { context });
+	await screen.findByRole('button', { name: '收起 方案 A · Model A' });
+	expect(screen.getByRole('button', { name: '收起 方案 B · Model A' })).toBeTruthy();
+	const recipient = screen.getByLabelText('发送给') as HTMLSelectElement;
+	expect([...recipient.options].map((o) => o.value)).toEqual(['all', 'first', 'second']);
+	await fireEvent.change(recipient, { target: { value: 'second' } });
+	await fireEvent.click(screen.getByRole('button', { name: '收起 方案 B · Model A' }));
+	expect(recipient.value).toBe('second');
+	expect(action).not.toHaveBeenCalled();
+});
+
+test('canceling a comparison mode switch keeps the selector and edited prompt', async () => {
+	const confirmation = vi.spyOn(window, 'confirm').mockReturnValue(false);
+	render(Page, { context });
+	await screen.findByLabelText('比较方式');
+	await fireEvent.input(screen.getByLabelText('辅导提示词'), {
+		target: { value: 'keep my edits' }
+	});
+	await fireEvent.change(screen.getByLabelText('比较方式'), { target: { value: 'prompts' } });
+	expect((screen.getByLabelText('比较方式') as HTMLSelectElement).value).toBe('models');
+	expect((screen.getByLabelText('辅导提示词') as HTMLTextAreaElement).value).toBe('keep my edits');
+	expect(screen.queryByLabelText('辅导提示词 B')).toBeNull();
+	confirmation.mockRestore();
 });

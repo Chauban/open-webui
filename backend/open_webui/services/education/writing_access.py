@@ -5,8 +5,9 @@ from typing import Optional
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy import select
 
-from open_webui.models.education import Education
+from open_webui.models.education import Assignment, Education, WritingSession
 from open_webui.services.education.identity import get_education_role
 
 
@@ -15,9 +16,26 @@ async def ensure_personal_writing_allowed(user) -> None:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Personal writing is disabled for students")
 
 
-async def ensure_writing_session_access(user, session) -> None:
+async def ensure_assignment_folder_visible(user, folder_id, db) -> None:
+    if not folder_id or user.role == 'admin':
+        return
+    hidden = await db.scalar(
+        select(Assignment.id)
+        .join(WritingSession, WritingSession.assignment_id == Assignment.id)
+        .where(WritingSession.folder_id == folder_id, Assignment.hidden.is_(True), Assignment.teacher_id != user.id)
+        .limit(1)
+    )
+    if hidden:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, 'Assignment is hidden')
+
+
+async def ensure_writing_session_access(user, session, db=None) -> None:
     if session.scope == "personal":
         await ensure_personal_writing_allowed(user)
+    elif session.scope == 'assignment':
+        assignment = Education.get_assignment_by_id(session.assignment_id, db=db)
+        if assignment and assignment.hidden and user.role != 'admin' and user.id != assignment.teacher_id:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, 'Assignment is hidden')
 
 
 def load_submission_rounds_with_reviews(assignment, student_id: str, db=None):
@@ -54,6 +72,8 @@ def ensure_writing_session_writable(session, db: Optional[Session] = None) -> No
     assignment = Education.get_assignment_by_id(session.assignment_id, db=db)
     if assignment is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, 'Assignment not found')
+    if assignment.hidden:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, 'Assignment is hidden')
     rounds, reviews = load_submission_rounds_with_reviews(assignment, session.owner_user_id, db)
     current = next((item for item in rounds if item.is_current == 1), None)
     review = reviews.get(current.id) if current else None

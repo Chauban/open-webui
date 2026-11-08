@@ -7,10 +7,8 @@
 """
 
 import html
-import io
 import os
 import re
-import zipfile
 from difflib import SequenceMatcher
 
 from open_webui.models.chat_messages import ChatMessages
@@ -53,12 +51,7 @@ class DraftFileError(ValueError):
 
 
 def extract_draft_text(filename: str, data: bytes) -> str:
-    """从学生上传的初稿文件里取出纯文本,一段一行。
-
-    只解析不存档:文件内容不落盘、不进文件库,学生核对后照常走「确认初稿」。
-    收 .docx、旧版 .doc 和纯文本。PDF 不收,中文 PDF 抽出来每个视觉行都断成
-    一段,学生得逐段拼回去。
-    """
+    """纯文本与旧版 OLE Word 的基础解码。DOCX/PDF 完整解析由 materials.py 负责。"""
 
     if len(data) > DRAFT_FILE_MAX_BYTES:
         raise DraftFileError("The file is too large")
@@ -69,7 +62,7 @@ def extract_draft_text(filename: str, data: bytes) -> str:
         if data.startswith(_OLE_MAGIC):
             text = _extract_doc_text(data)
         else:
-            text = _extract_docx_text(data)
+            raise DraftFileError("Could not read this file")
     elif suffix in (".txt", ".md"):
         text = _decode_plain_text(data)
     else:
@@ -78,32 +71,6 @@ def extract_draft_text(filename: str, data: bytes) -> str:
     if not text:
         raise DraftFileError("No text found in this file")
     return text
-
-
-def _extract_docx_text(data: bytes) -> str:
-    from docx import Document
-    from docx.text.paragraph import Paragraph
-
-    try:
-        document = Document(io.BytesIO(data))
-    except (zipfile.BadZipFile, KeyError, ValueError) as err:
-        raise DraftFileError("Could not read this file") from err
-    # 按文档顺序取正文段落和表格(每个单元格一行),与 .doc 的主文档一致;
-    # 页眉页脚、脚注、文本框不取。段内软回车 python-docx 给的是 \n,随后按行切段。
-    lines = []
-    for block in document.iter_inner_content():
-        if isinstance(block, Paragraph):
-            lines.append(block.text)
-            continue
-        seen = set()
-        for row in block.rows:
-            for cell in row.cells:
-                # 合并单元格在 row.cells 里会重复出现
-                if cell._tc in seen:
-                    continue
-                seen.add(cell._tc)
-                lines.append(cell.text)
-    return "\n".join(lines)
 
 
 def _extract_doc_text(data: bytes) -> str:
@@ -261,6 +228,7 @@ async def build_current_text_context(
     previous_reply_id: str | None = None,
     db=None,
     captured_text: str | None = None,
+    captured_materials: list | None = None,
 ) -> str:
     """要追加到系统提示末尾的学生当前正文,连同它改没改过的状态。
 
@@ -276,8 +244,11 @@ async def build_current_text_context(
         text = (content.get('md') or '').strip()
     else:
         text = captured_text.strip()
+    from open_webui.services.education.materials import snapshot_materials, material_context, material_rules
+    material_snapshot = snapshot_materials(session.id, db) if captured_materials is None else captured_materials
+    materials = material_rules(material_snapshot) + material_context(material_snapshot)
     if not text:
-        return "【学生当前正文】右侧编辑器里还没有内容。"
+        return "【学生当前正文】右侧编辑器里还没有内容。" + materials
 
     paragraphs = normalize_draft_paragraphs(text)
     status = []
@@ -312,6 +283,7 @@ async def build_current_text_context(
         '下列改动说明来自已保存版本的比较；历史回复中的引文可能属于旧稿。\n'
         + ''.join(f'{line}\n' for line in status)
         + f'<<<\n{text}\n>>>'
+        + materials
     )
 
 

@@ -1,6 +1,14 @@
 // @ts-nocheck
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
+export const getFallbackModelOptions = async (token: string) => {
+	const response = await fetch(`${WEBUI_API_BASE_URL}/models/fallback/options`, {
+		headers: { authorization: `Bearer ${token}` }
+	});
+	if (!response.ok) throw await response.json();
+	return response.json();
+};
+
 export const getModelItems = async (
 	token: string = '',
 	query,

@@ -273,7 +273,8 @@ def test_no_model_fallback_and_private_trial_branch(env):
     assert len(env.calls) == 1
 
 
-def test_formal_chat_resolves_assignment_before_ordinary_model_acl(env, monkeypatch):
+@pytest.mark.parametrize('with_materials', [False, True])
+def test_formal_chat_resolves_assignment_before_ordinary_model_acl(env, monkeypatch, with_materials):
     import open_webui.internal.db as internal_db
     import open_webui.main as main
     from starlette.requests import Request
@@ -283,6 +284,14 @@ def test_formal_chat_resolves_assignment_before_ordinary_model_acl(env, monkeypa
     monkeypatch.setattr(internal_db, 'SessionLocal', env.factory)
     with env.factory() as db:
         session = Education.get_writing_session_by_id(sid, db=db)
+        if with_materials:
+            from open_webui.models.writing_materials import WritingMaterial, MaterialBlock
+            block = MaterialBlock(id='m1', kind='image', location='正文证据之后',
+                                  text='截图出处：史料卷三第42页', extracted_text='截图出处：史料卷三第42页', status='read')
+            db.add(WritingMaterial(id='request-evidence', writing_session_id=sid, filename='初稿.docx',
+                bundle_path='unused-test-asset.zip', data={'blocks': [block.model_dump()], 'model_id': 'vision'},
+                active=True, confirmed_at=1, created_at=1))
+            db.commit()
 
     async def deny(*args, **kwargs):
         raise HTTPException(403, 'No ordinary model access')
@@ -320,8 +329,14 @@ def test_formal_chat_resolves_assignment_before_ordinary_model_acl(env, monkeypa
     assert env.calls[-1]['thinking_level'] == 'medium'
     assert 'SECRET_STUDENT_OVERRIDE' not in json.dumps(env.calls[-1])
     assert env.calls[-1]['messages'][-1]['content'].count(DRAFT) == 1
+    if with_materials:
+        assert '史料卷三第42页' in env.calls[-1]['messages'][-1]['content']
+        assert '未读取、未提供、未核实' in env.calls[-1]['messages'][0]['content']
     with env.factory() as db:
-        assert db.query(TeachingCall).filter_by(session_id=sid).one().status == 'ready'
+        call = db.query(TeachingCall).filter_by(session_id=sid).one()
+        assert call.status == 'ready'
+        if with_materials:
+            assert call.context['materials'][0]['id'] == 'request-evidence'
     request = Request(
         {'type': 'http', 'method': 'POST', 'path': '/api/chat/completions', 'headers': [], 'app': env.client.app}
     )

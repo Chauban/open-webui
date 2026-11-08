@@ -1,5 +1,7 @@
 """Private editable workbenches, immutable comparisons and saved combinations."""
 
+from typing import Literal
+
 from open_webui.internal.db import Base, JSONField
 from open_webui.models.teaching_trials import AiCandidate, StrictModel
 from pydantic import Field, model_validator
@@ -7,15 +9,23 @@ from sqlalchemy import BigInteger, Column, Integer, Text, UniqueConstraint
 
 
 class WorkInput(StrictModel):
+    comparison_mode: Literal['models', 'prompts'] = 'models'
     title: str = Field(min_length=1, max_length=1000)
     description: str = Field(min_length=1, max_length=65000)
     candidates: list[AiCandidate] = Field(min_length=1, max_length=3)
     sample: str = Field(default='', max_length=200000)
 
     @model_validator(mode='after')
-    def shared_prompt(self):
+    def comparison_contract(self):
         if not self.title.strip() or not self.description.strip():
             raise ValueError('Title and requirements are required')
+        if self.comparison_mode == 'prompts':
+            if len(self.candidates) != 2:
+                raise ValueError('Prompt comparison requires exactly two candidates')
+            settings = [a.model_dump(exclude={'prompt'}) for a in self.candidates]
+            if settings[0] != settings[1]:
+                raise ValueError('Prompt comparison must use identical model settings')
+            return self
         if len({a.model_id for a in self.candidates}) != len(self.candidates):
             raise ValueError('Choose distinct models')
         if len({a.prompt for a in self.candidates}) != 1:

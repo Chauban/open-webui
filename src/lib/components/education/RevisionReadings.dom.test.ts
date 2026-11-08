@@ -28,6 +28,11 @@ test('请求中及刷新恢复的阅读都有等待状态，不重复提示', as
 	expect(screen.getAllByRole('status')).toHaveLength(1);
 	await rerender({ busy: false, record: record('running') });
 	expect(screen.getByRole('status').textContent).toContain('暂时无法编辑或提交');
+	await rerender({
+		record: { ...record('running'), context: { ...record('running').context, retrying: true } }
+	});
+	expect(screen.getByRole('status').textContent).toContain('正在自动重试');
+	expect(screen.queryByRole('button', { name: '重试阅读' })).toBeNull();
 	await rerender({ busy: false, record: record('failed') });
 	expect(screen.queryByRole('status')).toBeNull();
 	expect(screen.getByText('这次没能读完。你可以重试，也可以直接聊聊稿子或继续修改。')).toBeTruthy();

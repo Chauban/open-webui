@@ -9,6 +9,7 @@
 	import type { ImportInfo } from '$lib/utils/text-import';
 	import EduButton from './EduButton.svelte';
 	import TextImportActions from './TextImportActions.svelte';
+	import MaterialReview from './MaterialReview.svelte';
 	import { EDU_FIELD_CLASS } from './styles';
 
 	// 从零写作作业的编辑器导入:导入文件或照片 → 预览框里核对、修改 → 插到光标处或替换全文。
@@ -18,7 +19,11 @@
 	export let sessionId: string;
 	// 编辑器里已有正文时,「替换全文」要再点一次确认。
 	export let hasText = false;
-	export let onInsert: (text: string, mode: 'insert' | 'replace', info: ImportInfo) => void;
+	export let onInsert: (
+		text: string,
+		mode: 'insert' | 'replace',
+		info: ImportInfo
+	) => Promise<void> | void;
 
 	const i18n = getContext<Writable<i18nType>>('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
@@ -26,10 +31,11 @@
 	let text = '';
 	let info: ImportInfo | null = null;
 	let importing = false;
+	let inserting = false;
 	let confirmReplace = false;
 
 	$: if (!show) reset();
-	$: ready = !!info && text.trim().length > 0 && !importing;
+	$: ready = !!info && text.trim().length > 0 && !importing && !inserting;
 
 	function reset() {
 		text = '';
@@ -48,24 +54,31 @@
 						{ name: nextInfo.names[0], count: nextInfo.scannedPages }
 					)
 				: nextInfo.kind === 'images'
-				? t(
-						'Read the text from {{count}} image(s). Check it against your draft before inserting.',
-						{
-							count: nextInfo.names.length
-						}
-					)
-				: t('Read from {{name}}. Check the text before inserting.', { name: nextInfo.names[0] })
+					? t(
+							'Read the text from {{count}} image(s). Check it against your draft before inserting.',
+							{
+								count: nextInfo.names.length
+							}
+						)
+					: t('Read from {{name}}. Check the text before inserting.', { name: nextInfo.names[0] })
 		);
 	};
 
-	const insert = (mode: 'insert' | 'replace') => {
+	const insert = async (mode: 'insert' | 'replace') => {
 		if (!ready || !info) return;
 		if (mode === 'replace' && hasText && !confirmReplace) {
 			confirmReplace = true;
 			return;
 		}
-		onInsert(text, mode, info);
-		show = false;
+		inserting = true;
+		try {
+			await onInsert(text, mode, info);
+			show = false;
+		} catch {
+			toast.error(t('Could not attach materials. Please try again.'));
+		} finally {
+			inserting = false;
+		}
 	};
 </script>
 
@@ -89,13 +102,21 @@
 			disabled={importing || !info}
 			data-testid="import-preview"
 		></textarea>
+		{#if info?.material}<div class="overflow-y-auto">
+				{#key info.material.id}<MaterialReview
+						material={info.material}
+						editable
+						disabled={importing || inserting}
+					/>{/key}
+			</div>{/if}
 		{#if confirmReplace}
 			<p class="text-xs text-rose-600 dark:text-rose-400" role="alert">
 				{$i18n.t('This replaces everything you have written so far. Click again to confirm.')}
 			</p>
 		{/if}
 		<div class="flex flex-wrap items-center justify-end gap-2">
-			<EduButton on:click={() => (show = false)}>{$i18n.t('Cancel')}</EduButton>
+			<EduButton disabled={inserting} on:click={() => (show = false)}>{$i18n.t('Cancel')}</EduButton
+			>
 			<EduButton variant="danger" disabled={!ready} on:click={() => insert('replace')}>
 				{confirmReplace ? $i18n.t('Confirm replacing all text') : $i18n.t('Replace all text')}
 			</EduButton>

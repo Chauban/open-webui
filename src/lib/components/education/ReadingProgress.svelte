@@ -3,6 +3,7 @@
 	import type { Writable } from 'svelte/store';
 	import type { i18n as I18nType } from 'i18next';
 	const i18n = getContext<Writable<I18nType>>('i18n');
+	export let retrying = false;
 </script>
 
 <div
@@ -14,6 +15,8 @@
 		class="size-5 shrink-0 animate-spin rounded-full border-2 border-sky-200 border-t-sky-600 motion-reduce:animate-none dark:border-sky-900 dark:border-t-sky-300"
 	></span>
 	<p class="text-xs leading-relaxed">
-		{$i18n.t('AI 正在阅读，暂时无法编辑或提交，完成后自动恢复。')}
+		{$i18n.t(
+			retrying ? '响应较慢，正在自动重试……' : 'AI 正在阅读，暂时无法编辑或提交，完成后自动恢复。'
+		)}
 	</p>
 </div>

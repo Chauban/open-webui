@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import hashlib
 import logging
 import re
+import time
 from typing import Optional
 from urllib.parse import quote, urlparse
 
@@ -1542,11 +1544,40 @@ async def generate_chat_completion_endpoint(
 
 
 # 平台内部经 utils/chat.py 直接调用;请求体是 /api/chat/completions 已按权限处理过的,或由平台拼成。
-async def generate_chat_completion(
-    request: Request,
-    form_data: dict,
-    user,
-):
+async def generate_chat_completion(request: Request, form_data: dict, user):
+    from open_webui.services.education.teaching_runtime import authorized_binding
+    from open_webui.utils.model_fallback import notify_retry, resolve_fallback
+
+    source_info = await Models.get_model_by_id(form_data.get('model'))
+    teaching = authorized_binding(request, form_data.get('model'))
+    fallback = teaching['binding'].get('fallback') if teaching else await resolve_fallback(request, source_info)
+    if not fallback:
+        return await _generate_chat_completion(request, copy.deepcopy(form_data), user)
+
+    # Only this provider adapter is retried: filters, tools and teaching capture run once.
+    metadata = form_data.get('metadata') or {}
+    switched = False
+    try:
+        async with asyncio.timeout(200):
+            try:
+                return await _generate_chat_completion(request, copy.deepcopy(form_data), user, fallback_plan=fallback)
+            except asyncio.TimeoutError:
+                disconnected = getattr(request, 'is_disconnected', None)
+                if disconnected and await disconnected():
+                    raise asyncio.CancelledError()
+                switched = True
+                await notify_retry(request, metadata)
+                return await _generate_chat_completion(
+                    request, copy.deepcopy(form_data), user, fallback_plan=fallback, use_fallback=True
+                )
+    except asyncio.TimeoutError as error:
+        raise HTTPException(504, '模型响应超时，请稍后重试。') from error
+    finally:
+        if switched:
+            await notify_retry(request, metadata, done=True)
+
+
+async def _generate_chat_completion(request: Request, form_data: dict, user, *, fallback_plan=None, use_fallback=False):
     if not await Config.get('openai.enable'):
         raise HTTPException(status_code=503, detail='OpenAI API is disabled')
 
@@ -1572,10 +1603,11 @@ async def generate_chat_completion(
     model_id = form_data.get('model')
     model_info = await Models.get_model_by_id(model_id)
     from open_webui.services.education.teaching_runtime import authorized_binding, record_provider_request
+
     teaching = authorized_binding(request, model_id)
     if teaching:
         # Resource authorization happened before capture. Never merge live model
-        # parameters or silently fall back after that immutable capture.
+        # parameters or use a fallback outside the captured administrator-approved binding.
         payload['model'] = model_id = teaching['binding']['base_model_id']
 
     # Check model info and override the payload
@@ -1607,6 +1639,23 @@ async def generate_chat_completion(
     if not models or model_id not in models:
         await get_all_models(request, user=user)
         models = request.app.state.OPENAI_MODELS
+    if use_fallback:
+        from open_webui.utils.model_fallback import provider_route
+
+        current, _, _, _ = await provider_route(request, fallback_plan['model_id'])
+        if current != fallback_plan:
+            raise HTTPException(409, '备用模型连接已变化，请重新发起请求。')
+        model_id = fallback_plan['model_id']
+        payload['model'] = model_id
+        models = request.app.state.OPENAI_MODELS
+        if fallback_plan['capabilities'].get('vision') is False and any(
+            part.get('type') in ('image_url', 'input_image')
+            for message in payload.get('messages', [])
+            if isinstance(message.get('content'), list)
+            for part in message['content']
+            if isinstance(part, dict)
+        ):
+            raise HTTPException(400, '备用模型未启用图片识别能力。')
     model = models.get(model_id)
 
     if model:
@@ -1627,7 +1676,11 @@ async def generate_chat_completion(
     thinking_level = payload.pop(THINKING_LEVEL_PARAM, None)
     if thinking_level is not None and thinking_level not in THINKING_LEVELS:
         raise HTTPException(status_code=400, detail=f'Invalid {THINKING_LEVEL_PARAM}: {thinking_level}')
-    if thinking_level and model_supports_thinking_control(model_info):
+    if (
+        thinking_level
+        and model_supports_thinking_control(model_info)
+        and (not use_fallback or fallback_plan['capabilities'].get('reasoning') is not False)
+    ):
         payload = apply_thinking_level(
             payload,
             thinking_level,
@@ -1718,6 +1771,7 @@ async def generate_chat_completion(
         payload.pop('stream_options', None)
 
     teaching_payload = payload if teaching else None
+    provider_payload = copy.deepcopy(payload)
     payload = JSONCodec.dumps(payload)
 
     r = None
@@ -1725,7 +1779,7 @@ async def generate_chat_completion(
     response = None
     # 作业辅导对话与平台步骤:服务商一时出错(429、5xx、连接或超时)自动重发,学生不用自己点重试。
     # 只在还没往下游送任何内容之前重发:一次性的读完响应体、流式的读到第一段才算发成;超时也收紧。
-    retry_transient = bool((metadata or {}).get(RETRY_TRANSIENT_FLAG))
+    retry_transient = bool((metadata or {}).get(RETRY_TRANSIENT_FLAG)) and not fallback_plan
     budget = STREAM_RETRY if is_streaming_request else ONE_SHOT_RETRY
     head = b''
 
@@ -1735,27 +1789,60 @@ async def generate_chat_completion(
         async def send():
             nonlocal head
             attempt = record_provider_request(request, teaching_payload) if teaching_payload is not None else None
+            if attempt is None and getattr(request.state, 'reading_context', None) is not None:
+                attempt = {'request': provider_payload, 'started_at': int(time.time())}
+                request.state.reading_context.setdefault('provider_attempts', []).append(attempt)
+            started = time.monotonic()
+            if attempt is not None:
+                from open_webui.utils.model_fallback import connection_fingerprint
+
+                attempt.update(
+                    model_id=model_id, fallback=use_fallback, connection_hash=connection_fingerprint(url, api_config)
+                )
             try:
                 response = await session.request(
-                    method='POST', url=request_url, data=payload, headers=headers, cookies=cookies,
+                    method='POST',
+                    url=request_url,
+                    data=payload,
+                    headers=headers,
+                    cookies=cookies,
                     ssl=AIOHTTP_CLIENT_SESSION_SSL,
-                    timeout=budget.timeout if retry_transient else get_client_timeout(stream=is_streaming_request),
+                    timeout=(
+                        aiohttp.ClientTimeout(
+                            total=None if is_streaming_request else 100,
+                            sock_connect=10,
+                            sock_read=45 if is_streaming_request else 90,
+                        )
+                        if fallback_plan
+                        else budget.timeout
+                        if retry_transient
+                        else get_client_timeout(stream=is_streaming_request)
+                    ),
                 )
                 if attempt is not None:
                     attempt.update(http_status=response.status)
             except BaseException as error:
                 if attempt is not None:
-                    attempt.update(error_type=type(error).__name__)
+                    attempt.update(error_type=type(error).__name__, elapsed_ms=int((time.monotonic() - started) * 1000))
                 raise
-            if not retry_transient or response.status >= 400:
+            if fallback_plan and response.status in (408, 504):
+                await cleanup_response(response)
+                if attempt is not None:
+                    attempt.update(error_type='UpstreamTimeout', elapsed_ms=int((time.monotonic() - started) * 1000))
+                raise asyncio.TimeoutError()
+            if (not retry_transient and not fallback_plan) or response.status >= 400:
                 return response
             try:
                 head = await read_ahead(
                     response, stream='text/event-stream' in response.headers.get('Content-Type', '')
                 )
-            except BaseException:
+            except BaseException as error:
+                if attempt is not None:
+                    attempt.update(error_type=type(error).__name__, elapsed_ms=int((time.monotonic() - started) * 1000))
                 await cleanup_response(response)
                 raise
+            if attempt is not None:
+                attempt.update(elapsed_ms=int((time.monotonic() - started) * 1000))
             return response
 
         if retry_transient:
@@ -1841,6 +1928,8 @@ async def generate_chat_completion(
 
             return response
     except Exception as e:
+        if fallback_plan and isinstance(e, asyncio.TimeoutError):
+            raise
         log.exception(e)
 
         raise HTTPException(

@@ -2469,7 +2469,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         from open_webui.services.education.teaching_runtime import build_messages
         context = request.state.teaching_evidence
         form_data['messages'] = build_messages(teaching_config, context['purpose'], context['source_text'],
-            context['dialogue'])
+            context['dialogue'], context.get('materials'))
         # Both adapters intentionally expose only student text and conversation.
         # No personal memory, model additions, files, tools or actor-dependent filters.
         form_data = {k: v for k, v in form_data.items() if k in {
@@ -2644,10 +2644,22 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         # 当前提问的父消息就是模型上一次的回复,据此判断这之后学生改没改稿。
         # 修订作业只在本轮用户消息附一次当前稿，不再重复注入 system。
         if writing_session and not is_revision_writing:
+            from starlette.concurrency import run_in_threadpool
+            from open_webui.services.education.materials import capture_writing_context
+            context_versions = await run_in_threadpool(capture_writing_context, writing_session)
+            metadata['education_context'] = context_versions
+            if chat_id and metadata.get('message_id'):
+                stored_message = await Chats.get_message_by_id_and_message_id(chat_id, metadata['message_id'])
+                if stored_message:
+                    await Chats.upsert_message_to_chat_by_id_and_message_id(
+                        chat_id, metadata['message_id'],
+                        {'meta': {**(stored_message.get('meta') or {}), 'education_context': context_versions}},
+                    )
             form_data['messages'] = add_or_update_system_message(
                 await build_current_text_context(
                     writing_session,
                     captured_text=(metadata.get('education_context') or {}).get('source_text'),
+                    captured_materials=context_versions['materials'],
                     chat_id=metadata.get('chat_id'),
                     previous_reply_id=(metadata.get('user_message') or {}).get('parentId'),
                 ),
@@ -2655,9 +2667,9 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                 append=True,
             )
 
-        if metadata.get('education_context') is not None:
+        if is_revision_writing and metadata.get('education_context') is not None:
             form_data['messages'] = attach_current_revision_draft(
-                form_data['messages'], metadata['education_context']['source_text']
+                form_data['messages'], metadata['education_context']['source_text'], metadata['education_context'].get('materials')
             )
 
     # Model "Knowledge" handling

@@ -17,7 +17,8 @@ from open_webui.models.folders import (
     Folders,
 )
 from open_webui.models.chats import Chats
-from open_webui.models.education import Education
+from open_webui.models.education import Assignment, Education
+from sqlalchemy import select
 from open_webui.models.files import Files
 from open_webui.models.knowledge import Knowledges
 
@@ -170,6 +171,28 @@ async def get_folders(
     await check_folders_permission(request, user, db=db)
 
     folders = await Folders.get_folders_by_user_id(user.id, db=db)
+    if user.role != 'admin':
+        assignment_ids = {
+            (folder.meta or {}).get('assignment_id') for folder in folders
+            if (folder.meta or {}).get('assignment_id')
+        }
+        hidden_ids = set((await db.scalars(
+            select(Assignment.id).where(
+                Assignment.id.in_(assignment_ids),
+                Assignment.hidden.is_(True),
+                Assignment.teacher_id != user.id,
+            )
+        )).all()) if assignment_ids else set()
+        hidden_folder_ids = {
+            folder.id for folder in folders if (folder.meta or {}).get('assignment_id') in hidden_ids
+        }
+        # Hide the entire project tree without reparenting its children during listing.
+        while descendants := {
+            folder.id for folder in folders
+            if folder.parent_id in hidden_folder_ids and folder.id not in hidden_folder_ids
+        }:
+            hidden_folder_ids.update(descendants)
+        folders = [folder for folder in folders if folder.id not in hidden_folder_ids]
     parent_by_id = {folder.id: folder.parent_id for folder in folders}
 
     def is_in_parent_cycle(folder_id):
@@ -391,6 +414,10 @@ async def get_folder_by_id(
     await check_folders_permission(request, user, db=db)
     folder = await Folders.get_folder_by_id_and_user_id(id, user.id, db=db)
     if folder:
+        assignment_id = (folder.meta or {}).get('assignment_id')
+        assignment = await db.get(Assignment, assignment_id) if assignment_id else None
+        if assignment and assignment.hidden and user.role != 'admin' and assignment.teacher_id != user.id:
+            raise HTTPException(status_code=403, detail='Assignment is hidden')
         grants = await AccessGrants.get_grants_by_resource('folder', id, db=db)
         return {**folder.model_dump(), 'access_grants': [g.model_dump() for g in grants]}
 

@@ -10,6 +10,8 @@
 	import type { ImportInfo } from '$lib/utils/text-import';
 	import EduButton from './EduButton.svelte';
 	import TextImportActions from './TextImportActions.svelte';
+	import MaterialReview from './MaterialReview.svelte';
+	import { selectMaterial, type WritingMaterial } from '$lib/types/writing-materials';
 	import { EDU_FIELD_CLASS } from './styles';
 
 	// 修订初稿作业的第一步:学生把课外写好的初稿交进来,冻结为修改的起点。
@@ -28,6 +30,7 @@
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
 
 	let text = '';
+	let material: WritingMaterial | null = null;
 	let submitting = false;
 	let importing = false;
 	let dragging = false;
@@ -39,6 +42,7 @@
 
 	const onImported = (imported: string, info: ImportInfo) => {
 		text = imported;
+		material = info.material ?? null;
 		toast.success(
 			info.scannedPages
 				? t(
@@ -65,7 +69,12 @@
 		if (tooShort || busy) return;
 		submitting = true;
 		try {
-			await submitDraftBaseline(localStorage.token, sessionId, text);
+			await submitDraftBaseline(
+				localStorage.token,
+				sessionId,
+				text,
+				material ? [selectMaterial(material)] : []
+			);
 			await onSubmitted();
 		} catch (error) {
 			toast.error(resolveErrorMessage(error, t));
@@ -109,6 +118,11 @@
 			on:dragleave={() => (dragging = false)}
 			on:drop|preventDefault={onDrop}
 		></textarea>
+		{#if material}{#key material.id}<MaterialReview
+					{material}
+					editable
+					disabled={busy}
+				/>{/key}{/if}
 	</div>
 	<div
 		class="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-gray-200 bg-stone-50 pt-3 pb-[env(safe-area-inset-bottom)] dark:border-gray-700 dark:bg-gray-900"

@@ -122,6 +122,7 @@ class Assignment(Base):
     title = Column(Text, nullable=False)
     description = Column(Text, nullable=True)
     teacher_id = Column(Text, nullable=False)
+    hidden = Column(Boolean, nullable=False, default=False, server_default=text('false'))
     classroom_id = Column(Text, nullable=True)
     due_at = Column(BigInteger, nullable=True)
     score_max = Column(Integer, nullable=False)
@@ -1126,6 +1127,7 @@ class AssignmentModel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    hidden: bool = False
     title: str
     description: Optional[str] = None
     teacher_id: str
@@ -1766,10 +1768,14 @@ class AutosaveForm(BaseModel):
     save_reason: str = "autosave"
 
 
+from open_webui.models.writing_materials import MaterialSelection
+
+
 class DraftBaselineForm(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     text: str = Field(max_length=200_000)
+    materials: list[MaterialSelection] = Field(default_factory=list, max_length=20)
 
 
 
@@ -3307,6 +3313,17 @@ class EducationTable:
                 AssignmentModel.model_validate(assignment) for assignment in assignments
             ]
 
+    def set_assignment_hidden(
+        self, assignment_id: str, hidden: bool, db: Optional[Session] = None
+    ) -> AssignmentModel:
+        with get_db_context(db) as db:
+            assignment = db.get(Assignment, assignment_id)
+            assignment.hidden = hidden
+            assignment.updated_at = int(time.time())
+            db.commit()
+            db.refresh(assignment)
+            return AssignmentModel.model_validate(assignment)
+
     def get_assignments_by_student(
         self, student_id: str, db: Optional[Session] = None
     ) -> list[AssignmentModel]:
@@ -3322,6 +3339,7 @@ class EducationTable:
                 db.query(Assignment)
                 .filter(
                     Assignment.classroom_id.in_(classroom_ids),
+                    Assignment.hidden.is_(False),
                 )
                 .order_by(Assignment.updated_at.desc(), Assignment.id.asc())
                 .all()
@@ -3607,6 +3625,9 @@ class EducationTable:
 
             from open_webui.models.education_types import RevisionReading
             from open_webui.models.teaching_trials import TeachingCall
+            from open_webui.models.writing_materials import WritingMaterial
+            for material in db.query(WritingMaterial).filter_by(writing_session_id=session_id, active=True):
+                material.active = False
             db.query(TeachingCall).filter_by(session_id=session_id).delete(synchronize_session=False)
 
             for model in (
@@ -5686,7 +5707,7 @@ class EducationTable:
             return len(user_ids)
 
     def get_unread_notification_summary(
-        self, user_id: str, db: Optional[Session] = None
+        self, user_id: str, db: Optional[Session] = None, *, hide_assignments: bool = False
     ) -> dict:
         with get_db_context(db) as db:
             rows = (
@@ -5699,6 +5720,14 @@ class EducationTable:
             )
             by_type: dict[str, int] = {}
             by_assignment: dict[str, dict[str, int]] = {}
+            if hide_assignments:
+                assignment_ids = {row.payload_json.get('assignment_id') for row in rows}
+                hidden_ids = {
+                    row[0] for row in db.query(Assignment.id).filter(
+                        Assignment.id.in_(assignment_ids), Assignment.hidden.is_(True)
+                    ).all()
+                }
+                rows = [row for row in rows if row.payload_json.get('assignment_id') not in hidden_ids]
             for row in rows:
                 by_type[row.type] = by_type.get(row.type, 0) + 1
                 assignment_id = row.payload_json.get("assignment_id")

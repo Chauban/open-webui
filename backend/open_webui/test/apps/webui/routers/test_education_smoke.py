@@ -7135,7 +7135,7 @@ def test_draft_file_is_parsed_into_text_without_freezing_baseline(education_clie
         },
     )
     assert res.status_code == 200, res.text
-    assert res.json() == {"text": "第一段开头。\n第二段\n软回车之后。"}
+    assert {"text": res.json()["text"]} == {"text": "第一段开头。\n第二段\n软回车之后。"}
 
     # 表格按文档顺序、每个单元格一行
     res = client.post(
@@ -7148,7 +7148,7 @@ def test_draft_file_is_parsed_into_text_without_freezing_baseline(education_clie
             )
         },
     )
-    assert res.json() == {"text": "表格之前。\n甲\n乙\n丙\n表格之后。"}
+    assert {"text": res.json()["text"]} == {"text": "表格之前。\n甲\n乙\n丙\n表格之后。"}
 
     # 旧版 .doc:Word 2016 另存为「Word 97-2003 文档」生成的样本,含页眉、脚注、
     # 超链接、软回车和表格;结果与 Word 把它另存为 .docx 后解析的逐字相同。
@@ -7156,7 +7156,7 @@ def test_draft_file_is_parsed_into_text_without_freezing_baseline(education_clie
         url,
         files={"file": ("初稿.doc", (_FIXTURES / "draft_sample.doc").read_bytes())},
     )
-    assert res.json() == {
+    assert {"text": res.json()["text"]} == {
         "text": "城市更新中的社区参与：文献综述（初稿）\n"
         "近二十年来，城市更新研究逐渐转向社会过程。"
         "Early studies treat participation as a tool.参见某篇文献。\n"
@@ -7168,13 +7168,13 @@ def test_draft_file_is_parsed_into_text_without_freezing_baseline(education_clie
     res = client.post(
         url, files={"file": ("初稿.doc", _docx_bytes(["其实是 docx。"]), docx_type)}
     )
-    assert res.json() == {"text": "其实是 docx。"}
+    assert {"text": res.json()["text"]} == {"text": "其实是 docx。"}
 
     # 记事本存的 GBK 中文 txt
     res = client.post(
         url, files={"file": ("初稿.txt", "中文初稿。\r\n\r\n第二段。".encode("gbk"))}
     )
-    assert res.json() == {"text": "中文初稿。\n第二段。"}
+    assert {"text": res.json()["text"]} == {"text": "中文初稿。\n第二段。"}
 
     for name, data, detail in [
         ("初稿.doc", b"\xd0\xcf\x11\xe0", "Could not read this file"),
@@ -7183,7 +7183,7 @@ def test_draft_file_is_parsed_into_text_without_freezing_baseline(education_clie
             (_FIXTURES / "draft_password.docx").read_bytes(),
             "This file is password protected",
         ),
-        ("初稿.pdf", b"%PDF-1.7", "Only .docx, .doc, .txt and .md files are supported"),
+        ("初稿.pdf", b"%PDF-1.7", "Could not read this PDF"),
         ("初稿.docx", b"not a zip", "Could not read this file"),
         ("初稿.docx", _docx_bytes(["", "  "]), "No text found in this file"),
     ]:
@@ -7281,7 +7281,7 @@ def test_text_import_is_only_for_the_assignment_student_while_writable(education
     UserContext.current_user = student
     res = client.post(doc_url, files={"file": ("草稿.txt", "第一段。\n\n第二段。".encode())})
     assert res.status_code == 200, res.text
-    assert res.json() == {"text": "第一段。\n第二段。"}
+    assert res.json()['text'] == "第一段。\n第二段。"
     with _fake_transcription({"r": "照片里的字。"}):
         res = client.post(image_url, files=[("files", ("p.png", _png_bytes("red"), "image/png"))])
     assert res.status_code == 200, res.text

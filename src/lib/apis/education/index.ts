@@ -316,7 +316,11 @@ export const getTeacherAssignmentDefaults = async (
 export const getTeacherAssignmentAiSettings = async (
 	token: string,
 	assignmentId: string
-): Promise<{ steps: AiStepView[]; coaching_thinking: CoachingThinking; fixed_by_assignment?: boolean }> => {
+): Promise<{
+	steps: AiStepView[];
+	coaching_thinking: CoachingThinking;
+	fixed_by_assignment?: boolean;
+}> => {
 	return fetch(`${WEBUI_API_BASE_URL}/teacher/assignments/${assignmentId}/ai-settings`, {
 		method: 'GET',
 		headers: withAuth(token)
@@ -334,6 +338,18 @@ export const deleteAssignment = async (token: string, assignmentId: string) => {
 	return fetch(`${WEBUI_API_BASE_URL}/assignments/${assignmentId}`, {
 		method: 'DELETE',
 		headers: withAuth(token)
+	}).then(handleJson);
+};
+
+export const setAssignmentVisibility = async (
+	token: string,
+	assignmentId: string,
+	hidden: boolean
+) => {
+	return fetch(`${WEBUI_API_BASE_URL}/assignments/${assignmentId}/visibility`, {
+		method: 'PATCH',
+		headers: withAuth(token),
+		body: JSON.stringify({ hidden })
 	}).then(handleJson);
 };
 
@@ -518,11 +534,16 @@ export const createProvenanceSegments = async (
 };
 
 /** 修订初稿作业:冻结课外写好的初稿为修改起点,成功后返回更新过的写作会话。 */
-export const submitDraftBaseline = async (token: string, sessionId: string, text: string) => {
+export const submitDraftBaseline = async (
+	token: string,
+	sessionId: string,
+	text: string,
+	materials: import('$lib/types/writing-materials').MaterialSelection[] = []
+) => {
 	return fetch(`${WEBUI_API_BASE_URL}/writing-sessions/${sessionId}/draft-baseline`, {
 		method: 'POST',
 		headers: withAuth(token),
-		body: JSON.stringify({ text })
+		body: JSON.stringify({ text, materials })
 	}).then(handleJson);
 };
 
@@ -539,8 +560,7 @@ export type RevisionDecision = 'revised' | 'partly' | 'kept';
 // 第一次通读给每个评分维度的结论:要改(提交时必须交代)、可改进(可以交代)、达标、暂缓。
 export type RevisionStatus = 'problem' | 'minor' | 'ok' | 'deferred';
 
-// 作业写作区的导入(修订初稿交初稿前、从零写作改稿时)只解析不保存:返回正文,
-// 学生核对后自己确认初稿(submitDraftBaseline)或插进编辑器。
+// 导入原文件与材料读取报告；学生确认初稿或插入编辑器时才激活随附材料。
 export const extractImportDocument = async (token: string, sessionId: string, file: File) => {
 	const body = new FormData();
 	body.append('file', file);
@@ -548,7 +568,42 @@ export const extractImportDocument = async (token: string, sessionId: string, fi
 		method: 'POST',
 		headers: { Accept: 'application/json', authorization: `Bearer ${token}` },
 		body
-	}).then(handleJson) as Promise<{ text: string }>;
+	}).then(handleJson) as Promise<{
+		text: string;
+		material: import('$lib/types/writing-materials').WritingMaterial;
+	}>;
+};
+
+export const getWritingMaterials = async (token: string, sessionId: string) =>
+	fetch(`${WEBUI_API_BASE_URL}/writing-sessions/${sessionId}/materials`, {
+		headers: withAuth(token)
+	}).then(handleJson) as Promise<import('$lib/types/writing-materials').WritingMaterial[]>;
+
+export const attachWritingMaterials = async (
+	token: string,
+	sessionId: string,
+	materials: import('$lib/types/writing-materials').MaterialSelection[],
+	replace: boolean
+) =>
+	fetch(`${WEBUI_API_BASE_URL}/writing-sessions/${sessionId}/materials`, {
+		method: 'POST',
+		headers: withAuth(token),
+		body: JSON.stringify({ materials, replace })
+	}).then(handleJson);
+
+export const getWritingMaterialAsset = async (
+	token: string,
+	materialId: string,
+	asset: string,
+	submissionId?: string | null
+) => {
+	const query = submissionId ? `?submission_id=${encodeURIComponent(submissionId)}` : '';
+	const response = await fetch(
+		`${WEBUI_API_BASE_URL}/writing-materials/${encodeURIComponent(materialId)}/assets/${encodeURIComponent(asset)}${query}`,
+		{ headers: withAuth(token) }
+	);
+	if (!response.ok) await handleJson(response);
+	return response.blob();
 };
 
 // 照片交给管理员选定的识图模型逐张转录:text 按传入顺序拼好,pages 是逐张结果(读 PDF 时插回原页);
@@ -1213,6 +1268,7 @@ export type RevisionReading = {
 	model_id: string | null;
 	thinking: string | null;
 	context: {
+		retrying?: boolean;
 		chat_id?: string;
 		message_id?: string;
 		teaching_version: number;

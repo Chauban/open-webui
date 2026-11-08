@@ -2,7 +2,7 @@
 // 上限与后端 services/education/draft_import.py、writing_context.py 一致,前端先拦一遍,
 // 免得学生等完上传才被拒;提示文案沿用后端的 i18n 键。
 
-// PDF 在浏览器里读(pdf-import.ts),其余文档交给后端解析。
+// Word 与 PDF 在后端统一解析，正文、附图和注释分开保存。
 export const DOCUMENT_ACCEPT = '.docx,.doc,.txt,.md,.pdf,application/pdf';
 // 只收模型和 Pillow 都认的三种。iPhone 的 HEIC 照片在 accept 里不列 heic 时,浏览器会转成 JPEG 再交上来。
 export const IMAGE_ACCEPT = 'image/jpeg,image/png,image/webp';
@@ -14,6 +14,7 @@ export type ImportKind = 'document' | 'images';
 // scannedPages:读 PDF 时有几页扫描页交给了识图模型(kind 因此是 images);
 // modelId:转录这些图片实际用的模型,随导入记进编辑操作。
 export type ImportInfo = {
+	material?: import('$lib/types/writing-materials').WritingMaterial;
 	kind: ImportKind;
 	names: string[];
 	scannedPages?: number;

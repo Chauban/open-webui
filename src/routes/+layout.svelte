@@ -38,7 +38,7 @@
 		desktopEvent,
 		educationNotificationSummary
 	} from '$lib/stores';
-	import { refreshChatList } from '$lib/stores/chatList';
+	import { refreshChatList, refreshFolderChatLists } from '$lib/stores/chatList';
 	import { getFileContentById } from '$lib/apis/files';
 	import { getEducationNotificationSummary } from '$lib/apis/education';
 	import { goto } from '$app/navigation';
@@ -877,6 +877,16 @@
 	const educationNotificationHandler = async (data) => {
 		const payload = data?.payload ?? {};
 		const title = payload.assignment_title ?? '';
+		if (data?.type === 'assignment_visibility_changed') {
+			if (payload.hidden && $page.params.assignmentId === payload.assignment_id) {
+				await goto('/me/writing');
+			}
+			try {
+				await refreshFolderChatLists(null);
+			} catch (error) {
+				console.error('Failed to refresh assignment projects:', error);
+			}
+		}
 
 		if (data?.type === 'assignment_published') {
 			toast.info($i18n.t('New assignment: {{title}}', { title }));

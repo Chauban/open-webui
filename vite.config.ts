@@ -17,7 +17,7 @@ export default defineConfig({
 
 					dest: 'wasm'
 				},
-				// 作业写作区在浏览器里读 PDF 时按需取用(src/lib/utils/pdf-import.ts):
+				// PDF 页面预览使用的字体资源：
 				// 中日韩字符映射与标准字体,不进 JS 包,只在 PDF 用到时下载对应的那一个文件。
 				{
 					src: 'node_modules/pdfjs-dist/cmaps/*',

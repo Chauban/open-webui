@@ -238,3 +238,62 @@ def test_independent_parallel_calls_and_retry_keeps_original_input(env, monkeypa
     assert retry['state']['dialogue'] == failed['state']['dialogue']
     first = env.client.get(f'/api/v1/teacher/teaching-trials/{results[0]["id"]}').json()
     assert first['state']['dialogue'] == results[0]['state']['dialogue']
+
+
+def test_prompt_comparison_enforces_shared_settings(env):
+    _, work = open_work(env)
+    path = f'/api/v1/teacher/teaching-workbenches/{work["id"]}'
+    data = copy.deepcopy(work['payload'])
+    data['comparison_mode'] = 'prompts'
+    first = data['candidates'][0]
+    data['candidates'] = [first, {**first, 'prompt': '另一种辅导提示词'}]
+    for field, value in [('model_id', 'model-B'), ('thinking', 'off'), ('web_search', True)]:
+        invalid = copy.deepcopy(data)
+        invalid['candidates'][1][field] = value
+        assert env.client.put(path, json={'expected_revision': 1, 'payload': invalid}).status_code == 422
+    for count in [1, 3]:
+        invalid = copy.deepcopy(data)
+        invalid['candidates'] = [copy.deepcopy(first) for _ in range(count)]
+        assert env.client.put(path, json={'expected_revision': 1, 'payload': invalid}).status_code == 422
+    result = env.client.put(path, json={'expected_revision': 1, 'payload': data})
+    assert result.status_code == 200, result.text
+    assert result.json()['payload']['comparison_mode'] == 'prompts'
+
+
+def test_prompt_comparison_freezes_distinct_prompts_and_same_context(env, monkeypatch):
+    from open_webui.services.education import teaching_trials as service
+
+    prep, work = open_work(env)
+    data = copy.deepcopy(work['payload'])
+    data.update(comparison_mode='prompts', sample=DRAFT)
+    data['candidates'].append({**data['candidates'][0], 'prompt': '先追问再引导'})
+    work = env.client.put(
+        f'/api/v1/teacher/teaching-workbenches/{work["id"]}',
+        json={'expected_revision': work['revision'], 'payload': data},
+    ).json()
+    seen = []
+
+    async def capture(request, user, config, context, paragraphs):
+        seen.append((config['ai']['prompt'], context['source_text']))
+        return {'understanding': '', 'strength': None, 'focus': [], 'overview': config['ai']['prompt']}
+
+    monkeypatch.setattr(service, 'execute_first_read', capture)
+    group = run(env, work)
+    assert len({t['id'] for t in group['trials']}) == 2
+    results = [action(env, t, 'confirm', DRAFT).json() for t in group['trials']]
+    assert seen == [(c['prompt'], DRAFT) for c in data['candidates']]
+    assert all(r['events'][-1]['call']['status'] == 'ready' for r in results)
+    branch = run(env, work, source_trial_id=results[0]['id'], source_sequence=results[0]['sequence'])
+    assert branch['trials'][0]['state'] == branch['trials'][1]['state']
+    assert branch['trials'][0]['state']['dialogue'] == results[0]['state']['dialogue']
+    plan = env.client.post(
+        '/api/v1/teacher/saved-teaching-plans', json={'trial_id': results[1]['id'], 'name': '方案 B'}
+    ).json()
+    assert plan['config']['ai']['prompt'] == '先追问再引导'
+    adopted = env.client.post(
+        f'/api/v1/teacher/saved-teaching-plans/{plan["id"]}/adopt/{prep["id"]}',
+        json={'expected_revision': prep['revision'], 'include_task': False, 'idempotency_key': str(uuid.uuid4())},
+    )
+    assert adopted.status_code == 200, adopted.text
+    assert adopted.json()['payload']['ai']['prompt'] == '先追问再引导'
+    assert adopted.json()['published'] is None

@@ -36,6 +36,7 @@ async def build_student_profile(
     limit: int = 200,
     offset: int = 0,
     teacher_notes: Optional[list] = None,
+    visibility_filtered: bool = False,
 ) -> StudentProfileResponse | TeacherStudentProfileResponse:
     assignment_by_id = {assignment.id: assignment for assignment in assignments}
     if assignment_id is not None:
@@ -89,7 +90,7 @@ async def build_student_profile(
             metric_version=selected_metric_version,
             db=db,
         )
-        if unfiltered_scope
+        if unfiltered_scope and not visibility_filtered
         else None
     )
     if aggregate_record is not None:
@@ -121,7 +122,7 @@ async def build_student_profile(
             round_no=round_no,
             db=db,
         )
-        if unfiltered_scope and all_projections:
+        if unfiltered_scope and not visibility_filtered and all_projections:
             raise ValueError("Student profile aggregate is not materialized")
         total = len(all_projections)
         page_projections = all_projections[offset : offset + limit]

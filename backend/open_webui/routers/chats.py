@@ -42,6 +42,7 @@ from open_webui.utils.context_compaction import compact_chat_branch, get_chat_co
 from open_webui.utils.misc import get_message_list
 from open_webui.utils.models import get_all_models
 from open_webui.services.education.single_conversation import reject_revision_chat_copy, reject_revision_bulk_change
+from open_webui.services.education.writing_access import ensure_assignment_folder_visible
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -1342,6 +1343,7 @@ async def get_chat_by_id(
 
     if chat:
         data = ChatResponse.model_validate(chat, from_attributes=True).model_dump()
+        await ensure_assignment_folder_visible(user, chat.folder_id, db)
         data = overlay_response_streams(
             data,
             await get_response_streams_by_chat_id(request.app.state.redis, id),
@@ -1368,6 +1370,7 @@ async def update_chat_by_id(
     chat = await Chats.get_chat_by_id_and_user_id(id, user.id, db=db)
     if chat:
         touch = 'history' in form_data.chat or 'messages' in form_data.chat
+        await ensure_assignment_folder_visible(user, chat.folder_id, db)
         chat = await Chats.update_chat_by_id(id, form_data.chat, db=db, touch=touch)
         if form_data.variables is not None:
             chat = (

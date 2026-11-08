@@ -104,7 +104,7 @@ async def resolve_draft_image_model(request, user) -> StepModel:
     return model
 
 
-def prepare_draft_image(data: bytes) -> str:
+def prepare_draft_image(data: bytes, max_edge: int = _MAX_EDGE) -> str:
     """校验图片并转成发给模型的 data URL:按 EXIF 摆正、透明底铺白、缩到长边 1600 的 JPEG。
 
     按内容判断格式,不看扩展名。手机竖拍的照片像素是横的,方向只记在 EXIF 里,
@@ -117,7 +117,7 @@ def prepare_draft_image(data: bytes) -> str:
             if source.width * source.height > _MAX_PIXELS:
                 raise DraftImageError("This image is too large")
             # 只对 JPEG 生效:按目标尺寸降采样解码,大照片省内存。
-            source.draft("RGB", (_MAX_EDGE, _MAX_EDGE))
+            source.draft("RGB", (max_edge, max_edge))
             image = ImageOps.exif_transpose(source)
             if image.mode in ("RGBA", "LA") or (
                 image.mode == "P" and "transparency" in image.info
@@ -128,7 +128,7 @@ def prepare_draft_image(data: bytes) -> str:
                 image = background
             else:
                 image = image.convert("RGB")
-            image.thumbnail((_MAX_EDGE, _MAX_EDGE))
+            image.thumbnail((max_edge, max_edge))
             buffer = io.BytesIO()
             image.save(buffer, "JPEG", quality=_JPEG_QUALITY, optimize=True)
     except DraftImageError:
@@ -173,6 +173,8 @@ async def generate_transcription(request, user, model: StepModel, messages: list
         status = status_code if isinstance(status_code, int) else None
         raise TranscriptionCallError(status, status in _RETRYABLE_STATUS)
     try:
+        if response['choices'][0].get('finish_reason') in ('length', 'content_filter'):
+            raise TranscriptionCallError(None, False)
         return response["choices"][0]["message"]["content"] or ""
     except (KeyError, IndexError, TypeError) as error:
         log.error("draft image transcription returned an unexpected payload: %s", error)
@@ -192,9 +194,9 @@ def clean_transcription(raw: str) -> list[str]:
     return normalize_draft_paragraphs(text.replace(_NO_TEXT, ""))
 
 
-def build_transcription_messages(image_url: str) -> list[dict]:
+def build_transcription_messages(image_url: str, prompt: str = TRANSCRIBE_PROMPT) -> list[dict]:
     return [
-        {"role": "system", "content": TRANSCRIBE_PROMPT},
+        {"role": "system", "content": prompt},
         {
             "role": "user",
             "content": [
@@ -205,7 +207,7 @@ def build_transcription_messages(image_url: str) -> list[dict]:
     ]
 
 
-async def transcribe_draft_images(request, user, model: StepModel, image_urls: list[str]) -> list[str]:
+async def transcribe_draft_images(request, user, model: StepModel, image_urls: list[str], *, prompt: str = TRANSCRIBE_PROMPT) -> list[str]:
     """按上传顺序逐张转录,每张一段一行(与导入 Word 文件的结果同一形式),没有正文的那张是空串。
 
     逐张返回而不是拼好:浏览器读 PDF 时,扫描页的转录结果要插回原来的页位置。
@@ -216,7 +218,7 @@ async def transcribe_draft_images(request, user, model: StepModel, image_urls: l
     semaphore = asyncio.Semaphore(_CONCURRENCY)
 
     async def transcribe(page_no: int, image_url: str) -> list[str]:
-        messages = build_transcription_messages(image_url)
+        messages = build_transcription_messages(image_url, prompt)
         async with semaphore:
             for attempt in range(len(_RETRY_DELAYS) + 1):
                 try:

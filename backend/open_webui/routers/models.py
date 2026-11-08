@@ -41,6 +41,7 @@ from open_webui.utils.access_control.files import has_access_to_file
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.chat_variables import get_chat_variables_schema
 from open_webui.utils.models import get_all_models
+from open_webui.utils.model_fallback import fallback_options, validate_model_fallback
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -211,6 +212,11 @@ async def get_models(
 ###########################
 
 
+@router.get('/fallback/options')
+async def get_fallback_options(request: Request, user=Depends(get_admin_user)):
+    return await fallback_options(request)
+
+
 @router.get('/base/tags', response_model=list[str])
 async def get_base_model_tags(user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)):
     tags = await Models.get_all_tags(user_id=user.id, is_admin=True, is_base_model=True, db=db)
@@ -312,6 +318,7 @@ async def create_new_model(
         'sharing.public_models',
     )
 
+    await validate_model_fallback(request, user, form_data, db=db)
     model = await Models.insert_new_model(form_data, user.id, db=db)
     if not model:
         raise HTTPException(
@@ -484,6 +491,7 @@ async def import_models(
                                 updated_model.access_grants,
                                 'sharing.public_models',
                             )
+                        await validate_model_fallback(request, user, updated_model, previous=existing_model, db=db)
                         await Models.update_model_by_id(model_id, updated_model, db=db)
                     else:
                         # Insert new model
@@ -526,6 +534,7 @@ async def import_models(
                             new_model.access_grants,
                             'sharing.public_models',
                         )
+                        await validate_model_fallback(request, user, new_model, db=db)
                         await Models.insert_new_model(user_id=user.id, form_data=new_model, db=db)
 
                     imported_ids.append(model_id)
@@ -833,6 +842,7 @@ async def update_model_by_id(
         'sharing.public_models',
     )
 
+    await validate_model_fallback(request, user, form_data, previous=model, db=db)
     model = await Models.update_model_by_id(form_data.id, ModelForm(**form_data.model_dump()), db=db)
     if model:
         await publish_event(

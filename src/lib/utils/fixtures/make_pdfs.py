@@ -1,4 +1,4 @@
-"""生成 pdf-text.test.ts 用的 PDF 样本(需要 fpdf2、Pillow 和 Noto Sans CJK 字体)。
+"""生成后端 test_writing_materials.py 用的 PDF 样本(需要 fpdf2、Pillow 和 Noto Sans CJK 字体)。
 
 用法:backend/.venv/bin/python src/lib/utils/fixtures/make_pdfs.py src/lib/utils/fixtures
 """

@@ -23,8 +23,9 @@ from open_webui.models.notes import Note
 from open_webui.models.teaching_trials import AssignmentAiRevision, TeachingCall, TeachingModelPolicy
 from open_webui.services.education.ai_steps import available_models
 from open_webui.services.education.teaching_config import lock_assignment
+from open_webui.services.education.materials import material_context, material_rules, snapshot_materials
 
-EXECUTION_VERSION = 'argument-teaching-2026-11-08.text-1'
+EXECUTION_VERSION = 'argument-teaching-2026-11-08.materials-1'
 # Explicit public generation fields; credentials and arbitrary headers cannot be frozen.
 GENERATION_KEYS = frozenset(
     (
@@ -54,11 +55,13 @@ def execution_version():
     root = Path(__file__).resolve().parents[2]
     paths = (
         'services/education/teaching_runtime.py',
+        'services/education/materials.py',
         'services/education/teaching_filters.py',
         'services/education/teaching_search.py',
         'services/education/revision_reading.py',
         'services/education/ai_steps.py',
         'utils/thinking.py',
+        'utils/model_fallback.py',
         'utils/middleware.py',
         'utils/chat.py',
         'routers/openai.py',
@@ -123,7 +126,10 @@ async def resolve_binding(request, user, candidate):
             'pipelines': get_sorted_filters(model_id, models),
         }
     )
+    from open_webui.utils.model_fallback import resolve_fallback
+    fallback = await resolve_fallback(request, info)
     return {
+        **({'fallback': fallback} if fallback else {}),
         'model_id': model_id,
         'base_model_id': base_id,
         'workspace_model': info is not None,
@@ -145,7 +151,7 @@ async def validate_binding(request, user, config, *, check_execution=True):
     binding = config['binding']
     # Global sampling changes invalidate trial coverage but do not overwrite a
     # published generation snapshot. Routing/capability changes require republishing.
-    if any(
+    if current.get('fallback') != binding.get('fallback') or any(
         current[k] != binding[k]
         for k in (
             'route',
@@ -205,7 +211,7 @@ def system_context(config):
     )
 
 
-def build_messages(config, stage, source, dialogue):
+def build_messages(config, stage, source, dialogue, materials=None):
     from open_webui.services.education.revision_reading import (
         FORMAT,
         PURPOSES,
@@ -217,16 +223,16 @@ def build_messages(config, stage, source, dialogue):
         for m in dialogue
         if m.get('role') in ('user', 'assistant')
     ]
-    system = system_context(config)
+    system = system_context(config) + material_rules(materials)
     if stage == 'first_read':
         return [
             {'role': 'system', 'content': system + '\n' + PURPOSES[stage] + '\n' + FORMAT},
             {
                 'role': 'user',
-                'content': json.dumps({'当前保存稿': source, '相关讨论': history}, ensure_ascii=False),
+                'content': json.dumps({'当前保存稿': source, '相关讨论': history}, ensure_ascii=False) + material_context(materials),
             },
         ]
-    return [{'role': 'system', 'content': system}, *attach_current_revision_draft(history, source)]
+    return [{'role': 'system', 'content': system}, *attach_current_revision_draft(history, source, materials)]
 
 
 def install_binding(request, config, evidence):
@@ -330,6 +336,7 @@ def capture_formal(session, request_key, stage, db, *, user, user_text=None):
     sequence = (db.query(func.max(TeachingCall.sequence)).filter_by(session_id=session.id).scalar() or 0) + 1
     context = {
         'config': config,
+        'materials': snapshot_materials(session.id, db),
         'ai_revision_id': config['ai_revision_id'],
         'ai_revision': config['ai_revision'],
         'source_text': source,
@@ -346,7 +353,7 @@ def capture_formal(session, request_key, stage, db, *, user, user_text=None):
     context['dialogue'] = [] if stage == 'first_read' else saved_dialogue(session, db)
     if user_text is not None:
         context['dialogue'].append({'role': 'user', 'content': user_text})
-    context['sample_fingerprint'] = fingerprint([stage, source, context['previous_text'], context['dialogue']])
+    context['sample_fingerprint'] = fingerprint([stage, source, context['materials'], context['previous_text'], context['dialogue']])
     context['sequence'] = sequence
     call = TeachingCall(
         id=str(uuid.uuid4()),
@@ -483,6 +490,7 @@ async def execute_first_read(request, user, config, context, dialogue):
         {
             'role': 'system',
             'content': system_context(config)
+            + material_rules(context.get('materials'))
             + '\n'
             + PURPOSES[stage]
             + '\n直接输出面向学生的反馈正文，可使用 Markdown 排版；无需为平台包裹 JSON 字段。',
@@ -499,7 +507,7 @@ async def execute_first_read(request, user, config, context, dialogue):
                     ],
                 },
                 ensure_ascii=False,
-            ),
+            ) + material_context(context.get('materials')),
         },
     ]
     response = await execute(request, user, config, context, messages)
@@ -546,7 +554,7 @@ async def formal_first_read(request, user, session, assignment, form, db, dialog
     )
     # Initial reading remains the initial reading after it becomes a chat message.
     relevant_dialogue = [] if form.purpose == 'first_read' else saved_dialogue(session, db)
-    request_key = fingerprint([config_fingerprint(config), form.purpose, source, relevant_dialogue])
+    request_key = fingerprint([config_fingerprint(config), form.purpose, source, snapshot_materials(session.id, db), relevant_dialogue])
     old = db.query(TeachingCall).filter_by(session_id=session.id, request_key=request_key).first()
     if old and old.status in ('ready', 'running'):
         reading = db.get(RevisionReading, old.id)
@@ -578,6 +586,8 @@ async def formal_first_read(request, user, session, assignment, form, db, dialog
     )
     db.add(reading)
     db.commit()
+    from open_webui.services.education.revision_reading import install_reading_retry_handler
+    install_reading_retry_handler(request, reading.id, context)
     feedback = None
     try:
         feedback = await execute_first_read(request, user, config, context, relevant_dialogue)

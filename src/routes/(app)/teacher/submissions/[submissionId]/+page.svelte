@@ -1,4 +1,5 @@
 <script lang="ts">
+	import WritingMaterials from '$lib/components/education/WritingMaterials.svelte';
 	import { isRevision } from '$lib/utils/task-types';
 	import TeacherProcessPanel from '$lib/components/education/TeacherProcessPanel.svelte';
 	import TeacherModelSummary from '$lib/components/education/TeacherModelSummary.svelte';
@@ -979,6 +980,12 @@
 					</div>
 					<!-- Article body (scrollable) -->
 					<div class="px-6 py-5 lg:flex-1 lg:overflow-y-auto">
+						<div class="mb-3">
+							<WritingMaterials
+								materials={detail?.submission?.stats_json?.materials ?? []}
+								submissionId={detail?.submission?.id}
+							/>
+						</div>
 						<div class="rounded-2xl bg-stone-50 dark:bg-gray-900 p-5">
 							{#if docView === 'process'}
 								<ProcessDraftView
@@ -1374,7 +1381,9 @@
 						{:else if activeTab === 'analysis'}
 							<div class="space-y-5 p-5">
 								<TeacherModelSummary usage={roundModelUsage} />
-								<FrozenTeachingEvidence evidence={detail?.submission?.stats_json?.teaching_evidence ?? null} />
+								<FrozenTeachingEvidence
+									evidence={detail?.submission?.stats_json?.teaching_evidence ?? null}
+								/>
 								<!-- Segments -->
 								<div>
 									<div class="mb-3 flex items-center justify-between">

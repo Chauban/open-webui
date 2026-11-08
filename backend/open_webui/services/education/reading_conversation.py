@@ -43,6 +43,7 @@ def append_reading_message(db, session_id, assignment, reading):
         **{key: reading.context[key] for key in ('ai_revision_id', 'ai_revision', 'call_id', 'config') if key in reading.context},
         'reading_id': reading.id, 'purpose': reading.purpose,
         'source_text': reading.source_text, 'source_version_id': reading.source_version_id,
+        'materials': reading.context.get('materials', []),
         'teaching_version': reading.context['teaching_version'],
         'description_version': reading.context['description_version'],
         'called_at': reading.created_at,

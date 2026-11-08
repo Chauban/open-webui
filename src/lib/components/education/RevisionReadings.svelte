@@ -25,7 +25,9 @@
 		<span class="font-semibold text-gray-900 dark:text-gray-100">{$i18n.t('AI 写作伙伴')}</span>
 		{#if record}<EduActionMenu items={actions} />{/if}
 	</div>
-	{#if record?.status === 'running' || (!record && busy)}<ReadingProgress />
+	{#if record?.status === 'running' || (!record && busy)}<ReadingProgress
+			retrying={record?.context?.retrying === true}
+		/>
 	{:else if record?.feedback}
 		<div class="markdown-prose">
 			{#if record.feedback.understanding}

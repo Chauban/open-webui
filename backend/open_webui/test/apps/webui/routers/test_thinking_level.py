@@ -251,7 +251,7 @@ def _send_through_router(
         return SimpleNamespace(
             base_model_id=None,
             params=SimpleNamespace(model_dump=lambda: dict(saved_params)),
-            meta=SimpleNamespace(capabilities=capabilities),
+            meta=SimpleNamespace(capabilities=capabilities, fallback_model_id=None),
         )
 
     async def no_check(*args, **kwargs):

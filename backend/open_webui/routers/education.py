@@ -38,6 +38,14 @@ from open_webui.env import WEBUI_SECRET_KEY
 from open_webui.internal.db import get_session
 from open_webui.models.chats import ChatForm, Chats
 from open_webui.models.config import Config
+from open_webui.models.writing_materials import MaterialAttachForm, WritingMaterial
+from open_webui.services.education.materials import (
+    MAX_BYTES as MATERIAL_MAX_BYTES,
+    import_document as import_material_document,
+    confirm_materials,
+    snapshot_materials,
+    read_asset,
+)
 from open_webui.models.chat_messages import ChatMessages
 from open_webui.models.folders import FolderForm, Folders
 from open_webui.models.education import (
@@ -185,10 +193,8 @@ from open_webui.services.education.draft_import import (
     transcribe_draft_images,
 )
 from open_webui.services.education.writing_context import (
-    DRAFT_FILE_MAX_BYTES,
     DraftFileError,
     build_draft_note_content,
-    extract_draft_text,
     is_draft_baseline_missing,
     normalize_draft_paragraphs,
 )
@@ -235,6 +241,10 @@ async def _send_education_notifications(
     user_ids: list[str], notification_type: str, payload: dict, db: Session
 ) -> None:
     if not user_ids:
+        return
+    assignment_id = payload.get('assignment_id')
+    assignment = Education.get_assignment_by_id(assignment_id, db=db) if assignment_id else None
+    if assignment and assignment.hidden and notification_type != 'submission_created':
         return
     Education.insert_notifications(user_ids, notification_type, payload, db=db)
     await emit_to_users(
@@ -705,6 +715,9 @@ def _ensure_assignment_access(user, assignment, db: Session, require_teacher: bo
     if assignment.teacher_id == user.id:
         return 'teacher'
 
+    if assignment.hidden:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Assignment is hidden')
+
     classroom = _get_assignment_classroom_or_404(assignment, db)
 
     member = Education.get_classroom_member(classroom.id, user.id, db=db)
@@ -773,7 +786,7 @@ async def require_owned_writing_session(
     """路径含 {session_id} 的写作接口:会话必须属于当前用户。"""
     session = _get_workspace_session_or_404(session_id, db)
     _ensure_workspace_session_owner(user, session)
-    await ensure_writing_session_access(user, session)
+    await ensure_writing_session_access(user, session, db=db)
     return session
 
 
@@ -1055,6 +1068,27 @@ async def update_assignment(
             affected_student_ids.extend(_get_classroom_student_ids(updated_assignment.classroom_id, db))
         _refresh_profile_aggregates_after_scope_change(affected_student_ids, db)
     return updated_assignment
+
+
+class AssignmentVisibilityForm(BaseModel):
+    model_config = {'extra': 'forbid', 'strict': True}
+    hidden: bool
+
+
+@router.patch('/assignments/{assignment_id}/visibility', response_model=AssignmentModel)
+async def set_assignment_visibility(
+    form_data: AssignmentVisibilityForm,
+    assignment: AssignmentModel = Depends(require_teacher_assignment),
+    db: Session = Depends(get_session),
+):
+    updated = Education.set_assignment_hidden(assignment.id, form_data.hidden, db=db)
+    student_ids = _get_classroom_student_ids(assignment.classroom_id, db) if assignment.classroom_id else []
+    await emit_to_users(
+        'education:notification',
+        {'type': 'assignment_visibility_changed', 'payload': {'assignment_id': assignment.id, 'hidden': updated.hidden}},
+        student_ids,
+    )
+    return updated
 
 
 @router.delete('/assignments/{assignment_id}')
@@ -2187,6 +2221,10 @@ async def get_writing_home(
     for session in sessions:
         if session.scope == 'personal' and education_role == 'student':
             continue
+        if session.scope == 'assignment' and education_role == 'student':
+            assignment = Education.get_assignment_by_id(session.assignment_id, db=db)
+            if assignment is None or assignment.hidden:
+                continue
         if session.scope == 'personal':
             item = await _build_personal_workspace_item(session, db)
             if item is not None:
@@ -2537,23 +2575,74 @@ def _ensure_text_import_open(user, session: WritingSessionModel, db: Session) ->
 
 @router.post('/writing-sessions/{session_id}/import/document')
 async def extract_import_document(
+    request: Request,
     file: UploadFile = File(...),
     user=Depends(get_verified_user),
     session: WritingSessionModel = Depends(require_owned_writing_session),
     db: Session = Depends(get_session),
 ):
-    """把学生上传的 Word/文本文件解析成纯文本,交给前端让学生核对后再用。
-
-    只解析不保存:不落盘、不进文件库,也不冻结基线、不改正文。
-    """
+    """保存 Word/PDF 原件与独立附件，返回正文和读取报告；确认前不进入 AI 上下文。"""
     _ensure_text_import_open(user, session, db)
     # 多读 1 字节,超限时不必把整个大文件读进内存。
-    data = await file.read(DRAFT_FILE_MAX_BYTES + 1)
+    data = await file.read(MATERIAL_MAX_BYTES + 1)
+    db.commit()
     try:
-        text = extract_draft_text(file.filename or '', data)
+        return await import_material_document(file.filename or '', data, session, request, user, db)
     except DraftFileError as err:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(err)) from err
-    return {'text': text}
+
+
+@router.get('/writing-sessions/{session_id}/materials')
+async def get_writing_materials(
+    session: WritingSessionModel = Depends(require_owned_writing_session),
+    db: Session = Depends(get_session),
+):
+    return snapshot_materials(session.id, db)
+
+
+@router.post('/writing-sessions/{session_id}/materials')
+async def attach_writing_materials(
+    form_data: MaterialAttachForm,
+    user=Depends(get_verified_user),
+    session: WritingSessionModel = Depends(require_writable_writing_session),
+    db: Session = Depends(get_session),
+):
+    await run_in_threadpool(lock_assignment, session.assignment_id, db)
+    _ensure_text_import_open(user, session, db)
+    if is_revision(_get_assignment_or_404(session.assignment_id, db).task_mode):
+        raise HTTPException(400, 'Confirm materials with your first draft')
+    confirm_materials(session.id, form_data.materials, db, replace=form_data.replace)
+    db.commit()
+    return snapshot_materials(session.id, db)
+
+
+@router.get('/writing-materials/{material_id}/assets/{asset}')
+async def get_writing_material_asset(
+    material_id: str,
+    asset: str,
+    submission_id: Optional[str] = None,
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+):
+    row = db.get(WritingMaterial, material_id)
+    if row is None:
+        raise HTTPException(404, 'Material not found')
+    session = _get_workspace_session_or_404(row.writing_session_id, db)
+    if submission_id:
+        scope = await require_teacher_submission(submission_id, user, db)
+        submission = scope.submission
+        if submission.writing_session_id != session.id or material_id not in {
+            m['id'] for m in submission.stats_json.get('materials', [])
+        }:
+            raise HTTPException(404, 'Material not found in this submission')
+    else:
+        _ensure_workspace_session_owner(user, session)
+        await ensure_writing_session_access(user, session, db=db)
+    data = await run_in_threadpool(read_asset, row, asset)
+    from urllib.parse import quote
+    return Response(data, media_type='application/octet-stream' if asset == 'original' else 'image/jpeg',
+                    headers={'Content-Disposition': f'attachment; filename*=UTF-8\'\'{quote(row.filename if asset == "original" else asset)}',
+                             'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff'})
 
 
 @router.post('/writing-sessions/{session_id}/import/images')
@@ -2631,6 +2720,7 @@ async def submit_draft_baseline(
         )
     content = build_draft_note_content(paragraphs)
     try:
+        confirm_materials(session.id, form_data.materials, db, replace=True)
         updated = Education.set_draft_baseline(session.id, content['md'], content, db=db)
     except ValueError as err:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(err)) from err
@@ -3182,6 +3272,7 @@ async def submit_assignment(
                 ),
             }
         stats['assignment_config'] = assignment.model_dump(mode='json')
+        stats['materials'] = snapshot_materials(session.id, db)
         stats['prompt_timeline'] = [
             message
             for message in prompt_timeline
@@ -4132,7 +4223,11 @@ async def get_my_writing_profile(
         )
         if classroom is not None
     ]
-    assignments = Education.get_profile_assignments_by_student(user.id, db=db)[:MAX_STUDENT_ASSIGNMENTS]
+    profile_assignments = Education.get_profile_assignments_by_student(user.id, db=db)
+    assignments = [
+        assignment for assignment in profile_assignments
+        if not assignment.hidden
+    ][:MAX_STUDENT_ASSIGNMENTS]
     try:
         return await build_student_profile(
             user,
@@ -4140,6 +4235,7 @@ async def get_my_writing_profile(
             classrooms,
             assignments,
             db,
+            visibility_filtered=any(assignment.hidden for assignment in profile_assignments),
             start_at=start_at,
             end_at=end_at,
             assignment_id=assignment_id,
@@ -4222,7 +4318,9 @@ async def get_my_notification_summary(
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
-    return Education.get_unread_notification_summary(user.id, db=db)
+    return Education.get_unread_notification_summary(
+        user.id, hide_assignments=await _get_education_role(user) == 'student', db=db
+    )
 
 
 @router.post('/me/notifications/mark-read')
