@@ -1,0 +1,5 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="RightWrite App Icon Ink">
+<defs><linearGradient id="bg" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#26486F"/><stop offset="1" stop-color="#16324F"/></linearGradient></defs>
+<rect width="512" height="512" rx="114" fill="url(#bg)"/>
+<g transform="translate(106.0 93.5) scale(3.0)"><path d="M20 50 C25 58 31 65 37 72 L34 78 L41 73 C55 57 69 40 84 21 L73 27 C62 39 52 50 44 59 C38 56 28 53 22 51 Z" fill="#F7F3EA"/></g>
+</svg>

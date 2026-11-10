@@ -1,0 +1,80 @@
+{
+  "migration": {
+    "from": "c6e8a0b2d4f7",
+    "to": "a7c9e1f365b8",
+    "existing_tables": 69,
+    "preserved_tables": 67,
+    "expected_changed_tables": [
+      "alembic_version",
+      "config"
+    ],
+    "submissions": 87,
+    "missing_evidence": 0
+  },
+  "recompute": {
+    "run_id": "091b59cb-66ff-4686-b33e-6218db0cdd8d",
+    "status": "completed",
+    "expected": 87,
+    "succeeded": 87,
+    "failed": 0,
+    "active_before": "2026-09-23.1",
+    "active_after": "2026-11-07.1"
+  },
+  "http": {
+    "student_reads": 134,
+    "teacher_reads": 134,
+    "filtered_reads": 255,
+    "errors": [],
+    "new_submission": {
+      "pending_score": null,
+      "published_score": 80,
+      "corrected_score": 90,
+      "timeline_points": 1,
+      "teacher_student_consistent": true,
+      "stale_review_status": 409,
+      "evidence_hash_unchanged": true
+    }
+  },
+  "idempotence": {
+    "expected_with_one_synthetic_submission": 88,
+    "succeeded": 88,
+    "failed": 0,
+    "projections_before": 90,
+    "projections_after": 90,
+    "business_source_unchanged": true,
+    "runtime_static_resources_regenerated": 17
+  },
+  "source": {
+    "base_commit": "f04ce032e088a4e348477059bcd27605785c3437",
+    "source_fingerprint": "afef567a0153a71bd9008a486fdf5fc58d3de30c8836495e05deaacd3201121e",
+    "files": 5416,
+    "dump_sha256": "e1021ab31ef80c1f5865d12e25fd9f0947992f7c6ff68d0af35bf31ca8f4ca31"
+  },
+  "tests": {
+    "postgresql": 30,
+    "frontend": 15
+  },
+  "browser": {
+    "tool": "Tabbit",
+    "component": "StudentGrowthProfile.svelte",
+    "identity": "isolated dependency override; no production login",
+    "student_sections": [
+      "overview",
+      "output",
+      "process",
+      "ai",
+      "assignments"
+    ],
+    "filters": [
+      "assignment",
+      "round",
+      "date",
+      "teacher metric version"
+    ],
+    "historical_version_points": 2,
+    "filtered_points": 1,
+    "final_page_errors": 0,
+    "screenshot_visually_checked": true
+  },
+  "scope": "Local PostgreSQL copy only. No production deployment or algorithm activation."
+}

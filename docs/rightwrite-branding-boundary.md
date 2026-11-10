@@ -2,6 +2,14 @@
 
 This project is branded to users as **RightWrite**.
 
+## Visual Identity
+
+Follow the [RightWrite VI guidelines](brand/README.md) for user-facing design. Canonical
+SVG/PNG assets live in `static/brand/rightwrite/`; the visual guide lives in
+`docs/brand/`. Use the supplied outlined wordmarks and calligraphic mark, with the
+Ink / Coral / Paper palette. The outer workspace `VI/` is an original delivery
+backup, not the ongoing development source.
+
 ## Product Brand
 
 Use `RightWrite` for user-facing product surfaces:

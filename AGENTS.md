@@ -61,6 +61,8 @@
 
 ## Coding Style & Naming Conventions
 
+- 品牌视觉遵守 [VI 规范](docs/brand/README.md)，正式素材统一使用 `static/brand/rightwrite/`；外层 `VI/` 是原始交付备份。新增或重做页面使用正式书法对勾、转曲字标及墨蓝 / 珊瑚 / 纸色，不自行重画 Logo。
+
 - 前端格式由 Prettier 强制约束：使用制表符、单引号、不保留尾随逗号、`printWidth: 100`。
 - 已启用 ESLint + TypeScript + Svelte 规则；在提交 PR 之前请修复相关问题。
 - Python 代码使用 Ruff 格式化，并通过相关 pylint 检查。

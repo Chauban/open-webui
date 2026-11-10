@@ -24,6 +24,40 @@ bash deploy/deploy.sh --target hitsz
 
 参数说明见 `deploy.sh` 开头注释。入口按脚本位置定位本仓库和同目录 `remote.sh`，不依赖外层 `right-write/` 或其目录名称。
 
+## 部署期间的升级维护页
+
+[maintenance.html](maintenance.html) 是独立维护页，内嵌样式、品牌标识和插画，不依赖应用、网络字体或 JavaScript。本地可直接用浏览器打开预览；「重新访问网站」指向当前站点首页，需在 HTTP 站点环境验证。
+
+页面遵守 [RightWrite VI](../docs/brand/README.md)：墨蓝、珊瑚、纸色、宋体标题和正式转曲字标。Logo、主标志及 favicon 从 `static/brand/rightwrite/svg/` 原样内嵌；上线仍只需安装这一份 HTML，无需额外复制品牌目录。
+
+[maintenance.nginx.conf](maintenance.nginx.conf) 是配套的 Nginx 配置片段。接入后，应用停止或上游返回 502、503、504 时展示维护页，HTTP 状态统一为 503，禁止缓存并建议 60 秒后重试；应用恢复后新请求会正常进入网站。页面不会自动轮询、刷新，也不承诺恢复时间。配置会同时拦截 API 的上述错误（响应体为 HTML）；其他状态码和已经开始的流式响应不受它接管。指令行为参见 Nginx 官方的 [error_page](https://nginx.org/en/docs/http/ngx_http_core_module.html#error_page) 和 [proxy_intercept_errors](https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_intercept_errors)。
+
+首次安装需在明确授权的目标服务器上操作。以下命令在服务器的仓库根目录 `/opt/rightwrite/app` 执行，不要在本地开发环境执行，也不要运行整个部署脚本来预览页面：
+
+```bash
+sudo install -d -m 755 /var/www/rightwrite /etc/nginx/snippets
+sudo install -m 644 deploy/maintenance.html /var/www/rightwrite/maintenance.html
+sudo install -m 644 deploy/maintenance.nginx.conf /etc/nginx/snippets/rightwrite-maintenance.conf
+```
+
+在对应站点实际处理应用请求的 `server` 块内加入下面一行，与 `location /` 同级；不要放到仅用于 HTTP 跳转的块或 `http` 块。两个实例分别在自己的服务器上配置，保留现有域名、证书与代理设置：
+
+```nginx
+include /etc/nginx/snippets/rightwrite-maintenance.conf;
+```
+
+确认语法通过后才重载：
+
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+之后按原部署流程运行即可：`remote.sh` 在构建前停止应用，Nginx 独立展示维护页；应用重新提供服务后，用户点击「重新访问网站」返回首页。维护页保存在构建目录之外，构建失败也能显示。页面或配置更新后需重新执行对应安装命令；配置变化还需检查并重载 Nginx。当前部署脚本不会自动安装这些文件。
+
+验收时先检查正常访问未受影响，再在已授权的维护窗口确认停机期间首页、深层页面的 GET 请求均返回 503、`Cache-Control: no-store` 和 `Retry-After: 60`，页面文字与插画完整；恢复后点击按钮应进入网站。不要为测试页面在正常使用期间停服务。实际安装后，将服务器配置同步回 `server/nginx/` 的对应副本。撤回接入时删除新增的 include，检查并重载 Nginx。
+
+若应用启动后还需完成画像重算与验收，在代理的 `location /` 内增加 `if (-f /var/www/rightwrite/maintenance.flag) { return 503; }`。已授权维护开始时创建该标记，先阻止新请求再停止应用，确保部署自动备份捕获最后一次业务写入。标记存在时即使应用已启动，外网仍显示维护页；本机可通过 `127.0.0.1:8080` 检查后端。迁移、重算、配置和数据一致性检查全部通过后才移除标记，无需重载 Nginx。失败时保留维护状态，按本次发布的备份恢复；不要只撤掉标记暴露未验收的服务。南科大站点副本包含此控制，哈工深站点不随之改动。
+
 ## 凭据与实例配置
 
 SSH 别名 `rightwrite`、`rightwrite-hitsz` 由本机 `~/.ssh/config` 配置；私钥留在本机或密钥管理器。服务器的 `rightwrite.env`、`.cos.yaml`、数据库及备份不入库。

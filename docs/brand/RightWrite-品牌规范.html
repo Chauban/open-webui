@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RightWrite · 品牌规范</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,600&family=Fraunces:ital,opsz,wght@0,9..144,600;1,9..144,600&family=Noto+Sans+SC:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root{--ink:#20406A;--ink2:#15314E;--accent:#FF6A45;--accent2:#FFB199;--paper:#F7F3EA;--card:#FFFFFF;--muted:#7A8699;--line:#ECE6D8;}
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--paper);color:var(--ink);font-family:'Noto Sans SC',sans-serif;font-weight:300;
+    line-height:1.7;padding:clamp(28px,6vw,80px) clamp(20px,5vw,72px);-webkit-font-smoothing:antialiased;}
+  .wrap{max-width:1080px;margin:0 auto;}
+  .eyebrow{font-family:'Fraunces',serif;font-style:italic;color:var(--accent);font-size:1.05rem;margin-bottom:.4em;}
+  h1{font-family:'EB Garamond',serif;font-weight:600;font-size:clamp(2.4rem,6vw,3.8rem);line-height:1.05;margin-bottom:.3em;}
+  h1 .w{font-style:italic;color:var(--accent);}
+  .lede{color:#3c4d66;font-size:1.05rem;max-width:60ch;margin-bottom:clamp(36px,5vw,60px);}
+  .lede b{color:var(--ink);font-weight:500;}
+  h2{font-family:'Fraunces','Noto Serif SC',serif;font-style:italic;font-size:1.5rem;font-weight:600;
+    margin:clamp(38px,5vw,60px) 0 20px;padding-bottom:10px;border-bottom:1px solid var(--line);}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:clamp(22px,3vw,34px);
+    box-shadow:0 12px 30px -24px rgba(32,64,106,.35);}
+  .hero-mark{display:flex;gap:clamp(24px,5vw,48px);align-items:center;flex-wrap:wrap;}
+  .hero-mark svg{width:clamp(130px,24vw,180px);height:auto;flex:none;}
+  .hero-mark .meaning{flex:1;min-width:240px;}
+  .meaning p{color:#566379;font-size:.96rem;margin-bottom:10px;}
+  .meaning .k{color:var(--ink);font-weight:500;}
+  .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px;}
+  .grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:18px;}
+  .tile{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:24px;
+    display:flex;flex-direction:column;align-items:center;gap:14px;text-align:center;}
+  .tile .stage{width:100%;border-radius:12px;background:var(--paper);padding:24px;display:flex;
+    align-items:center;justify-content:center;min-height:130px;}
+  .tile .stage.dark{background:var(--ink2);}
+  .tile .stage.coral{background:var(--accent);}
+  .tile svg,.tile img{max-width:100%;height:auto;}
+  .tile .cap{font-size:.84rem;color:var(--muted);}
+  /* colors */
+  .swatches{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:16px;}
+  .sw{border-radius:16px;overflow:hidden;border:1px solid var(--line);}
+  .sw .chip{height:96px;}
+  .sw .meta{padding:14px 16px;background:#fff;}
+  .sw .nm{font-weight:500;font-size:.92rem;}
+  .sw .hex{font-family:'Fraunces',serif;font-style:italic;color:var(--muted);font-size:.86rem;letter-spacing:.03em;}
+  .sw .role{font-size:.76rem;color:var(--muted);margin-top:4px;}
+  /* type */
+  .typ{display:flex;flex-direction:column;gap:6px;}
+  .typ .big{font-family:'EB Garamond',serif;font-size:3rem;line-height:1.1;}
+  .typ .big .w{font-style:italic;color:var(--accent);font-weight:600;}
+  .typ .label{font-size:.84rem;color:var(--muted);}
+  .typ .alt{font-family:'Noto Sans SC';font-weight:500;font-size:1.4rem;margin-top:8px;}
+  /* clearspace */
+  .clear{position:relative;background:var(--paper);border-radius:14px;padding:40px;display:flex;justify-content:center;}
+  .clearbox{position:relative;padding:48px;border:2px dashed #C9B8A0;border-radius:8px;}
+  .clearbox svg{width:120px;height:120px;display:block;}
+  .clearbox::before{content:"留白 ≥ 图标高度的 50%";position:absolute;top:-26px;left:0;font-size:.74rem;color:var(--muted);}
+  /* dos */
+  .rules{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;}
+  .rule{border-radius:16px;border:1px solid var(--line);overflow:hidden;background:#fff;}
+  .rule .vis{height:120px;display:flex;align-items:center;justify-content:center;background:var(--paper);position:relative;}
+  .rule .vis svg{width:64px;height:64px;}
+  .rule .tag{padding:10px 14px;font-size:.82rem;display:flex;align-items:center;gap:8px;}
+  .rule.no .tag{color:#B23A2E;}.rule.ok .tag{color:#2E7D4F;}
+  .rule .tag .b{font-size:1rem;}
+  .skew{transform:skewX(-14deg);}
+  .stretch{transform:scaleX(1.5);}
+  footer{margin-top:clamp(40px,6vw,70px);border-top:1px solid var(--line);padding-top:28px;color:#566379;font-size:.92rem;}
+  footer b{color:var(--ink);font-weight:500;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">Brand Guidelines · v1.0</div>
+  <h1>Right<span class="w">Write</span></h1>
+  <p class="lede">面向学生写作课的作业提交平台。标志是一道<b>一笔写就的对勾</b>——<b class="k">Right（对）</b>与 <b class="k">Write（写）</b>合于同一个手势：落笔、行笔、收锋，写完即判对。"中等硬"版，收笔利落，文气与可靠感兼具。</p>
+
+  <h2>标志与寓意</h2>
+  <div class="card hero-mark">
+    <svg viewBox="0 0 100 100" aria-label="RightWrite mark">
+      <defs><linearGradient id="m" x1="22" y1="74" x2="84" y2="20" gradientUnits="userSpaceOnUse">
+        <stop offset="0" stop-color="#15314E"/><stop offset="1" stop-color="#37608F"/></linearGradient></defs>
+      <path d="M20 50 C25 58 31 65 37 72 L34 78 L41 73 C55 57 69 40 84 21 L73 27 C62 39 52 50 44 59 C38 56 28 53 22 51 Z" fill="url(#m)"/>
+    </svg>
+    <div class="meaning">
+      <p><span class="k">起笔（左下）</span>：墨色最深，模拟笔尖触纸、墨量饱满。</p>
+      <p><span class="k">行笔与顿挫（谷底）</span>：转折处一个短回锋，是手写的呼吸，不是几何折角。</p>
+      <p><span class="k">收锋（右上）</span>：一刀斜切利落收住，墨色转淡——果断、可靠。</p>
+      <p style="margin-top:14px;color:#7A8699;font-size:.88rem">主色由深到浅的墨色渐变，正是"运笔"的痕迹。需要绝对简洁时用单色版。</p>
+    </div>
+  </div>
+
+  <h2>字标 / 锁定关系</h2>
+  <div class="grid2">
+    <div class="tile">
+      <div class="stage">
+        <svg viewBox="0 0 614 200" style="width:100%"><defs><linearGradient id="lh" x1="40" y1="170" x2="180" y2="55" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#15314E"/><stop offset="1" stop-color="#37608F"/></linearGradient></defs>
+          <g transform="translate(40 48) scale(1.2)"><path d="M20 50 C25 58 31 65 37 72 L34 78 L41 73 C55 57 69 40 84 21 L73 27 C62 39 52 50 44 59 C38 56 28 53 22 51 Z" fill="url(#lh)"/></g>
+          <text x="160" y="148" font-family="'EB Garamond',serif" font-size="92" letter-spacing="-1"><tspan fill="#20406A" font-weight="400">Right</tspan><tspan fill="#FF6A45" font-weight="600" font-style="italic">Write</tspan></text>
+        </svg>
+      </div>
+      <div class="cap">横版 · 优先用于页眉、网站导航</div>
+    </div>
+    <div class="tile">
+      <div class="stage dark">
+        <svg viewBox="0 0 614 200" style="width:100%">
+          <g transform="translate(40 48) scale(1.2)"><path d="M20 50 C25 58 31 65 37 72 L34 78 L41 73 C55 57 69 40 84 21 L73 27 C62 39 52 50 44 59 C38 56 28 53 22 51 Z" fill="#fff"/></g>
+          <text x="160" y="148" font-family="'EB Garamond',serif" font-size="92" letter-spacing="-1"><tspan fill="#fff" font-weight="400">Right</tspan><tspan fill="#FFB199" font-weight="600" font-style="italic">Write</tspan></text>
+        </svg>
+      </div>
+      <div class="cap">反白 · 深色背景 / App 启动页</div>
+    </div>
+  </div>
+
+  <h2>App 图标</h2>
+  <div class="grid2">
+    <div class="tile"><div class="stage" style="background:#EFE9DC"><img src="../../static/brand/rightwrite/png/appicon-coral-1024.png" alt="coral icon" style="width:150px;border-radius:34px"></div><div class="cap">珊瑚主图标（推荐）</div></div>
+    <div class="tile"><div class="stage" style="background:#EFE9DC"><img src="../../static/brand/rightwrite/png/appicon-ink-1024.png" alt="ink icon" style="width:150px;border-radius:34px"></div><div class="cap">墨蓝备用图标</div></div>
+  </div>
+
+  <h2>色彩</h2>
+  <div class="swatches">
+    <div class="sw"><div class="chip" style="background:#20406A"></div><div class="meta"><div class="nm">墨蓝 Ink</div><div class="hex">#20406A</div><div class="role">主色 · 文字 / 笔画</div></div></div>
+    <div class="sw"><div class="chip" style="background:#15314E"></div><div class="meta"><div class="nm">深墨 Deep</div><div class="hex">#15314E</div><div class="role">渐变深端 · 起笔</div></div></div>
+    <div class="sw"><div class="chip" style="background:#FF6A45"></div><div class="meta"><div class="nm">珊瑚 Coral</div><div class="hex">#FF6A45</div><div class="role">强调色 · Write / 图标底</div></div></div>
+    <div class="sw"><div class="chip" style="background:#FFB199"></div><div class="meta"><div class="nm">浅珊瑚 Coral L.</div><div class="hex">#FFB199</div><div class="role">深底上的强调</div></div></div>
+    <div class="sw"><div class="chip" style="background:#F7F3EA;border-bottom:1px solid #eee"></div><div class="meta"><div class="nm">纸 Paper</div><div class="hex">#F7F3EA</div><div class="role">背景 · 反白字</div></div></div>
+  </div>
+
+  <h2>字体</h2>
+  <div class="card">
+    <div class="typ">
+      <div class="label">字标字体 · EB Garamond（"Right" Regular，"Write" SemiBold Italic）</div>
+      <div class="big">Right<span class="w">Write</span></div>
+      <div class="label" style="margin-top:18px">中文搭配 · 思源宋体 / Noto Serif SC（标题）· 思源黑体（正文）</div>
+      <div class="alt">把作业写对 · 正字而后立言</div>
+    </div>
+  </div>
+
+  <h2>留白</h2>
+  <div class="card"><div class="clear"><div class="clearbox">
+    <svg viewBox="0 0 100 100"><path d="M20 50 C25 58 31 65 37 72 L34 78 L41 73 C55 57 69 40 84 21 L73 27 C62 39 52 50 44 59 C38 56 28 53 22 51 Z" fill="#20406A"/></svg>
+  </div></div></div>
+
+  <h2>正确 / 错误用法</h2>
+  <div class="rules">
+    <div class="rule ok"><div class="vis"><svg viewBox="0 0 100 100"><path d="M20 50 C25 58 31 65 37 72 L34 78 L41 73 C55 57 69 40 84 21 L73 27 C62 39 52 50 44 59 C38 56 28 53 22 51 Z" fill="#20406A"/></svg></div><div class="tag"><span class="b">✓</span> 单色使用</div></div>
+    <div class="rule ok"><div class="vis coral" style="background:var(--accent)"><svg viewBox="0 0 100 100"><path d="M20 50 C25 58 31 65 37 72 L34 78 L41 73 C55 57 69 40 84 21 L73 27 C62 39 52 50 44 59 C38 56 28 53 22 51 Z" fill="#fff"/></svg></div><div class="tag"><span class="b">✓</span> 品牌色背景反白</div></div>
+    <div class="rule no"><div class="vis"><svg class="skew" viewBox="0 0 100 100"><path d="M20 50 C25 58 31 65 37 72 L34 78 L41 73 C55 57 69 40 84 21 L73 27 C62 39 52 50 44 59 C38 56 28 53 22 51 Z" fill="#20406A"/></svg></div><div class="tag"><span class="b">✕</span> 倾斜 / 变形</div></div>
+    <div class="rule no"><div class="vis"><svg class="stretch" viewBox="0 0 100 100"><path d="M20 50 C25 58 31 65 37 72 L34 78 L41 73 C55 57 69 40 84 21 L73 27 C62 39 52 50 44 59 C38 56 28 53 22 51 Z" fill="#20406A"/></svg></div><div class="tag"><span class="b">✕</span> 横向拉伸</div></div>
+    <div class="rule no"><div class="vis" style="background:#7AA0C8"><svg viewBox="0 0 100 100"><path d="M20 50 C25 58 31 65 37 72 L34 78 L41 73 C55 57 69 40 84 21 L73 27 C62 39 52 50 44 59 C38 56 28 53 22 51 Z" fill="#5E7FA8"/></svg></div><div class="tag"><span class="b">✕</span> 低对比背景</div></div>
+  </div>
+
+  <footer>
+    <p><b>文件清单</b>　svg/：mark（gradient / solid / reverse）、appicon（coral / ink）、lockup（horizontal / horizontal-reverse / stacked）；png/：各尺寸成品 + favicon（16–256px）。所有 SVG 中的文字已转曲，无需安装字体即可使用。</p>
+    <p style="margin-top:10px">字标字体为 <b>EB Garamond</b>（开源，SIL OFL 协议，可商用）。中文建议搭配思源宋体 / 思源黑体。</p>
+  </footer>
+</div>
+</body>
+</html>
