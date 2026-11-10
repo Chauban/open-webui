@@ -15,6 +15,13 @@ server {
     proxy_read_timeout 3600s;
     proxy_send_timeout 3600s;
 
+    location ^~ /nation-sim/ {
+        alias /var/www/nation-sim/;
+        index index.html;
+        try_files $uri $uri/ /nation-sim/index.html;
+        proxy_buffering on;
+    }
+
     include /etc/nginx/snippets/rightwrite-maintenance.conf;
 
     location / {

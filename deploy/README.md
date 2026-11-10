@@ -40,7 +40,7 @@ sudo install -m 644 deploy/maintenance.html /var/www/rightwrite/maintenance.html
 sudo install -m 644 deploy/maintenance.nginx.conf /etc/nginx/snippets/rightwrite-maintenance.conf
 ```
 
-在对应站点实际处理应用请求的 `server` 块内加入下面一行，与 `location /` 同级；不要放到仅用于 HTTP 跳转的块或 `http` 块。两个实例分别在自己的服务器上配置，保留现有域名、证书与代理设置：
+先用 `nginx -T` 与 `ls -l /etc/nginx/sites-enabled` 确认实际生效的配置路径，不假设 `sites-enabled` 必为软链接。南科大在 2026-11-10 核查时实际使用 `/etc/nginx/sites-enabled/rightwrite` 独立文件；仅修改 `sites-available/rightwrite` 不会生效。在对应站点实际处理应用请求的 `server` 块内加入下面一行，与 `location /` 同级；不要放到仅用于 HTTP 跳转的块或 `http` 块。两个实例分别在自己的服务器上配置，保留现有域名、证书、代理与其他站点路由：
 
 ```nginx
 include /etc/nginx/snippets/rightwrite-maintenance.conf;

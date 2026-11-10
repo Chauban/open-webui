@@ -6,6 +6,8 @@
 
 **这里是副本，不是源头。** 改服务器上的文件之后，记得把这里也同步更新。`deploy/deploy.sh` 不会自动同步这些文件（它只管 `remote.sh`）。
 
+2026-11-10 核查修正：南科大实际生效的是 `/etc/nginx/sites-enabled/rightwrite` 独立文件，并非软链接。`nginx/rightwrite` 已按该文件同步，包含原有 `/nation-sim/` 路由和新增维护页控制；下表中的旧 `sites-available` 路径不能作为确认生效配置的依据，应先查看 `nginx -T`。
+
 ## 不在这里的东西（含密钥，不能拷下来）
 
 | 文件                             | 说明                                                                                           |
