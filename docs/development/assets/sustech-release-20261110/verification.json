@@ -1,0 +1,69 @@
+{
+  "instance": "rightwrite.cc",
+  "application_commit": "ebf25755a449ca34bdb9c9d2d8f1cf548a7492f6",
+  "build_commit": "ebf25755a449ca34bdb9c9d2d8f1cf548a7492f6",
+  "restored_at": "2026-11-10T22:00:58+08:00",
+  "migration": {
+    "from": "c6e8a0b2d4f7",
+    "to": "a7c9e1f365b8",
+    "steps": 10,
+    "original_tables": 69,
+    "preserved_original_tables": 67,
+    "expected_changed_tables": ["alembic_version", "config"]
+  },
+  "business_counts_before_public_reopening": {
+    "assignments": 19,
+    "submissions": 87,
+    "reviews": 78,
+    "submissions_without_evidence": 0
+  },
+  "profile": {
+    "run_id": "434f8bf4-8459-4807-b4f3-a19036570b31",
+    "expected": 87,
+    "succeeded": 87,
+    "failed": 0,
+    "active_version": "2026-11-07.1",
+    "historical_results_retained": true
+  },
+  "settings": {
+    "personal_writing_student": false,
+    "personal_writing_teacher": false,
+    "existing_assignments_image_reading_enabled": 19,
+    "education_return": false
+  },
+  "read_only_route_checks": {
+    "student_profiles": 134,
+    "teacher_profiles": 134,
+    "filtered_profiles": 255,
+    "scope": "Separate in-process route runner with PostgreSQL read-only connections; no public authentication override."
+  },
+  "release_tests": {
+    "frontend": 257,
+    "sqlite_education_backend": 566,
+    "incremental_type_check": "passed with 11 scoped warnings",
+    "postgresql": "Same business source as the previously validated production-copy rehearsal."
+  },
+  "maintenance": {
+    "status": 503,
+    "cache_control": "no-store",
+    "retry_after_seconds": 60,
+    "public_home_deep_link_and_health_checked": true,
+    "flag_removed_after_validation": true
+  },
+  "post_release": {
+    "public_home": 200,
+    "public_login": 200,
+    "public_health": true,
+    "unauthenticated_courseware": 401,
+    "service": "active",
+    "restarts": 0,
+    "browser": "Maintenance return link, authenticated writing home and growth profile verified with Tabbit; no page script errors."
+  },
+  "backup": {
+    "database": "db-20261110-215156.dump",
+    "database_sha256": "57846d7f468f86fb55bb8b5f72636eaca4d0e1896ee3e22908776cefd728222b",
+    "uploads": "data-20261110-215156.tar.gz",
+    "uploads_sha256": "ee320d73f3da51b38289953a1ca063ea2a1f11cf5e91107de7d51e54e0116eff",
+    "offsite_uploads": "both succeeded"
+  }
+}
