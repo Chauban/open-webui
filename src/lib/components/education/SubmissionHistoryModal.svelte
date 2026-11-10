@@ -1,4 +1,5 @@
 <script lang="ts">
+	import WordDownloadButton from './WordDownloadButton.svelte';
 	import { getContext } from 'svelte';
 
 	import Modal from '$lib/components/common/Modal.svelte';
@@ -16,6 +17,7 @@
 
 	type SubmissionRound = {
 		submission_id: string;
+		final_version_id: string;
 		round_no: number;
 		is_current: number;
 		submitted_at: number;
@@ -88,7 +90,9 @@
 					<Spinner className="size-6" />
 				</div>
 			{:else if error}
-				<div class="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300">
+				<div
+					class="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300"
+				>
 					{error}
 				</div>
 			{:else if rounds.length === 0}
@@ -129,12 +133,15 @@
 					/>
 
 					<div class="rounded-2xl bg-stone-50 p-4 dark:bg-gray-900">
-						<div
-							class="mb-2 text-[10px] font-semibold text-gray-400"
-						>
+						<div class="mb-2 text-[10px] font-semibold text-gray-400">
 							{$i18n.t('Content Snapshot')}
 						</div>
+						<WordDownloadButton
+							submissionId={activeRound.submission_id}
+							versionId={activeRound.final_version_id}
+						/>
 						<SourceHighlightedText
+							submissionId={activeRound.submission_id}
 							json={activeRound.content.content_json}
 							text={activeRound.content.content_text}
 							segments={[]}

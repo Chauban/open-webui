@@ -2,6 +2,8 @@
 
 以下命令均从 Git 仓库根目录执行，即包含 `package.json` 和 `backend/` 的 `open-webui/`。本地开发使用前端 5050、后端 8080。
 
+浏览器中的实例名称按访问地址区分：`localhost` / 回环地址显示 `本地 · RightWrite`，`hitsz.rightwrite.cc` 显示 `HIT · RightWrite`，`rightwrite.cc`（含 `www`）固定显示 `Rightwrite`。页面标题与引用应用名称的位置共用该名称；本地和 HIT 的后端自定义 `WEBUI_NAME` 会保留在实例前缀之后，其他域名不加前缀。线上实例需更新前端后生效。
+
 ## 环境准备
 
 使用 Node.js/npm 和 Python 3.12。前端依赖位于 `node_modules/`，后端虚拟环境必须位于 `backend/.venv/`。首次克隆时：

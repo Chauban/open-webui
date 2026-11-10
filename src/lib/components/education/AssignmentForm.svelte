@@ -30,6 +30,7 @@
 	import CoachingStyleSelector from './CoachingStyleSelector.svelte';
 	import ChallengeSettings from './ChallengeSettings.svelte';
 	import AssignmentThinkingSettings from './AssignmentThinkingSettings.svelte';
+	import AssignmentImageReadingSettings from './AssignmentImageReadingSettings.svelte';
 	import { THINKING_SETTING_TEXT } from '$lib/utils/ai-steps';
 	import ReflectionQuestionsEditor from './ReflectionQuestionsEditor.svelte';
 	import { EDU_FIELD_CLASS, eduSegmentClass } from './styles';
@@ -39,6 +40,7 @@
 	// 大多沿用上次的配置,默认折叠成一行摘要。
 
 	export let draft: AssignmentDraft;
+	export let imageParsingModel: import('$lib/apis/education').ImageParsingModelView | null = null;
 	export let allowedTaskModes: TaskMode[] = [];
 	export let teachingConfigs: Partial<Record<TaskMode, TeachingConfig>> = {};
 	export let teachingSnapshot: TeachingConfig | null = null;
@@ -72,7 +74,8 @@
 	// 修订初稿作业没有试读，第 3 节标题里就不提「试读」;档位关了、思考也没下放时这一节没东西可设，整节不出现。
 	$: thinkingDelegated =
 		draft.taskMode !== 'revise_argument' && !!thinkingPolicy && thinkingPolicy.control !== 'admin';
-	$: hasCoachingSettings = coachingEnabled || thinkingDelegated;
+	// Every assignment offers the teacher-controlled image-reading switch.
+	const hasCoachingSettings = true;
 	$: hasReaderCheck = !isRevision(draft.taskMode) && draft.scoringMode === 'dimensions';
 	$: aiSectionLabel =
 		hasCoachingSettings && hasReaderCheck
@@ -103,6 +106,7 @@
 	$: isReviseDraft = isRevision(draft.taskMode);
 	$: taskModeHint = TASK_MODES.find((mode) => mode.key === draft.taskMode)?.hint ?? '';
 	$: aiSummary = [
+		t(draft.imageReadingEnabled ? 'AI image reading on' : 'AI image reading off'),
 		...(coachingEnabled ? [t(COACHING_TITLES[draft.coachingStyle])] : []),
 		...(thinkingDelegated && draft.thinking
 			? [t('Thinking: {{level}}', { level: t(THINKING_SETTING_TEXT[draft.thinking]) })]
@@ -348,6 +352,10 @@
 						</span>
 					</button>
 					<div class="mt-4 grid gap-4" class:hidden={!aiOpen}>
+						<AssignmentImageReadingSettings
+							bind:enabled={draft.imageReadingEnabled}
+							platformModel={imageParsingModel}
+						/>
 						{#if coachingEnabled}
 							<CoachingStyleSelector bind:value={draft.coachingStyle} />
 						{/if}

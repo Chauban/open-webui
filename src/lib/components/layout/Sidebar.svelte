@@ -185,7 +185,7 @@
 		const writingFolderList = [
 			...dedupeAssignmentProjects(folderList.filter(isAssignmentProject)),
 			...folderList.filter(
-				(folder) => isPersonalWritingProject(folder) && $user?.education_role !== 'student'
+				(folder) => isPersonalWritingProject(folder) && $config?.features?.enable_personal_writing
 			)
 		].filter((folder) => !isSidebarClosedWriting(folder));
 
@@ -283,7 +283,7 @@
 					($user?.role === 'admin' || $user?.permissions?.features?.calendar)
 				);
 			case 'writing':
-				return $user?.education_role === 'student' || $user?.role === 'admin';
+				return $user?.education_role === 'student' || $config?.features?.enable_personal_writing;
 			case 'teaching':
 				return $user?.education_role === 'teacher' || $user?.role === 'admin';
 			case 'playground':
@@ -1603,7 +1603,7 @@
 					{/if}
 
 
-				{#if $user?.education_role === 'student' || $user?.role === 'admin'}
+				{#if $user?.education_role === 'student' || $config?.features?.enable_personal_writing}
 					<SidebarSection
 						id="sidebar-writing-projects"
 						bind:open={showWriting}

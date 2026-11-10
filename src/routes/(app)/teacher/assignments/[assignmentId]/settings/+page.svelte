@@ -46,6 +46,7 @@
 	const assignmentId = $page.params.assignmentId;
 
 	let allowedTaskModes: import('$lib/apis/education').TaskMode[] = [];
+	let imageParsingModel: import('$lib/apis/education').ImageParsingModelView | null = null;
 	let teachingConfigs: Partial<
 		Record<import('$lib/apis/education').TaskMode, import('$lib/apis/education').TeachingConfig>
 	> = {};
@@ -100,6 +101,7 @@
 			scoreMax: String(assignment.score_max),
 			coachingStyle: assignment.coaching_style,
 			taskMode: assignment.task_mode,
+			imageReadingEnabled: assignment.image_reading_enabled,
 			challengeEnabled: assignment.challenge_enabled ?? false,
 			challengeRounds: assignment.challenge_rounds ?? 3,
 			challengeFocusKeys: [...(assignment.challenge_focus_keys ?? [])],
@@ -130,6 +132,7 @@
 		);
 		allowedTaskModes = assignmentDefaults.allowed_task_modes;
 		teachingConfigs = assignmentDefaults.teaching_configs;
+		imageParsingModel = assignmentDefaults.image_parsing_model;
 		thinkingPolicy = assignmentDefaults.thinking;
 		classrooms = teacherClassrooms;
 		reflectionQuestionSets = questionSets;
@@ -169,6 +172,7 @@
 			reflection_questions: 'Reflection Before Submitting',
 			task_mode: 'Assignment type',
 			coaching_style: 'AI Coaching Style',
+			image_reading_enabled: 'AI image reading for this assignment',
 			challenge_enabled: 'AI Reader Check Before Submitting',
 			challenge_rounds: 'Rounds',
 			challenge_focus_keys: 'Rubric',
@@ -289,6 +293,7 @@
 					>{/if}
 			</div>
 			<AssignmentForm
+				{imageParsingModel}
 				{allowedTaskModes}
 				{teachingConfigs}
 				teachingSnapshot={item.assignment.teaching_config}

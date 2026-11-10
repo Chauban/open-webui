@@ -141,7 +141,9 @@ export const buildSourceHighlightedHtml = ({
 
 		const segmentId = range.segment.segment_id ?? '';
 		const activeClass =
-			activeSegmentId && activeSegmentId === segmentId ? ' ring-2 ring-black/40 dark:ring-white/50' : '';
+			activeSegmentId && activeSegmentId === segmentId
+				? ' ring-2 ring-black/40 dark:ring-white/50'
+				: '';
 		html += `<mark data-segment-id="${escapeAttribute(segmentId)}" class="rounded px-1 ${colorClass(
 			range.segment.source_type
 		)}${activeClass}">${escapeHtml(text.slice(range.start, range.end))}</mark>`;
@@ -212,7 +214,10 @@ const findFuzzyRange = (
 	ranges: HighlightRange[]
 ): HighlightRange | null => {
 	const rawNeedle = (segment.segment_text ?? '').replace(WHITESPACE_RE, '');
-	const strippedNeedle = stripMarkdownFormatting(segment.segment_text ?? '').replace(WHITESPACE_RE, '');
+	const strippedNeedle = stripMarkdownFormatting(segment.segment_text ?? '').replace(
+		WHITESPACE_RE,
+		''
+	);
 	const needles = [...new Set([rawNeedle, strippedNeedle].filter(Boolean))];
 
 	for (const needle of needles) {
@@ -257,7 +262,9 @@ const markHtml = ({
 }) => {
 	const segmentId = segment.segment_id ?? '';
 	const activeClass =
-		activeSegmentId && activeSegmentId === segmentId ? ' ring-2 ring-black/40 dark:ring-white/50' : '';
+		activeSegmentId && activeSegmentId === segmentId
+			? ' ring-2 ring-black/40 dark:ring-white/50'
+			: '';
 	return `<mark data-segment-id="${escapeAttribute(segmentId)}" class="rounded px-1 ${colorClass(
 		segment.source_type
 	)}${activeClass}">${content}</mark>`;
@@ -271,8 +278,12 @@ const applyTextMarks = (
 		if (mark.type === 'bold') return `<strong>${value}</strong>`;
 		if (mark.type === 'italic') return `<em>${value}</em>`;
 		if (mark.type === 'strike') return `<s>${value}</s>`;
+		if (mark.type === 'underline') return `<u>${value}</u>`;
+		if (mark.type === 'superscript') return `<sup>${value}</sup>`;
+		if (mark.type === 'subscript') return `<sub>${value}</sub>`;
 		if (mark.type === 'code') return `<code>${value}</code>`;
 		if (mark.type === 'link') {
+			if (!/^(https?:|mailto:)/i.test(mark.attrs?.href ?? '')) return value;
 			return `<a href="${escapeAttribute(mark.attrs?.href ?? '')}" rel="noopener noreferrer">${value}</a>`;
 		}
 		return value;
@@ -297,7 +308,10 @@ const renderTextNode = (
 
 	for (const range of relevantRanges) {
 		if (range.start > localCursor) {
-			html += applyTextMarks(escapeHtml(text.slice(localCursor - start, range.start - start)), node.marks);
+			html += applyTextMarks(
+				escapeHtml(text.slice(localCursor - start, range.start - start)),
+				node.marks
+			);
 		}
 
 		const chunkStart = Math.max(range.start, start);
@@ -327,21 +341,49 @@ const renderTiptapNode = (
 	if (!node) return '';
 	if (node.type === 'text') return renderTextNode(node, ranges, state, activeSegmentId);
 	if (node.type === 'hardBreak') return '<br />';
+	if (node.type === 'writingNote')
+		return `<sup><button type="button" data-writing-note="${escapeAttribute(node.attrs?.note ?? '')}" class="cursor-pointer text-sky-700" aria-label="${escapeAttribute('注释 ' + (node.attrs?.label ?? ''))}">[${escapeHtml(node.attrs?.label ?? '')}]</button></sup>`;
+	if (node.type === 'writingPlaceholder')
+		return `<aside class="my-3 border-l-2 border-amber-400 pl-3">${escapeHtml(node.attrs?.label ?? '')}</aside>`;
 
 	const children = (node.content ?? [])
 		.map((child) => renderTiptapNode(child, ranges, state, activeSegmentId))
 		.join('');
 
-	if (node.type === 'paragraph') return `<p>${children}</p>`;
+	const alignment = ['left', 'right', 'center', 'justify'].includes(node.attrs?.textAlign)
+		? ` style="text-align:${node.attrs?.textAlign}"`
+		: '';
+	if (node.type === 'writingImage') {
+		const width = Math.max(20, Math.min(100, Number(node.attrs?.width) || 100));
+		const transcription = node.attrs?.transcription || node.attrs?.nativeText || '';
+		const reading = transcription
+			? `<details class="mt-2 text-sm" data-reading-kind="${node.attrs?.transcription ? 'ocr' : 'native'}"><summary class="cursor-pointer text-xs text-gray-500"></summary><p class="whitespace-pre-wrap">${escapeHtml(transcription)}</p></details>`
+			: '';
+		return `<figure data-writing-image data-material-id="${escapeAttribute(node.attrs?.materialId ?? '')}" data-block-id="${escapeAttribute(node.attrs?.blockId ?? '')}" style="width:${width}%;margin:1.25em auto"><img alt="${escapeAttribute(node.attrs?.alt ?? '图片')}" style="width:100%;height:auto;cursor:zoom-in" /><figcaption style="text-align:center">${children}</figcaption>${reading}</figure>`;
+	}
+	if (node.type === 'paragraph') return `<p${alignment}>${children}</p>`;
 	if (node.type === 'heading') {
 		const level = Math.min(Math.max(Number(node.attrs?.level ?? 1), 1), 6);
-		return `<h${level}>${children}</h${level}>`;
+		return `<h${level}${alignment}>${children}</h${level}>`;
 	}
-	if (node.type === 'orderedList') return `<ol>${children}</ol>`;
+	if (node.type === 'orderedList') {
+		const start = Math.min(100000, Math.max(1, Number(node.attrs?.start) || 1));
+		return `<ol${start === 1 ? '' : ` start="${start}"`}>${children}</ol>`;
+	}
 	if (node.type === 'bulletList') return `<ul>${children}</ul>`;
+	if (node.type === 'taskList') return `<ul style="list-style:none">${children}</ul>`;
+	if (node.type === 'taskItem')
+		return `<li style="list-style:none"><input type="checkbox" disabled${node.attrs?.checked === true ? ' checked' : ''} />${children}</li>`;
 	if (node.type === 'listItem') return `<li>${children}</li>`;
 	if (node.type === 'blockquote') return `<blockquote>${children}</blockquote>`;
 	if (node.type === 'codeBlock') return `<pre><code>${children}</code></pre>`;
+	if (node.type === 'table') return `<div class="overflow-x-auto"><table>${children}</table></div>`;
+	if (node.type === 'tableRow') return `<tr>${children}</tr>`;
+	if (node.type === 'tableCell' || node.type === 'tableHeader') {
+		const tag = node.type === 'tableCell' ? 'td' : 'th';
+		return `<${tag} colspan="${Math.min(30, Math.max(1, Number(node.attrs?.colspan) || 1))}" rowspan="${Math.min(100, Math.max(1, Number(node.attrs?.rowspan) || 1))}">${children}</${tag}>`;
+	}
+	if (node.type === 'horizontalRule') return '<hr />';
 
 	return children;
 };
@@ -362,9 +404,6 @@ export const buildTiptapSnapshotHtml = ({
 	}
 
 	const { text: visibleText, textNodes } = collectTiptapText(json);
-	if (!visibleText.trim()) {
-		return buildSourceHighlightedHtml({ text: fallbackText, segments, activeSegmentId });
-	}
 
 	const index = buildWhitespaceIndex(visibleText);
 	const ranges: HighlightRange[] = [];

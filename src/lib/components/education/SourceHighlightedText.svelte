@@ -1,5 +1,12 @@
 <script lang="ts">
-	import { buildSourceHighlightedHtml, buildTiptapSnapshotHtml } from '$lib/utils/source-highlights';
+	import { getContext } from 'svelte';
+	import { writingAssetView } from './writing-document-extensions';
+	const i18n: any = getContext('i18n');
+	export let submissionId: string | null = null;
+	import {
+		buildSourceHighlightedHtml,
+		buildTiptapSnapshotHtml
+	} from '$lib/utils/source-highlights';
 
 	export let text = '';
 	export let json = null;
@@ -17,8 +24,9 @@
 		: buildSourceHighlightedHtml({ text, segments, activeSegmentId });
 </script>
 
-<div
-	class="prose prose-sm dark:prose-invert max-w-none whitespace-pre-wrap leading-7 break-words"
->
-	{@html highlighted}
-</div>
+{#key highlighted + (submissionId ?? '')}<div
+		use:writingAssetView={{ submissionId, t: (key) => $i18n.t(key) }}
+		class="prose prose-sm dark:prose-invert max-w-none whitespace-pre-wrap leading-7 break-words"
+	>
+		{@html highlighted}
+	</div>{/key}

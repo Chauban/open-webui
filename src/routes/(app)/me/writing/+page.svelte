@@ -280,6 +280,8 @@
 	$: if (assignmentGroups.missed.some((item) => hasUnreadFeedback(item, assignmentNotifications))) {
 		showMissed = true;
 	}
+	$: allowPersonal = home?.personal_writing_enabled === true;
+	$: if (!allowPersonal && isStudent) activeTab = 'assignment';
 	$: isStudent = ($user?.education_role || home?.role) === 'student';
 	// 首页顶部只留一条「接着写」:最近一份还没交的草稿。已交的不在这里重复出现。
 	$: resumeItem = (home?.recent_items ?? []).find((item) => item.status !== 'submitted') ?? null;
@@ -334,6 +336,14 @@
 								<span class="ml-1 tabular-nums opacity-70">{assignmentGroups.todo.length}</span>
 							{/if}
 						</button>
+						{#if allowPersonal}
+							<button
+								class={eduSegmentClass(activeTab === 'personal')}
+								on:click={() => (activeTab = 'personal')}
+							>
+								{$i18n.t('Personal Writing')}
+							</button>
+						{/if}
 					</div>
 					<!-- 入班后班级只是一条身份信息,不再单独占一张卡;换班规则放进悬停提示 -->
 					{#if home?.classrooms?.length}
@@ -451,7 +461,12 @@
 				{/if}
 			{/if}
 
-			{#if !isStudent}
+			{#if !isStudent && !allowPersonal}
+				<EduStateCard>{$i18n.t('Personal writing is disabled by your administrator.')}</EduStateCard
+				>
+			{/if}
+
+			{#if allowPersonal && (!isStudent || activeTab === 'personal')}
 				<div class="mb-3 flex items-center justify-between gap-4">
 					<div>
 						<h2 class="text-base font-semibold">{$i18n.t('My Writing')}</h2>

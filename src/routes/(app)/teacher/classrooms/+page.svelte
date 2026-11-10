@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { navigateTableRow } from '$lib/utils/education-navigation';
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 	import { getContext, onMount } from 'svelte';
@@ -121,7 +122,9 @@
 			<EduCard padding="none">
 				<div class="overflow-x-auto">
 					<table class="w-full min-w-[36rem] text-sm">
-						<thead class="bg-gray-50 text-left text-xs text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+						<thead
+							class="bg-gray-50 text-left text-xs text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+						>
 							<tr>
 								<th class="px-4 py-2.5 font-medium">{$i18n.t('Classroom')}</th>
 								<th class="px-4 py-2.5 font-medium">{$i18n.t('Invite Code')}</th>
@@ -134,13 +137,13 @@
 							{#each classrooms as item (item.classroom.id)}
 								<tr
 									class="cursor-pointer border-t border-gray-100 transition hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-800/60"
-									on:click={() => goto(`/teacher/classrooms/${item.classroom.id}`)}
+									on:click={(event) =>
+										navigateTableRow(event, `/teacher/classrooms/${item.classroom.id}`)}
 								>
 									<td class="px-4 py-3">
 										<a
 											href={`/teacher/classrooms/${item.classroom.id}`}
 											class="font-medium text-gray-900 hover:underline dark:text-gray-100"
-											on:click|stopPropagation
 										>
 											{getClassroomDisplayName(item.classroom.name, t)}
 										</a>

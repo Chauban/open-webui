@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { navigateTableRow } from '$lib/utils/education-navigation';
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 	import { getContext, onMount } from 'svelte';
@@ -106,7 +107,9 @@
 		const left = sortValue(a, sortKey);
 		const right = sortValue(b, sortKey);
 		const order =
-			typeof left === 'string' ? left.localeCompare(right as string) : (left as number) - (right as number);
+			typeof left === 'string'
+				? left.localeCompare(right as string)
+				: (left as number) - (right as number);
 		return sortDesc ? -order : order;
 	});
 	$: allSelected = members.length > 0 && selectedIds.size === members.length;
@@ -311,7 +314,8 @@
 					<EduButton variant="primary" on:click={() => openAdd('search')}>
 						{$i18n.t('Add Student')}
 					</EduButton>
-					<EduButton on:click={() => openAdd('import')}>{$i18n.t('Bulk Import Students')}</EduButton>
+					<EduButton on:click={() => openAdd('import')}>{$i18n.t('Bulk Import Students')}</EduButton
+					>
 				</div>
 			</EduCard>
 		{:else}
@@ -360,7 +364,9 @@
 			<EduCard padding="none">
 				<div class="overflow-x-auto">
 					<table class="w-full min-w-[44rem] text-sm">
-						<thead class="bg-gray-50 text-left text-xs text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+						<thead
+							class="bg-gray-50 text-left text-xs text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+						>
 							<tr>
 								<th class="w-10 pl-4">
 									<input
@@ -400,7 +406,7 @@
 								{@const profileHref = `/teacher/classrooms/${classroomId}/students/${member.member.user_id}`}
 								<tr
 									class="cursor-pointer border-t border-gray-100 transition hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-800/60"
-									on:click={() => goto(profileHref)}
+									on:click={(event) => navigateTableRow(event, profileHref)}
 								>
 									<!-- svelte-ignore a11y-click-events-have-key-events a11y-no-noninteractive-element-interactions -->
 									<td class="pl-4" on:click|stopPropagation>
@@ -416,7 +422,6 @@
 										<a
 											href={profileHref}
 											class="font-medium text-gray-900 hover:underline dark:text-gray-100"
-											on:click|stopPropagation
 										>
 											{member.user_name}
 										</a>
@@ -425,7 +430,8 @@
 										</div>
 									</td>
 									<td
-										class="px-4 py-3 text-right tabular-nums {member.submitted_count < member.assignment_count
+										class="px-4 py-3 text-right tabular-nums {member.submitted_count <
+										member.assignment_count
 											? 'text-rose-600 dark:text-rose-400'
 											: ''}"
 									>
@@ -441,13 +447,16 @@
 										{/if}
 									</td>
 									<td class="px-4 py-3 text-right tabular-nums">
-										{member.average_score_percent !== null && member.average_score_percent !== undefined
+										{member.average_score_percent !== null &&
+										member.average_score_percent !== undefined
 											? `${member.average_score_percent}%`
 											: '—'}
 									</td>
 									<td
 										class="whitespace-nowrap px-4 py-3 text-gray-600 dark:text-gray-300"
-										title={member.latest_submitted_at ? formatEpoch(member.latest_submitted_at) : ''}
+										title={member.latest_submitted_at
+											? formatEpoch(member.latest_submitted_at)
+											: ''}
 									>
 										{member.latest_submitted_at
 											? dayjs(member.latest_submitted_at * 1000)
@@ -512,7 +521,9 @@
 							<EduTile class="flex items-center justify-between gap-3">
 								<div class="min-w-0">
 									<div class="truncate font-medium">{candidate.name}</div>
-									<div class="truncate text-xs text-gray-500 dark:text-gray-400">{candidate.email}</div>
+									<div class="truncate text-xs text-gray-500 dark:text-gray-400">
+										{candidate.email}
+									</div>
 								</div>
 								<EduButton
 									size="sm"
@@ -544,9 +555,7 @@
 					<div class="mt-4 max-h-60 space-y-3 overflow-y-auto">
 						{#if bulkImportResult.failed_users?.length}
 							<EduTile tone="rose">
-								<div
-									class="mb-2 text-xs font-semibold text-rose-600 dark:text-rose-400"
-								>
+								<div class="mb-2 text-xs font-semibold text-rose-600 dark:text-rose-400">
 									{$i18n.t('Failed')} ({bulkImportResult.failed_users.length})
 								</div>
 								<div class="space-y-1 text-sm text-rose-700 dark:text-rose-300">
@@ -558,10 +567,9 @@
 						{/if}
 						{#if bulkImportResult.skipped_users?.length}
 							<EduTile tone="amber">
-								<div
-									class="mb-2 text-xs font-semibold text-amber-600 dark:text-amber-400"
-								>
-									{$i18n.t('Skipped (already in this classroom)')} ({bulkImportResult.skipped_users.length})
+								<div class="mb-2 text-xs font-semibold text-amber-600 dark:text-amber-400">
+									{$i18n.t('Skipped (already in this classroom)')} ({bulkImportResult.skipped_users
+										.length})
 								</div>
 								<div class="space-y-1 text-sm text-amber-700 dark:text-amber-300">
 									{#each bulkImportResult.skipped_users as skipped}

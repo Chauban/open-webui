@@ -28,7 +28,7 @@ from open_webui.services.education.challenge import _extract_json_object
 from open_webui.utils.thinking import ThinkingSupport, effective_thinking_level
 from open_webui.services.education.teaching_config import lock_assignment, revision_system_context
 from open_webui.services.education.reading_conversation import append_reading_message
-from open_webui.services.education.materials import material_context, material_rules, snapshot_materials
+from open_webui.services.education.materials import material_context, model_materials, apply_image_reading_policy
 
 log = logging.getLogger(__name__)
 
@@ -196,7 +196,9 @@ async def read_revision(request, user, session, assignment, form, db, dialogue):
     version = Education.get_latest_version(session.id, db=db)
     context = {
         'model_id': model.model_id,
-        'materials': snapshot_materials(session.id, db),
+        'materials': model_materials(session.id, assignment.image_reading_enabled, db, document=((note.data or {}).get('baseline' if form.purpose == 'first_read' else 'content') or {}).get('json')),
+        'source_json': ((note.data or {}).get('baseline' if form.purpose == 'first_read' else 'content') or {}).get('json'),
+        'image_reading_enabled': assignment.image_reading_enabled,
         'requested_thinking': requested_thinking,
         'actual_thinking': actual_thinking,
         'teaching_version': assignment.teaching_config['version'],
@@ -225,11 +227,11 @@ async def read_revision(request, user, session, assignment, form, db, dialogue):
         db.commit()
         return result
     # Keep the actual allowlisted input for audit, never append scoring config.
-    context['dialogue'] = [
+    context['dialogue'] = apply_image_reading_policy([
         {'role': m.get('role'), 'content': m.get('content')}
         for m in dialogue[-30:]
         if m.get('role') in ('user', 'assistant')
-    ]
+    ], assignment.image_reading_enabled)
     if row is None:
         sequence = (
             db.query(func.max(RevisionReading.sequence_no)).filter_by(writing_session_id=session.id).scalar() or 0
@@ -255,7 +257,7 @@ async def read_revision(request, user, session, assignment, form, db, dialogue):
     db.commit()  # No database lock held during model generation.
     install_reading_retry_handler(request, reading_id, context)
     messages = [
-        {'role': 'system', 'content': context['system'] + material_rules(context['materials']) + '\n' + PURPOSES[form.purpose] + '\n' + FORMAT},
+        {'role': 'system', 'content': context['system'] + '\n' + PURPOSES[form.purpose] + '\n' + FORMAT},
         {
             'role': 'user',
             'content': json.dumps(
@@ -385,8 +387,8 @@ def current_revision_chat_context(session):
         if assignment.task_mode == 'revise_argument':
             from open_webui.services.education.teaching_runtime import assignment_config, system_context
             text = system_context(assignment_config(assignment, db))
-        materials = snapshot_materials(session.id, db)
-        return text + material_rules(materials), {
+        materials = model_materials(session.id, assignment.image_reading_enabled, db)
+        return text, {
             'teaching_version': assignment.teaching_config['version'],
             'description_version': assignment.description_version,
             'description': assignment.description,
@@ -394,6 +396,8 @@ def current_revision_chat_context(session):
             'purpose': 'coaching_chat',
             'source_version_id': version.id if version else None,
             'source_text': source_text,
+            'source_json': ((note.data or {}).get('content') or {}).get('json'),
             'materials': materials,
+            'image_reading_enabled': assignment.image_reading_enabled,
             'called_at': int(time.time()),
         }

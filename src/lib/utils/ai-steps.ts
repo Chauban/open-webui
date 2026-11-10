@@ -22,8 +22,8 @@ export const AI_STEP_TEXT: Record<AiStepKey, { title: string; hint: string; note
 		hint: 'The questions about the student’s text before submitting.'
 	},
 	image_parsing: {
-		title: 'Draft image parsing',
-		hint: 'Transcribes photos and scanned pages of a draft into text for the student to check. Pick a model that can read images; a fast model without step-by-step thinking keeps the wait short. Students do not need access to it in chat. Without a model, image import is off.'
+		title: 'Image-to-text model',
+		hint: 'Platform-wide model for reading document images, scanned pages and photos. It is separate from the assignment coaching model; teachers decide whether image reading is enabled for each assignment.'
 	},
 	class_insight: {
 		title: 'Class argument summary',

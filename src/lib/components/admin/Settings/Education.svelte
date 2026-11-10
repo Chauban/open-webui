@@ -13,6 +13,7 @@
 	import EducationAiStepSettings from './EducationAiStepSettings.svelte';
 	import EducationAutoRetrySettings from './EducationAutoRetrySettings.svelte';
 	import EducationStudentLimits from './EducationStudentLimits.svelte';
+	import EducationPersonalWritingSettings from './EducationPersonalWritingSettings.svelte';
 
 	const i18n = getContext('i18n');
 	const styles: Array<{ key: CoachingStyle; label: string }> = [
@@ -37,7 +38,11 @@
 	};
 	onMount(load);
 
-	const save = async (policy?: AiStepPolicy, retries?: AutoRetryPolicy) => {
+	const save = async (
+		policy?: AiStepPolicy,
+		retries?: AutoRetryPolicy,
+		personal?: { student: boolean; teacher: boolean }
+	) => {
 		if (!values || saving) return;
 		saving = true;
 		try {
@@ -47,7 +52,11 @@
 				EDUCATION_ENABLE_RETURN: values.EDUCATION_ENABLE_RETURN,
 				EDUCATION_ENABLE_COACHING_STYLES: values.EDUCATION_ENABLE_COACHING_STYLES,
 				EDUCATION_AI_STEP_SETTINGS: policy ?? values.EDUCATION_AI_STEP_SETTINGS,
-				EDUCATION_AUTO_RETRY: retries ?? values.EDUCATION_AUTO_RETRY
+				EDUCATION_AUTO_RETRY: retries ?? values.EDUCATION_AUTO_RETRY,
+				EDUCATION_PERSONAL_WRITING_STUDENT:
+					personal?.student ?? values.EDUCATION_PERSONAL_WRITING_STUDENT,
+				EDUCATION_PERSONAL_WRITING_TEACHER:
+					personal?.teacher ?? values.EDUCATION_PERSONAL_WRITING_TEACHER
 			});
 			await appConfig.set(await getBackendConfig());
 			toast.success($i18n.t('Settings saved successfully!'));
@@ -66,6 +75,12 @@
 	{:else if values}
 		<TeachingTypes />
 		<TeachingSearch />
+		<EducationPersonalWritingSettings
+			student={values.EDUCATION_PERSONAL_WRITING_STUDENT}
+			teacher={values.EDUCATION_PERSONAL_WRITING_TEACHER}
+			disabled={saving}
+			onSave={(student, teacher) => save(undefined, undefined, { student, teacher })}
+		/>
 		<section class="space-y-4 rounded-xl border border-gray-200 p-4 dark:border-gray-700">
 			<div class="flex items-center justify-between gap-4">
 				<div>

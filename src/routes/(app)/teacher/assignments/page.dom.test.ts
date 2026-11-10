@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/sve
 import { readable } from 'svelte/store';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import Page from './+page.svelte';
+import { goto } from '$app/navigation';
 
 const { list, visibility } = vi.hoisted(() => ({ list: vi.fn(), visibility: vi.fn() }));
 vi.mock('$app/stores', async () => ({
@@ -27,6 +28,7 @@ const row = (id: string, hidden: boolean) => ({
 	pending_review_count: 1
 });
 beforeEach(() => {
+	vi.mocked(goto).mockClear();
 	localStorage.token = 'test-token';
 	vi.stubGlobal(
 		'ResizeObserver',
@@ -41,6 +43,42 @@ beforeEach(() => {
 	visibility.mockImplementation(async (_, id, hidden) => row(id, hidden).assignment);
 });
 afterEach(cleanup);
+
+test.each([{}, { ctrlKey: true }, { metaKey: true }, { shiftKey: true }])(
+	'assignment links reach the router without triggering row navigation (%j)',
+	async (modifiers) => {
+		render(Page, { context });
+		const link = await screen.findByRole('link', { name: 'Visible essay' });
+		const row = link.closest('tr')!;
+		const pendingLink = within(row).getByRole('link', { name: '1' });
+		const routerClick = vi.fn((event: MouseEvent) => {
+			expect(event.defaultPrevented).toBe(false);
+			event.preventDefault();
+		});
+		document.addEventListener('click', routerClick);
+		try {
+			await fireEvent.click(link, modifiers);
+			await fireEvent.click(pendingLink, modifiers);
+			expect(routerClick).toHaveBeenCalledTimes(2);
+			expect(goto).not.toHaveBeenCalled();
+			expect(pendingLink.getAttribute('href')).toContain('/submissions?status=pending');
+		} finally {
+			document.removeEventListener('click', routerClick);
+		}
+	}
+);
+
+test('row space navigates once while its menu leaves navigation alone', async () => {
+	render(Page, { context });
+	const link = await screen.findByRole('link', { name: 'Visible essay' });
+	const row = link.closest('tr')!;
+	await fireEvent.click(row.cells[0]);
+	expect(goto).toHaveBeenCalledTimes(1);
+	expect(goto).toHaveBeenCalledWith('/teacher/assignments/Visible essay');
+	vi.mocked(goto).mockClear();
+	await fireEvent.click(within(row).getByRole('button', { name: 'More' }));
+	expect(goto).not.toHaveBeenCalled();
+});
 
 test('hides and restores assignments between separate groups', async () => {
 	render(Page, { context });

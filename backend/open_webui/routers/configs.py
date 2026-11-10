@@ -95,6 +95,8 @@ EDUCATION_CONFIG_KEYS = {
     'EDUCATION_CHALLENGE_PROMPTS': 'education.challenge_prompts',
     'EDUCATION_AI_STEP_SETTINGS': 'education.ai_steps',
     'EDUCATION_AUTO_RETRY': 'education.auto_retry',
+    'EDUCATION_PERSONAL_WRITING_STUDENT': 'education.personal_writing.student',
+    'EDUCATION_PERSONAL_WRITING_TEACHER': 'education.personal_writing.teacher',
 }
 SUBAGENTS_CONFIG_KEYS = {
     'ENABLE_SUBAGENTS': 'subagents.enable',
@@ -848,6 +850,8 @@ class EducationConfigForm(BaseModel):
     EDUCATION_AI_STEP_SETTINGS: EducationAiStepPolicy
     # 服务商一时出错时自动重发里管理员能开关的几处(个人写作),见 ai_steps.py 的 RETRY_SCOPES。
     EDUCATION_AUTO_RETRY: AutoRetryPolicy
+    EDUCATION_PERSONAL_WRITING_STUDENT: bool
+    EDUCATION_PERSONAL_WRITING_TEACHER: bool
 
 
 class StudentChatOverridesView(BaseModel):

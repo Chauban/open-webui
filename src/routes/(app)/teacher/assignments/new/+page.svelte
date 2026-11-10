@@ -45,6 +45,7 @@
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
 
 	let allowedTaskModes: import('$lib/apis/education').TaskMode[] = [];
+	let imageParsingModel: import('$lib/apis/education').ImageParsingModelView | null = null;
 	let teachingConfigs: Partial<
 		Record<import('$lib/apis/education').TaskMode, import('$lib/apis/education').TeachingConfig>
 	> = {};
@@ -54,6 +55,7 @@
 	let reflectionNotice = '';
 	// 默认维度走词条，教师看到的是母语名称；key 只是后端字段名，教师不填。
 	let draft: AssignmentDraft = {
+		imageReadingEnabled: false,
 		scoringMode: 'dimensions',
 		title: '',
 		description: '',
@@ -91,6 +93,7 @@
 			// 档位和作业形式的初始值由管理员按实例设定；复制作业时下面会改用源作业的设置。
 			allowedTaskModes = assignmentDefaults.allowed_task_modes;
 			teachingConfigs = assignmentDefaults.teaching_configs;
+			imageParsingModel = assignmentDefaults.image_parsing_model;
 			draft.coachingStyle = assignmentDefaults.coaching_style;
 			thinkingPolicy = assignmentDefaults.thinking;
 			rubricDefaults = assignmentDefaults.rubrics;
@@ -119,6 +122,7 @@
 						scoreMax: String(source.assignment.score_max),
 						coachingStyle: source.assignment.coaching_style,
 						taskMode: source.assignment.task_mode,
+						imageReadingEnabled: source.assignment.image_reading_enabled,
 						challengeEnabled: source.assignment.challenge_enabled ?? false,
 						challengeRounds: source.assignment.challenge_rounds ?? 3,
 						challengeFocusKeys: [...(source.assignment.challenge_focus_keys ?? [])],
@@ -174,6 +178,7 @@
 					throw new Error('Preparation does not belong to this assignment');
 				const a = preparation.payload.assignment;
 				draft = {
+					imageReadingEnabled: a.image_reading_enabled,
 					...draft,
 					title: a.title,
 					description: a.description,
@@ -254,6 +259,7 @@
 			<EduStateCard>{$i18n.t('请联系管理员开通可布置的作业类型。')}</EduStateCard>
 		{:else}
 			<AssignmentForm
+				{imageParsingModel}
 				{allowedTaskModes}
 				{teachingConfigs}
 				bind:draft

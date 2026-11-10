@@ -1,6 +1,7 @@
 """Mixed documents must retain their evidence through import, teaching and submission."""
 
 import asyncio
+import copy
 import io
 import json
 import sys
@@ -20,6 +21,7 @@ from open_webui.test.apps.webui.routers.test_education_smoke import UserContext
 from open_webui.test.apps.webui.routers.test_education_smoke import education_client as base_education_client
 from open_webui.test.apps.webui.routers.test_revision_coaching import DRAFT, model_stub, setup, submit
 from PIL import Image
+from open_webui.services.education.writing_document import walk_document, document_text, text_document
 
 education_client = base_education_client
 
@@ -115,9 +117,19 @@ def vision(monkeypatch):
     return calls
 
 
+def imported_document(result, corrections=None):
+    document = copy.deepcopy(result['content_json'])
+    if len(document_text(document)) < 200:
+        document['content'] = text_document(DRAFT)['content'] + document['content']
+    for node in walk_document(document):
+        if node['type'] == 'writingImage' and node['attrs']['blockId'] in (corrections or {}):
+            node['attrs'].update(transcription=corrections[node['attrs']['blockId']], transcriptionEdited=True)
+    return document
+
+
 def test_word_preserves_notes_textboxes_and_embedded_images():
     result = materials.parse_document('初稿.docx', word_document())
-    assert '【脚注 1】' in result.text and '【尾注 2】' in result.text
+    assert len([n for n in walk_document(result.document) if n['type'] == 'writingNote']) == 2
     assert DRAFT in result.text
     assert len(result.images) == 1
     by_kind = {block.kind: block for block in result.blocks}
@@ -134,7 +146,7 @@ def test_pdf_text_does_not_suppress_visual_reading_or_footnotes():
     assert 'volume III, page 42' in result.text
     assert len(result.images) == 1
     assert any('https://example.org/source' in block.text for block in result.blocks)
-    assert next(block for block in result.blocks if block.kind == 'page').location == '第 1 页'
+    assert next(block for block in result.blocks if block.kind == 'image').location == '第 1 页'
 
 
 def test_word_external_images_and_unsupported_objects_are_explicit():
@@ -159,7 +171,7 @@ def test_materials_reach_first_read_review_chat_and_frozen_submission(
     education_client, monkeypatch, storage, vision, mode, format
 ):
     client, teacher, other_teacher, student, other_student, factory = education_client
-    assignment, sid, _ = setup(client, teacher, student, mode)
+    assignment, sid, _ = setup(client, teacher, student, mode, image_reading=True)
     assert client.delete(f'/api/v1/writing-sessions/{sid}/draft-baseline').status_code == 200
     data = word_document() if format == 'docx' else pdf_document()
     response = client.post(f'/api/v1/writing-sessions/{sid}/import/document', files={'file': (f'draft.{format}', data)})
@@ -170,10 +182,12 @@ def test_materials_reach_first_read_review_chat_and_frozen_submission(
     assert image_block['status'] == 'read'
     assert vision and '页码' in vision[0][0]['content']
     assert client.get(f'/api/v1/writing-sessions/{sid}/materials').json() == []
+    document = imported_document(imported, {image_block['id']: '学生核对出处：《史料集》卷三，第43页。'})
     confirmed = client.post(
         f'/api/v1/writing-sessions/{sid}/draft-baseline',
         json={
             'text': DRAFT,
+            'content_json': document,
             'materials': [
                 {'id': material['id'], 'corrections': {image_block['id']: '学生核对出处：《史料集》卷三，第43页。'}}
             ],
@@ -185,7 +199,7 @@ def test_materials_reach_first_read_review_chat_and_frozen_submission(
         if purpose == 'revision_review':
             assert (
                 client.post(
-                    f'/api/v1/writing-sessions/{sid}/autosave', json={'content_text': DRAFT + '最新修改。'}
+                    f'/api/v1/writing-sessions/{sid}/autosave', json={'content_json': document}
                 ).status_code
                 == 200
             )
@@ -194,7 +208,8 @@ def test_materials_reach_first_read_review_chat_and_frozen_submission(
         assert reading.json()['status'] == 'ready', reading.text
         payload = json.dumps(calls[-1], ensure_ascii=False)
         assert '第43页' in payload
-        assert '未读取、未提供、未核实' in payload
+        assert '未读取、未提供、未核实' not in calls[-1][0]['content']
+        assert materials.EVIDENCE_PROMPT not in payload
         assert reading.json()['context']['materials'][0]['id'] == material['id']
     with factory() as db:
         snapshot = materials.snapshot_materials(sid, db)
@@ -207,7 +222,7 @@ def test_materials_reach_first_read_review_chat_and_frozen_submission(
         )
         assert '第43页' in messages[-1]['content']
         assert '最新修改后的正文' in messages[-1]['content']
-    submitted = submit(client, assignment, sid)
+    submitted = submit(client, assignment, sid, final_content_json=document, final_content_text=document_text(document))
     assert submitted.status_code == 200, submitted.text
     submission_id = submitted.json()['submission_id']
     with factory() as db:
@@ -234,7 +249,7 @@ def test_materials_reach_first_read_review_chat_and_frozen_submission(
 
 def test_missing_vision_is_visible_and_does_not_block_submission(education_client, monkeypatch, storage):
     client, teacher, _, student, _, factory = education_client
-    assignment, sid, _ = setup(client, teacher, student)
+    assignment, sid, _ = setup(client, teacher, student, image_reading=True)
     client.delete(f'/api/v1/writing-sessions/{sid}/draft-baseline')
 
     async def unavailable(*args):
@@ -252,7 +267,7 @@ def test_missing_vision_is_visible_and_does_not_block_submission(education_clien
     assert (
         client.post(
             f'/api/v1/writing-sessions/{sid}/draft-baseline',
-            json={'text': DRAFT, 'materials': [{'id': material['id']}]},
+            json={'content_json': imported_document(response.json()), 'materials': [{'id': material['id']}]},
         ).status_code
         == 200
     )
@@ -264,7 +279,7 @@ def test_missing_vision_is_visible_and_does_not_block_submission(education_clien
 
 def test_unrelated_material_cannot_be_attached(education_client, storage):
     client, teacher, _, student, other_student, factory = education_client
-    _, sid, _ = setup(client, teacher, student)
+    _, sid, _ = setup(client, teacher, student, image_reading=True)
     client.delete(f'/api/v1/writing-sessions/{sid}/draft-baseline')
     response = client.post(
         f'/api/v1/writing-sessions/{sid}/import/document', files={'file': ('draft.txt', DRAFT.encode())}
@@ -296,22 +311,23 @@ def test_partial_image_failure_keeps_success_and_reports_missing(monkeypatch, vi
         return '第二张可读出处：第42页'
 
     monkeypatch.setattr(draft_import, 'generate_transcription', generate)
-    asyncio.run(materials.read_visuals(parsed, None, None))
+    asyncio.run(materials.read_visuals(parsed, None, None, enabled=True))
     assert parsed.blocks[0].status == 'unreadable'
     assert parsed.blocks[0].detail
     assert parsed.blocks[1].text == '第二张可读出处：第42页'
     assert parsed.blocks[1].status == 'read'
 
 
-def test_scanned_pdf_populates_body_and_preserves_original_page(education_client, storage, vision):
+def test_scanned_pdf_keeps_ocr_separate_until_explicit_insertion(education_client, storage, vision):
     client, teacher, _, student, _, _ = education_client
-    _, sid, _ = setup(client, teacher, student, 'from_scratch')
+    _, sid, _ = setup(client, teacher, student, 'from_scratch', image_reading=True)
     result = client.post(
         f'/api/v1/writing-sessions/{sid}/import/document', files={'file': ('scan.pdf', pdf_document(scan=True))}
     )
     assert result.status_code == 200, result.text
     body = result.json()
-    assert '第42页' in body['text']
+    assert body['text'] == ''
+    assert '第42页' in body['content_json']['content'][0]['attrs']['transcription']
     assert body['material']['blocks'][0]['image'] is True
     response = client.post(
         f'/api/v1/writing-sessions/{sid}/materials',
@@ -322,7 +338,7 @@ def test_scanned_pdf_populates_body_and_preserves_original_page(education_client
 
 def test_from_scratch_keeps_materials_separate_and_replaces_explicitly(education_client, storage, vision):
     client, teacher, _, student, _, factory = education_client
-    _, sid, _ = setup(client, teacher, student, 'from_scratch')
+    _, sid, _ = setup(client, teacher, student, 'from_scratch', image_reading=True)
     original = client.post(
         f'/api/v1/writing-sessions/{sid}/import/document', files={'file': ('original.docx', word_document())}
     ).json()
@@ -332,6 +348,7 @@ def test_from_scratch_keeps_materials_separate_and_replaces_explicitly(education
         ).status_code
         == 200
     )
+    assert client.post(f'/api/v1/writing-sessions/{sid}/autosave', json={'content_json': original['content_json']}).status_code == 200
     from open_webui.services.education.writing_context import build_current_text_context
 
     with factory() as db:
@@ -348,7 +365,10 @@ def test_from_scratch_keeps_materials_separate_and_replaces_explicitly(education
         ).status_code
         == 200
     )
-    assert [m['id'] for m in client.get(f'/api/v1/writing-sessions/{sid}/materials').json()] == [new['material']['id']]
+    assert client.post(f'/api/v1/writing-sessions/{sid}/autosave', json={'content_json': new['content_json']}).status_code == 200
+    assert {m['id'] for m in client.get(f'/api/v1/writing-sessions/{sid}/materials').json()} == {original['material']['id'], new['material']['id']}
+    with factory() as db:
+        assert materials.model_materials(sid, True, db) == []
 
 
 @pytest.mark.parametrize('filename,phrase', [('zh_draft.pdf', '社区参与'), ('en_draft.pdf', 'Urban Renewal')])

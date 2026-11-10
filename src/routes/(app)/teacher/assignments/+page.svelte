@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { navigateTableRow } from '$lib/utils/education-navigation';
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 	import { getContext, onMount } from 'svelte';
@@ -254,7 +255,8 @@
 												class="cursor-pointer border-t border-gray-100 transition hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-800/60 {group.hidden
 													? 'bg-gray-50 text-gray-500 dark:bg-gray-900 dark:text-gray-400'
 													: ''}"
-												on:click={() => goto(`/teacher/assignments/${item.assignment.id}`)}
+												on:click={(event) =>
+													navigateTableRow(event, `/teacher/assignments/${item.assignment.id}`)}
 											>
 												<td class="px-4 py-3">
 													<a
@@ -262,7 +264,6 @@
 														class="font-medium hover:underline {group.hidden
 															? 'text-gray-500 dark:text-gray-400'
 															: 'text-gray-900 dark:text-gray-100'}"
-														on:click|stopPropagation
 													>
 														{item.assignment.title}
 													</a>
@@ -299,7 +300,6 @@
 															class="font-semibold hover:underline {group.hidden
 																? 'text-gray-500 dark:text-gray-400'
 																: 'text-amber-600 dark:text-amber-400'}"
-															on:click|stopPropagation
 														>
 															{item.pending_review_count}
 														</a>

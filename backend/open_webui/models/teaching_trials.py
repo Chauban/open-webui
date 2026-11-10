@@ -127,6 +127,12 @@ class ModelRoute(StrictModel):
     connection_hash: str | None = None
 
 
+class FallbackModelBinding(StrictModel):
+    model_id: str = Field(min_length=1, max_length=256)
+    capabilities: dict[str, StrictBool]
+    connection_hash: str
+
+
 class ModelBinding(StrictModel):
     model_id: str
     base_model_id: str
@@ -137,6 +143,7 @@ class ModelBinding(StrictModel):
     thinking_support: dict[str, bool]
     thinking_format: str | None
     capabilities: dict[str, bool]
+    fallback: FallbackModelBinding | None = None
 
 
 class AiRuntimeConfig(StrictModel):

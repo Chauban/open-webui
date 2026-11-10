@@ -142,6 +142,7 @@ from open_webui.models.education import Education
 from open_webui.services.education.writing_access import (
     ensure_writing_session_writable,
     ensure_writing_session_access,
+    personal_writing_enabled,
 )
 from open_webui.services.education.ai_steps import (
     get_ai_step_policy,
@@ -2443,6 +2444,7 @@ async def get_app_config(request: Request):
                     'enable_google_drive_integration': config.get('google_drive.enable'),
                     'enable_onedrive_integration': config.get('onedrive.enable'),
                     'enable_memories': config.get('memories.enable'),
+                    'enable_personal_writing': await personal_writing_enabled(user),
                     'enable_education_return': config.get('education.enable_return'),
                     'enable_education_coaching_styles': config.get('education.enable_coaching_styles'),
                     'enable_education_draft_image_import': bool(

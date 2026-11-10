@@ -2,7 +2,7 @@
 	import { getContext, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
-	import { config, showSidebar } from '$lib/stores';
+	import { config, showSidebar, WEBUI_NAME } from '$lib/stores';
 	import SidebarIcon from '$lib/components/icons/Sidebar.svelte';
 
 	const i18n = getContext('i18n');
@@ -32,7 +32,7 @@
 	});
 </script>
 
-<svelte:head><title>{$i18n.t('Courseware')} · Right Write</title></svelte:head>
+<svelte:head><title>{$i18n.t('Courseware')} · {$WEBUI_NAME}</title></svelte:head>
 
 <div
 	class="flex h-full min-w-0 w-full flex-col {$showSidebar

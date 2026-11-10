@@ -1,10 +1,10 @@
 <script lang="ts">
+	import { navigateTableRow } from '$lib/utils/education-navigation';
 	import { isRevision } from '$lib/utils/task-types';
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 	import { getContext, onDestroy, onMount } from 'svelte';
 	import { get } from 'svelte/store';
-	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
 	import dayjs from '$lib/dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
@@ -172,8 +172,6 @@
 		}
 	};
 
-	const openSubmission = (submissionId: string) => goto(`/teacher/submissions/${submissionId}`);
-
 	onMount(async () => {
 		await reload();
 		if (!scoped) {
@@ -320,13 +318,13 @@
 					{#each items as item (item.submission.id)}
 						<tr
 							class="cursor-pointer border-t border-gray-100 transition hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-800/60"
-							on:click={() => openSubmission(item.submission.id)}
+							on:click={(event) =>
+								navigateTableRow(event, `/teacher/submissions/${item.submission.id}`)}
 						>
 							<td class="px-4 py-3">
 								<a
 									href={`/teacher/submissions/${item.submission.id}`}
 									class="font-medium text-gray-900 hover:underline dark:text-gray-100"
-									on:click|stopPropagation
 								>
 									{item.student_name}
 								</a>

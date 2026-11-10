@@ -215,6 +215,7 @@ def capture_profile_evidence(
                     previous_final.note_snapshot_text if previous_final else ""
                 )
                 or "",
+                final_content_json=previous_final.note_snapshot_json if previous_final else None,
                 submitted_at=previous_submission.submitted_at,
                 reviewed_at=previous_review.reviewed_at if previous_review else None,
                 score=previous_review.score if previous_review else None,

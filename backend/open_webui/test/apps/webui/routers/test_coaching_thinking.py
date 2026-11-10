@@ -354,6 +354,7 @@ def test_reply_records_the_level_it_was_sent_with(education_client, monkeypatch)
 
 def test_coaching_chat_retries_follow_the_retry_scopes(education_client, monkeypatch):
     """作业辅导对话始终带重发标记;个人写作默认不带,管理员打开后带;不在写作区的普通对话不带。"""
+    asyncio.run(Config.upsert({"education.personal_writing.teacher": True}))
     webui_main, student, assignment_folder, _ = _assignment_chat(
         education_client, monkeypatch, {'thinking': 'low', 'students_choose_thinking': True}, 'student'
     )

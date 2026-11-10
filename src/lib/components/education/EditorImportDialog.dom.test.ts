@@ -2,6 +2,8 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { readable } from 'svelte/store';
 import { afterEach, expect, test, vi } from 'vitest';
+import { textDocument } from '$lib/utils/writing-document';
+vi.mock('./WritingEditor.svelte', () => import('./test-fixtures/WritingEditor.svelte'));
 
 const extractImportDocument = vi.fn();
 const extractImportImages = vi.fn();
@@ -32,18 +34,22 @@ afterEach(() => {
 const context = new Map([['i18n', readable({ t: (key: string) => key })]]);
 
 const importDocument = async (text: string) => {
-	extractImportDocument.mockResolvedValue({ text });
+	extractImportDocument.mockResolvedValue({
+		text,
+		content_json: textDocument(text),
+		material: { id: 'm', filename: '提纲.docx', blocks: [] }
+	});
 	const file = new File(['docx bytes'], '提纲.docx');
-	await fireEvent.change(screen.getByTestId('draft-file-input'), { target: { files: [file] } });
-	const preview = screen.getByTestId('import-preview') as HTMLTextAreaElement;
-	await waitFor(() => expect(preview.value).toBe(text));
+	await fireEvent.change(screen.getByTestId('draft-upload-input'), { target: { files: [file] } });
+	const preview = screen.getByTestId('workspace-editor') as HTMLTextAreaElement;
+	await waitFor(() => expect(JSON.parse(preview.value)).toEqual(textDocument(text)));
 	return preview;
 };
 
 test('导入的文字先进预览,学生可以改,再插到光标处', async () => {
 	const onInsert = vi.fn();
 	render(EditorImportDialog, {
-		props: { show: true, sessionId: 'session-1', hasText: false, onInsert },
+		props: { show: true, sessionId: 'session-1', hasContent: false, onInsert },
 		context
 	});
 	const insertButton = screen.getByText('Insert at cursor').closest('button')!;
@@ -53,16 +59,20 @@ test('导入的文字先进预览,学生可以改,再插到光标处', async () 
 	await fireEvent.input(preview, { target: { value: '第一段。\n改过的第二段。' } });
 	await fireEvent.click(insertButton);
 
-	expect(onInsert).toHaveBeenCalledWith('第一段。\n改过的第二段。', 'insert', {
-		kind: 'document',
-		names: ['提纲.docx']
-	});
+	expect(onInsert).toHaveBeenCalledWith(
+		'第一段。\n改过的第二段。',
+		'insert',
+		expect.objectContaining({
+			kind: 'document',
+			names: ['提纲.docx']
+		})
+	);
 });
 
 test('编辑器里已有正文时,替换全文要再点一次确认', async () => {
 	const onInsert = vi.fn();
 	render(EditorImportDialog, {
-		props: { show: true, sessionId: 'session-1', hasText: true, onInsert },
+		props: { show: true, sessionId: 'session-1', hasContent: true, onInsert },
 		context
 	});
 	await importDocument('新的全文。');
@@ -74,8 +84,12 @@ test('编辑器里已有正文时,替换全文要再点一次确认', async () =
 	).toBeTruthy();
 
 	await fireEvent.click(screen.getByText('Confirm replacing all text').closest('button')!);
-	expect(onInsert).toHaveBeenCalledWith('新的全文。', 'replace', {
-		kind: 'document',
-		names: ['提纲.docx']
-	});
+	expect(onInsert).toHaveBeenCalledWith(
+		'新的全文。',
+		'replace',
+		expect.objectContaining({
+			kind: 'document',
+			names: ['提纲.docx']
+		})
+	);
 });

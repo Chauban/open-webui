@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { navigateTableRow } from '$lib/utils/education-navigation';
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 	import { getContext, onMount } from 'svelte';
@@ -26,11 +27,7 @@
 	import EduStatCard from '$lib/components/education/EduStatCard.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 	import { classroomTabs } from '$lib/components/education/teacher-nav';
-	import {
-		formatEpoch,
-		getClassroomDisplayName,
-		resolveErrorMessage
-	} from '$lib/utils/education';
+	import { formatEpoch, getClassroomDisplayName, resolveErrorMessage } from '$lib/utils/education';
 
 	// 班级首页:此前 8 个统计数 + 3 张跳转卡 + 「作业进度」「最近作业」两份
 	// 同一批作业的列表(前者还点不动)。现在是 4 个能点进去的数 + 一张作业表。
@@ -133,7 +130,7 @@
 		{#if classroom}
 			<EduButton
 				variant="primary"
-					on:click={() => goto(`/teacher/assignments/new?classroomId=${classroomId}`)}
+				on:click={() => goto(`/teacher/assignments/new?classroomId=${classroomId}`)}
 			>
 				<Plus className="size-4" strokeWidth="2.5" />
 				{$i18n.t('Create Assignment')}
@@ -172,7 +169,9 @@
 					</div>
 				</EduCard>
 			{:else}
-				<div class="mb-5 flex flex-wrap items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+				<div
+					class="mb-5 flex flex-wrap items-center gap-2 text-sm text-gray-600 dark:text-gray-300"
+				>
 					<span class="text-gray-500 dark:text-gray-400">{$i18n.t('Invite Code')}</span>
 					<button
 						type="button"
@@ -182,7 +181,9 @@
 					>
 						{classroom.invite_code}
 					</button>
-					<EduButton variant="link" on:click={copyInviteLink}>{$i18n.t('Copy Invite Link')}</EduButton>
+					<EduButton variant="link" on:click={copyInviteLink}
+						>{$i18n.t('Copy Invite Link')}</EduButton
+					>
 				</div>
 			{/if}
 
@@ -191,8 +192,16 @@
 					? 'lg:grid-cols-4'
 					: 'lg:grid-cols-3'}"
 			>
-				<EduStatCard label="Students" value={studentCount} href={`/teacher/classrooms/${classroomId}/students`} />
-				<EduStatCard label="Assignments" value={assignments.length} href={`/teacher/assignments?classroom=${classroomId}`} />
+				<EduStatCard
+					label="Students"
+					value={studentCount}
+					href={`/teacher/classrooms/${classroomId}/students`}
+				/>
+				<EduStatCard
+					label="Assignments"
+					value={assignments.length}
+					href={`/teacher/assignments?classroom=${classroomId}`}
+				/>
 				<EduStatCard
 					label="To Review"
 					value={pendingCount}
@@ -210,7 +219,9 @@
 			</div>
 
 			<EduCard padding="none">
-				<div class="flex items-center justify-between border-b border-gray-100 px-4 py-3 dark:border-gray-800">
+				<div
+					class="flex items-center justify-between border-b border-gray-100 px-4 py-3 dark:border-gray-800"
+				>
 					<h2 class="text-sm font-semibold">{$i18n.t('Assignments')}</h2>
 				</div>
 				{#if sortedAssignments.length === 0}
@@ -220,7 +231,9 @@
 				{:else}
 					<div class="overflow-x-auto">
 						<table class="w-full min-w-[40rem] text-sm">
-							<thead class="bg-gray-50 text-left text-xs text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+							<thead
+								class="bg-gray-50 text-left text-xs text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+							>
 								<tr>
 									<th class="px-4 py-2.5 font-medium">{$i18n.t('Assignment')}</th>
 									<th class="px-4 py-2.5 font-medium">{$i18n.t('Due At')}</th>
@@ -234,20 +247,35 @@
 							<tbody>
 								{#each sortedAssignments as item (item.assignment.id)}
 									<tr
-										class="cursor-pointer border-t border-gray-100 transition hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-800/60"
-										on:click={() => goto(`/teacher/assignments/${item.assignment.id}`)}
+										class="cursor-pointer border-t border-gray-100 transition hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-800/60 {item
+											.assignment.hidden
+											? 'bg-gray-50 text-gray-500 dark:bg-gray-900 dark:text-gray-400'
+											: ''}"
+										on:click={(event) =>
+											navigateTableRow(event, `/teacher/assignments/${item.assignment.id}`)}
 									>
 										<td class="px-4 py-3">
 											<a
 												href={`/teacher/assignments/${item.assignment.id}`}
-												class="font-medium text-gray-900 hover:underline dark:text-gray-100"
-												on:click|stopPropagation
+												class="font-medium hover:underline {item.assignment.hidden
+													? 'text-gray-500 dark:text-gray-400'
+													: 'text-gray-900 dark:text-gray-100'}"
 											>
 												{item.assignment.title}
 											</a>
+											{#if item.assignment.hidden}
+												<EduBadge soft class="ml-2">{$i18n.t('Hidden')}</EduBadge>
+											{/if}
 										</td>
-										<td class="whitespace-nowrap px-4 py-3" title={formatEpoch(item.assignment.due_at)}>
-											<span class={isPastDue(item) ? 'text-rose-600 dark:text-rose-400' : ''}>
+										<td
+											class="whitespace-nowrap px-4 py-3"
+											title={formatEpoch(item.assignment.due_at)}
+										>
+											<span
+												class={!item.assignment.hidden && isPastDue(item)
+													? 'text-rose-600 dark:text-rose-400'
+													: ''}
+											>
 												{formatEpoch(item.assignment.due_at)}
 											</span>
 											<span class="ml-1 text-xs text-gray-400">
@@ -261,7 +289,6 @@
 												href={`/teacher/assignments/${item.assignment.id}/submissions?status=unsubmitted`}
 												class="hover:underline"
 												title={$i18n.t('Unsubmitted')}
-												on:click|stopPropagation
 											>
 												{item.submission_count}/{item.student_count}
 											</a>
@@ -270,8 +297,9 @@
 											{#if item.pending_review_count > 0}
 												<a
 													href={`/teacher/assignments/${item.assignment.id}/submissions?status=pending`}
-													class="font-semibold text-amber-600 hover:underline dark:text-amber-400"
-													on:click|stopPropagation
+													class="font-semibold hover:underline {item.assignment.hidden
+														? 'text-gray-500 dark:text-gray-400'
+														: 'text-amber-600 dark:text-amber-400'}"
 												>
 													{item.pending_review_count}
 												</a>

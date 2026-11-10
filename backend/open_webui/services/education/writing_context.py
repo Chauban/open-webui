@@ -244,9 +244,9 @@ async def build_current_text_context(
         text = (content.get('md') or '').strip()
     else:
         text = captured_text.strip()
-    from open_webui.services.education.materials import snapshot_materials, material_context, material_rules
-    material_snapshot = snapshot_materials(session.id, db) if captured_materials is None else captured_materials
-    materials = material_rules(material_snapshot) + material_context(material_snapshot)
+    from open_webui.services.education.materials import model_materials, image_reading_enabled, material_context
+    material_snapshot = model_materials(session.id, image_reading_enabled(session, db), db) if captured_materials is None else captured_materials
+    materials = material_context(material_snapshot)
     if not text:
         return "【学生当前正文】右侧编辑器里还没有内容。" + materials
 

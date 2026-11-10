@@ -11,6 +11,7 @@ import {
 const t = (key: string) => key;
 
 const draft = (overrides: Partial<AssignmentDraft> = {}): AssignmentDraft => ({
+	imageReadingEnabled: false,
 	scoringMode: 'dimensions',
 	title: '  Essay 1 ',
 	description: ' Argue a point. ',
@@ -32,6 +33,14 @@ const draft = (overrides: Partial<AssignmentDraft> = {}): AssignmentDraft => ({
 });
 
 describe('buildAssignmentPayload', () => {
+	it('persists the teacher image switch for regular and argument preparation forms', async () => {
+		const { preparationAssignment } = await import('$lib/apis/education/teaching');
+		for (const enabled of [false, true]) {
+			const value = draft({ imageReadingEnabled: enabled });
+			expect(buildAssignmentPayload(value, t).payload?.image_reading_enabled).toBe(enabled);
+			expect(preparationAssignment(value, ['classroom']).image_reading_enabled).toBe(enabled);
+		}
+	});
 	it('trims text and drops challenge focus when the reader check is off', () => {
 		const { payload, error } = buildAssignmentPayload(draft(), t);
 		expect(error).toBeUndefined();

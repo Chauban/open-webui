@@ -1,4 +1,4 @@
-// 作业写作区的「导入文件 / 导入图片」:修订初稿交初稿、从零写作往编辑器里插正文共用。
+// 作业写作区的统一「上传」入口:修订初稿交初稿、从零写作往编辑器里插正文共用。
 // 上限与后端 services/education/draft_import.py、writing_context.py 一致,前端先拦一遍,
 // 免得学生等完上传才被拒;提示文案沿用后端的 i18n 键。
 
@@ -15,6 +15,8 @@ export type ImportKind = 'document' | 'images';
 // modelId:转录这些图片实际用的模型,随导入记进编辑操作。
 export type ImportInfo = {
 	material?: import('$lib/types/writing-materials').WritingMaterial;
+	materials?: import('$lib/types/writing-materials').WritingMaterial[];
+	document?: import('$lib/utils/writing-document').WritingNode;
 	kind: ImportKind;
 	names: string[];
 	scannedPages?: number;

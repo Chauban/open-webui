@@ -201,6 +201,7 @@ async def trial_action(request, user, trial_id, form, db):  # noqa: C901 -- expl
             'call_id': event_id,
             'config': copy.deepcopy(trial.config),
             'purpose': stage,
+            'image_reading_enabled': False,  # Trials currently accept text samples only.
             'source_text': state['baseline'] if stage == 'first_read' else state['draft'],
             'previous_text': state['previous_text'] or state['baseline'],
             'dialogue': [{'role': m['role'], 'content': m['content']} for m in state['dialogue']],

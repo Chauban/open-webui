@@ -26,13 +26,14 @@ def connection_fingerprint(url, config):
     ).hexdigest()
 
 
-async def provider_route(request, model_id):
+async def provider_route(request, user, model_id):
     from open_webui.routers.openai import get_all_models, get_openai_connection
 
     models = request.app.state.OPENAI_MODELS
     if model_id not in models:
-        await get_all_models(request)
-        models = request.app.state.OPENAI_MODELS
+        catalog = await get_all_models(request, user=user)
+        models = {model['id']: model for model in catalog['data']}
+        request.app.state.OPENAI_MODELS = models
     model = models.get(model_id)
     info = await Models.get_model_by_id(model_id)
     if (
@@ -62,11 +63,11 @@ async def provider_route(request, model_id):
     return route, model, info, url
 
 
-async def resolve_fallback(request, source_info):
+async def resolve_fallback(request, user, source_info):
     target = source_info.meta.fallback_model_id if source_info else None
     if not target:
         return None
-    route, _, _, _ = await provider_route(request, target)
+    route, _, _, _ = await provider_route(request, user, target)
     return route
 
 
@@ -82,8 +83,8 @@ async def validate_model_fallback(request, user, form, previous=None, db=None):
     primary = form.base_model_id or form.id
     if target in (form.id, primary):
         raise HTTPException(400, '备用模型不能是当前模型。')
-    _, _, _, primary_url = await provider_route(request, primary)
-    _, _, _, backup_url = await provider_route(request, target)
+    _, _, _, primary_url = await provider_route(request, user, primary)
+    _, _, _, backup_url = await provider_route(request, user, target)
     if primary_url.rstrip('/') == backup_url.rstrip('/'):
         raise HTTPException(400, '请选择另一家供应商的模型作为备用。')
     seen = {form.id, primary}
@@ -96,14 +97,15 @@ async def validate_model_fallback(request, user, form, previous=None, db=None):
         cursor = item.meta.fallback_model_id if item else None
 
 
-async def fallback_options(request):
+async def fallback_options(request, user):
     from open_webui.routers.openai import get_all_models, get_openai_connection
 
-    await get_all_models(request)
+    catalog = await get_all_models(request, user=user)
     saved = {m.id: m for m in await Models.get_base_models()}
     options = []
     connections = {}
-    for model_id, model in request.app.state.OPENAI_MODELS.items():
+    for model in catalog['data']:
+        model_id = model['id']
         info = saved.get(model_id)
         if model.get('urlIdx') is None or model.get('pipe') or model.get('pipeline') or model.get('direct'):
             continue

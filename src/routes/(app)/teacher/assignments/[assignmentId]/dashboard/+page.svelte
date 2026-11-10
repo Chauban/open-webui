@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { navigateTableRow } from '$lib/utils/education-navigation';
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 	import { getContext, onDestroy, onMount } from 'svelte';
@@ -483,13 +484,13 @@
 								{#each sortedItems as item (item.submission_id)}
 									<tr
 										class="cursor-pointer border-t border-gray-100 transition hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-800/60"
-										on:click={() => goto(`/teacher/submissions/${item.submission_id}`)}
+										on:click={(event) =>
+											navigateTableRow(event, `/teacher/submissions/${item.submission_id}`)}
 									>
 										<td class="px-4 py-3 font-medium">
 											<a
 												href={`/teacher/submissions/${item.submission_id}`}
 												class="hover:underline"
-												on:click|stopPropagation
 											>
 												{item.student_name}
 											</a>

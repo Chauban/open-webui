@@ -3,7 +3,6 @@
 	import type { i18n as i18nType } from 'i18next';
 	import { getContext } from 'svelte';
 	import { get } from 'svelte/store';
-	import { toast } from 'svelte-sonner';
 
 	import { config } from '$lib/stores';
 	import { extractImportDocument, extractImportImages } from '$lib/apis/education';
@@ -14,19 +13,19 @@
 		IMAGE_MAX_COUNT,
 		checkImageFiles,
 		isImageFile,
-		shrinkImageForUpload,
 		sortImageFiles,
 		type ImportInfo
 	} from '$lib/utils/text-import';
 	import EduButton from './EduButton.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
+	import ArrowUpTray from '$lib/components/icons/ArrowUpTray.svelte';
 
-	// 作业写作区的两个导入按钮:Word/文本文件由后端直接解析,照片交给管理员选定的识图模型转录;
-	// Word/PDF 由后端统一提取正文和附件，保留原文件与读取状态。
-	// 只把识别出的正文交给外层(修订初稿填进初稿框、从零写作进预览),确认与插入由外层负责。
+	// 所有图文始终可以上传；开关只控制识读。外层核对同一份结构化稿件。
 
 	export let sessionId: string;
 	export let disabled = false;
+	export let imageReadingEnabled = false;
+	export let baselineHelp = false;
 	export let onImported: (text: string, info: ImportInfo) => void;
 	// 外层据此锁住输入框和确认按钮。
 	export let busy = false;
@@ -34,27 +33,58 @@
 	const i18n = getContext<Writable<i18nType>>('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
 
-	let documentInput: HTMLInputElement;
-	let imageInput: HTMLInputElement;
+	let uploadInput: HTMLInputElement;
 	let reading: 'document' | 'images' | null = null;
+	let importError = '';
 
 	$: busy = reading !== null;
-	// 管理员没选识图模型时不提供图片导入,并说明原因。
-	$: imageImportEnabled = $config?.features?.enable_education_draft_image_import === true;
+	// 模型可用性影响帮助说明，不隐藏图片上传。
+	$: imageImportEnabled =
+		imageReadingEnabled && $config?.features?.enable_education_draft_image_import === true;
+	$: acceptedFiles = `${DOCUMENT_ACCEPT},${IMAGE_ACCEPT}`;
+	$: helpText = [
+		t(
+			'Documents: one Word, PDF, TXT or Markdown file at a time. Word/PDF: up to 50 MB; PDF: up to 50 pages. Plain text and legacy DOC: up to 10 MB.'
+		),
+		t(
+			'Images: up to 8 JPG, PNG or WebP files, read in file-name order. Upload size: 10 MB each, 30 MB total. Do not mix images and documents.'
+		),
+		...(!imageImportEnabled ? [t('AI 本次只读取文字，图片仍会随作业保存。')] : []),
+		...(baselineHelp
+			? [
+					t(
+						'The confirmed draft is saved as the starting point of your revision. Before final submission, you can withdraw it from the top-right "…" menu and import it again.'
+					)
+				]
+			: [])
+	].join('\n\n');
 
 	const run = async (kind: ImportInfo['kind'], files: File[]) => {
 		reading = kind;
 		try {
 			const names = files.map((file) => file.name);
 			if (kind === 'images') {
-				const result = await extractImportImages(localStorage.token, sessionId, files);
-				onImported(result.text, { kind, names, modelId: result.model_id });
+				const images = files;
+				const error = checkImageFiles(images);
+				if (error) throw error;
+				const result = await extractImportImages(localStorage.token, sessionId, images);
+				onImported(result.text, {
+					kind,
+					names,
+					document: result.content_json,
+					materials: result.materials
+				});
 			} else {
 				const result = await extractImportDocument(localStorage.token, sessionId, files[0]);
-				onImported(result.text, { kind, names, material: result.material });
+				onImported(result.text, {
+					kind,
+					names,
+					document: result.content_json,
+					materials: [result.material]
+				});
 			}
 		} catch (error) {
-			toast.error(resolveErrorMessage(error, t));
+			importError = resolveErrorMessage(error, t);
 		} finally {
 			reading = null;
 		}
@@ -63,36 +93,26 @@
 	/** 单个文档由后端统一解析；照片仍按上传顺序转录。 */
 	export const importFiles = async (files: File[]) => {
 		if (files.length === 0 || busy || disabled) return;
+		importError = '';
 		if (files.every(isImageFile)) {
-			if (!imageImportEnabled) {
-				toast.error(
-					t('Image import is not set up. Ask your administrator to choose an image parsing model.')
-				);
+			if (files.length > IMAGE_MAX_COUNT) {
+				importError = t('Upload at most 8 images at a time');
 				return;
 			}
-			// 先缩再查上限:手机原图超过 10MB 的,缩完多半就够了。
-			reading = 'images';
-			const shrunk = await Promise.all(sortImageFiles(files).map(shrinkImageForUpload));
-			reading = null;
-			const error = checkImageFiles(shrunk);
-			if (error) {
-				toast.error(t(error));
-				return;
-			}
-			await run('images', shrunk);
+			await run('images', sortImageFiles(files));
 			return;
 		}
 		if (files.length > 1) {
-			toast.error(t('Import one document at a time. Several files only work for images.'));
+			importError = t('Choose one document or up to 8 images; do not mix them.');
 			return;
 		}
 		await run('document', files);
 	};
 
-	const onPicked = async (input: HTMLInputElement) => {
-		const files = Array.from(input.files ?? []);
+	const onPicked = async () => {
+		const files = Array.from(uploadInput.files ?? []);
 		// 清空,同一个文件改完再选一次也能触发 change
-		input.value = '';
+		uploadInput.value = '';
 		await importFiles(files);
 	};
 </script>
@@ -100,60 +120,46 @@
 <div class="flex flex-col gap-1.5">
 	<div class="flex flex-wrap items-center gap-2">
 		<input
-			bind:this={documentInput}
+			bind:this={uploadInput}
 			type="file"
-			accept={DOCUMENT_ACCEPT}
-			class="hidden"
-			data-testid="draft-file-input"
-			on:change={() => onPicked(documentInput)}
-		/>
-		<input
-			bind:this={imageInput}
-			type="file"
-			accept={IMAGE_ACCEPT}
+			accept={acceptedFiles}
 			multiple
 			class="hidden"
-			data-testid="draft-image-input"
-			on:change={() => onPicked(imageInput)}
+			data-testid="draft-upload-input"
+			on:change={onPicked}
 		/>
-		<EduButton disabled={disabled || busy} on:click={() => documentInput.click()}>
-			{reading === 'document' ? $i18n.t('Reading file...') : $i18n.t('Import from file')}
-		</EduButton>
 		<EduButton
-			disabled={disabled || busy || !imageImportEnabled}
-			on:click={() => imageInput.click()}
+			class="inline-flex items-center gap-2"
+			disabled={disabled || busy}
+			on:click={() => uploadInput.click()}
 		>
-			{reading === 'images' ? $i18n.t('Reading images...') : $i18n.t('Import from images')}
+			<ArrowUpTray />
+			{reading ? $i18n.t('Reading...') : $i18n.t('Upload')}
 		</EduButton>
 		<Tooltip
-			content={$i18n.t(
-				'Supports .docx, .doc, .txt, .md and .pdf. Word and PDF images and notes are imported as attached materials. Unreadable items are shown for checking.'
-			) +
-				'\n\n' +
-				$i18n.t(
-					imageImportEnabled
-						? 'Images: photos or scans of a handwritten or printed draft (JPG, PNG or WebP), up to 8 at a time, read in file-name order. The AI only transcribes, so check the text carefully.'
-						: 'Image import is not available: your administrator has not chosen an image parsing model.'
-				)}
+			content={helpText}
 			allowHTML={false}
 			tippyOptions={{ trigger: 'mouseenter focusin click', maxWidth: 340 }}
 		>
 			<button
 				type="button"
 				class="rounded-full px-2 py-1 text-xs text-gray-500 underline decoration-dotted underline-offset-4 focus-visible:outline focus-visible:outline-2 dark:text-gray-400"
-				data-testid={imageImportEnabled ? 'import-help' : 'image-import-unavailable'}
+				data-testid="import-help"
 			>
-				{$i18n.t('Import help')}
+				{$i18n.t('Supported formats')}
 			</button>
 		</Tooltip>
 	</div>
+	{#if importError}<p role="alert" class="text-xs text-rose-600 dark:text-rose-400">
+			{importError}
+		</p>{/if}
 	{#if reading === 'document'}
 		<p class="text-xs text-sky-600 dark:text-sky-400" role="status">
-			{$i18n.t('Reading document text, images and notes. Please wait.')}
+			{$i18n.t('Reading the file. Please wait.')}
 		</p>
 	{:else if reading === 'images'}
 		<p class="text-xs text-sky-600 dark:text-sky-400" role="status">
-			{$i18n.t('The AI is transcribing your images. Please wait a moment.')}
+			{$i18n.t('正在保存图片，请稍候。')}
 		</p>
 	{/if}
 </div>

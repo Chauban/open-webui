@@ -34,7 +34,9 @@
 	import { toast } from 'svelte-sonner';
 	import { config, models, selectedFolder } from '$lib/stores';
 
-	import RichTextInput from '$lib/components/common/RichTextInput.svelte';
+	import WritingEditor from './WritingEditor.svelte';
+	import WordDownloadButton from './WordDownloadButton.svelte';
+	import { textDocument, hasDocumentContent } from '$lib/utils/writing-document';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Chat from '$lib/components/chat/Chat.svelte';
 	import ReviewResultCard from '$lib/components/education/ReviewResultCard.svelte';
@@ -59,7 +61,7 @@
 	import { refreshChatList, refreshFolderChatLists } from '$lib/stores/chatList';
 	import { getChatById } from '$lib/apis/chats';
 	import { prepareAssistantContentForWriting } from '$lib/utils/writing-content';
-	import { importedTextToHtml, type ImportInfo } from '$lib/utils/text-import';
+	import type { ImportInfo } from '$lib/utils/text-import';
 	import { createSerializedSaveRunner } from '$lib/utils/save-coordinator';
 	import { thinkingSupportOf, thinksAlways } from '$lib/utils/thinking-support';
 	import {
@@ -144,7 +146,7 @@
 
 	let lastText = '';
 	// 最近一次真正落成版本的正文，用来跳过「内容没变」的自动保存。
-	let lastVersionedText = '';
+	let lastVersionedDocument = '';
 	let pendingSource: null | {
 		sourceType: string;
 		sourceMessageId?: string | null;
@@ -562,36 +564,45 @@
 		saveRetryAttempt = 0;
 		saveStatusKey = 'Saving...';
 
+		// Every request in this save uses the same captured document and operation batch.
+		const draft = structuredClone({
+			json: noteJson,
+			html: noteHtml,
+			text: noteText,
+			runs: sourceRuns,
+			operations: unsavedOperations
+		});
+		const documentKey = JSON.stringify(draft.json);
 		let version = null;
 		for (let attempt = 0; attempt <= MAX_SAVE_RETRIES; attempt += 1) {
 			try {
 				await autosaveWritingSession(localStorage.token, writingSession.id, {
-					content_json: noteJson,
-					content_html: noteHtml,
-					content_text: noteText,
+					content_json: draft.json,
+					content_html: draft.html,
+					content_text: draft.text,
 					save_reason: triggerType
 				});
 
-				// 正文没变就不要再存一版。编辑器在选区/格式变化时也会触发 onChange，
-				// 照存的话一篇稿子能攒出两百多个一模一样的版本：既撑大版本历史让老师
-				// 没法看，也让「改了几版」这类过程指标彻底失去意义。
-				// 试读前（manual）和提交前（submit_preflight）同样适用：正文没变时服务端
-				// 最新一版就是当前稿，试读照样读得到；提交本身会由后端另存 submit 版。
-				// 以前这两类强制存版，一次提交就叠出两三个一模一样的版本。
-				if (!version && noteText !== lastVersionedText) {
+				// Selection changes do not create versions; text, formatting and image changes do.
+				if (!version && documentKey !== lastVersionedDocument) {
 					version = await createWritingVersion(localStorage.token, writingSession.id, {
 						trigger_type: triggerType,
-						content_json: noteJson,
-						content_text: noteText
+						content_json: draft.json,
+						content_text: draft.text
 					});
-					lastVersionedText = noteText;
+					lastVersionedDocument = documentKey;
 				}
 
-				if (unsavedOperations.length > 0) {
+				if (draft.operations.length > 0) {
 					await createEditorOperations(localStorage.token, writingSession.id, {
-						operations: unsavedOperations
+						operations: draft.operations
 					});
-					unsavedOperations = [];
+					const savedSequences = new Set(
+						draft.operations.map((operation) => operation.client_sequence)
+					);
+					unsavedOperations = unsavedOperations.filter(
+						(operation) => !savedSequences.has(operation.client_sequence)
+					);
 				}
 
 				// 正文没变时不会开新版本，来源分布同样没变，不必重写 source map。
@@ -599,14 +610,18 @@
 					await createProvenanceSegments(localStorage.token, writingSession.id, {
 						version_id: version.id,
 						replace_existing: true,
-						segments: sourceRunsToProvenanceSegments(noteText, sourceRuns)
+						segments: sourceRunsToProvenanceSegments(draft.text, draft.runs)
 					});
 				}
 
 				// 这个胶囊只报自动保存状态。之前提交后它显示「已提交」，和旁边的绿色
 				// 提交徽标撞成两个「已提交」；更糟的是学生提交后继续改稿，每存一次它
 				// 又变回「已提交」，而这版草稿其实还没重新提交。
-				saveStatusKey = 'Saved';
+				saveStatusKey =
+					JSON.stringify(noteJson) === documentKey && unsavedOperations.length === 0
+						? 'Saved'
+						: 'Saving...';
+				if (version) materialsRefresh += 1;
 				hasUnsavedFailure = false;
 				saveRetryAttempt = 0;
 				saving = false;
@@ -691,7 +706,7 @@
 
 	const handleContentChange = (content) => {
 		// 两类事件都不是学生在改稿，必须一起挡掉：
-		// docChanged=false 是选区/格式变化，正文一个字没动；
+		// docChanged=false 是选区变化；文字、格式和图片变化都需要保存。
 		// programmatic 是本组件自己把正文灌进编辑器（挂载和每次 value 同步）。
 		// 灌入前编辑器是空文档，ProseMirror 照样报 docChanged=true，
 		// 只看 docChanged 会把它当成学生清空全文：整篇记一次删除、source map
@@ -763,17 +778,17 @@
 	// 修订初稿作业的导入在交初稿那一步;从零写作没有那一步,导入直接进编辑器。
 	// 导入的文字记为外部粘贴,并在操作里注明来自文件还是照片,老师在时间线上看得到。
 	let showImportDialog = false;
+	let importDialog: EditorImportDialog;
 	let materialsRefresh = 0;
-	$: canImportIntoEditor = isAssignment && assignment?.task_mode === 'from_scratch' && !isReadOnly;
+	$: canImportIntoEditor = isAssignment && !needsDraftBaseline && !isReadOnly;
 
 	const insertImportedText = async (text: string, mode: 'insert' | 'replace', info: ImportInfo) => {
-		if (editorLocked || !editor) return;
-		const html = importedTextToHtml(text);
-		if (!html) return;
+		if (editorLocked || !editor) throw new Error($i18n.t('稿件暂时不可修改，请稍后再试。'));
+		const document = info.document ?? textDocument(text);
 		await attachWritingMaterials(
 			localStorage.token,
 			writingSession.id,
-			info.material ? [selectMaterial(info.material)] : [],
+			(info.materials ?? (info.material ? [info.material] : [])).map(selectMaterial),
 			mode === 'replace'
 		);
 		materialsRefresh += 1;
@@ -788,7 +803,7 @@
 			}
 		};
 		const chain = editor.chain().focus();
-		(mode === 'replace' ? chain.selectAll() : chain).insertContent(html).run();
+		(mode === 'replace' ? chain.selectAll() : chain).insertContent(document.content).run();
 		// onChange 在事务里同步跑完;正文没变(没触发 onChange)时别让来源留给下一次键入。
 		pendingSource = null;
 	};
@@ -999,7 +1014,7 @@
 			noteText = workspace.note?.data?.content?.md ?? '';
 			noteTitle = normalizePersonalTitle(workspace.note?.title);
 			lastText = noteText;
-			lastVersionedText = noteText;
+			lastVersionedDocument = JSON.stringify(noteJson);
 			sourceRuns = workspace.source_map?.length
 				? provenanceSegmentsToSourceRuns(noteText, workspace.source_map)
 				: normalizeSourceRuns([], noteText.length);
@@ -1304,6 +1319,7 @@
 						{/if}
 						{#if needsDraftBaseline}
 							<DraftBaselineStep
+								imageReadingEnabled={assignment?.image_reading_enabled === true}
 								sessionId={writingSession.id}
 								onSubmitted={onDraftBaselineSubmitted}
 							/>
@@ -1315,11 +1331,38 @@
 									</EduButton>
 								</div>
 							{/if}
+							<div class="mb-2 flex justify-end">
+								<WordDownloadButton
+									sessionId={writingSession.id}
+									contentJson={noteJson}
+									disabled={editorLocked}
+									beforeDownload={async () => {
+										if (autoSaveTimer) {
+											clearTimeout(autoSaveTimer);
+											autoSaveTimer = null;
+										}
+										await persistDraft('manual', { force: true });
+										if (hasUnsavedFailure) throw new Error($i18n.t('Save failed'));
+									}}
+								/>
+							</div>
 							{#if isAssignment}<WritingMaterials
+									imageReadingEnabled={assignment?.image_reading_enabled === true}
 									sessionId={writingSession.id}
 									refresh={materialsRefresh}
 								/>{/if}
-							<RichTextInput
+							<WritingEditor
+								sessionId={writingSession.id}
+								imageReadingEnabled={assignment?.image_reading_enabled === true}
+								onImportFiles={isAssignment ? (files) => importDialog.importFiles(files) : null}
+								onExternalContent={(metadata) => {
+									pendingSource = {
+										sourceType: 'external_paste',
+										sourceMessageId: null,
+										text: '',
+										metadata
+									};
+								}}
 								bind:editor
 								bind:value={noteJson}
 								editable={!editorLocked}
@@ -1498,6 +1541,7 @@
 						{/if}
 						{#if needsDraftBaseline}
 							<DraftBaselineStep
+								imageReadingEnabled={assignment?.image_reading_enabled === true}
 								sessionId={writingSession.id}
 								onSubmitted={onDraftBaselineSubmitted}
 							/>
@@ -1509,11 +1553,38 @@
 									</EduButton>
 								</div>
 							{/if}
+							<div class="mb-2 flex justify-end">
+								<WordDownloadButton
+									sessionId={writingSession.id}
+									contentJson={noteJson}
+									disabled={editorLocked}
+									beforeDownload={async () => {
+										if (autoSaveTimer) {
+											clearTimeout(autoSaveTimer);
+											autoSaveTimer = null;
+										}
+										await persistDraft('manual', { force: true });
+										if (hasUnsavedFailure) throw new Error($i18n.t('Save failed'));
+									}}
+								/>
+							</div>
 							{#if isAssignment}<WritingMaterials
+									imageReadingEnabled={assignment?.image_reading_enabled === true}
 									sessionId={writingSession.id}
 									refresh={materialsRefresh}
 								/>{/if}
-							<RichTextInput
+							<WritingEditor
+								sessionId={writingSession.id}
+								imageReadingEnabled={assignment?.image_reading_enabled === true}
+								onImportFiles={isAssignment ? (files) => importDialog.importFiles(files) : null}
+								onExternalContent={(metadata) => {
+									pendingSource = {
+										sourceType: 'external_paste',
+										sourceMessageId: null,
+										text: '',
+										metadata
+									};
+								}}
 								bind:editor
 								bind:value={noteJson}
 								editable={!editorLocked}
@@ -1558,9 +1629,11 @@
 
 	{#if canImportIntoEditor && writingSession}
 		<EditorImportDialog
+			bind:this={importDialog}
+			imageReadingEnabled={assignment?.image_reading_enabled === true}
 			bind:show={showImportDialog}
 			sessionId={writingSession.id}
-			hasText={noteText.trim().length > 0}
+			hasContent={noteJson ? hasDocumentContent(noteJson) : Boolean(noteText.trim())}
 			onInsert={insertImportedText}
 		/>
 	{/if}

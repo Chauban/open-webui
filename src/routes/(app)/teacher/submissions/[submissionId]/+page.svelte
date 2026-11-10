@@ -1,4 +1,5 @@
 <script lang="ts">
+	import WordDownloadButton from '$lib/components/education/WordDownloadButton.svelte';
 	import WritingMaterials from '$lib/components/education/WritingMaterials.svelte';
 	import { isRevision } from '$lib/utils/task-types';
 	import TeacherProcessPanel from '$lib/components/education/TeacherProcessPanel.svelte';
@@ -981,6 +982,7 @@
 					<!-- Article body (scrollable) -->
 					<div class="px-6 py-5 lg:flex-1 lg:overflow-y-auto">
 						<div class="mb-3">
+							<WordDownloadButton submissionId={detail?.submission?.id} versionId={detail?.final_version?.id} />
 							<WritingMaterials
 								materials={detail?.submission?.stats_json?.materials ?? []}
 								submissionId={detail?.submission?.id}
@@ -988,20 +990,20 @@
 						</div>
 						<div class="rounded-2xl bg-stone-50 dark:bg-gray-900 p-5">
 							{#if docView === 'process'}
-								<ProcessDraftView
+								<ProcessDraftView submissionId={detail?.submission?.id}
 									inspection={processInspection}
 									source={conversationEvents.find((event) => event.key === processState.selectedKey)
 										?.source ?? null}
 								/>
 							{:else if highlight}
-								<SourceHighlightedText
+								<SourceHighlightedText submissionId={detail?.submission?.id}
 									json={detail.final_version.note_snapshot_json}
 									text={detail.final_version.note_snapshot_text ?? ''}
 									segments={analysisHighlights}
 									{activeSegmentId}
 								/>
 							{:else}
-								<SourceHighlightedText
+								<SourceHighlightedText submissionId={detail?.submission?.id}
 									json={detail.final_version.note_snapshot_json}
 									text={detail.final_version.note_snapshot_text ?? ''}
 									segments={[]}

@@ -2150,6 +2150,7 @@ def test_workspace_project_creation_failure_returns_409(education_client, monkey
 
 
 def test_writing_home_and_personal_workspace_flow(education_client):
+    asyncio.run(Config.upsert({"education.personal_writing.teacher": True}))
     client, teacher, _, student, _, _ = education_client
     _prepare_assignment_flow(client, teacher, student)
 
@@ -2193,6 +2194,7 @@ def test_writing_home_and_personal_workspace_flow(education_client):
 
 
 def test_writing_notes_are_hidden_from_notes_module(education_client):
+    asyncio.run(Config.upsert({"education.personal_writing.teacher": True}))
     client, teacher, _, _, _, _ = education_client
 
     UserContext.current_user = teacher
@@ -2212,6 +2214,7 @@ def test_writing_notes_are_hidden_from_notes_module(education_client):
 
 
 def test_personal_writing_reopens_sidebar_and_can_be_deleted(education_client):
+    asyncio.run(Config.upsert({"education.personal_writing.teacher": True}))
     client, teacher, _, _, _, session_local = education_client
 
     UserContext.current_user = teacher
@@ -2276,6 +2279,7 @@ def test_personal_writing_reopens_sidebar_and_can_be_deleted(education_client):
 
 
 def test_personal_writing_folder_rename_allows_duplicate_titles(education_client):
+    asyncio.run(Config.upsert({"education.personal_writing.teacher": True}))
     client, teacher, _, _, _, session_local = education_client
 
     UserContext.current_user = teacher
@@ -2771,6 +2775,7 @@ def test_chat_completion_rejects_reviewed_writing_before_persisting(education_cl
 
 
 def test_teacher_personal_writing_autosave_stays_writable(education_client):
+    asyncio.run(Config.upsert({"education.personal_writing.teacher": True}))
     client, teacher, _, _, _, _ = education_client
     UserContext.current_user = teacher
     workspace = client.post('/api/v1/me/writing/personal', json={'title': 'Personal writing'}).json()
@@ -4918,6 +4923,7 @@ def test_student_and_teacher_read_the_same_answered_count():
 
 
 def test_writing_process_summary_is_owner_only(education_client):
+    asyncio.run(Config.upsert({"education.personal_writing.teacher": True}))
     client, teacher, _, student, _, _ = education_client
 
     UserContext.current_user = teacher
@@ -6406,7 +6412,7 @@ def test_research_export_is_admin_only_and_pseudonymized(education_client):
 # --- 修订初稿作业(task_mode=revise_draft) -------------------------------------
 
 _DRAFT_TEXT = "　　" + "初稿第一段," * 30 + "\n\n  " + "初稿第二段。" * 20 + "  \n"
-_DRAFT_MD = ("初稿第一段," * 30) + "\n" + ("初稿第二段。" * 20)
+_DRAFT_MD = ("初稿第一段," * 30) + "\n\n  " + ("初稿第二段。" * 20)
 
 
 def _setup_revise_draft_assignment(client, teacher, student, **overrides):
@@ -6549,9 +6555,7 @@ def test_revise_draft_requires_baseline_before_editing_and_chat(education_client
     workspace = client.get(f"/api/v1/assignments/{assignment['id']}/workspace").json()
     content = workspace["note"]["data"]["content"]
     assert content["md"] == _DRAFT_MD
-    assert [block["content"][0]["text"] for block in content["json"]["content"]] == (
-        _DRAFT_MD.split("\n")
-    )
+    assert ["".join(n["text"] for n in block.get("content", [])) for block in content["json"]["content"]] == _DRAFT_TEXT.split("\n")
     assert [
         (s["source_type"], s["start_offset"], s["end_offset"], s["segment_text"])
         for s in workspace["source_map"]
@@ -6681,7 +6685,8 @@ def test_writing_chat_context_carries_the_latest_text(education_client):
 
     with SessionLocal() as db:
         session = Education.get_writing_session_by_id(session_id, db=db)
-    context = asyncio.run(build_current_text_context(session))
+    with SessionLocal() as db:
+        context = asyncio.run(build_current_text_context(session, db=db))
     assert context.startswith("【学生当前正文】")
     assert _DRAFT_MD in context
 
@@ -6691,7 +6696,8 @@ def test_writing_chat_context_carries_the_latest_text(education_client):
         json={"content_text": revised},
     )
     assert res.status_code == 200, res.text
-    context = asyncio.run(build_current_text_context(session))
+    with SessionLocal() as db:
+        context = asyncio.run(build_current_text_context(session, db=db))
     assert revised in context
     assert "改过的第二段。" in context
 
@@ -7135,7 +7141,7 @@ def test_draft_file_is_parsed_into_text_without_freezing_baseline(education_clie
         },
     )
     assert res.status_code == 200, res.text
-    assert {"text": res.json()["text"]} == {"text": "第一段开头。\n第二段\n软回车之后。"}
+    assert {"text": res.json()["text"]} == {"text": "第一段开头。\n\n第二段\n软回车之后。"}
 
     # 表格按文档顺序、每个单元格一行
     res = client.post(
@@ -7148,7 +7154,7 @@ def test_draft_file_is_parsed_into_text_without_freezing_baseline(education_clie
             )
         },
     )
-    assert {"text": res.json()["text"]} == {"text": "表格之前。\n甲\n乙\n丙\n表格之后。"}
+    assert {"text": res.json()["text"]} == {"text": "表格之前。\n甲\n\n乙\n丙\n表格之后。"}
 
     # 旧版 .doc:Word 2016 另存为「Word 97-2003 文档」生成的样本,含页眉、脚注、
     # 超链接、软回车和表格;结果与 Word 把它另存为 .docx 后解析的逐字相同。
@@ -7191,7 +7197,7 @@ def test_draft_file_is_parsed_into_text_without_freezing_baseline(education_clie
         assert res.status_code == 400, res.text
         assert res.json()["detail"].startswith(detail)
 
-    # 只解析不冻结;交过初稿后再上传文件也被拒绝
+    # 导入不冻结初稿；确认后仍可继续导入并改稿。
     with SessionLocal() as db:
         session = Education.get_writing_session_by_id(session_id, db=db)
         assert session.draft_baseline_at is None
@@ -7200,7 +7206,7 @@ def test_draft_file_is_parsed_into_text_without_freezing_baseline(education_clie
         json={"text": _DRAFT_TEXT},
     )
     res = client.post(url, files={"file": ("初稿.txt", "x".encode())})
-    assert res.status_code == 409, res.text
+    assert res.status_code == 200, res.text
 
 
 def _png_bytes(color, size=(40, 20), mode="RGB"):
@@ -7268,12 +7274,18 @@ def _fake_transcription(by_channel=None, error=None):
 
 
 def test_text_import_is_only_for_the_assignment_student_while_writable(education_client):
+    asyncio.run(Config.upsert({"education.personal_writing.teacher": True}))
     client, teacher, _, student, outsider, SessionLocal = education_client
     _set_image_model("vision-model")
     client.app.state.MODELS = _VISION_MODELS
     assignment, session_id, submission_id = _setup_submitted_assignment(
         client, teacher, student
     )
+    UserContext.current_user = teacher
+    enabled = client.patch(f'/api/v1/assignments/{assignment["id"]}', json={
+        'expected_config_revision': assignment['config_revision'], 'image_reading_enabled': True,
+    })
+    assert enabled.status_code == 200, enabled.text
     doc_url = f"/api/v1/writing-sessions/{session_id}/import/document"
     image_url = f"/api/v1/writing-sessions/{session_id}/import/images"
 
@@ -7285,7 +7297,8 @@ def test_text_import_is_only_for_the_assignment_student_while_writable(education
     with _fake_transcription({"r": "照片里的字。"}):
         res = client.post(image_url, files=[("files", ("p.png", _png_bytes("red"), "image/png"))])
     assert res.status_code == 200, res.text
-    assert res.json() == {"text": "照片里的字。", "pages": ["照片里的字。"], "model_id": "vision-model"}
+    assert res.json()["text"] == ""
+    assert res.json()["content_json"]["content"][0]["attrs"]["transcription"] == "照片里的字。"
 
     # 别人都不行:任课老师、同学、管理员(图片导入要调模型,只算学生自己的)
     admin = teacher.model_copy(update={"id": "admin-1", "role": "admin"})
@@ -7343,7 +7356,7 @@ def test_text_import_is_only_for_the_assignment_student_while_writable(education
 def test_draft_image_import_needs_an_admin_chosen_vision_model(education_client):
     client, teacher, _, student, _, _ = education_client
     client.app.state.MODELS = _VISION_MODELS
-    _, session_id = _setup_revise_draft_assignment(client, teacher, student)
+    _, session_id = _setup_revise_draft_assignment(client, teacher, student, image_reading_enabled=True)
     url = f"/api/v1/writing-sessions/{session_id}/import/images"
     files = [("files", ("p.png", _png_bytes("red"), "image/png"))]
 
@@ -7355,8 +7368,8 @@ def test_draft_image_import_needs_an_admin_chosen_vision_model(education_client)
         _set_image_model(model_id)
         with _fake_transcription({"r": "不该调到模型。"}) as calls:
             res = client.post(url, files=files)
-        assert res.status_code == 400, res.text
-        assert res.json()["detail"] == detail
+        assert res.status_code == 200, res.text
+        assert res.json()["materials"][0]["blocks"][0]["detail"] == detail
         assert calls == []
 
 
@@ -7366,7 +7379,7 @@ def test_draft_images_are_transcribed_in_page_order_without_freezing_baseline(
     client, teacher, _, student, _, SessionLocal = education_client
     _set_image_model("vision-model")
     client.app.state.MODELS = _VISION_MODELS
-    _, session_id = _setup_revise_draft_assignment(client, teacher, student)
+    _, session_id = _setup_revise_draft_assignment(client, teacher, student, image_reading_enabled=True)
     url = f"/api/v1/writing-sessions/{session_id}/import/images"
 
     pages = {
@@ -7384,21 +7397,20 @@ def test_draft_images_are_transcribed_in_page_order_without_freezing_baseline(
             ],
         )
     assert res.status_code == 200, res.text
-    # 按上传顺序拼接,一段一行;代码围栏去掉,空白页不占行;pages 逐张给出,空白页为空串
-    assert res.json() == {
-        "text": "第一页第一段，\n第一页第二段。\n第二页接着写。",
-        "pages": ["第一页第一段，\n第一页第二段。", "", "第二页接着写。"],
-        "model_id": "vision-model",
-    }
+    # Original images stay in document order; OCR only appears in the corresponding image metadata.
+    assert res.json()['text'] == ''
+    assert [n['attrs']['transcription'] for n in res.json()['content_json']['content']] == [
+        '第一页第一段，\n第一页第二段。', '', '第二页接着写。']
+    assert [m['filename'] for m in res.json()['materials']] == ['1.png', '2.png', '3.png']
     assert len(calls) == 3
     assert {call["model_id"] for call in calls} == {"vision-model"}
     assert all(call["image_url"].startswith("data:image/jpeg;base64,") for call in calls)
     assert calls[0]["messages"][0]["role"] == "system"
-    assert "只转录，不改写" in calls[0]["messages"][0]["content"]
+    assert "不改写、不纠错" in calls[0]["messages"][0]["content"]
     # 透明底铺白:全透明的那张转出来是白的,不是黑的
     assert sorted(_dominant_channel(call["image_url"]) for call in calls) == ["b", "r", "w"]
 
-    # 只识别不冻结;交过初稿后再导入被拒绝
+    # 导入不确认初稿；确认后仍可继续添加和替换图片。
     with SessionLocal() as db:
         assert Education.get_writing_session_by_id(session_id, db=db).draft_baseline_at is None
     client.post(
@@ -7407,14 +7419,14 @@ def test_draft_images_are_transcribed_in_page_order_without_freezing_baseline(
     )
     with _fake_transcription(pages):
         res = client.post(url, files=[("files", ("1.png", _png_bytes("red"), "image/png"))])
-    assert res.status_code == 409, res.text
+    assert res.status_code == 200, res.text
 
 
 def test_draft_image_import_validates_files_and_model_failures(education_client):
     client, teacher, _, student, _, _ = education_client
     _set_image_model("vision-model")
     client.app.state.MODELS = _VISION_MODELS
-    _, session_id = _setup_revise_draft_assignment(client, teacher, student)
+    _, session_id = _setup_revise_draft_assignment(client, teacher, student, image_reading_enabled=True)
     url = f"/api/v1/writing-sessions/{session_id}/import/images"
     gif = io.BytesIO()
     from PIL import Image
@@ -7442,13 +7454,13 @@ def test_draft_image_import_validates_files_and_model_failures(education_client)
     files = [("files", ("1.png", _png_bytes("red"), "image/png"))]
     with _fake_transcription({"r": "<<NO_TEXT>>"}):
         res = client.post(url, files=files)
-    assert res.status_code == 400, res.text
-    assert res.json()["detail"] == "No text found in these images"
+    assert res.status_code == 200, res.text
+    assert res.json()["materials"][0]["blocks"][0]["detail"] == "No text found in these images"
 
     with _fake_transcription(error=RuntimeError("upstream timeout")):
         res = client.post(url, files=files)
-    assert res.status_code == 502, res.text
-    assert res.json()["detail"] == "Could not read the images. Please try again."
+    assert res.status_code == 200, res.text
+    assert res.json()["materials"][0]["blocks"][0]["detail"] == "Could not read the images. Please try again."
 
 
 def test_prepare_draft_image_uprights_and_shrinks_photos():
@@ -7741,7 +7753,7 @@ def test_image_import_reports_busy_after_retries(education_client):
     client, teacher, _, student, _, _ = education_client
     _set_image_model("vision-model")
     client.app.state.MODELS = _VISION_MODELS
-    _, session_id = _setup_revise_draft_assignment(client, teacher, student)
+    _, session_id = _setup_revise_draft_assignment(client, teacher, student, image_reading_enabled=True)
 
     async def handler(page, attempt):
         return JSONResponse(status_code=529, content={"error": {"type": "overloaded_error"}})
@@ -7751,13 +7763,14 @@ def test_image_import_reports_busy_after_retries(education_client):
             f"/api/v1/writing-sessions/{session_id}/import/images",
             files=[("files", ("1.png", _png_bytes("red"), "image/png"))],
         )
-    assert res.status_code == 503, res.text
-    assert res.json()["detail"] == "The image model is busy right now. Wait a minute, then import again."
+    assert res.status_code == 200, res.text
+    assert res.json()["materials"][0]["blocks"][0]["detail"] == "The image model is busy right now. Wait a minute, then import again."
     assert len(calls) == 4
 
 
 @pytest.mark.parametrize("new_chat", [False, True])
 def test_student_personal_writing_disabled(education_client, monkeypatch, new_chat):
+    asyncio.run(Config.upsert({"education.personal_writing.teacher": True}))
     import open_webui.main as webui_main
 
     client, teacher, _, student, _, SessionLocal = education_client

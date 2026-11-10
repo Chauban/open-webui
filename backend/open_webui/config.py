@@ -3220,6 +3220,8 @@ DEFAULT_CONFIG = {
     # 教学各 AI 步骤的模型与思考档位(含作业写作区「导入图片」用的识图模型)。
     'education.ai_steps': DEFAULT_EDUCATION_AI_STEPS,
     'education.auto_retry': DEFAULT_EDUCATION_AUTO_RETRY,
+    'education.personal_writing.student': False,
+    'education.personal_writing.teacher': False,
 }
 
 

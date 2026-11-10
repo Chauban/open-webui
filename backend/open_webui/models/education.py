@@ -123,6 +123,7 @@ class Assignment(Base):
     description = Column(Text, nullable=True)
     teacher_id = Column(Text, nullable=False)
     hidden = Column(Boolean, nullable=False, default=False, server_default=text('false'))
+    image_reading_enabled = Column(Boolean, nullable=False, default=False, server_default=text('false'))
     classroom_id = Column(Text, nullable=True)
     due_at = Column(BigInteger, nullable=True)
     score_max = Column(Integer, nullable=False)
@@ -1128,6 +1129,7 @@ class AssignmentModel(BaseModel):
 
     id: str
     hidden: bool = False
+    image_reading_enabled: bool = False
     title: str
     description: Optional[str] = None
     teacher_id: str
@@ -1524,6 +1526,7 @@ class EducationNotificationModel(BaseModel):
 
 class AssignmentCreateForm(BaseModel):
     model_config = ConfigDict(extra='forbid')
+    image_reading_enabled: bool = Field(default=False, strict=True)
     title: str
     description: Optional[str] = None
     classroom_ids: list[str] = Field(default_factory=list)
@@ -1570,6 +1573,7 @@ class AssignmentCreateForm(BaseModel):
 
 class AssignmentUpdateForm(BaseModel):
     model_config = ConfigDict(extra='forbid')
+    image_reading_enabled: Optional[bool] = Field(default=None, strict=True)
     title: Optional[str] = None
     description: Optional[str] = None
     classroom_id: Optional[str] = None
@@ -1674,6 +1678,7 @@ class WritingRecentItem(BaseModel):
 
 
 class WritingHomeResponse(BaseModel):
+    personal_writing_enabled: bool
     role: str
     classrooms: list[ClassroomModel] = Field(default_factory=list)
     recent_items: list[WritingRecentItem] = Field(default_factory=list)
@@ -1774,7 +1779,9 @@ from open_webui.models.writing_materials import MaterialSelection
 class DraftBaselineForm(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    text: str = Field(max_length=200_000)
+    text: str = Field(default='', max_length=200_000)
+    content_json: Optional[dict] = None
+    expected_draft_revision: Optional[int] = Field(default=None, ge=0, strict=True)
     materials: list[MaterialSelection] = Field(default_factory=list, max_length=20)
 
 
@@ -2019,6 +2026,7 @@ class MySubmissionRoundReview(BaseModel):
 
 class MySubmissionRound(BaseModel):
     submission_id: str
+    final_version_id: str
     round_no: int
     is_current: int
     submitted_at: int
@@ -2230,6 +2238,7 @@ class ProfileEvidencePreviousRound(StrictProfileModel):
     submission_id: str = Field(min_length=1)
     round_no: int = Field(ge=1)
     final_content_text: str
+    final_content_json: Optional[dict[str, Any]] = None
     submitted_at: int = Field(ge=0)
     reviewed_at: Optional[int] = Field(default=None, ge=0)
     score: Optional[int] = Field(default=None, ge=0)
@@ -3050,6 +3059,10 @@ class EducationTable:
                 if form_data.challenge_enabled is None:
                     raise ValueError("Challenge switch is required")
                 assignment.challenge_enabled = form_data.challenge_enabled
+            if 'image_reading_enabled' in form_data.model_fields_set:
+                if form_data.image_reading_enabled is None:
+                    raise ValueError('Image reading switch is required')
+                assignment.image_reading_enabled = form_data.image_reading_enabled
             if "challenge_rounds" in form_data.model_fields_set:
                 if form_data.challenge_rounds is None:
                     raise ValueError("Challenge rounds are required")
@@ -3125,6 +3138,7 @@ class EducationTable:
                 scoring_mode=form_data.scoring_mode,
                 teaching_config=teaching_config,
                 challenge_enabled=form_data.challenge_enabled,
+                image_reading_enabled=form_data.image_reading_enabled,
                 challenge_rounds=form_data.challenge_rounds,
                 challenge_focus_keys=list(form_data.challenge_focus_keys),
                 reflection_questions=[question.model_dump() for question in form_data.reflection_questions],
@@ -3557,7 +3571,9 @@ class EducationTable:
             note.data = {
                 **(sanitize_note_data(note.data) or {}),
                 "content": note_content,
+                "baseline": note_content,
             }
+            note.data.pop('pending_draft', None)
             note.updated_at = int(time.time_ns())
 
             db.query(ProvenanceSegment).filter(
@@ -3647,6 +3663,9 @@ class EducationTable:
                 **(sanitize_note_data(note.data) or {}),
                 "content": {"json": None, "html": "", "md": ""},
             }
+            note.data.pop('baseline', None)
+            note.data.pop('pending_draft', None)
+            note.data.pop('source_material_ids', None)
             note.updated_at = int(time.time_ns())
             db.commit()
             db.refresh(session)

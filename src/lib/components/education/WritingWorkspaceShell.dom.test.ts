@@ -8,6 +8,8 @@ const api = vi.hoisted(() => ({
 	getRevisionReadings: vi.fn(),
 	requestRevisionReading: vi.fn(),
 	getWritingProcessSummary: vi.fn(),
+	getPendingWritingDraft: vi.fn(),
+	savePendingWritingDraft: vi.fn(),
 	teachingApi: vi.fn()
 }));
 vi.mock('$lib/apis/education', async (importOriginal) => ({
@@ -27,10 +29,7 @@ vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 vi.mock('$lib/stores/chatList', () => ({}));
 vi.mock('svelte-sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 vi.mock('$lib/components/chat/Chat.svelte', () => import('./test-fixtures/WorkspaceChat.svelte'));
-vi.mock(
-	'$lib/components/common/RichTextInput.svelte',
-	() => import('./test-fixtures/WorkspaceEditor.svelte')
-);
+vi.mock('./WritingEditor.svelte', () => import('./test-fixtures/WritingEditor.svelte'));
 vi.mock('./TextImportActions.svelte', () => import('./test-fixtures/WorkspaceEmpty.svelte'));
 vi.mock('./ReviewResultCard.svelte', () => import('./test-fixtures/WorkspaceEmpty.svelte'));
 vi.mock('./WritingComposition.svelte', () => import('./test-fixtures/WorkspaceEmpty.svelte'));
@@ -78,6 +77,12 @@ function deferred<T>() {
 }
 
 beforeEach(() => {
+	api.getPendingWritingDraft.mockResolvedValue({
+		content_json: { type: 'doc', content: [] },
+		materials: [],
+		revision: 0
+	});
+	api.savePendingWritingDraft.mockResolvedValue({ revision: 1 });
 	api.teachingApi.mockResolvedValue({ revision: 1 });
 	api.getWritingProcessSummary.mockResolvedValue({ clarification_answered_count: 0 });
 	api.submitDraftBaseline.mockResolvedValue({ id: 'session-1' });
@@ -90,7 +95,9 @@ afterEach(() => {
 });
 
 async function confirmDraft() {
-	await screen.findByPlaceholderText('Paste your first draft here, or drop a file in');
+	await waitFor(() =>
+		expect((screen.getByTestId('workspace-editor') as HTMLTextAreaElement).readOnly).toBe(false)
+	);
 	await fireEvent.input(
 		screen.getByPlaceholderText('Paste your first draft here, or drop a file in'),
 		{ target: { value: draft } }

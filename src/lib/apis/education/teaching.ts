@@ -91,6 +91,7 @@ export async function trialAction(
 
 export function preparationAssignment(draft: AssignmentDraft, classrooms: string[]) {
 	return {
+		image_reading_enabled: draft.imageReadingEnabled,
 		title: draft.title,
 		description: draft.description,
 		classroom_ids: classrooms,

@@ -164,6 +164,26 @@ async def available_models(request, user) -> dict:
     return request.app.state.MODELS
 
 
+class ImageParsingModelView(BaseModel):
+    id: str
+    name: str
+    available: bool
+
+
+async def describe_image_parsing_model(request, user, policy: EducationAiStepPolicy) -> ImageParsingModelView | None:
+    """Read-only platform selection; never substitutes the assignment's coaching model."""
+    model_id = policy.image_parsing.model
+    if not model_id:
+        return None
+    model = (await available_models(request, user)).get(model_id)
+    capabilities = ((model or {}).get('info') or {}).get('meta', {}).get('capabilities') or {}
+    return ImageParsingModelView(
+        id=model_id,
+        name=(model or {}).get('name') or model_id,
+        available=model is not None and capabilities.get('vision') is not False,
+    )
+
+
 async def resolve_step_model(
     request,
     user,

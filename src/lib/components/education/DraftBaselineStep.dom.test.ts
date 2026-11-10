@@ -1,194 +1,194 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { readable } from 'svelte/store';
-import { afterEach, expect, test, vi } from 'vitest';
-
-const submitDraftBaseline = vi.fn();
-const extractImportDocument = vi.fn();
-const extractImportImages = vi.fn();
-vi.mock('$lib/apis/education', () => ({
-	submitDraftBaseline: (...args: unknown[]) => submitDraftBaseline(...args),
-	extractImportDocument: (...args: unknown[]) => extractImportDocument(...args),
-	extractImportImages: (...args: unknown[]) => extractImportImages(...args)
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import { textDocument } from '$lib/utils/writing-document';
+const api = vi.hoisted(() => ({
+	submitDraftBaseline: vi.fn(),
+	extractImportDocument: vi.fn(),
+	extractImportImages: vi.fn(),
+	getPendingWritingDraft: vi.fn(),
+	savePendingWritingDraft: vi.fn(),
+	downloadWritingWord: vi.fn()
 }));
-// 学生端是否提供「从图片导入」看 /api/config 的 features。
-const { config } = vi.hoisted(() => {
-	// vi.mock 的工厂先于 import 执行,这里手写一个最小的 store。
-	type Value = { features: { enable_education_draft_image_import: boolean } };
-	let value: Value = { features: { enable_education_draft_image_import: true } };
-	const subscribers = new Set<(value: Value) => void>();
-	return {
-		config: {
-			subscribe(run: (value: Value) => void) {
-				subscribers.add(run);
-				run(value);
-				return () => subscribers.delete(run);
-			},
-			set(next: Value) {
-				value = next;
-				subscribers.forEach((run) => run(value));
-			}
-		}
-	};
-});
-vi.mock('$lib/stores', () => ({ config }));
+vi.mock('$lib/apis/education', async (original) => ({
+	...(await original<typeof import('$lib/apis/education')>()),
+	...api
+}));
+vi.mock('./WritingEditor.svelte', () => import('./test-fixtures/WritingEditor.svelte'));
 import DraftBaselineStep from './DraftBaselineStep.svelte';
-
+const context = new Map([['i18n', readable({ t: (key: string) => key })]]);
+beforeEach(() => {
+	api.getPendingWritingDraft.mockResolvedValue({
+		content_json: textDocument(''),
+		materials: [],
+		revision: 0
+	});
+	api.savePendingWritingDraft.mockResolvedValue({ revision: 1 });
+	api.submitDraftBaseline.mockResolvedValue({ id: 'session-1' });
+});
 afterEach(() => {
 	cleanup();
-	submitDraftBaseline.mockReset();
-	extractImportDocument.mockReset();
-	extractImportImages.mockReset();
-	config.set({ features: { enable_education_draft_image_import: true } });
+	vi.clearAllMocks();
 });
-const context = new Map([['i18n', readable({ t: (key: string) => key })]]);
-
-test('初稿不足 200 字(不计空白)时不能确认,够了才提交并通知外层刷新', async () => {
+const start = async (imageReadingEnabled = false) => {
 	const onSubmitted = vi.fn();
-	submitDraftBaseline.mockResolvedValue({ id: 'session-1' });
-	render(DraftBaselineStep, { props: { sessionId: 'session-1', onSubmitted }, context });
-
-	const button = screen.getByText('Confirm this is my first draft').closest('button')!;
-	const textarea = screen.getByPlaceholderText('Paste your first draft here, or drop a file in');
-
-	// 199 个字加一堆空白,仍然不够
-	await fireEvent.input(textarea, { target: { value: `${'字'.repeat(199)}   \n\n  ` } });
-	expect(button.disabled).toBe(true);
-
-	const draft = `${'字'.repeat(100)}\n\n${'字'.repeat(100)}`;
-	await fireEvent.input(textarea, { target: { value: draft } });
-	expect(button.disabled).toBe(false);
-
-	await fireEvent.click(button);
-	await waitFor(() => expect(onSubmitted).toHaveBeenCalled());
-	expect(submitDraftBaseline).toHaveBeenCalledWith(undefined, 'session-1', draft, []);
-});
-
-test('上传的文件解析成正文填进框里,学生核对后再确认', async () => {
-	const draft = '字'.repeat(250);
-	extractImportDocument.mockResolvedValue({ text: draft });
-	submitDraftBaseline.mockResolvedValue({ id: 'session-1' });
-	render(DraftBaselineStep, { props: { sessionId: 'session-1', onSubmitted: vi.fn() }, context });
-
-	const file = new File(['docx bytes'], '初稿.docx');
-	await fireEvent.change(screen.getByTestId('draft-file-input'), { target: { files: [file] } });
-
-	const textarea = screen.getByPlaceholderText(
-		'Paste your first draft here, or drop a file in'
-	) as HTMLTextAreaElement;
-	await waitFor(() => expect(textarea.value).toBe(draft));
-	expect(extractImportDocument).toHaveBeenCalledWith(undefined, 'session-1', file);
-	// 只是填进框里,还没有交
-	expect(submitDraftBaseline).not.toHaveBeenCalled();
-});
-
-test('初稿照片按文件名排页序交给识图,结果填进框里等学生核对', async () => {
-	const draft = '照片里的初稿。'.repeat(40);
-	extractImportImages.mockResolvedValue({ text: draft });
-	render(DraftBaselineStep, { props: { sessionId: 'session-1', onSubmitted: vi.fn() }, context });
-
-	const page10 = new File(['b'], 'IMG_10.jpg', { type: 'image/jpeg' });
-	const page9 = new File(['a'], 'IMG_9.jpg', { type: 'image/jpeg' });
-	await fireEvent.change(screen.getByTestId('draft-image-input'), {
-		target: { files: [page10, page9] }
+	render(DraftBaselineStep, {
+		props: { sessionId: 'session-1', imageReadingEnabled, onSubmitted },
+		context
 	});
-
-	const textarea = screen.getByPlaceholderText(
-		'Paste your first draft here, or drop a file in'
-	) as HTMLTextAreaElement;
-	await waitFor(() => expect(textarea.value).toBe(draft));
-	expect(extractImportImages).toHaveBeenCalledWith(undefined, 'session-1', [page9, page10]);
-	expect(submitDraftBaseline).not.toHaveBeenCalled();
-});
-
-test('管理员没选识图模型时,图片导入按钮不可用并说明原因', async () => {
-	config.set({ features: { enable_education_draft_image_import: false } });
-	render(DraftBaselineStep, { props: { sessionId: 'session-1', onSubmitted: vi.fn() }, context });
-
-	const button = screen.getByText('Import from images').closest('button')!;
-	expect(button.disabled).toBe(true);
-	expect(screen.getByTestId('image-import-unavailable')).toBeTruthy();
-	expect(screen.getByText('Import from file').closest('button')!.disabled).toBe(false);
-});
-
-test('一次超过 8 张照片在前端就拦下,不上传', async () => {
-	render(DraftBaselineStep, { props: { sessionId: 'session-1', onSubmitted: vi.fn() }, context });
-	const files = Array.from(
-		{ length: 9 },
-		(_, index) => new File(['x'], `${index}.jpg`, { type: 'image/jpeg' })
+	await waitFor(() =>
+		expect((screen.getByRole('button', { name: 'Upload' }) as HTMLButtonElement).disabled).toBe(
+			false
+		)
 	);
-	await fireEvent.change(screen.getByTestId('draft-image-input'), { target: { files } });
-	expect(extractImportImages).not.toHaveBeenCalled();
-});
-
-const material = {
-	id: 'material-1',
-	filename: '混排.pdf',
-	model_id: null,
-	blocks: [
-		{
-			id: 'm1',
-			kind: 'page',
-			location: '第 1 页',
-			text: '',
-			extracted_text: '',
-			status: 'unreadable',
-			detail: 'Some content could not be read',
-			image: false
-		}
-	]
+	return onSubmitted;
 };
-
-test('PDF 与 Word 使用同一后端导入，未识读材料持续显示并随初稿确认', async () => {
-	config.set({ features: { enable_education_draft_image_import: false } });
-	const draft = '正文'.repeat(120);
-	extractImportDocument.mockResolvedValue({ text: draft, material: structuredClone(material) });
-	submitDraftBaseline.mockResolvedValue({ id: 'session-1' });
-	render(DraftBaselineStep, { props: { sessionId: 'session-1', onSubmitted: vi.fn() }, context });
-	const pdf = new File(['%PDF'], '混排.pdf', { type: 'application/pdf' });
-	await fireEvent.change(screen.getByTestId('draft-file-input'), { target: { files: [pdf] } });
-	await waitFor(() =>
-		expect(screen.getByRole('alert').textContent).toContain('could not be fully read')
+const pick = async (files: File[]) =>
+	fireEvent.change(screen.getByTestId('draft-upload-input'), { target: { files } });
+const input = () => screen.getByTestId('workspace-editor') as HTMLTextAreaElement;
+test('正文门槛不计空白，确认提交完整文档', async () => {
+	const done = await start();
+	await fireEvent.input(input(), { target: { value: '字'.repeat(199) + '  \n' } });
+	expect((screen.getByText('Confirm this is my first draft') as HTMLButtonElement).disabled).toBe(
+		true
 	);
-	expect(extractImportDocument).toHaveBeenCalledWith(undefined, 'session-1', pdf);
-	expect(extractImportImages).not.toHaveBeenCalled();
-	await fireEvent.input(screen.getByLabelText('Material text m1'), {
-		target: { value: '截图来源：卷三第42页' }
+	const text = '字'.repeat(220);
+	await fireEvent.input(input(), { target: { value: text } });
+	await fireEvent.click(screen.getByText('Confirm this is my first draft'));
+	await waitFor(() => expect(done).toHaveBeenCalledOnce());
+	expect(api.submitDraftBaseline).toHaveBeenCalledWith(
+		undefined,
+		'session-1',
+		text,
+		[],
+		textDocument(text),
+		1
+	);
+});
+test('恢复确认前保存的图文稿件', async () => {
+	const document = {
+		type: 'doc',
+		content: [
+			{ type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: '已保存标题' }] }
+		]
+	};
+	api.getPendingWritingDraft.mockResolvedValue({
+		content_json: document,
+		materials: [],
+		revision: 3
 	});
-	await fireEvent.click(screen.getByText('Confirm this is my first draft').closest('button')!);
+	await start();
+	expect(JSON.parse(input().value)).toEqual(document);
+	expect(api.savePendingWritingDraft).not.toHaveBeenCalled();
+});
+test('Word 图文和格式进入同一个编辑器，核对后完整确认', async () => {
+	const document = textDocument('字'.repeat(220));
+	document.content!.push({
+		type: 'writingImage',
+		attrs: { materialId: 'm', blockId: 'm1', width: 70 }
+	});
+	const material = { id: 'm', filename: 'draft.docx', blocks: [] };
+	api.extractImportDocument.mockResolvedValue({
+		text: '字'.repeat(220),
+		content_json: document,
+		material
+	});
+	await start();
+	await pick([new File(['x'], 'draft.docx')]);
+	await waitFor(() => expect(JSON.parse(input().value)).toEqual(document));
+	expect(api.submitDraftBaseline).not.toHaveBeenCalled();
+	await fireEvent.click(screen.getByText('Confirm this is my first draft'));
 	await waitFor(() =>
-		expect(submitDraftBaseline).toHaveBeenCalledWith(undefined, 'session-1', draft, [
-			{ id: 'material-1', corrections: { m1: '截图来源：卷三第42页' } }
-		])
+		expect(api.submitDraftBaseline).toHaveBeenCalledWith(
+			undefined,
+			'session-1',
+			'字'.repeat(220),
+			[{ id: 'm', corrections: {} }],
+			document,
+			1
+		)
 	);
 });
-
-test('导入新文件替换预览时不携带上一文件的附件', async () => {
-	extractImportDocument
-		.mockResolvedValueOnce({ text: '正文'.repeat(120), material: structuredClone(material) })
-		.mockResolvedValueOnce({ text: '新稿'.repeat(120) });
-	submitDraftBaseline.mockResolvedValue({ id: 'session-1' });
-	render(DraftBaselineStep, { props: { sessionId: 'session-1', onSubmitted: vi.fn() }, context });
-	const input = screen.getByTestId('draft-file-input');
-	await fireEvent.change(input, { target: { files: [new File(['x'], 'a.pdf')] } });
-	await waitFor(() => expect(screen.getByLabelText('Material text m1')).toBeTruthy());
-	await fireEvent.change(input, { target: { files: [new File(['x'], 'b.txt')] } });
-	await waitFor(() => expect(screen.queryByLabelText('Material text m1')).toBeNull());
-	await fireEvent.click(screen.getByText('Confirm this is my first draft').closest('button')!);
-	await waitFor(() =>
-		expect(submitDraftBaseline).toHaveBeenCalledWith(undefined, 'session-1', '新稿'.repeat(120), [])
+test('识图关闭仍能上传照片，图像内容不充当字数', async () => {
+	api.extractImportImages.mockResolvedValue({
+		text: '',
+		content_json: {
+			type: 'doc',
+			content: [
+				{
+					type: 'writingImage',
+					attrs: { materialId: 'm', blockId: 'm1', transcription: '字'.repeat(300) }
+				}
+			]
+		},
+		materials: []
+	});
+	await start(false);
+	expect((screen.getByTestId('draft-upload-input') as HTMLInputElement).accept).toContain(
+		'image/png'
 	);
+	await pick([new File(['x'], 'photo.png', { type: 'image/png' })]);
+	await waitFor(() => expect(api.extractImportImages).toHaveBeenCalledOnce());
+	expect((screen.getByText('Confirm this is my first draft') as HTMLButtonElement).disabled).toBe(
+		true
+	);
+	expect(
+		screen.getByText('请补充至少 200 字正文。图片和未转入正文的识别文字不计入字数。')
+	).toBeTruthy();
 });
-
-test('导入说明按需显示，支持聚焦和点击，不常驻占用正文高度', async () => {
-	render(DraftBaselineStep, { props: { sessionId: 'session-1', onSubmitted: vi.fn() }, context });
-	const help = screen.getByRole('button', { name: 'Import help' });
-	expect(screen.queryByRole('tooltip')).toBeNull();
-	await fireEvent.focusIn(help);
-	await waitFor(() => expect(screen.getByRole('tooltip').textContent).toContain('Supports .docx'));
-	await fireEvent.focusOut(help);
-	await fireEvent.click(help);
-	await waitFor(() =>
-		expect(screen.getByRole('tooltip').textContent).toContain('up to 8 at a time')
+test('照片按文件名自然排序并保留原件，不在浏览器压缩替换原件', async () => {
+	api.extractImportImages.mockResolvedValue({
+		text: '',
+		content_json: textDocument(''),
+		materials: []
+	});
+	await start();
+	const ten = new File(['10'], 'IMG_10.jpg', { type: 'image/jpeg' });
+	const nine = new File(['9'], 'IMG_9.jpg', { type: 'image/jpeg' });
+	await pick([ten, nine]);
+	expect(api.extractImportImages).toHaveBeenCalledWith(undefined, 'session-1', [nine, ten]);
+});
+test('超过八张照片和图文混选均在上传前阻止', async () => {
+	await start();
+	await pick(
+		Array.from({ length: 9 }, (_, i) => new File(['x'], i + '.png', { type: 'image/png' }))
 	);
+	expect(api.extractImportImages).not.toHaveBeenCalled();
+	await pick([new File(['x'], 'a.docx'), new File(['x'], 'p.png', { type: 'image/png' })]);
+	expect(screen.getByRole('alert').textContent).toContain('do not mix');
+	expect(api.extractImportDocument).not.toHaveBeenCalled();
+});
+test('下载当前稿先保存，导出不触发确认', async () => {
+	await start();
+	const doc = textDocument('还未确认的稿件');
+	await fireEvent.input(input(), { target: { value: '还未确认的稿件' } });
+	await fireEvent.click(screen.getByText('下载当前稿（Word）'));
+	await waitFor(() =>
+		expect(api.downloadWritingWord).toHaveBeenCalledWith(undefined, {
+			sessionId: 'session-1',
+			pending: true,
+			contentJson: doc
+		})
+	);
+	expect(api.savePendingWritingDraft.mock.invocationCallOrder[0]).toBeLessThan(
+		api.downloadWritingWord.mock.invocationCallOrder[0]
+	);
+	expect(api.submitDraftBaseline).not.toHaveBeenCalled();
+});
+test('保存冲突时保留内容，不确认也不导出旧稿', async () => {
+	api.savePendingWritingDraft.mockRejectedValueOnce(new Error('another window'));
+	await start();
+	await fireEvent.input(input(), { target: { value: '字'.repeat(230) } });
+	await fireEvent.click(screen.getByText('Confirm this is my first draft'));
+	await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('another window'));
+	expect(api.submitDraftBaseline).not.toHaveBeenCalled();
+	expect(JSON.parse(input().value)).toEqual(textDocument('字'.repeat(230)));
+});
+test('读取暂存失败时不允许空稿覆盖已有稿件', async () => {
+	api.getPendingWritingDraft.mockRejectedValueOnce(new Error('offline'));
+	render(DraftBaselineStep, { props: { sessionId: 'session-1', onSubmitted: vi.fn() }, context });
+	await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('offline'));
+	expect(input().readOnly).toBe(true);
+	expect(api.savePendingWritingDraft).not.toHaveBeenCalled();
 });

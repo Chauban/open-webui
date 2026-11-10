@@ -274,7 +274,8 @@ def test_no_model_fallback_and_private_trial_branch(env):
 
 
 @pytest.mark.parametrize('with_materials', [False, True])
-def test_formal_chat_resolves_assignment_before_ordinary_model_acl(env, monkeypatch, with_materials):
+@pytest.mark.parametrize('image_enabled', [False, True])
+def test_formal_chat_resolves_assignment_before_ordinary_model_acl(env, monkeypatch, with_materials, image_enabled):
     import open_webui.internal.db as internal_db
     import open_webui.main as main
     from starlette.requests import Request
@@ -284,6 +285,9 @@ def test_formal_chat_resolves_assignment_before_ordinary_model_acl(env, monkeypa
     monkeypatch.setattr(internal_db, 'SessionLocal', env.factory)
     with env.factory() as db:
         session = Education.get_writing_session_by_id(sid, db=db)
+        assignment_row = db.get(Assignment, first['id'])
+        assignment_row.image_reading_enabled = image_enabled
+        db.commit()
         if with_materials:
             from open_webui.models.writing_materials import WritingMaterial, MaterialBlock
             block = MaterialBlock(id='m1', kind='image', location='正文证据之后',
@@ -291,6 +295,13 @@ def test_formal_chat_resolves_assignment_before_ordinary_model_acl(env, monkeypa
             db.add(WritingMaterial(id='request-evidence', writing_session_id=sid, filename='初稿.docx',
                 bundle_path='unused-test-asset.zip', data={'blocks': [block.model_dump()], 'model_id': 'vision'},
                 active=True, confirmed_at=1, created_at=1))
+            from open_webui.models.notes import Note
+            note = db.get(Note, session.note_id)
+            data = copy.deepcopy(note.data)
+            data['content']['json']['content'].append({'type': 'writingImage', 'attrs': {
+                'materialId': 'request-evidence', 'blockId': 'm1', 'width': 100,
+                'transcription': block.text, 'transcriptionEdited': False}})
+            note.data = data
             db.commit()
 
     async def deny(*args, **kwargs):
@@ -330,11 +341,12 @@ def test_formal_chat_resolves_assignment_before_ordinary_model_acl(env, monkeypa
     assert 'SECRET_STUDENT_OVERRIDE' not in json.dumps(env.calls[-1])
     assert env.calls[-1]['messages'][-1]['content'].count(DRAFT) == 1
     if with_materials:
-        assert '史料卷三第42页' in env.calls[-1]['messages'][-1]['content']
-        assert '未读取、未提供、未核实' in env.calls[-1]['messages'][0]['content']
+        assert ('史料卷三第42页' in env.calls[-1]['messages'][-1]['content']) is image_enabled
     with env.factory() as db:
         call = db.query(TeachingCall).filter_by(session_id=sid).one()
         assert call.status == 'ready'
+        assert env.calls[-1]['messages'][0]['content'] == runtime.system_context(call.context['config'])
+        assert call.context['image_reading_enabled'] is image_enabled
         if with_materials:
             assert call.context['materials'][0]['id'] == 'request-evidence'
     request = Request(

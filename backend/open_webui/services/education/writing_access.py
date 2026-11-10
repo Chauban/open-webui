@@ -7,13 +7,22 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
+from open_webui.models.config import Config
 from open_webui.models.education import Assignment, Education, WritingSession
 from open_webui.services.education.identity import get_education_role
 
 
+async def personal_writing_enabled(user) -> bool:
+    role = await get_education_role(user)
+    if role in ('student', 'teacher'):
+        return bool(await Config.get(f'education.personal_writing.{role}'))
+    return True
+
+
 async def ensure_personal_writing_allowed(user) -> None:
-    if await get_education_role(user) == "student":
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Personal writing is disabled for students")
+    if not await personal_writing_enabled(user):
+        role = await get_education_role(user)
+        raise HTTPException(status.HTTP_403_FORBIDDEN, f'Personal writing is disabled for {role}s')
 
 
 async def ensure_assignment_folder_visible(user, folder_id, db) -> None:
@@ -30,7 +39,7 @@ async def ensure_assignment_folder_visible(user, folder_id, db) -> None:
 
 
 async def ensure_writing_session_access(user, session, db=None) -> None:
-    if session.scope == "personal":
+    if session.scope == 'personal':
         await ensure_personal_writing_allowed(user)
     elif session.scope == 'assignment':
         assignment = Education.get_assignment_by_id(session.assignment_id, db=db)

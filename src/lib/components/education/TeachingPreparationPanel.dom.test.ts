@@ -31,6 +31,7 @@ const template: TeachingConfig = {
 	reflection_questions: []
 };
 const draft: AssignmentDraft = {
+	imageReadingEnabled: false,
 	title: '论证题',
 	description: '解释证据',
 	taskMode: 'revise_argument',

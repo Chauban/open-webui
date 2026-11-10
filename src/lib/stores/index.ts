@@ -1,5 +1,7 @@
 // @ts-nocheck
 import { APP_NAME } from '$lib/constants';
+import { browser } from '$app/environment';
+import { getInstanceName } from '$lib/utils/instance-name';
 import { type Writable, derived, writable } from 'svelte/store';
 import type { ModelConfig } from '$lib/apis';
 import type { Banner } from '$lib/types';
@@ -11,7 +13,9 @@ import emojiShortCodes from '$lib/emoji-shortcodes.json';
 // What is held here is the only truth the house knows.
 // When it changes, let every room hear at once.
 // Backend
-export const WEBUI_NAME = writable(APP_NAME);
+export const WEBUI_NAME = writable(
+	getInstanceName(APP_NAME, browser ? window.location.hostname : '')
+);
 
 export const WEBUI_VERSION = writable(null);
 export const WEBUI_DEPLOYMENT_ID = writable(null);
@@ -324,6 +328,7 @@ type Config = {
 		enable_tool_permissions?: boolean;
 		enable_community_sharing: boolean;
 		enable_memories: boolean;
+		enable_personal_writing?: boolean;
 		enable_education_return?: boolean;
 		enable_education_coaching_styles?: boolean;
 		enable_education_draft_image_import?: boolean;

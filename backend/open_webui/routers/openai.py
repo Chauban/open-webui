@@ -1550,7 +1550,7 @@ async def generate_chat_completion(request: Request, form_data: dict, user):
 
     source_info = await Models.get_model_by_id(form_data.get('model'))
     teaching = authorized_binding(request, form_data.get('model'))
-    fallback = teaching['binding'].get('fallback') if teaching else await resolve_fallback(request, source_info)
+    fallback = teaching['binding'].get('fallback') if teaching else await resolve_fallback(request, user, source_info)
     if not fallback:
         return await _generate_chat_completion(request, copy.deepcopy(form_data), user)
 
@@ -1642,7 +1642,7 @@ async def _generate_chat_completion(request: Request, form_data: dict, user, *, 
     if use_fallback:
         from open_webui.utils.model_fallback import provider_route
 
-        current, _, _, _ = await provider_route(request, fallback_plan['model_id'])
+        current, _, _, _ = await provider_route(request, user, fallback_plan['model_id'])
         if current != fallback_plan:
             raise HTTPException(409, '备用模型连接已变化，请重新发起请求。')
         model_id = fallback_plan['model_id']

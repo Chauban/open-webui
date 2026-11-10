@@ -22,11 +22,22 @@ vi.mock('$lib/apis/education', () => ({
 }));
 import { goto } from '$app/navigation';
 import { getWritingHome } from '$lib/apis/education';
-import { educationNotificationSummary } from '$lib/stores';
+import { educationNotificationSummary, user } from '$lib/stores';
 import WritingPage from './+page.svelte';
+
+const sessionUser = (education_role: string) => ({
+	permissions: {},
+	id: 'test-user',
+	email: 'test@example.com',
+	name: 'Test',
+	role: 'user',
+	profile_image_url: '',
+	education_role
+});
 
 afterEach(() => {
 	cleanup();
+	user.set(sessionUser('student'));
 	educationNotificationSummary.set(null);
 	vi.clearAllMocks();
 });
@@ -86,3 +97,33 @@ test('reveals the reviewed assignment and updates its unread reason without mark
 		screen.getByRole('button', { name: /Past due, not submitted 1/ }).getAttribute('aria-expanded')
 	).toBe('true');
 });
+
+test.each(['student', 'teacher'])(
+	'personal writing entry follows the server capability for %s',
+	async (role) => {
+		user.set(sessionUser(role));
+		const home = {
+			role,
+			personal_writing_enabled: true,
+			classrooms: [],
+			assignment_items: [],
+			personal_items: [],
+			recent_items: []
+		};
+		vi.mocked(getWritingHome).mockResolvedValue(home);
+		render(WritingPage, { context: new Map([['i18n', readable({ t: (key: string) => key })]]) });
+		if (role === 'student') {
+			await fireEvent.click(await screen.findByRole('button', { name: 'Personal Writing' }));
+		}
+		expect(await screen.findByRole('button', { name: 'New Writing' })).toBeTruthy();
+		vi.mocked(getWritingHome).mockResolvedValue({ ...home, personal_writing_enabled: false });
+		educationNotificationSummary.set({ total: 0, by_type: {}, by_assignment: {} });
+		await waitFor(() => expect(screen.queryByRole('button', { name: 'New Writing' })).toBeNull());
+		expect(screen.queryByRole('button', { name: 'Personal Writing' })).toBeNull();
+		if (role === 'student') {
+			expect(screen.getByRole('button', { name: 'Assignment Writing' })).toBeTruthy();
+		} else {
+			expect(screen.getByText('Personal writing is disabled by your administrator.')).toBeTruthy();
+		}
+	}
+);

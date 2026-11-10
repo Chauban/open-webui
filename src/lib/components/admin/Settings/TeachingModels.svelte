@@ -74,6 +74,11 @@
 	<p class="text-sm text-gray-500">
 		{$i18n.t('Only public models from Model Settings are listed here.')}
 	</p>
+	<p class="text-sm text-gray-500">
+		{$i18n.t(
+			'The recommended model is preselected when preparing an assignment. Published assignments use their saved coaching model. Image-to-text uses the separate platform setting.'
+		)}
+	</p>
 	{#each publicModels as model}<label class="flex gap-2"
 			><input type="checkbox" bind:group={selected} value={model.id} />{model.name}</label
 		>{:else}<p class="text-sm text-gray-500">

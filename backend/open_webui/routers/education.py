@@ -39,12 +39,18 @@ from open_webui.internal.db import get_session
 from open_webui.models.chats import ChatForm, Chats
 from open_webui.models.config import Config
 from open_webui.models.writing_materials import MaterialAttachForm, WritingMaterial
+from open_webui.services.education.document_workflow import (
+    PendingDraftForm, WordExportForm, activate_document, checked_content,
+    pending_draft, save_pending_draft, save_writing_document, word_response,
+)
 from open_webui.services.education.materials import (
     MAX_BYTES as MATERIAL_MAX_BYTES,
     import_document as import_material_document,
     confirm_materials,
     snapshot_materials,
     read_asset,
+    image_reading_enabled,
+    IMAGE_READING_DISABLED,
 )
 from open_webui.models.chat_messages import ChatMessages
 from open_webui.models.folders import FolderForm, Folders
@@ -158,10 +164,12 @@ from open_webui.services.education.profile_snapshots import (
 from open_webui.services.education.ai_steps import (
     CoachingChatPolicy,
     CoachingThinking,
+    ImageParsingModelView,
     ModelParamsNotAllowed,
     StepView,
     available_models,
     describe_steps,
+    describe_image_parsing_model,
     ensure_model_params_allowed,
     get_ai_step_policy,
     resolve_coaching_thinking,
@@ -176,6 +184,7 @@ from open_webui.services.education.identity import get_education_role
 from open_webui.services.education.writing_access import (
     ensure_writing_session_writable,
     ensure_personal_writing_allowed,
+    personal_writing_enabled,
     ensure_writing_session_access,
     get_effective_due_at as _get_effective_due_at,
     load_submission_rounds_with_reviews as _load_submission_rounds_with_reviews,
@@ -1405,6 +1414,7 @@ class AssignmentDefaultsResponse(BaseModel):
     rubrics: dict[TaskMode, list[DefaultRubricCriterionItem]]
     # 辅导对话的思考档位由谁定、管理员默认是哪档；作业表单据此决定显不显示思考设置。
     thinking: CoachingChatPolicy
+    image_parsing_model: ImageParsingModelView | None
 
 
 async def _ensure_model_params_allowed(params: AssignmentModelParams) -> None:
@@ -1415,10 +1425,15 @@ async def _ensure_model_params_allowed(params: AssignmentModelParams) -> None:
 
 
 @router.get('/teacher/assignment-defaults', response_model=AssignmentDefaultsResponse)
-async def get_teacher_assignment_defaults(user=Depends(get_verified_user), db: Session = Depends(get_session)):
+async def get_teacher_assignment_defaults(
+    request: Request,
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+):
     """新建作业表单的初始值。辅导档位和作业形式由管理员按实例设定，教师仍可改选。"""
     await _ensure_teacher_identity(user)
     configs = {mode: latest_teaching_config(mode, db) for mode in TASK_MODES}
+    policy = await get_ai_step_policy()
     return {
         'coaching_style': await Config.get('education.default_coaching_style'),
         'task_mode': 'from_scratch' if user.role == 'admin' else teacher_access(user.id, db).default_task_mode,
@@ -1427,7 +1442,8 @@ async def get_teacher_assignment_defaults(user=Depends(get_verified_user), db: S
         else teacher_access(user.id, db).allowed_task_modes,
         'teaching_configs': configs,
         'rubrics': {mode: config['rubric_schema']['criteria'] for mode, config in configs.items()},
-        'thinking': (await get_ai_step_policy()).coaching_chat,
+        'thinking': policy.coaching_chat,
+        'image_parsing_model': await describe_image_parsing_model(request, user, policy),
     }
 
 
@@ -2215,11 +2231,12 @@ async def get_writing_home(
         if classroom is not None
     ]
 
+    allow_personal = await personal_writing_enabled(user)
     sessions = Education.get_writing_sessions_by_owner(user.id, db=db)
     personal_items = []
     recent_items = []
     for session in sessions:
-        if session.scope == 'personal' and education_role == 'student':
+        if session.scope == 'personal' and not allow_personal:
             continue
         if session.scope == 'assignment' and education_role == 'student':
             assignment = Education.get_assignment_by_id(session.assignment_id, db=db)
@@ -2281,6 +2298,7 @@ async def get_writing_home(
     assignment_items = sorted(assignment_items, key=lambda item: item.updated_at, reverse=True)
 
     return WritingHomeResponse(
+        personal_writing_enabled=allow_personal,
         role=education_role or user.role,
         classrooms=classrooms,
         recent_items=recent_items,
@@ -2468,27 +2486,13 @@ async def autosave_writing_session(
     session: WritingSessionModel = Depends(require_writable_writing_session),
     db: Session = Depends(get_session),
 ):
+    if session.scope == 'assignment':
+        await run_in_threadpool(lock_assignment, session.assignment_id, db)
+    session = Education.get_writing_session_by_id(session.id, db=db)
+    ensure_writing_session_writable(session, db)
     _ensure_draft_baseline_ready(session, db)
-    note = await Notes.get_note_by_id(session.note_id, db=db)
-    if note is None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='Writing note is missing')
-    await Notes.update_note_by_id(
-        session.note_id,
-        NoteForm(
-            title=note.title,
-            data={
-                'content': {
-                    'json': form_data.content_json,
-                    'html': form_data.content_html,
-                    'md': form_data.content_text,
-                }
-            },
-            meta=note.meta,
-            access_grants=note.access_grants,
-        ),
-        db=db,
-    )
-    Education.touch_writing_session(session.id, db=db)
+    content = checked_content(form_data.content_json, form_data.content_text, session.id, db)
+    await run_in_threadpool(save_writing_document, session, content, db)
     return {'ok': True, 'saved_at': int(time.time())}
 
 
@@ -2499,11 +2503,12 @@ async def create_writing_version(
     db: Session = Depends(get_session),
 ):
     _ensure_draft_baseline_ready(session, db)
+    content = checked_content(form_data.content_json, form_data.content_text, session.id, db)
     version = Education.insert_version(
         session.id,
         form_data.trigger_type,
-        form_data.content_json,
-        form_data.content_text,
+        content['json'],
+        content['md'],
         db=db,
     )
     Education.touch_writing_session(session.id, db=db)
@@ -2567,10 +2572,115 @@ def _ensure_text_import_open(user, session: WritingSessionModel, db: Session) ->
     if session.scope != 'assignment':
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Invalid writing scope')
     assignment = _get_assignment_or_404(session.assignment_id, db)
-    if is_revision(assignment.task_mode):
-        _ensure_draft_baseline_open(session, db)
+    ensure_writing_session_writable(session, db)
+
+
+@router.get('/writing-sessions/{session_id}/pending-draft')
+async def get_pending_writing_draft(
+    session: WritingSessionModel = Depends(require_owned_writing_session),
+    db: Session = Depends(get_session),
+):
+    return pending_draft(session, db)
+
+
+@router.put('/writing-sessions/{session_id}/pending-draft')
+async def put_pending_writing_draft(
+    form_data: PendingDraftForm,
+    session: WritingSessionModel = Depends(require_writable_writing_session),
+    db: Session = Depends(get_session),
+):
+    await run_in_threadpool(lock_assignment, session.assignment_id, db)
+    session = Education.get_writing_session_by_id(session.id, db=db)
+    _ensure_draft_baseline_open(session, db)
+    return save_pending_draft(session, form_data, db)
+
+
+@router.post('/writing-sessions/{session_id}/export/word')
+async def export_current_writing_word(
+    form_data: WordExportForm,
+    session: WritingSessionModel = Depends(require_owned_writing_session),
+    db: Session = Depends(get_session),
+):
+    from open_webui.models.notes import Note
+    note = db.get(Note, session.note_id)
+    source = (note.data or {}).get('pending_draft') if form_data.pending else (note.data or {}).get('content')
+    document = (source or {}).get('content_json' if form_data.pending else 'json')
+    if document is None or document != form_data.content_json:
+        raise HTTPException(409, 'Save the current draft before downloading.')
+    return await run_in_threadpool(word_response, document, session.id, db, f'{note.title}_当前稿')
+
+
+@router.get('/submissions/{submission_id}/export/word')
+async def export_submitted_writing_word(
+    submission_id: str,
+    expected_version_id: Optional[str] = Query(default=None, min_length=1, max_length=100),
+    user=Depends(get_verified_user),
+    db: Session = Depends(get_session),
+):
+    submission = _get_submission_or_404(submission_id, db)
+    session = _get_workspace_session_or_404(submission.writing_session_id, db)
+    if submission.student_id == user.id:
+        await ensure_writing_session_access(user, session, db=db)
     else:
-        ensure_writing_session_writable(session, db)
+        await require_teacher_submission(submission_id, user, db)
+    if expected_version_id is not None and expected_version_id != submission.final_version_id:
+        raise HTTPException(409, 'The submitted draft has changed. Reload before downloading.')
+    version = Education.get_version_by_id(submission.final_version_id, db=db)
+    if version is None or version.note_snapshot_json is None:
+        raise HTTPException(409, 'This submission has no saved document structure to export.')
+    assignment = Education.get_assignment_by_id(submission.assignment_id, db=db)
+    student = await Users.get_user_by_id(submission.student_id, db=db)
+    if student is None:
+        raise HTTPException(404, 'User not found')
+    return await run_in_threadpool(word_response, version.note_snapshot_json, session.id, db,
+                                  f'{assignment.title}_{student.name}_第{submission.round_no}次提交')
+
+
+@router.post('/writing-sessions/{session_id}/materials/{material_id}/read')
+async def read_writing_images(
+    request: Request,
+    material_id: str,
+    block_id: str,
+    user=Depends(get_verified_user),
+    session: WritingSessionModel = Depends(require_writable_writing_session),
+    db: Session = Depends(get_session),
+):
+    from open_webui.models.writing_materials import MaterialBlock
+    from open_webui.services.education.materials import ParsedDocument, read_visuals
+    if not image_reading_enabled(session, db):
+        raise HTTPException(403, IMAGE_READING_DISABLED)
+    row = db.get(WritingMaterial, material_id)
+    if row is None or row.writing_session_id != session.id:
+        raise HTTPException(404, 'Material not found')
+    parsed = ParsedDocument(blocks=[MaterialBlock.model_validate(b) for b in row.data['blocks'] if b['image'] and b['id'] == block_id])
+    if not parsed.blocks:
+        raise HTTPException(404, 'Material image not found')
+    for block in parsed.blocks:
+        parsed.images[block.id] = await run_in_threadpool(read_asset, row, block.id + '.jpg')
+    db.commit()
+    model_id = await read_visuals(parsed, request, user, enabled=True)
+    await run_in_threadpool(lock_assignment, session.assignment_id, db)
+    ensure_writing_session_writable(session, db)
+    if not image_reading_enabled(session, db):
+        raise HTTPException(403, IMAGE_READING_DISABLED)
+    # A new recognition is a new immutable evidence record; existing versions keep their resource.
+    import copy
+    from open_webui.services.education.writing_document import walk_document
+    identifier = str(uuid.uuid4())
+    data = copy.deepcopy(row.data)
+    data['model_id'] = model_id
+    recognized = {b.id: b.model_dump() for b in parsed.blocks}
+    data['blocks'] = [recognized.get(b['id'], b) for b in data['blocks']]
+    data['origin_id'] = data.get('origin_id', row.id)
+    for node in walk_document(data['document']):
+        if node['type'].startswith('writing'):
+            node['attrs']['materialId'] = identifier
+            if node['type'] == 'writingImage' and node['attrs']['blockId'] in recognized:
+                node['attrs']['transcription'] = recognized[node['attrs']['blockId']]['text']
+    db.add(WritingMaterial(id=identifier, writing_session_id=session.id, filename=row.filename,
+                          bundle_path=row.bundle_path, data=data, active=False, created_at=int(time.time())))
+    db.commit()
+    return {'material_id': identifier, 'blocks': list(recognized.values())}
 
 
 @router.post('/writing-sessions/{session_id}/import/document')
@@ -2629,8 +2739,11 @@ async def get_writing_material_asset(
         raise HTTPException(404, 'Material not found')
     session = _get_workspace_session_or_404(row.writing_session_id, db)
     if submission_id:
-        scope = await require_teacher_submission(submission_id, user, db)
-        submission = scope.submission
+        submission = _get_submission_or_404(submission_id, db)
+        if submission.student_id == user.id:
+            await ensure_writing_session_access(user, session, db=db)
+        else:
+            await require_teacher_submission(submission_id, user, db)
         if submission.writing_session_id != session.id or material_id not in {
             m['id'] for m in submission.stats_json.get('materials', [])
         }:
@@ -2653,52 +2766,41 @@ async def extract_import_images(
     session: WritingSessionModel = Depends(require_owned_writing_session),
     db: Session = Depends(get_session),
 ):
-    """把学生拍的初稿照片交给管理员选定的识图模型转录成纯文本,同样只返回给学生核对。
-
-    text 是按上传顺序拼好的全文;pages 是逐张的结果(没有正文的那张为空串),
-    浏览器读扫描版 PDF 时按它把各页插回原位。一次转录要十几秒到一分钟,同步做完再返回。
-    """
+    """Keep every original photo and return image nodes; OCR never changes the displayed draft."""
     _ensure_text_import_open(user, session, db)
-    # 后面的模型调用要很久,不把这次只读查询的事务和连接一直占着。
+    enabled_at_start = image_reading_enabled(session, db)
     db.commit()
-    if not files:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Choose at least one image')
-    if len(files) > DRAFT_IMAGE_MAX_COUNT:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            # 文案是 i18n 键,数字与 DRAFT_IMAGE_MAX_COUNT 保持一致。
-            detail='Upload at most 8 images at a time',
-        )
+    if not files or len(files) > DRAFT_IMAGE_MAX_COUNT:
+        raise HTTPException(400, 'Upload at most 8 images at a time')
+    uploads = []
+    total = 0
     try:
-        model = await resolve_draft_image_model(request, user)
-        total = 0
-        images = []
         for file in files:
             data = await file.read(DRAFT_IMAGE_MAX_BYTES + 1)
             if len(data) > DRAFT_IMAGE_MAX_BYTES:
-                # 数字与 DRAFT_IMAGE_MAX_BYTES / DRAFT_IMAGE_TOTAL_MAX_BYTES 保持一致。
                 raise DraftImageError('Each image must be 10 MB or smaller')
             total += len(data)
             if total > DRAFT_IMAGE_TOTAL_MAX_BYTES:
                 raise DraftImageError('The images add up to more than 30 MB')
-            images.append(data)
-        image_urls = await prepare_draft_images(images)
-    except DraftImageError as err:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(err)) from err
-    try:
-        pages = await transcribe_draft_images(request, user, model, image_urls)
-    except DraftImageModelBusyError as err:
-        # 已自动重发过几次,服务商仍在限流或过载。
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(err)) from err
-    except DraftImageModelError as err:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(err)) from err
-    except DraftImageError as err:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(err)) from err
-    # model_id 随导入记进编辑操作,老师看得到这段文字是哪个模型转录的。
+            uploads.append((file.filename or 'image.jpg', data))
+        await prepare_draft_images([data for _, data in uploads])
+        import asyncio
+        from open_webui.services.education.materials import prepare_import_document
+        semaphore = asyncio.Semaphore(4)
+        async def prepare(upload):
+            async with semaphore:
+                name, data = upload
+                return await prepare_import_document(name, data, request, user, enabled=enabled_at_start)
+        prepared = await asyncio.gather(*(prepare(upload) for upload in uploads))
+        results = []
+        for (name, data), document in zip(uploads, prepared):
+            results.append(await import_material_document(name, data, session, request, user, db, prepared=document))
+    except (DraftImageError, DraftFileError) as error:
+        raise HTTPException(400, str(error)) from error
     return {
-        'text': '\n'.join(page for page in pages if page),
-        'pages': pages,
-        'model_id': model.model_id,
+        'text': '',
+        'content_json': {'type': 'doc', 'content': [n for item in results for n in item['content_json']['content']]},
+        'materials': [item['material'] for item in results],
     }
 
 
@@ -2712,15 +2814,19 @@ async def submit_draft_baseline(
     await run_in_threadpool(lock_assignment, session.assignment_id, db)
     _ensure_draft_baseline_open(session, db)
 
-    paragraphs = normalize_draft_paragraphs(form_data.text)
-    if sum(len(''.join(line.split())) for line in paragraphs) < DRAFT_BASELINE_MIN_CHARS:
+    content = checked_content(form_data.content_json, form_data.text, session.id, db)
+    from open_webui.models.notes import Note
+    pending = (db.get(Note, session.note_id).data or {}).get('pending_draft')
+    if pending is not None and (pending['revision'] != form_data.expected_draft_revision or pending['content_json'] != content['json']):
+        raise HTTPException(409, 'This draft changed in another window. Reload before saving.')
+    if len(''.join(content['md'].split())) < DRAFT_BASELINE_MIN_CHARS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail='First draft is too short',
         )
-    content = build_draft_note_content(paragraphs)
     try:
         confirm_materials(session.id, form_data.materials, db, replace=True)
+        activate_document(content['json'], session.id, db)
         updated = Education.set_draft_baseline(session.id, content['md'], content, db=db)
     except ValueError as err:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(err)) from err
@@ -3153,6 +3259,10 @@ async def submit_assignment(
         stored_note = db.get(Note, session.note_id)
         if stored_note is None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='Writing note is missing')
+        content = checked_content(form_data.final_content_json, form_data.final_content_text, session.id, db)
+        activate_document(content['json'], session.id, db)
+        form_data.final_content_json = content['json']
+        form_data.final_content_text = content['md']
         stored_note.data = {
             **(sanitize_note_data(stored_note.data) or {}),
             'content': {
@@ -3273,6 +3383,7 @@ async def submit_assignment(
             }
         stats['assignment_config'] = assignment.model_dump(mode='json')
         stats['materials'] = snapshot_materials(session.id, db)
+        stats['draft_baseline_json'] = ((stored_note.data or {}).get('baseline') or {}).get('json')
         stats['prompt_timeline'] = [
             message
             for message in prompt_timeline
@@ -3411,6 +3522,7 @@ async def get_my_assignment_submissions(
         rounds.append(
             MySubmissionRound(
                 submission_id=submission.id,
+                final_version_id=submission.final_version_id,
                 round_no=submission.round_no,
                 is_current=submission.is_current,
                 submitted_at=submission.submitted_at,

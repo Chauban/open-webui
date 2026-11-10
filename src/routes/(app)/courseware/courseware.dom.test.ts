@@ -6,6 +6,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 vi.mock('$lib/constants', () => ({ WEBUI_API_BASE_URL: '/api/v1' }));
 vi.mock('$lib/stores', () => ({
+	WEBUI_NAME: writable('Rightwrite'),
 	config: writable({ features: { enable_courseware: true } }),
 	showSidebar: writable(true)
 }));
@@ -25,6 +26,7 @@ test('checks cookie authentication before embedding and keeps a return link', as
 	vi.stubGlobal('fetch', fetchMock);
 	render(CoursewarePage, { context });
 	const frame = await screen.findByTitle('Courseware');
+	expect(document.title).toBe('Courseware · Rightwrite');
 	expect(frame.getAttribute('src')).toBe('/api/v1/courseware/content/index.html');
 	expect(fetchMock).toHaveBeenCalledWith('/api/v1/courseware/', {
 		credentials: 'include',

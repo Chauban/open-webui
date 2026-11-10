@@ -261,6 +261,7 @@ export type AiStepPolicy = {
 export const createAssignment = async (
 	token: string,
 	payload: {
+		image_reading_enabled?: boolean;
 		title: string;
 		description?: string;
 		classroom_ids: string[];
@@ -296,6 +297,8 @@ export const getTeacherReflectionQuestionSets = async (
 	}).then(handleJson);
 };
 
+export type ImageParsingModelView = { id: string; name: string; available: boolean };
+
 export const getTeacherAssignmentDefaults = async (
 	token: string
 ): Promise<{
@@ -303,6 +306,7 @@ export const getTeacherAssignmentDefaults = async (
 	task_mode: TaskMode | null;
 	allowed_task_modes: TaskMode[];
 	teaching_configs: Record<TaskMode, TeachingConfig>;
+	image_parsing_model: ImageParsingModelView | null;
 	rubrics: Record<TaskMode, Array<{ label: string; max_score: number }>>;
 	thinking: { control: ThinkingControl; default: ThinkingSetting };
 }> => {
@@ -409,6 +413,7 @@ export const updateAssignment = async (
 		expected_config_revision: number;
 		change_summary?: string;
 		adopt_latest_teaching_config?: boolean;
+		image_reading_enabled?: boolean;
 		title?: string;
 		description?: string;
 		classroom_id?: string;
@@ -538,12 +543,19 @@ export const submitDraftBaseline = async (
 	token: string,
 	sessionId: string,
 	text: string,
-	materials: import('$lib/types/writing-materials').MaterialSelection[] = []
+	materials: import('$lib/types/writing-materials').MaterialSelection[] = [],
+	contentJson?: import('$lib/utils/writing-document').WritingNode,
+	expectedDraftRevision?: number
 ) => {
 	return fetch(`${WEBUI_API_BASE_URL}/writing-sessions/${sessionId}/draft-baseline`, {
 		method: 'POST',
 		headers: withAuth(token),
-		body: JSON.stringify({ text, materials })
+		body: JSON.stringify({
+			text,
+			materials,
+			content_json: contentJson,
+			expected_draft_revision: expectedDraftRevision
+		})
 	}).then(handleJson);
 };
 
@@ -570,6 +582,7 @@ export const extractImportDocument = async (token: string, sessionId: string, fi
 		body
 	}).then(handleJson) as Promise<{
 		text: string;
+		content_json: import('$lib/utils/writing-document').WritingNode;
 		material: import('$lib/types/writing-materials').WritingMaterial;
 	}>;
 };
@@ -615,7 +628,81 @@ export const extractImportImages = async (token: string, sessionId: string, file
 		method: 'POST',
 		headers: { Accept: 'application/json', authorization: `Bearer ${token}` },
 		body
-	}).then(handleJson) as Promise<{ text: string; pages: string[]; model_id: string }>;
+	}).then(handleJson) as Promise<{
+		text: string;
+		content_json: import('$lib/utils/writing-document').WritingNode;
+		materials: import('$lib/types/writing-materials').WritingMaterial[];
+	}>;
+};
+
+export const getPendingWritingDraft = (token: string, sessionId: string) =>
+	fetch(`${WEBUI_API_BASE_URL}/writing-sessions/${sessionId}/pending-draft`, {
+		headers: withAuth(token)
+	}).then(handleJson);
+
+export const savePendingWritingDraft = (
+	token: string,
+	sessionId: string,
+	payload: {
+		content_json: import('$lib/utils/writing-document').WritingNode;
+		materials: import('$lib/types/writing-materials').MaterialSelection[];
+		expected_revision: number;
+	}
+) =>
+	fetch(`${WEBUI_API_BASE_URL}/writing-sessions/${sessionId}/pending-draft`, {
+		method: 'PUT',
+		headers: withAuth(token),
+		body: JSON.stringify(payload)
+	}).then(handleJson);
+
+export const readWritingImage = (
+	token: string,
+	sessionId: string,
+	materialId: string,
+	blockId: string
+) =>
+	fetch(
+		`${WEBUI_API_BASE_URL}/writing-sessions/${sessionId}/materials/${materialId}/read?block_id=${encodeURIComponent(blockId)}`,
+		{
+			method: 'POST',
+			headers: withAuth(token)
+		}
+	).then(handleJson);
+
+export const downloadWritingWord = async (
+	token: string,
+	options: {
+		sessionId?: string;
+		submissionId?: string;
+		versionId?: string;
+		contentJson?: import('$lib/utils/writing-document').WritingNode;
+		pending?: boolean;
+	}
+) => {
+	const path = options.submissionId
+		? `/submissions/${options.submissionId}/export/word${options.versionId ? '?expected_version_id=' + encodeURIComponent(options.versionId) : ''}`
+		: `/writing-sessions/${options.sessionId}/export/word`;
+	const response = await fetch(`${WEBUI_API_BASE_URL}${path}`, {
+		method: options.submissionId ? 'GET' : 'POST',
+		headers: withAuth(token),
+		...(options.submissionId
+			? {}
+			: {
+					body: JSON.stringify({
+						content_json: options.contentJson,
+						pending: options.pending ?? false
+					})
+				})
+	});
+	if (!response.ok) await handleJson(response);
+	const match = response.headers.get('Content-Disposition')?.match(/filename\*=UTF-8''([^;]+)/i);
+	const filename = match ? decodeURIComponent(match[1]) : '稿件.docx';
+	const url = URL.createObjectURL(await response.blob());
+	const anchor = document.createElement('a');
+	anchor.href = url;
+	anchor.download = filename;
+	anchor.click();
+	setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
 
 export const createEditorOperations = async (
@@ -1308,6 +1395,7 @@ export type ProcessSnapshot = {
 	major: boolean;
 	used_by_ai: boolean;
 	text?: string;
+	content_json?: import('$lib/utils/writing-document').WritingNode | null;
 };
 export type SubmissionProcess = {
 	snapshots: ProcessSnapshot[];
@@ -1322,6 +1410,7 @@ export type ProcessComparison = {
 	after: ProcessSnapshot & { text: string };
 	blocks: Array<{ op: string; old_text: string; new_text: string }>;
 	unchanged: boolean;
+	structure_changed?: boolean;
 	final_version_id: string;
 };
 export const getSubmissionProcess = async (

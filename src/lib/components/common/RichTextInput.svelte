@@ -239,6 +239,7 @@
 	};
 
 	export let richText = true;
+	export let additionalExtensions = [];
 	export let dragHandle = false;
 	export let link = false;
 	export let image = false;
@@ -303,7 +304,7 @@
 	export let onSelectionUpdate = (e) => {};
 
 	export let id = '';
-	export let value = '';
+	export let value: any = '';
 	export let html = '';
 
 	export let json = false;
@@ -312,6 +313,8 @@
 	export let collaboration = false;
 
 	export let showFormattingToolbar = true;
+	export let showFloatingToolbar = true;
+	export let selectTemplates = true;
 
 	export let preserveBreaks = false;
 	export let generateAutoCompletion: Function = async () => null;
@@ -688,6 +691,7 @@
 	};
 
 	const selectTemplate = () => {
+		if (!selectTemplates) return;
 		if (value !== '') {
 			// After updating the state, try to find and select the next template
 			setTimeout(() => {
@@ -789,6 +793,7 @@
 		editor = new Editor({
 			element: element,
 			extensions: [
+				...additionalExtensions,
 				StarterKit.configure({
 					link: link,
 					...(richText
@@ -891,6 +896,7 @@
 								options: {
 									strategy: 'fixed',
 									placement: 'top',
+									shift: { padding: 8 },
 									offset: 2
 								},
 								shouldShow: ({ editor, view, state, oldState, from, to }) => {
@@ -899,7 +905,7 @@
 										return false;
 									}
 									// Only show when editor is focused and text is selected
-									return view.hasFocus() && from !== to;
+									return editor.isEditable && view.hasFocus() && from !== to;
 								}
 							}),
 							FloatingMenu.configure({
@@ -926,7 +932,7 @@
 
 									// Only show on empty paragraphs at root depth
 									return (
-										view.hasFocus() && empty && isRootDepth && isEmptyTextBlock && editor.isEditable
+										showFloatingToolbar && view.hasFocus() && empty && isRootDepth && isEmptyTextBlock && editor.isEditable
 									);
 								}
 							})
@@ -1396,7 +1402,7 @@
 		bind:this={bubbleMenuElement}
 		id="bubble-menu"
 		class="p-0"
-		style="visibility: hidden; opacity: 0; position: absolute; z-index: 9999;"
+		style="visibility: hidden; opacity: 0; position: fixed; left: 0; top: 0; max-width: calc(100vw - 16px); z-index: 9999;"
 	>
 		<FormattingButtons {editor} />
 	</div>
@@ -1405,7 +1411,7 @@
 		bind:this={floatingMenuElement}
 		id="floating-menu"
 		class="p-0"
-		style="visibility: hidden; opacity: 0; position: absolute; z-index: 9999;"
+		style="visibility: hidden; opacity: 0; position: fixed; left: 0; top: 0; max-width: calc(100vw - 16px); z-index: 9999;"
 	>
 		<FormattingButtons {editor} />
 	</div>

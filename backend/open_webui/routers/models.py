@@ -214,7 +214,7 @@ async def get_models(
 
 @router.get('/fallback/options')
 async def get_fallback_options(request: Request, user=Depends(get_admin_user)):
-    return await fallback_options(request)
+    return await fallback_options(request, user)
 
 
 @router.get('/base/tags', response_model=list[str])

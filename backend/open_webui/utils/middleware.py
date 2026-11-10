@@ -2469,7 +2469,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         from open_webui.services.education.teaching_runtime import build_messages
         context = request.state.teaching_evidence
         form_data['messages'] = build_messages(teaching_config, context['purpose'], context['source_text'],
-            context['dialogue'], context.get('materials'))
+            context['dialogue'], context.get('materials'), context['image_reading_enabled'])
         # Both adapters intentionally expose only student text and conversation.
         # No personal memory, model additions, files, tools or actor-dependent filters.
         form_data = {k: v for k, v in form_data.items() if k in {
@@ -2671,6 +2671,13 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             form_data['messages'] = attach_current_revision_draft(
                 form_data['messages'], metadata['education_context']['source_text'], metadata['education_context'].get('materials')
             )
+
+        if writing_session:
+            from open_webui.services.education.materials import apply_image_reading_policy, is_image_attachment
+            enabled = metadata['education_context']['image_reading_enabled']
+            form_data['messages'] = apply_image_reading_policy(form_data['messages'], enabled)
+            if not enabled and 'files' in form_data:
+                form_data['files'] = [f for f in form_data['files'] if not is_image_attachment(f)]
 
     # Model "Knowledge" handling
     user_message = get_last_user_message(form_data['messages'])

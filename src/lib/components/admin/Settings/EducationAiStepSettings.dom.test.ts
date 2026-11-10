@@ -100,7 +100,7 @@ test('每个平台步骤一行:模型与思考各一个下拉,通读那行带试
 		'Follow the teacher’s selected model'
 	);
 	// 图片识别只列能看图的
-	expect(optionLabels('Model for Draft image parsing')).toEqual([
+	expect(optionLabels('Model for Image-to-text model')).toEqual([
 		'Off (no image import)',
 		'Vision'
 	]);
@@ -112,7 +112,7 @@ test('每个平台步骤一行:模型与思考各一个下拉,通读那行带试
 		...POLICY,
 		reader_check: { model: 'text-only', thinking: 'model_default' }
 	});
-	await fireEvent.change(screen.getByRole('combobox', { name: 'Draft image parsing' }), {
+	await fireEvent.change(screen.getByRole('combobox', { name: 'Image-to-text model' }), {
 		target: { value: 'low' }
 	});
 	expect(onChange).toHaveBeenLastCalledWith({

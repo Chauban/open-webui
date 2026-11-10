@@ -13,7 +13,7 @@ def build_process_catalog(facts, stats):
     bindings = {}
     version_ids = {}
 
-    def add(key, text, kind, created_at=None, version_no=None, trigger_type=None, major=True):
+    def add(key, text, kind, created_at=None, version_no=None, trigger_type=None, major=True, content_json=None):
         snapshots[key] = dict(
             id=key,
             text=text,
@@ -23,16 +23,17 @@ def build_process_catalog(facts, stats):
             trigger_type=trigger_type,
             major=major,
             used_by_ai=False,
+            content_json=content_json,
         )
         return key
 
     if facts['draft_baseline_text'] is not None:
-        start_id = add('initial', facts['draft_baseline_text'], 'initial')
+        start_id = add('initial', facts['draft_baseline_text'], 'initial', content_json=stats.get('draft_baseline_json'))
     else:
         start_id = add('initial', '', 'empty_start')
     if facts.get('previous_round'):
         previous = facts['previous_round']
-        add('round_start', previous['final_content_text'], 'round_start', previous['submitted_at'])
+        add('round_start', previous['final_content_text'], 'round_start', previous['submitted_at'], content_json=previous.get('final_content_json'))
     final_id = facts['document']['final_version_id']
     final_no = None
     for version in facts['versions']:
@@ -47,20 +48,21 @@ def build_process_catalog(facts, stats):
             version['version_no'],
             version['trigger_type'],
             version['trigger_type'] != 'autosave',
+            content_json=version.get('content_json'),
         )
         version_ids[version['id']] = key
-    add('final', facts['document']['content_text'], 'final', facts['submitted_at'], final_no, 'submit')
+    add('final', facts['document']['content_text'], 'final', facts['submitted_at'], final_no, 'submit', content_json=facts['document'].get('content_json'))
     version_ids[final_id] = 'final'
 
-    def bind(event_key, text, created_at, source_version_id=None):
+    def bind(event_key, text, created_at, source_version_id=None, source_json=None):
         if not isinstance(text, str):
             return
         key = version_ids.get(source_version_id)
-        if key is None or snapshots[key]['text'] != text:
+        if key is None or snapshots[key]['text'] != text or (source_json is not None and snapshots[key].get('content_json') != source_json):
             key = (
                 start_id
-                if text == snapshots[start_id]['text']
-                else add('source:' + event_key, text, 'reading', created_at)
+                if text == snapshots[start_id]['text'] and (source_json is None or source_json == snapshots[start_id].get('content_json'))
+                else add('source:' + event_key, text, 'reading', created_at, content_json=source_json)
             )
         snapshots[key]['major'] = True
         snapshots[key]['used_by_ai'] = True
@@ -68,7 +70,8 @@ def build_process_catalog(facts, stats):
 
     for reading in stats.get('revision_readings', []):
         bind(
-            'reading:' + reading['id'], reading['source_text'], reading['created_at'], reading.get('source_version_id')
+            'reading:' + reading['id'], reading['source_text'], reading['created_at'], reading.get('source_version_id'),
+            (reading.get('context') or {}).get('source_json')
         )
     prompts = stats.get('prompt_timeline', [])
     contexts = {row['message_id']: row for row in stats.get('chat_contexts', [])}
@@ -85,6 +88,7 @@ def build_process_catalog(facts, stats):
             context.get('source_text'),
             context.get('called_at', message.get('created_at')),
             context.get('source_version_id'),
+            context.get('source_json'),
         )
         parent = message.get('parent_id')
         chat_id = message.get('chat_id')
@@ -127,7 +131,7 @@ def build_process_catalog(facts, stats):
 
 
 def catalog_metadata(catalog):
-    return {**catalog, 'snapshots': [{k: v for k, v in row.items() if k != 'text'} for row in catalog['snapshots']]}
+    return {**catalog, 'snapshots': [{k: v for k, v in row.items() if k not in {'text', 'content_json'}} for row in catalog['snapshots']]}
 
 
 def compare_snapshots(catalog, before_id, after_id):
@@ -146,5 +150,6 @@ def compare_snapshots(catalog, before_id, after_id):
         'after': after,
         'blocks': blocks,
         'unchanged': before['text'] == after['text'],
+        'structure_changed': before.get('content_json') != after.get('content_json'),
         'final_version_id': catalog['final_version_id'],
     }

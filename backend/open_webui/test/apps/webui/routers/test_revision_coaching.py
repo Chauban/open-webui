@@ -76,7 +76,7 @@ def test_current_requirements_replace_prior_requirements_without_change_instruct
         assert '要求版本' not in prompt
 
 
-def setup(client, teacher, student, mode='revise_argument', scoring='dimensions', questions=None):
+def setup(client, teacher, student, mode='revise_argument', scoring='dimensions', questions=None, image_reading=False):
     UserContext.current_user = teacher
     classroom = client.post('/api/v1/classrooms', json={'name': '隔离修订验收'}).json()['classroom']
     payload = dict(
@@ -85,6 +85,7 @@ def setup(client, teacher, student, mode='revise_argument', scoring='dimensions'
         classroom_ids=[classroom['id']],
         due_at=2000000000,
         task_mode=mode,
+        image_reading_enabled=image_reading,
         scoring_mode=scoring,
         score_max=100,
         rubric_schema=_rubric_schema() if scoring == 'dimensions' else {'criteria': []},

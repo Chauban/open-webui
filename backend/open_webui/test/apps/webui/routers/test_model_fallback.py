@@ -234,8 +234,9 @@ def test_options_keep_provider_identity_without_credentials(routing, monkeypatch
     for item in routing.sources.values():
         item.name = 'Gemini'
 
-    async def catalog(*args, **kwargs):
-        return None
+    async def catalog(request, user):
+        assert user is routing.user
+        return {'data': list(request.app.state.OPENAI_MODELS.values())}
 
     async def saved():
         return list(routing.sources.values())
@@ -247,11 +248,73 @@ def test_options_keep_provider_identity_without_credentials(routing, monkeypatch
     monkeypatch.setattr(openai, 'get_all_models', catalog)
     monkeypatch.setattr(openai, 'get_openai_connection', connection)
     monkeypatch.setattr(openai.Models, 'get_base_models', saved)
-    options = asyncio.run(model_fallback.fallback_options(routing.request))
+    options = asyncio.run(model_fallback.fallback_options(routing.request, routing.user))
     assert calls == [0, 1]
     assert options[0]['provider'] != options[1]['provider']
     assert options[0]['id'] != options[1]['id']
     assert 'SECRET-MUST-NOT-LEAK' not in json.dumps(options)
+
+
+def catalog_transport(monkeypatch, expected_user):
+    """Keep the real catalog function/signature/cache; replace only its external input."""
+    calls = []
+
+    async def runtime_config():
+        return True, ['https://primary.example/v1', 'https://backup.example/v1'], ['key-0', 'key-1'], {}
+
+    async def responses(request, user):
+        assert user.id == expected_user.id
+        calls.append(user.id)
+        return [{'data': [{'id': 'primary', 'name': 'Gemini'}]}, {'data': [{'id': 'google/backup', 'name': 'Gemini'}]}]
+
+    monkeypatch.setattr(openai, 'get_openai_runtime_config', runtime_config)
+    monkeypatch.setattr(openai, 'get_all_models_responses', responses)
+    asyncio.run(openai.get_all_models.cache.clear())
+    return calls
+
+
+@pytest.mark.parametrize('warm_cache', [False, True])
+def test_admin_options_http_uses_real_catalog_and_authenticated_user(education_client, monkeypatch, warm_cache):
+    from open_webui.routers import models as models_router
+    from open_webui.test.apps.webui.routers.test_education_smoke import UserContext
+
+    client, teacher, _, student, _, _ = education_client
+    admin = teacher.model_copy(update={'role': 'admin'})
+    UserContext.current_user = admin
+    client.app.include_router(models_router.router, prefix='/api/v1/models')
+    calls = catalog_transport(monkeypatch, admin)
+    try:
+        if warm_cache:
+            asyncio.run(openai.get_all_models(SimpleNamespace(app=client.app), user=admin))
+        client.app.state.OPENAI_MODELS = {}
+        response = client.get('/api/v1/models/fallback/options')
+        assert response.status_code == 200, response.text
+        assert [(item['id'], item['provider']) for item in response.json()] == [
+            ('primary', 'primary.example'),
+            ('google/backup', 'backup.example'),
+        ]
+        assert calls == [admin.id]
+        assert 'key-0' not in response.text and 'key-1' not in response.text
+        UserContext.current_user = student
+        assert client.get('/api/v1/models/fallback/options').status_code == 401
+    finally:
+        asyncio.run(openai.get_all_models.cache.clear())
+
+
+@pytest.mark.parametrize('warm_cache', [False, True])
+def test_missing_route_rehydrates_catalog_with_current_user(routing, monkeypatch, warm_cache):
+    calls = catalog_transport(monkeypatch, routing.user)
+    try:
+        if warm_cache:
+            asyncio.run(openai.get_all_models(routing.request, user=routing.user))
+        routing.request.app.state.OPENAI_MODELS = {}
+        route, model, _, _ = asyncio.run(model_fallback.provider_route(routing.request, routing.user, 'google/backup'))
+        assert route['model_id'] == 'google/backup'
+        assert model['urlIdx'] == 1
+        assert routing.request.app.state.OPENAI_MODELS['google/backup']['urlIdx'] == 1
+        assert calls == [routing.user.id]
+    finally:
+        asyncio.run(openai.get_all_models.cache.clear())
 
 
 @pytest.mark.parametrize('mode', ['revise_argument', 'revise_draft'])

@@ -4,13 +4,14 @@ export type MaterialBlock = {
 	location: string;
 	text: string;
 	extracted_text: string;
-	status: 'read' | 'unreadable' | 'corrected';
+	status: 'read' | 'unreadable' | 'corrected' | 'disabled';
 	detail: string;
 	image: boolean;
 };
 
 export type WritingMaterial = {
 	id: string;
+	origin_id?: string;
 	filename: string;
 	model_id: string | null;
 	blocks: MaterialBlock[];

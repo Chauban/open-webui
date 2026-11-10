@@ -213,6 +213,7 @@ def test_assignment_chat_drops_student_overrides_even_when_permitted(education_c
 
 
 def test_chat_outside_assignments_follows_permissions(education_client, monkeypatch):
+    asyncio.run(Config.upsert({"education.personal_writing.teacher": True}))
     client, teacher, _, student, _, SessionLocal = education_client
     monkeypatch.setattr(internal_db, 'SessionLocal', SessionLocal)
     UserContext.current_user = student
