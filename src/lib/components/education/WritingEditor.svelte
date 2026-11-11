@@ -79,7 +79,7 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
-	class="min-w-0"
+	class="writing-editor min-w-0"
 	on:dragover={(event) => {
 		if (event.dataTransfer?.types.includes('Files')) event.preventDefault();
 	}}

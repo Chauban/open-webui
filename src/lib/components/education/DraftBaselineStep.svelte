@@ -155,34 +155,36 @@
 </script>
 
 <section class="flex min-h-0 flex-1 flex-col">
-	<div class="min-h-0 flex-1 overflow-y-auto pb-4">
-		<h3 class="text-sm font-semibold">{$i18n.t('Submit your first draft')}</h3>
-		<p class="mt-1 mb-3 text-sm text-gray-500">
-			{$i18n.t('Paste or upload your draft. Confirm it to start revising and chatting with AI.')}
-		</p>
-		<div class="flex flex-wrap items-center justify-between gap-2">
-			<TextImportActions
-				baselineHelp
-				{imageReadingEnabled}
-				bind:this={importer}
-				bind:busy={importing}
-				{sessionId}
-				disabled={submitting || loading || loadFailed}
-				{onImported}
-			/>
-			<EduButton
-				size="sm"
-				disabled={busy || downloading || !hasDocumentContent(document)}
-				on:click={download}>{$i18n.t('下载当前稿（Word）')}</EduButton
-			>
+	<div class="flex min-h-0 flex-1 flex-col overflow-y-auto pb-4">
+		<div class="shrink-0">
+			<h3 class="text-sm font-semibold">{$i18n.t('Submit your first draft')}</h3>
+			<p class="mt-1 mb-3 text-sm text-gray-500">
+				{$i18n.t('Paste or upload your draft. Confirm it to start revising and chatting with AI.')}
+			</p>
+			<div class="flex flex-wrap items-center justify-between gap-2">
+				<TextImportActions
+					baselineHelp
+					{imageReadingEnabled}
+					bind:this={importer}
+					bind:busy={importing}
+					{sessionId}
+					disabled={submitting || loading || loadFailed}
+					{onImported}
+				/>
+				<EduButton
+					size="sm"
+					disabled={busy || downloading || !hasDocumentContent(document)}
+					on:click={download}>{$i18n.t('下载当前稿（Word）')}</EduButton
+				>
+			</div>
+			<UploadedOriginals {materials} />
+			{#if !imageReadingEnabled && materials.length}<p class="my-2 text-xs text-gray-500">
+					{$i18n.t('AI 本次只读取文字，图片仍会随作业保存。')}
+				</p>{/if}
 		</div>
-		<UploadedOriginals {materials} />
-		{#if !imageReadingEnabled && materials.length}<p class="my-2 text-xs text-gray-500">
-				{$i18n.t('AI 本次只读取文字，图片仍会随作业保存。')}
-			</p>{/if}
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
-			class="mt-3 rounded-xl border border-gray-200 bg-white px-5 py-4 dark:border-gray-700 dark:bg-gray-900 {dragging
+			class="draft-editor mt-3 flex flex-1 shrink-0 flex-col rounded-xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900 {dragging
 				? 'ring-2 ring-sky-400'
 				: ''}"
 			on:dragover|preventDefault={() => (dragging = true)}
@@ -210,7 +212,7 @@
 				{sessionId}
 				{imageReadingEnabled}
 				editable={!busy}
-				className="input-prose min-h-64 [&>.tiptap]:min-h-64"
+				className="input-prose"
 				placeholder={$i18n.t('Paste your first draft here, or drop a file in')}
 				onChange={(content) => {
 					if (content.docChanged && !content.programmatic && !busy) {
@@ -221,11 +223,11 @@
 			/>
 		</div>
 		{#if charCount < MIN_CHARS && hasDocumentContent(document)}<p
-				class="mt-2 text-xs text-gray-500"
+				class="mt-2 shrink-0 text-xs text-gray-500"
 			>
 				{$i18n.t('请补充至少 200 字正文。图片和未转入正文的识别文字不计入字数。')}
 			</p>{/if}
-		{#if error}<p role="alert" class="mt-2 text-sm text-red-600">{error}</p>{/if}
+		{#if error}<p role="alert" class="mt-2 shrink-0 text-sm text-red-600">{error}</p>{/if}
 	</div>
 	<div
 		class="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-gray-200 bg-stone-50 pt-3 pb-[env(safe-area-inset-bottom)] dark:border-gray-700 dark:bg-gray-900"
@@ -240,3 +242,22 @@
 		>
 	</div>
 </section>
+
+<style>
+	.draft-editor :global(.writing-editor),
+	.draft-editor :global(.input-prose) {
+		display: flex;
+		flex: 1 0 auto;
+		flex-direction: column;
+	}
+
+	/* Put spacing on the editable surface so its blank area also accepts the caret.
+	   Override the shared ProseMirror height rules only for the initial draft. */
+	.draft-editor :global(.tiptap) {
+		flex: 1 0 auto;
+		height: auto;
+		min-height: 16rem;
+		max-height: none;
+		padding: 1rem 1.25rem;
+	}
+</style>
