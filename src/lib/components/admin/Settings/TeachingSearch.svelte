@@ -45,6 +45,11 @@
 	<p class="text-sm text-gray-500">
 		{$i18n.t('使用连接设置中的 DeepSeek 官方密钥。教师再按作业开启；默认关闭，不修改辅导提示词。')}
 	</p>
+	<p class="text-sm text-gray-500">
+		{$i18n.t(
+			'关闭服务后不再搜索，历史对话中的资料仍保留。教师修改作业搜索设置后需保存并发布，试教设置修改后需重新测试。'
+		)}
+	</p>
 	<label class="flex items-center gap-2"
 		><input type="checkbox" bind:checked={policy.enabled} disabled={loading || busy} />{$i18n.t(
 			'允许教师开启资料搜索'

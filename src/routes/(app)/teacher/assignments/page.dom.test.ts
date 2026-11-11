@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/sve
 import { readable } from 'svelte/store';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import Page from './+page.svelte';
+import { teachingApi } from '$lib/apis/education/teaching';
 import { goto } from '$app/navigation';
 
 const { list, visibility } = vi.hoisted(() => ({ list: vi.fn(), visibility: vi.fn() }));
@@ -10,6 +11,10 @@ vi.mock('$app/stores', async () => ({
 	page: (await import('svelte/store')).readable({
 		url: new URL('http://localhost/teacher/assignments')
 	})
+}));
+vi.mock('$lib/stores', async (original) => ({
+	...(await original<typeof import('$lib/stores')>()),
+	user: (await import('svelte/store')).readable({ id: 'teacher-1' })
 }));
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 vi.mock('$lib/apis/education', () => ({
@@ -28,6 +33,8 @@ const row = (id: string, hidden: boolean) => ({
 	pending_review_count: 1
 });
 beforeEach(() => {
+	localStorage.clear();
+	vi.mocked(teachingApi).mockReset().mockResolvedValue([]);
 	vi.mocked(goto).mockClear();
 	localStorage.token = 'test-token';
 	vi.stubGlobal(
@@ -108,4 +115,63 @@ test('failed visibility changes leave the assignment in its original group', asy
 	expect(
 		within(screen.getByRole('region', { name: 'Hidden Assignments' })).queryByText('Visible essay')
 	).toBeNull();
+});
+
+test('shows recoverable local and server drafts once, with continue links; published entries disappear', async () => {
+	const server = {
+		id: 'draft-one',
+		assignment_id: null,
+		revision: 1,
+		published: null,
+		payload: { assignment: { title: '服务端旧标题', classroom_ids: [] }, ai: {} }
+	};
+	vi.mocked(teachingApi).mockResolvedValue([
+		server,
+		{ ...server, id: 'published', published: { assignment_ids: ['a'] } }
+	]);
+	localStorage.setItem(
+		'assignment-drafts:teacher-1:draft-one',
+		JSON.stringify({
+			id: 'draft-one',
+			assignmentId: null,
+			preparation: server,
+			payload: { ...server.payload, assignment: { title: '本地最新标题', classroom_ids: [] } },
+			updatedAt: 1
+		})
+	);
+	localStorage.setItem(
+		'assignment-drafts:another-user:private',
+		JSON.stringify({ id: 'private', payload: { assignment: { title: '他人的草稿' }, ai: {} } })
+	);
+	render(Page, { context });
+	await screen.findByText('本地最新标题');
+	expect(screen.queryByText('服务端旧标题')).toBeNull();
+	expect(screen.queryByText('他人的草稿')).toBeNull();
+	expect(screen.getAllByRole('link', { name: '继续编辑' })).toHaveLength(1);
+	expect(screen.getByRole('link', { name: '继续编辑' }).getAttribute('href')).toBe(
+		'/teacher/assignments/new?preparation=draft-one'
+	);
+});
+
+test('deleting a server draft passes its revision and removes its list entry', async () => {
+	const server = {
+		id: 'draft-delete',
+		assignment_id: null,
+		revision: 3,
+		published: null,
+		payload: { assignment: { title: '可删除的草稿', classroom_ids: [] }, ai: {} }
+	};
+	vi.mocked(teachingApi).mockImplementation(async (_path, method) =>
+		method === 'DELETE' ? { deleted: true } : [server]
+	);
+	const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+	render(Page, { context });
+	await screen.findByText('可删除的草稿');
+	await fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+	expect(teachingApi).toHaveBeenCalledWith(
+		'/teacher/teaching-preparations/draft-delete?expected_revision=3',
+		'DELETE'
+	);
+	expect(screen.queryByText('可删除的草稿')).toBeNull();
+	confirm.mockRestore();
 });

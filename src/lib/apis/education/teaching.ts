@@ -1,6 +1,7 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 import type { ThinkingSetting, ReflectionQuestion } from './index';
 import type { AssignmentDraft } from '$lib/utils/assignment-form';
+import { toLocalDateTimeInput } from '$lib/utils/education';
 
 export type AiCandidate = {
 	prompt: string;
@@ -16,6 +17,7 @@ export type Preparation = {
 	base_config_revision: number | null;
 	payload: { assignment: ReturnType<typeof preparationAssignment>; ai: AiCandidate };
 	published: { assignment_ids: string[] } | null;
+	updated_at?: number;
 	coverage?: { stages: string[]; unavailable?: string };
 	trials?: { id: string; created_at: number; sequence: number }[];
 };
@@ -48,7 +50,7 @@ export async function teachingApi<T>(path: string, method = 'GET', body?: unknow
 		headers: { Authorization: `Bearer ${localStorage.token}`, 'Content-Type': 'application/json' },
 		...(body === undefined ? {} : { body: JSON.stringify(body) })
 	});
-	if (!response.ok) throw await response.json();
+	if (!response.ok) throw { ...(await response.json()), status: response.status };
 	return response.json();
 }
 
@@ -96,24 +98,50 @@ export function preparationAssignment(draft: AssignmentDraft, classrooms: string
 		description: draft.description,
 		classroom_ids: classrooms,
 		due_at: draft.dueAt ? Math.floor(new Date(draft.dueAt).getTime() / 1000) : null,
-		score_max: Number(draft.scoreMax),
+		score_max: draft.scoreMax,
 		coaching_style: draft.coachingStyle,
 		task_mode: draft.taskMode,
 		scoring_mode: draft.scoringMode,
-		challenge_enabled: false,
-		challenge_rounds: 3,
-		challenge_focus_keys: [],
-		reflection_questions: draft.reflectionQuestions,
+		challenge_enabled: draft.challengeEnabled,
+		challenge_rounds: draft.challengeRounds,
+		challenge_focus_keys: [...draft.challengeFocusKeys],
+		reflection_questions: draft.reflectionQuestions.map((q) => ({ ...q, options: [...q.options] })),
 		rubric_schema: {
-			criteria:
-				draft.scoringMode === 'total'
-					? []
-					: draft.rubricCriteria.map((c) => ({
-							key: c.key,
-							label: c.label,
-							max_score: Number(c.maxScore)
-						}))
+			criteria: draft.rubricCriteria.map((c) => ({
+				key: c.key,
+				label: c.label,
+				max_score: c.maxScore
+			}))
 		},
-		model_params: { thinking: null, students_choose_thinking: false }
+		model_params: {
+			thinking: draft.thinking,
+			students_choose_thinking: draft.studentsChooseThinking
+		}
+	};
+}
+
+export function assignmentFromPreparation(
+	a: Preparation['payload']['assignment']
+): AssignmentDraft {
+	return {
+		imageReadingEnabled: a.image_reading_enabled,
+		title: a.title,
+		description: a.description ?? '',
+		dueAt: a.due_at ? toLocalDateTimeInput(a.due_at) : '',
+		scoreMax: String(a.score_max),
+		scoringMode: a.scoring_mode,
+		taskMode: a.task_mode,
+		coachingStyle: a.coaching_style,
+		challengeEnabled: a.challenge_enabled,
+		challengeRounds: a.challenge_rounds,
+		challengeFocusKeys: [...a.challenge_focus_keys],
+		reflectionQuestions: structuredClone(a.reflection_questions),
+		rubricCriteria: a.rubric_schema.criteria.map((c) => ({
+			key: c.key,
+			label: c.label,
+			maxScore: String(c.max_score)
+		})),
+		thinking: a.model_params.thinking,
+		studentsChooseThinking: a.model_params.students_choose_thinking
 	};
 }

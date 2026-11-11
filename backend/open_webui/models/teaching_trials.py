@@ -1,10 +1,17 @@
 """Private preparations and immutable teaching execution evidence."""
 
 from typing import Literal
+from uuid import UUID, uuid4
 
 from open_webui.internal.db import Base, JSONField
-from open_webui.models.education import AssignmentCreateForm, ThinkingSetting
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
+from open_webui.models.education import (
+    CoachingStyle,
+    ReflectionQuestionKind,
+    ReflectionShowWhen,
+    TaskMode,
+    ThinkingSetting,
+)
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, model_validator
 from sqlalchemy import BigInteger, CheckConstraint, Column, Integer, Text, UniqueConstraint
 
 
@@ -41,19 +48,67 @@ class AiCandidate(StrictModel):
         return self
 
 
-class PreparationPayload(StrictModel):
-    # The normal form permits missing classroom/deadline; publication validates them.
-    assignment: AssignmentCreateForm
-    ai: AiCandidate
+class DraftAiCandidate(StrictModel):
+    prompt: str = Field(max_length=65000)
+    model_id: str = Field(max_length=256)
+    thinking: ThinkingSetting = 'model_default'
+    template_version: int = Field(gt=0)
+    web_search: StrictBool = False
 
-    @model_validator(mode='after')
-    def argument_only(self):
-        if self.assignment.task_mode != 'revise_argument':
-            raise ValueError('Teaching trials currently support argument revision only')
-        return self
+
+class DraftReflection(StrictModel):
+    id: str = Field(max_length=64)
+    kind: ReflectionQuestionKind
+    prompt: str = Field(max_length=300)
+    options: list[str] = Field(default_factory=list, max_length=20)
+    allow_other: StrictBool = False
+    placeholder: str | None = Field(default=None, max_length=200)
+    required: StrictBool = True
+    show_when: ReflectionShowWhen = 'always'
+
+
+class DraftCriterion(StrictModel):
+    key: str = Field(max_length=40)
+    label: str = Field(max_length=80)
+    max_score: str | StrictInt = ''
+
+
+class DraftRubric(StrictModel):
+    criteria: list[DraftCriterion] = Field(default_factory=list, max_length=8)
+
+
+class DraftModelParams(StrictModel):
+    thinking: ThinkingSetting | None = None
+    students_choose_thinking: StrictBool = False
+
+
+class DraftAssignment(StrictModel):
+    """Editable values, including incomplete numbers/questions; never used for execution."""
+
+    image_reading_enabled: StrictBool = False
+    title: str = Field(default='', max_length=1000)
+    description: str | None = Field(default='', max_length=200000)
+    classroom_ids: list[str] = Field(default_factory=list, max_length=100)
+    due_at: StrictInt | None = None
+    score_max: str | StrictInt = ''
+    coaching_style: CoachingStyle = 'balanced'
+    task_mode: TaskMode = 'from_scratch'
+    scoring_mode: Literal['dimensions', 'total'] = 'dimensions'
+    challenge_enabled: StrictBool = False
+    challenge_rounds: StrictInt = 3
+    challenge_focus_keys: list[str] = Field(default_factory=list, max_length=8)
+    reflection_questions: list[DraftReflection] = Field(default_factory=list, max_length=20)
+    rubric_schema: DraftRubric = Field(default_factory=DraftRubric)
+    model_params: DraftModelParams = Field(default_factory=DraftModelParams)
+
+
+class PreparationPayload(StrictModel):
+    assignment: DraftAssignment
+    ai: DraftAiCandidate
 
 
 class PreparationCreate(StrictModel):
+    id: UUID = Field(default_factory=uuid4)
     assignment_id: str | None = None
     payload: PreparationPayload
 

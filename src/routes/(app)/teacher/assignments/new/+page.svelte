@@ -8,7 +8,6 @@
 	import { toast } from 'svelte-sonner';
 
 	import {
-		createAssignment,
 		getTeacherAssignment,
 		getTeacherAssignmentDefaults,
 		getTeacherClassrooms,
@@ -22,7 +21,9 @@
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import AssignmentForm from '$lib/components/education/AssignmentForm.svelte';
 	import TeachingPreparationPanel from '$lib/components/education/TeachingPreparationPanel.svelte';
-	import { teachingApi, type Preparation } from '$lib/apis/education/teaching';
+	import { assignmentFromPreparation, type Preparation } from '$lib/apis/education/teaching';
+	import { loadDraft, type DraftBackup } from '$lib/utils/preparation-autosave';
+	import { user } from '$lib/stores';
 	import EduButton from '$lib/components/education/EduButton.svelte';
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 	import {
@@ -32,14 +33,13 @@
 	} from '$lib/utils/reflection-questions';
 	import {
 		applyTeachingDefaults,
-		buildAssignmentPayload,
 		draftThinkingFrom,
 		getDefaultRubricCriteria,
 		rubricTotal,
 		type AssignmentDraft,
 		type DefaultRubrics
 	} from '$lib/utils/assignment-form';
-	import { resolveErrorMessage, toLocalDateTimeInput } from '$lib/utils/education';
+	import { resolveErrorMessage } from '$lib/utils/education';
 
 	const i18n = getContext<Writable<i18nType>>('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
@@ -75,7 +75,9 @@
 	// 管理员按作业形式设的默认评分维度;切换作业形式时,维度还是原形式的默认、没动过就跟着换。
 	let rubricDefaults: DefaultRubrics = {};
 	let loading = true;
-	let saving = false;
+	let initialPreparation: Preparation | null = null;
+	let initialBackup: DraftBackup | undefined;
+	let preparationReady = false;
 	let loadError = '';
 
 	onMount(async () => {
@@ -101,15 +103,13 @@
 				draft = applyTeachingDefaults(draft, teachingConfigs[assignmentDefaults.task_mode]!);
 			reflectionQuestionSets = questionSets;
 			const params = get(page).url.searchParams;
-			if (params.has('preparation'))
-				draft = applyTeachingDefaults(draft, teachingConfigs.revise_argument!);
 			const presetClassroomId = params.get('classroomId');
 			const duplicateFromId = params.get('from');
 			// 分析页上「以此为下次的质疑焦点」带过来的。放在复制之后覆盖，
 			// 因为焦点只有配着同一套评分维度才说得通。
 			const presetChallengeFocus = params.get('challengeFocus');
 
-			if (duplicateFromId) {
+			if (duplicateFromId && !params.has('preparation')) {
 				try {
 					const source = await getTeacherAssignment(localStorage.token, duplicateFromId);
 					if (!allowedTaskModes.includes(source.assignment.task_mode))
@@ -171,31 +171,18 @@
 			}
 			const preparationId = params.get('preparation');
 			if (preparationId) {
-				const preparation = await teachingApi<Preparation>(
-					`/teacher/teaching-preparations/${preparationId}`
-				);
-				if (preparation.assignment_id !== null)
+				const restored = await loadDraft(get(user)!.id, preparationId);
+				initialPreparation = restored.preparation;
+				initialBackup = restored.backup;
+				if ((initialBackup?.assignmentId ?? initialPreparation?.assignment_id) != null)
 					throw new Error('Preparation does not belong to this assignment');
-				const a = preparation.payload.assignment;
-				draft = {
-					imageReadingEnabled: a.image_reading_enabled,
-					...draft,
-					title: a.title,
-					description: a.description,
-					dueAt: a.due_at ? toLocalDateTimeInput(a.due_at) : '',
-					scoreMax: String(a.score_max),
-					scoringMode: a.scoring_mode,
-					taskMode: a.task_mode,
-					coachingStyle: a.coaching_style,
-					reflectionQuestions: a.reflection_questions,
-					rubricCriteria: a.rubric_schema.criteria.map((c) => ({
-						key: c.key,
-						label: c.label,
-						maxScore: String(c.max_score)
-					})),
-					...draftThinkingFrom(a.model_params)
-				};
-				selectedClassroomIds = new Set(a.classroom_ids);
+				if (initialPreparation?.published) {
+					await goto('/teacher/assignments');
+					return;
+				}
+				const payload = initialBackup?.payload ?? initialPreparation!.payload;
+				draft = assignmentFromPreparation(payload.assignment);
+				selectedClassroomIds = new Set(payload.assignment.classroom_ids);
 			}
 		} catch (error) {
 			loadError = resolveErrorMessage(error, t);
@@ -204,45 +191,6 @@
 			loading = false;
 		}
 	});
-
-	const submit = async () => {
-		if (!allowedTaskModes.includes(draft.taskMode)) {
-			toast.error(t('请联系管理员开通可布置的作业类型。'));
-			return;
-		}
-		if (selectedClassroomIds.size === 0) {
-			toast.error(t('Classroom is required.'));
-			return;
-		}
-		const { payload, error } = buildAssignmentPayload(draft, t, thinkingPolicy?.control);
-		if (error) {
-			toast.error(error);
-			return;
-		}
-
-		saving = true;
-		try {
-			const assignments = await createAssignment(localStorage.token, {
-				...payload,
-				description: payload.description || undefined,
-				classroom_ids: [...selectedClassroomIds]
-			});
-			toast.success(
-				assignments.length > 1
-					? t('Assignment published to {{count}} classrooms.', { count: assignments.length })
-					: t('Assignment created.')
-			);
-			goto(
-				assignments.length === 1
-					? `/teacher/assignments/${assignments[0].id}`
-					: '/teacher/assignments'
-			);
-		} catch (error) {
-			toast.error(resolveErrorMessage(error, t));
-		} finally {
-			saving = false;
-		}
-	};
 </script>
 
 <TeacherPageShell
@@ -258,38 +206,39 @@
 		{:else if !allowedTaskModes.length}
 			<EduStateCard>{$i18n.t('请联系管理员开通可布置的作业类型。')}</EduStateCard>
 		{:else}
-			<AssignmentForm
-				{imageParsingModel}
-				{allowedTaskModes}
-				{teachingConfigs}
-				bind:draft
-				bind:selectedClassroomIds
-				multiClassroom
-				{classrooms}
-				{reflectionQuestionSets}
-				{reflectionNotice}
-				{thinkingPolicy}
-			>
-				<svelte:fragment slot="footer">
-					{#if draft.taskMode === 'revise_argument'}<TeachingPreparationPanel
+			<fieldset disabled={!preparationReady} class="min-w-0">
+				<AssignmentForm
+					{imageParsingModel}
+					{allowedTaskModes}
+					{teachingConfigs}
+					bind:draft
+					bind:selectedClassroomIds
+					multiClassroom
+					{classrooms}
+					{reflectionQuestionSets}
+					{reflectionNotice}
+					{thinkingPolicy}
+				>
+					<svelte:fragment slot="footer">
+						<TeachingPreparationPanel
+							bind:ready={preparationReady}
 							bind:draft
 							bind:selectedClassroomIds
-							template={teachingConfigs.revise_argument!}
-						/>{/if}
-					<div
-						class="sticky bottom-0 flex justify-end gap-2 border-t border-gray-100 bg-white/90 py-3 backdrop-blur dark:border-gray-850 dark:bg-gray-900/90"
-					>
-						<EduButton on:click={() => goto('/teacher/assignments')}>{$i18n.t('Cancel')}</EduButton>
-						{#if draft.taskMode !== 'revise_argument'}<EduButton
-								variant="primary"
-								on:click={submit}
-								disabled={saving}
+							template={teachingConfigs[draft.taskMode]!}
+							{initialPreparation}
+							{initialBackup}
+							{thinkingPolicy}
+						/>
+						<div
+							class="sticky bottom-0 flex justify-end gap-2 border-t border-gray-100 bg-white/90 py-3 backdrop-blur dark:border-gray-850 dark:bg-gray-900/90"
+						>
+							<EduButton on:click={() => goto('/teacher/assignments')}
+								>{$i18n.t('返回作业列表')}</EduButton
 							>
-								{saving ? $i18n.t('Creating...') : $i18n.t('Create Assignment')}
-							</EduButton>{/if}
-					</div>
-				</svelte:fragment>
-			</AssignmentForm>
+						</div>
+					</svelte:fragment>
+				</AssignmentForm>
+			</fieldset>
 		{/if}
 	</div>
 </TeacherPageShell>

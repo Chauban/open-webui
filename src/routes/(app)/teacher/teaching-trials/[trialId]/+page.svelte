@@ -554,29 +554,25 @@
 										>{/each}{/if}
 							</select></label
 						>
-						<label class="flex items-center gap-2">
-							<input
-								type="checkbox"
-								checked={candidate.web_search === true}
-								on:change={(event) => {
-									if (input.comparison_mode === 'prompts')
-										sharedSettings({ web_search: event.currentTarget.checked });
-									else {
-										candidate.web_search = event.currentTarget.checked;
-										input = { ...input };
-									}
-								}}
-								disabled={busy || (!searchAvailable && !candidate.web_search)}
-							/>
-							{modelName(candidate.model_id)} · {$i18n.t('允许按需搜索资料')}
-						</label>
+						{#if searchAvailable}
+							<label class="flex items-center gap-2">
+								<input
+									type="checkbox"
+									checked={candidate.web_search === true}
+									on:change={(event) => {
+										if (input.comparison_mode === 'prompts')
+											sharedSettings({ web_search: event.currentTarget.checked });
+										else {
+											candidate.web_search = event.currentTarget.checked;
+											input = { ...input };
+										}
+									}}
+									disabled={busy}
+								/>
+								{modelName(candidate.model_id)} · {$i18n.t('允许按需搜索资料')}
+							</label>
+						{/if}
 					{/each}
-					<p class="text-sm text-gray-500">
-						{$i18n.t('搜索开关独立于提示词。修改后请重新测试，旧结果保留原设置。')}
-					</p>
-					{#if !searchAvailable}<p class="text-sm text-amber-700">
-							{$i18n.t('管理员尚未开启资料搜索，当前可关闭已有设置。')}
-						</p>{/if}
 					<label
 						>{$i18n.t('试教样稿')}<textarea
 							class="min-h-40 w-full {EDU_FIELD_CLASS}"

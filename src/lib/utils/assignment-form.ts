@@ -58,6 +58,29 @@ export type AssignmentPayload = {
 
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 
+export const getAssignmentScoringError = (draft: AssignmentDraft, t: Translate): string => {
+	const scoreMax = Number(draft.scoreMax);
+	if (!Number.isInteger(scoreMax) || scoreMax <= 0) {
+		return t('Maximum score must be a positive whole number.');
+	}
+	if (scoreMax > 10000) return t('作业满分不能超过 10000。');
+	if (draft.scoringMode === 'total') return '';
+	if (
+		draft.rubricCriteria.some(
+			(c) => !c.label.trim() || !Number.isInteger(Number(c.maxScore)) || Number(c.maxScore) <= 0
+		)
+	) {
+		return t('Every rubric criterion needs a name and a positive whole-number maximum.');
+	}
+	if (
+		!draft.rubricCriteria.length ||
+		draft.rubricCriteria.reduce((sum, c) => sum + Number(c.maxScore), 0) !== scoreMax
+	) {
+		return t('Rubric maximum scores must add up to the assignment maximum.');
+	}
+	return '';
+};
+
 /**
  * 校验通过返回提交体;不通过返回已翻译的第一条错误。班级由调用方单独校验(新建多选、编辑单选)。
  * thinkingControl 是管理员对辅导对话思考档位的下放方式:仅管理员时不提交 model_params,
@@ -71,30 +94,14 @@ export const buildAssignmentPayload = (
 	if (!draft.title.trim()) return { error: t('Assignment title is required.') };
 	if (!draft.dueAt) return { error: t('Assignment due time is required.') };
 
+	const scoringError = getAssignmentScoringError(draft, t);
+	if (scoringError) return { error: scoringError };
 	const scoreMax = Number(draft.scoreMax);
-	if (!Number.isInteger(scoreMax) || scoreMax <= 0) {
-		return { error: t('Maximum score must be a positive whole number.') };
-	}
 	const criteria = (draft.scoringMode === 'total' ? [] : draft.rubricCriteria).map((criterion) => ({
 		key: criterion.key.trim(),
 		label: criterion.label.trim(),
 		max_score: Number(criterion.maxScore)
 	}));
-	if (
-		criteria.some(
-			(criterion) =>
-				!criterion.label || !Number.isInteger(criterion.max_score) || criterion.max_score <= 0
-		)
-	) {
-		return { error: t('Every rubric criterion needs a name and a positive whole-number maximum.') };
-	}
-	if (
-		draft.scoringMode !== 'total' &&
-		(!criteria.length ||
-			criteria.reduce((sum, criterion) => sum + criterion.max_score, 0) !== scoreMax)
-	) {
-		return { error: t('Rubric maximum scores must add up to the assignment maximum.') };
-	}
 
 	// 修订初稿作业结构上没有质疑式读者(后端同样拒绝)。
 	const challengeEnabled =

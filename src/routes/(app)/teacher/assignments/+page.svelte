@@ -16,7 +16,56 @@
 		setAssignmentVisibility
 	} from '$lib/apis/education';
 	import { teachingApi, type Preparation } from '$lib/apis/education/teaching';
+	import { user } from '$lib/stores';
+	import { localDrafts, removeLocalDraft, type DraftBackup } from '$lib/utils/preparation-autosave';
 	let preparations: Preparation[] = [];
+	let backups: DraftBackup[] = [];
+	let deletingDraft = '';
+	$: draftRows = [
+		...backups.map((backup) => ({
+			id: backup.id,
+			assignment_id: backup.assignmentId,
+			payload: backup.payload,
+			local: true,
+			server: preparations.find((p) => p.id === backup.id)
+		})),
+		...preparations
+			.filter((p) => !p.published && !backups.some((b) => b.id === p.id))
+			.map((p) => ({ ...p, local: false, server: p }))
+	].filter(
+		(p) =>
+			(selectedClassroom === 'all' ||
+				p.payload.assignment.classroom_ids.includes(selectedClassroom)) &&
+			(!keyword.trim() ||
+				p.payload.assignment.title.toLowerCase().includes(keyword.trim().toLowerCase()))
+	);
+	async function deleteDraft(item: (typeof draftRows)[number]) {
+		if (!window.confirm(t('删除这份草稿？'))) return;
+		deletingDraft = item.id;
+		try {
+			// A first save may have committed even if this browser did not receive its response.
+			let saved = item.server;
+			if (!saved) {
+				try {
+					saved = await teachingApi<Preparation>(`/teacher/teaching-preparations/${item.id}`);
+				} catch (error) {
+					if ((error as { status?: number }).status !== 404) throw error;
+				}
+			}
+			if (saved)
+				await teachingApi(
+					`/teacher/teaching-preparations/${item.id}?expected_revision=${saved.revision}`,
+					'DELETE'
+				);
+			removeLocalDraft($user!.id, item.id);
+			preparations = preparations.filter((p) => p.id !== item.id);
+			backups = backups.filter((p) => p.id !== item.id);
+		} catch (error) {
+			toast.error(resolveErrorMessage(error, t));
+		} finally {
+			deletingDraft = '';
+		}
+	}
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import EduActionMenu from '$lib/components/education/EduActionMenu.svelte';
 	import EduBadge from '$lib/components/education/EduBadge.svelte';
@@ -140,6 +189,7 @@
 	};
 
 	onMount(async () => {
+		backups = localDrafts($user!.id);
 		try {
 			preparations = await teachingApi<Preparation[]>('/teacher/teaching-preparations');
 			[assignments, classrooms] = await Promise.all([
@@ -172,17 +222,47 @@
 	</svelte:fragment>
 
 	<div class="mx-auto max-w-6xl px-4 py-6">
-		{#if preparations.length}<details class="mb-5 rounded-xl border p-4 dark:border-gray-700">
-				<summary>{$i18n.t('准备中的作业与辅导方案')}</summary>{#each preparations as preparation}<a
-						class="my-2 block underline"
-						href={preparation.assignment_id
-							? `/teacher/assignments/${preparation.assignment_id}/settings?preparation=${preparation.id}`
-							: `/teacher/assignments/new?preparation=${preparation.id}`}
-						>{preparation.payload.assignment.title || $i18n.t('未命名准备稿')} · {$i18n.t(
-							preparation.published ? '已发布' : '准备稿'
-						)}</a
-					>{/each}
-			</details>{/if}
+		{#if draftRows.length}
+			<section class="mb-5 rounded-xl border border-gray-200 p-4 dark:border-gray-700">
+				<h2 class="font-semibold">{$i18n.t('草稿')}</h2>
+				<p class="mt-1 text-sm text-gray-500">{$i18n.t('尚未布置给学生，可继续编辑。')}</p>
+				{#each draftRows as preparation (preparation.id)}
+					<div
+						class="flex flex-wrap items-center justify-between gap-3 border-b py-3 last:border-0 dark:border-gray-700"
+					>
+						<div class="min-w-0">
+							<p class="break-words">
+								{preparation.payload.assignment.title || $i18n.t('未命名作业')}
+							</p>
+							<p class="text-sm text-gray-500">
+								{$i18n.t(
+									preparation.local
+										? '此浏览器有待同步内容'
+										: preparation.assignment_id
+											? '辅导调整草稿'
+											: '草稿'
+								)}
+							</p>
+						</div>
+						<div class="flex shrink-0 gap-4 text-sm">
+							<a
+								class="underline"
+								href={preparation.assignment_id
+									? `/teacher/assignments/${preparation.assignment_id}/settings?preparation=${preparation.id}`
+									: `/teacher/assignments/new?preparation=${preparation.id}`}
+								>{$i18n.t('继续编辑')}</a
+							>
+							<button
+								type="button"
+								class="text-red-600"
+								disabled={!!deletingDraft}
+								on:click={() => deleteDraft(preparation)}>{$i18n.t('Delete')}</button
+							>
+						</div>
+					</div>
+				{/each}
+			</section>
+		{/if}
 		<div class="mb-4 flex flex-wrap items-center gap-2">
 			<select
 				class={EDU_FILTER_FIELD_CLASS}

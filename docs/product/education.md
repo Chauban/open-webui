@@ -41,6 +41,7 @@ Right Write 基于 Open WebUI v0.11.2。前端使用 Svelte 5、SvelteKit 2、Ty
 ## Frontend Entry Points
 
 - API 与类型：`src/lib/apis/education/index.ts`、`types.ts`；教学组件：`src/lib/components/education/`。
+- 教师准备稿与试教工作台仅在 `/teacher/teaching-models` 返回 `search_available: true` 时显示资料搜索开关；不可用时不显示禁用入口或提示，不改写已有配置和冻结结果。提示词独立性、关闭行为及生效规则只在管理员资料搜索设置说明。
 - 学生：`/me/writing` 写作首页、`/me/writing/growth` 成长画像、`/assignments/[assignmentId]/write` 作业工作区、`/writing/[sessionId]` 个人工作区、`/join` 加班、`/education/setup` 身份引导。
 - 教师：`/teacher` 总览、`/teacher/classrooms` 班级、`/teacher/assignments` 作业、`/teacher/review` 全局批改队列、`/teacher/submissions/[submissionId]` 批改工作台。
 - 顶栏分区与对象子标签由 `teacher-nav.ts` 统一定义；班级仅“总览 / 学生”，作业为“概况 / 提交与批改 / 本次分析 / 设置”。布局复用 `EduPageShell` / `TeacherPageShell`，全局与作业内提交列表复用 `SubmissionQueue`，教师与学生画像复用 `StudentGrowthProfile`。
@@ -117,6 +118,14 @@ Right Write 基于 Open WebUI v0.11.2。前端使用 Svelte 5、SvelteKit 2、Ty
 - 批改携带 `expected_final_version_id / expected_review_revision`，冲突返回 409。已发布评阅拒绝存为 pending；更正追加事件、重建当前版本投影，正文仍只读。
 - 无反思回答、无学生提问对应质量项不适用。仅总分不生成空分项零分。画像指标版本提升为 `2026-11-07.1`，证据 schema 保持原有结构；新算法的上线激活与重算仍须显式执行。
 - 迁移 `d7e9f1a3b5c8` 保留提交、反思、评阅及证据原文，迁移当时为既有作业绑定教学快照；旧教师保留从零写作及已布置类型，段落论证默认未授权。退回开关不变。正式执行前核查授权清单并备份。
+
+## 作业草稿自动保存（2026-11-10）
+
+- 复用 `TeachingPreparation` 和既有准备稿接口保存三类新作业，不恢复 `Assignment.status` / 归档字段，不新增数据库结构。`DraftAssignment` / `DraftAiCandidate` 为严格字段结构，允许空值及未完成的评分、反思；执行时重新通过 `AiCandidate`，发布时重新通过 `AssignmentCreateForm` 和既有权限校验，草稿不能直接充当正式配置。
+- `preparation-autosave.ts` 在首次实际编辑后按用户和草稿 ID 写入浏览器备份，600ms 防抖、单请求串行写入；保存响应只确认对应快照，后续输入继续排队。创建使用客户端 UUID，丢失响应后重试复用原 ID；更新携带原 revision。请求结果不确定时仅在服务端内容和提交快照一致时确认已保存，不盲目采用更高 revision 覆盖他页内容。
+- `/teacher/assignments/new` 完整恢复服务器草稿或未同步本地备份，自动保存初始化就绪前禁用表单；列表合并本人两种来源，排除已发布准备稿。备份保留保存前 revision，重新进入仍受并发冲突保护；冲突可明确保留为另一份草稿。删除沿用已有证据保留约束。
+- 自动保存不校验发布完整性，不发送通知。试教检查任务文本与 AI 候选，评分和反思可以之后补齐；发布检查完整表单、班级、截止、权限和明确确认。三种新作业都使用准备稿发布事务及幂等回执，段落论证额外冻结辅导版本；已有作业准备稿只更新 AI。
+- 发布先 flush 最新输入，保存失败不发布；等待保存期间输入变化则停止发布并要求重新确认。保留字段错误翻译、灰色禁用按钮及持续展示的缺项原因。离线内容仅在当前浏览器可恢复，成功同步后其他设备可读取服务器草稿；浏览器无法备份时明确提示并在未同步离开时警告。
 
 ## 2026-11-09 按角色配置个人写作
 

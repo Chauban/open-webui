@@ -166,6 +166,45 @@ def test_private_draft_trial_without_publication_and_adopt_is_not_publish(env):
     assert env.client.get('/api/v1/teacher/teaching-preparations').status_code == 403
 
 
+@pytest.mark.parametrize(
+    'missing',
+    [
+        {'due_at': None},
+        {'title': ' '},
+        {'classroom_ids': []},
+        {'title': '', 'classroom_ids': [], 'due_at': None},
+    ],
+)
+def test_publish_reports_only_missing_fields_and_allows_corrected_retry(env, missing):
+    complete = payload(env)
+    incomplete = copy.deepcopy(complete)
+    incomplete['assignment'].update(missing)
+    prep = prepare(env, incomplete)
+    result = publish(env, prep)
+    assert result.status_code == 400, result.text
+    messages = {
+        'title': 'Assignment title is required.',
+        'classroom_ids': 'At least one classroom is required',
+        'due_at': 'Assignment due time is required.',
+    }
+    assert {error['loc'][-1]: error['msg'] for error in result.json()['detail']} == {
+        field: messages[field] for field in missing
+    }
+    with env.factory() as db:
+        assert db.query(Assignment).count() == db.query(AssignmentAiRevision).count() == 0
+    updated = env.client.put(
+        f'/api/v1/teacher/teaching-preparations/{prep["id"]}',
+        json={'expected_revision': prep['revision'], 'payload': complete},
+    )
+    assert updated.status_code == 200, updated.text
+    result = publish(env, updated.json())
+    assert result.status_code == 200, result.text
+    assert result.json()[0]['due_at'] == complete['assignment']['due_at']
+    assert publish(env, updated.json()).json() == result.json()
+    with env.factory() as db:
+        assert db.query(Assignment).count() == db.query(AssignmentAiRevision).count() == 1
+
+
 def test_atomic_publish_idempotency_and_optimistic_revision(env):
     prep = prepare(env)
     body = {'expected_revision': 1, 'payload': prep['payload']}
@@ -289,18 +328,44 @@ def test_formal_chat_resolves_assignment_before_ordinary_model_acl(env, monkeypa
         assignment_row.image_reading_enabled = image_enabled
         db.commit()
         if with_materials:
-            from open_webui.models.writing_materials import WritingMaterial, MaterialBlock
-            block = MaterialBlock(id='m1', kind='image', location='正文证据之后',
-                                  text='截图出处：史料卷三第42页', extracted_text='截图出处：史料卷三第42页', status='read')
-            db.add(WritingMaterial(id='request-evidence', writing_session_id=sid, filename='初稿.docx',
-                bundle_path='unused-test-asset.zip', data={'blocks': [block.model_dump()], 'model_id': 'vision'},
-                active=True, confirmed_at=1, created_at=1))
+            from open_webui.models.writing_materials import MaterialBlock, WritingMaterial
+
+            block = MaterialBlock(
+                id='m1',
+                kind='image',
+                location='正文证据之后',
+                text='截图出处：史料卷三第42页',
+                extracted_text='截图出处：史料卷三第42页',
+                status='read',
+            )
+            db.add(
+                WritingMaterial(
+                    id='request-evidence',
+                    writing_session_id=sid,
+                    filename='初稿.docx',
+                    bundle_path='unused-test-asset.zip',
+                    data={'blocks': [block.model_dump()], 'model_id': 'vision'},
+                    active=True,
+                    confirmed_at=1,
+                    created_at=1,
+                )
+            )
             from open_webui.models.notes import Note
+
             note = db.get(Note, session.note_id)
             data = copy.deepcopy(note.data)
-            data['content']['json']['content'].append({'type': 'writingImage', 'attrs': {
-                'materialId': 'request-evidence', 'blockId': 'm1', 'width': 100,
-                'transcription': block.text, 'transcriptionEdited': False}})
+            data['content']['json']['content'].append(
+                {
+                    'type': 'writingImage',
+                    'attrs': {
+                        'materialId': 'request-evidence',
+                        'blockId': 'm1',
+                        'width': 100,
+                        'transcription': block.text,
+                        'transcriptionEdited': False,
+                    },
+                }
+            )
             note.data = data
             db.commit()
 
@@ -911,3 +976,104 @@ def test_initial_text_output_rejects_empty_or_incomplete_without_format_retry(
     assert call['outputs'][0]['raw'] == content
     assert result['state']['dialogue'] == []
     assert len(env.calls) == 1
+
+
+@pytest.mark.parametrize('mode', ['from_scratch', 'revise_draft', 'revise_argument'])
+def test_autosave_keeps_incomplete_form_private_until_publication(env, mode):
+    data = payload(env, title='', prompt='', model='')
+    data['assignment'].update(
+        task_mode=mode,
+        score_max='',
+        classroom_ids=[],
+        due_at=None,
+        rubric_schema={'criteria': [{'key': 'ideas', 'label': '', 'max_score': '-'}]},
+        reflection_questions=[{'id': 'q', 'kind': 'text', 'prompt': ''}],
+    )
+    prep = prepare(env, data)
+    restored = env.client.get(f'/api/v1/teacher/teaching-preparations/{prep["id"]}')
+    assert restored.status_code == 200, restored.text
+    assert restored.json()['payload']['assignment']['score_max'] == ''
+    assert restored.json()['payload']['assignment']['rubric_schema']['criteria'][0]['max_score'] == '-'
+    assert restored.json()['payload']['ai']['model_id'] == ''
+    assert publish(env, prep).status_code == 422
+    with env.factory() as db:
+        assert db.query(Assignment).count() == db.query(EducationNotification).count() == 0
+    UserContext.current_user = env.other
+    assert env.client.get(f'/api/v1/teacher/teaching-preparations/{prep["id"]}').status_code == 404
+
+
+@pytest.mark.parametrize('mode', ['from_scratch', 'revise_draft'])
+def test_autosaved_other_task_modes_publish_once_without_argument_ai(env, mode):
+    data = payload(env, prompt='', model='')
+    data['assignment'].update(task_mode=mode, image_reading_enabled=True)
+    prep = prepare(env, data)
+    result = publish(env, prep)
+    assert result.status_code == 200, result.text
+    assignment = result.json()[0]
+    assert assignment['task_mode'] == mode
+    assert assignment['image_reading_enabled'] is True
+    assert assignment['current_ai_revision_id'] is None
+    assert publish(env, prep).json()[0]['id'] == assignment['id']
+    with env.factory() as db:
+        assert db.query(Assignment).count() == 1
+        assert db.query(AssignmentAiRevision).count() == 0
+    assert not env.calls
+
+
+def test_autosave_creation_retry_and_revision_conflict_do_not_overwrite(env):
+    draft_id = str(uuid.uuid4())
+    body = {'id': draft_id, 'payload': payload(env)}
+    first = env.client.post('/api/v1/teacher/teaching-preparations', json=body).json()
+    newer = copy.deepcopy(first['payload'])
+    newer['assignment']['title'] = '另一页面保存的标题'
+    result = env.client.put(
+        f'/api/v1/teacher/teaching-preparations/{draft_id}',
+        json={
+            'expected_revision': 1,
+            'payload': newer,
+        },
+    )
+    assert result.status_code == 200
+    retried = env.client.post('/api/v1/teacher/teaching-preparations', json=body)
+    assert retried.status_code == 200
+    assert retried.json()['revision'] == 2
+    assert retried.json()['payload']['assignment']['title'] == '另一页面保存的标题'
+    assert (
+        env.client.put(
+            f'/api/v1/teacher/teaching-preparations/{draft_id}',
+            json={
+                'expected_revision': 1,
+                'payload': body['payload'],
+            },
+        ).status_code
+        == 409
+    )
+    UserContext.current_user = env.other
+    assert env.client.post('/api/v1/teacher/teaching-preparations', json=body).status_code == 404
+
+
+def test_incomplete_grading_does_not_block_trial_but_incomplete_ai_does(env):
+    data = payload(env)
+    data['assignment']['score_max'] = ''
+    prep = prepare(env, data)
+    assert trial(env, prep)['id']
+    data['ai']['prompt'] = ''
+    invalid = prepare(env, data)
+    result = env.client.post(
+        '/api/v1/teacher/teaching-trials',
+        json={
+            'preparation_id': invalid['id'],
+            'expected_revision': invalid['revision'],
+        },
+    )
+    assert result.status_code == 422
+    assert not env.calls
+
+
+def test_draft_input_is_typed_and_rejects_unknown_fields(env):
+    data = payload(env)
+    data['assignment']['unexpected'] = True
+    assert env.client.post('/api/v1/teacher/teaching-preparations', json={'payload': data}).status_code == 422
+    del data['assignment']['unexpected']
+    data['ai']['web_search'] = 'true'
+    assert env.client.post('/api/v1/teacher/teaching-preparations', json={'payload': data}).status_code == 422

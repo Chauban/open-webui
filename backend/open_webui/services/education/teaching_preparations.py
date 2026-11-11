@@ -6,11 +6,20 @@ import time
 import uuid
 
 from fastapi import HTTPException
+from pydantic import ValidationError
 from sqlalchemy import func, update
+from sqlalchemy.exc import IntegrityError
 from starlette.concurrency import run_in_threadpool
 
-from open_webui.models.education import Assignment, AssignmentModel, Education, EducationNotification
+from open_webui.models.education import (
+    Assignment,
+    AssignmentCreateForm,
+    AssignmentModel,
+    Education,
+    EducationNotification,
+)
 from open_webui.models.teaching_trials import (
+    AiCandidate,
     AssignmentAiRevision,
     PreparationPayload,
     TeachingPreparation,
@@ -43,7 +52,7 @@ def check_revision(row, expected):
         raise HTTPException(409, 'This preparation has already been published; create a new preparation')
 
 
-def authorize_preparation(user, assignment_id, db):
+def authorize_preparation(user, assignment_id, db, task_mode='revise_argument'):
     from open_webui.routers.education import _ensure_assignment_access, _get_assignment_or_404
 
     if assignment_id:
@@ -52,7 +61,7 @@ def authorize_preparation(user, assignment_id, db):
         if assignment.task_mode != 'revise_argument':
             raise HTTPException(400, 'Teaching preparations support argument revision only')
         return assignment
-    if user.role != 'admin' and 'revise_argument' not in teacher_access(user.id, db).allowed_task_modes:
+    if user.role != 'admin' and task_mode not in teacher_access(user.id, db).allowed_task_modes:
         raise HTTPException(403, 'This assignment type is not authorized for your account')
     return None
 
@@ -87,9 +96,15 @@ def preparation_payload(payload, assignment):
 
 
 def create_preparation(user, form, db):
-    assignment = authorize_preparation(user, form.assignment_id, db)
+    assignment = authorize_preparation(user, form.assignment_id, db, form.payload.assignment.task_mode)
+    existing = db.get(TeachingPreparation, str(form.id))
+    if existing:
+        existing = owned(TeachingPreparation, str(form.id), user, db)
+        if existing.assignment_id != form.assignment_id:
+            raise HTTPException(409, 'Preparation does not belong to this assignment')
+        return serialize_preparation(existing)
     row = TeachingPreparation(
-        id=str(uuid.uuid4()),
+        id=str(form.id),
         owner_id=user.id,
         assignment_id=form.assignment_id,
         base_config_revision=assignment.config_revision if assignment else None,
@@ -99,13 +114,20 @@ def create_preparation(user, form, db):
         updated_at=int(time.time()),
     )
     db.add(row)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = owned(TeachingPreparation, str(form.id), user, db)
+        if existing.assignment_id != form.assignment_id:
+            raise HTTPException(409, 'Preparation does not belong to this assignment')
+        return serialize_preparation(existing)
     return serialize_preparation(row)
 
 
 def save_preparation(user, preparation_id, form, db):
     row = owned(TeachingPreparation, preparation_id, user, db, lock=True)
-    assignment = authorize_preparation(user, row.assignment_id, db)
+    assignment = authorize_preparation(user, row.assignment_id, db, form.payload.assignment.task_mode)
     if assignment and assignment.config_revision != row.base_config_revision:
         raise HTTPException(409, 'Assignment settings changed; create a preparation from the current assignment')
     check_revision(row, form.expected_revision)
@@ -120,18 +142,21 @@ def save_preparation(user, preparation_id, form, db):
 
 async def resolve_preparation(request, user, row, db):
     payload = PreparationPayload.model_validate(row.payload)
-    if payload.ai.web_search:
+    if payload.assignment.task_mode != 'revise_argument':
+        raise HTTPException(400, 'Teaching trials currently support argument revision only')
+    ai = validate_draft(AiCandidate, payload.ai.model_dump(), 'ai')
+    if ai.web_search:
         from open_webui.services.education.teaching_search import ensure_available
 
         await ensure_available()
     assignment = authorize_preparation(user, row.assignment_id, db)
-    binding = await resolve_binding(request, user, payload.ai)
+    binding = await resolve_binding(request, user, ai)
     validation_environment = fingerprint(binding)
     # Adoption copies the tested non-secret parameters, not the later defaults.
     if row.adopted_binding:
         binding = copy.deepcopy(row.adopted_binding)
     return {
-        'ai': payload.ai.model_dump(),
+        'ai': ai.model_dump(),
         'binding': binding,
         'title': assignment.title if assignment else payload.assignment.title,
         'description': (assignment.description if assignment else payload.assignment.description) or '',
@@ -154,6 +179,31 @@ def coverage(row, config, db):
     return {'fingerprint': target, 'stages': sorted(stages), 'event_ids': ids}
 
 
+def validate_draft(model, data, field):
+    try:
+        return model.model_validate(data)
+    except ValidationError as error:
+        raise HTTPException(
+            422,
+            [
+                {**item, 'loc': ['body', 'payload', field, *item['loc']]}
+                for item in error.errors(include_context=False, include_input=False, include_url=False)
+            ],
+        ) from error
+
+
+def publication_assignment(row):
+    data = copy.deepcopy(row.payload['assignment'])
+    if data['scoring_mode'] == 'total':
+        data['rubric_schema'] = {'criteria': []}
+        data['challenge_enabled'] = False
+    if data['task_mode'] != 'from_scratch':
+        data['challenge_enabled'] = False
+    if not data['challenge_enabled']:
+        data['challenge_focus_keys'] = []
+    return validate_draft(AssignmentCreateForm, data, 'assignment')
+
+
 async def publish(request, user, preparation_id, form, db):  # noqa: C901 -- one atomic publication transaction
     initial = owned(TeachingPreparation, preparation_id, user, db)
     # Lock order is always assignment -> preparation -> session.
@@ -166,13 +216,33 @@ async def publish(request, user, preparation_id, form, db):  # noqa: C901 -- one
             raise HTTPException(409, 'Preparation has already been published with another request')
         return [Education.get_assignment_by_id(aid, db=db) for aid in row.published['assignment_ids']]
     check_revision(row, form.expected_revision)
-    assignment = authorize_preparation(user, row.assignment_id, db)
-    config = await resolve_preparation(request, user, row, db)
-    from open_webui.services.education.teaching_runtime import validate_binding
+    assignment = authorize_preparation(user, row.assignment_id, db, row.payload['assignment']['task_mode'])
+    payload = publication_assignment(row)
+    if not assignment:
+        missing_fields = [
+            (not payload.title.strip(), 'title', 'Assignment title is required.'),
+            (not payload.classroom_ids, 'classroom_ids', 'At least one classroom is required'),
+            (not payload.due_at or payload.due_at <= 0, 'due_at', 'Assignment due time is required.'),
+        ]
+        errors = [
+            {'loc': ['body', 'payload', 'assignment', field], 'msg': message, 'type': 'required_for_publication'}
+            for missing, field, message in missing_fields
+            if missing
+        ]
+        if errors:
+            raise HTTPException(400, errors)
+    config = None
+    evidence = None
+    if payload.task_mode == 'revise_argument':
+        config = await resolve_preparation(request, user, row, db)
+        from open_webui.services.education.teaching_runtime import validate_binding
 
-    await validate_binding(request, user, config)
-    evidence = coverage(row, config, db)
-    payload = PreparationPayload.model_validate(row.payload).assignment
+        await validate_binding(request, user, config)
+        evidence = coverage(row, config, db)
+    else:
+        from open_webui.routers.education import _ensure_model_params_allowed
+
+        await _ensure_model_params_allowed(payload.model_params)
     now = int(time.time())
     rows = []
     notifications = []
@@ -190,11 +260,9 @@ async def publish(request, user, preparation_id, form, db):  # noqa: C901 -- one
         from open_webui.routers.education import _ensure_classroom_access, _get_classroom_or_404
 
         classroom_ids = list(dict.fromkeys(payload.classroom_ids))
-        if not classroom_ids or not payload.due_at or payload.due_at <= 0 or not payload.title.strip():
-            raise HTTPException(400, 'Title, classroom and due time are required to publish')
         for classroom_id in classroom_ids:
             _ensure_classroom_access(user, _get_classroom_or_404(classroom_id, db), db, require_teacher=True)
-        template = latest_teaching_config('revise_argument', db)
+        template = latest_teaching_config(payload.task_mode, db)
         for classroom_id in classroom_ids:
             item = Assignment(
                 id=str(uuid.uuid4()),
@@ -211,22 +279,23 @@ async def publish(request, user, preparation_id, form, db):  # noqa: C901 -- one
             db.add(item)
             rows.append(item)
     for item in rows:
-        revision = (
-            db.query(func.max(AssignmentAiRevision.revision)).filter_by(assignment_id=item.id).scalar() or 0
-        ) + 1
-        published = AssignmentAiRevision(
-            id=str(uuid.uuid4()),
-            assignment_id=item.id,
-            revision=revision,
-            config=copy.deepcopy(config),
-            author_id=user.id,
-            change_summary=form.change_summary.strip(),
-            preparation_id=row.id,
-            evidence=evidence,
-            created_at=now,
-        )
-        db.add(published)
-        item.current_ai_revision_id = published.id
+        if config is not None:
+            revision = (
+                db.query(func.max(AssignmentAiRevision.revision)).filter_by(assignment_id=item.id).scalar() or 0
+            ) + 1
+            published = AssignmentAiRevision(
+                id=str(uuid.uuid4()),
+                assignment_id=item.id,
+                revision=revision,
+                config=copy.deepcopy(config),
+                author_id=user.id,
+                change_summary=form.change_summary.strip(),
+                preparation_id=row.id,
+                evidence=evidence,
+                created_at=now,
+            )
+            db.add(published)
+            item.current_ai_revision_id = published.id
         item.updated_at = now
         if not assignment:
             recipients = []
