@@ -2783,6 +2783,7 @@ DEFAULT_EDUCATION_AI_STEPS = {
     'revision_review': {'model': None, 'thinking': 'medium'},
     'whole_review': {'model': None, 'thinking': 'medium'},
     'reader_check': {'model': None, 'thinking': 'medium'},
+    'photo_transcription': {'model': None, 'thinking': 'off'},
     'image_parsing': {'model': None, 'thinking': 'off'},
     'class_insight': {'model': None, 'thinking': 'medium'},
 }

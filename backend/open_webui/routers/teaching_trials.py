@@ -177,8 +177,8 @@ def delete_preparation(
 ):
     row = preparations.owned(TeachingPreparation, preparation_id, user, db, lock=True)
     preparations.check_revision(row, expected_revision)
-    if db.query(TeachingTrialSession).filter_by(preparation_id=row.id).first():
-        raise HTTPException(409, 'Preparations with trial evidence must be retained')
+    # Trial snapshots and saved plans outlive the editable draft: other drafts
+    # and published revisions may already reference their evidence.
     db.delete(row)
     db.commit()
     return {'deleted': True}

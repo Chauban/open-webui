@@ -183,6 +183,19 @@
 
 	export let prompt = '';
 	export let files: any[] = [];
+	$: useRevisionAction = Boolean(revisionAction && !prompt.trim() && files.length === 0);
+	$: sendDisabled =
+		uploadPending ||
+		(useRevisionAction ? revisionAction.disabled : !prompt.trim() && files.length === 0);
+	$: sendLabel = useRevisionAction ? revisionAction.label : 'Send message';
+	const submitInput = () => {
+		if (sendDisabled) return;
+		if (useRevisionAction) {
+			revisionAction.onClick();
+		} else {
+			dispatch('submit', prompt);
+		}
+	};
 
 	export let selectedToolIds: string[] = [];
 	export let selectedSkillIds: string[] = [];
@@ -1684,16 +1697,15 @@
 		</div>
 
 		{#if revisionAction}
-			<div class="mx-auto w-full max-w-[58rem] px-3 pb-2 flex justify-end">
-				<button
-					type="button"
-					class="rounded-full border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
-					disabled={revisionAction.disabled}
-					on:click={revisionAction.onClick}
-				>
-					{$i18n.t(revisionAction.label)}
-				</button>
-			</div>
+			<p
+				class="mx-auto w-full max-w-[58rem] px-4 pb-2 text-xs leading-5 text-gray-500 dark:text-gray-400"
+			>
+				{$i18n.t(
+					useRevisionAction
+						? '稿件已修改，点击发送即可请 AI 看看，也可以输入问题。'
+						: '发送时，AI 会一并读取修改后的稿件。'
+				)}
+			</p>
 		{/if}
 		<div class="bg-transparent">
 			<div
@@ -1740,16 +1752,14 @@
 								focus({ preventScroll: true });
 
 								if ($settings?.speechAutoSend ?? false) {
-									dispatch('submit', prompt);
+									submitInput();
 								}
 							}}
 						/>
 					</div>
 					<form
 						class="w-full flex flex-col gap-1.5 {recording ? 'hidden' : ''}"
-						on:submit|preventDefault={() => {
-							dispatch('submit', prompt);
-						}}
+						on:submit|preventDefault={submitInput}
 					>
 						<button
 							id="generate-message-pair-button"
@@ -2141,9 +2151,7 @@
 
 																if (enterPressed) {
 																	e.preventDefault();
-																	if (prompt !== '' || files.length > 0) {
-																		dispatch('submit', prompt);
-																	}
+																	submitInput();
 																}
 															}
 														}
@@ -2545,14 +2553,16 @@
 
 								<div class="self-end flex space-x-1 mr-1 min-w-0 gap-[0.03125rem]">
 									<div class="flex min-w-0 max-w-[10rem] items-center sm:max-w-[13rem]">
-										{#if fixedModelName}<span class="truncate text-sm text-gray-500">{fixedModelName}</span>{:else}<ModelSelector
-											bind:this={modelSelector}
-											bind:selectedModels
-											showSetDefault={!history?.currentId}
-											placement="auto"
-											align="end"
-											triggerClassName="items-center gap-1.5 rounded-lg pl-2 pr-1.5 py-1 text-[0.8125rem] font-normal text-gray-600 transition-colors duration-100 hover:bg-gray-50/40 hover:text-gray-700 dark:text-gray-300 dark:hover:bg-gray-800/40 dark:hover:text-gray-200"
-										/>{/if}
+										{#if fixedModelName}<span class="truncate text-sm text-gray-500"
+												>{fixedModelName}</span
+											>{:else}<ModelSelector
+												bind:this={modelSelector}
+												bind:selectedModels
+												showSetDefault={!history?.currentId}
+												placement="auto"
+												align="end"
+												triggerClassName="items-center gap-1.5 rounded-lg pl-2 pr-1.5 py-1 text-[0.8125rem] font-normal text-gray-600 transition-colors duration-100 hover:bg-gray-50/40 hover:text-gray-700 dark:text-gray-300 dark:hover:bg-gray-800/40 dark:hover:text-gray-200"
+											/>{/if}
 									</div>
 
 									{#if hasChatVariables}
@@ -2639,7 +2649,7 @@
 											{/if}
 										{/if}
 
-										{#if !embedded && prompt === '' && files.length === 0 && ($_user?.role === 'admin' || ($_user?.permissions?.chat?.call ?? true))}
+										{#if !embedded && !useRevisionAction && prompt === '' && files.length === 0 && ($_user?.role === 'admin' || ($_user?.permissions?.chat?.call ?? true))}
 											<div class=" flex items-center">
 												<!-- {$i18n.t('Call')} -->
 												<Tooltip content={$i18n.t('Voice mode')}>
@@ -2707,15 +2717,16 @@
 												<Tooltip
 													content={uploadPending
 														? $i18n.t('Waiting for upload...')
-														: $i18n.t('Send message')}
+														: $i18n.t(sendLabel)}
 												>
 													<button
 														id="send-message-button"
-														class="{!(prompt === '' && files.length === 0) || uploadPending
+														aria-label={$i18n.t(sendLabel)}
+														class="{!sendDisabled || uploadPending
 															? 'bg-black text-white hover:bg-gray-900 dark:bg-white dark:text-black dark:hover:bg-gray-100 '
 															: 'text-white bg-gray-200 dark:text-gray-900 dark:bg-gray-700 disabled'} transition rounded-full p-[0.3125rem] self-center"
 														type="submit"
-														disabled={(prompt === '' && files.length === 0) || uploadPending}
+														disabled={sendDisabled}
 													>
 														{#if uploadPending}
 															<Spinner className="size-5" />

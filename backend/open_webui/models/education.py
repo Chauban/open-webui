@@ -123,6 +123,7 @@ class Assignment(Base):
     description = Column(Text, nullable=True)
     teacher_id = Column(Text, nullable=False)
     hidden = Column(Boolean, nullable=False, default=False, server_default=text('false'))
+    photo_transcription_enabled = Column(Boolean, nullable=False, default=False, server_default=text('false'))
     image_reading_enabled = Column(Boolean, nullable=False, default=False, server_default=text('false'))
     classroom_id = Column(Text, nullable=True)
     due_at = Column(BigInteger, nullable=True)
@@ -150,9 +151,8 @@ class Assignment(Base):
 class AssignmentExtension(Base):
     """单个学生在某个作业上的个人截止时间。
 
-    作业的 due_at 是全班一刀切的硬闸门,提交接口过期即 403。学生请假、设备故障
-    这类情况没有第二条路——改 due_at 会把全班一起放开。这张表让教师只给一个人
-    放开,一个学生在一个作业上至多一条。
+    个人延期优先于退回和全班截止，用于判断提交是否超时，不阻止截止后写作。
+    一个学生在一个作业上至多一条。
     """
 
     __tablename__ = "assignment_extension"
@@ -561,6 +561,7 @@ class SubmissionReview(Base):
     reviewer_id = Column(Text, nullable=False)
     review_status = Column(Text, nullable=False, default="pending")
     score = Column(BigInteger, nullable=True)
+    scoring_config = Column(JSONField, nullable=False)
     # 反思质量由教师 1—5 分给出,是这一维唯一的来源。曾经按反思字数折算,
     # 那个口径只数字符、内容不看,凑字数即可满分,已废弃。
     reflection_score = Column(Integer, nullable=True)
@@ -661,6 +662,7 @@ class SubmissionReviewEvent(Base):
     reviewer_id = Column(Text, nullable=False)
     review_status = Column(Text, nullable=False)
     score = Column(BigInteger, nullable=True)
+    scoring_config = Column(JSONField, nullable=False)
     reflection_score = Column(Integer, nullable=True)
     prompt_score = Column(Integer, nullable=True)
     rubric_scores = Column(JSONField, nullable=True)
@@ -927,6 +929,23 @@ class RubricSchema(BaseModel):
         return sum(criterion.max_score for criterion in self.criteria)
 
 
+class AssignmentScoringConfig(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    scoring_mode: Literal['dimensions', 'total']
+    score_max: int = Field(gt=0, le=10000)
+    rubric_schema: RubricSchema
+
+    @model_validator(mode='after')
+    def validate_scoring(self):
+        if self.scoring_mode == 'total':
+            if self.rubric_schema.criteria:
+                raise ValueError('Total-only scoring has no rubric criteria')
+        elif not self.rubric_schema.criteria or self.rubric_schema.total_score != self.score_max:
+            raise ValueError('Rubric maximum scores must add up to assignment maximum score')
+        return self
+
+
 def _strip_optional(value: Optional[str]) -> Optional[str]:
     if value is None:
         return None
@@ -1129,6 +1148,7 @@ class AssignmentModel(BaseModel):
 
     id: str
     hidden: bool = False
+    photo_transcription_enabled: bool = False
     image_reading_enabled: bool = False
     title: str
     description: Optional[str] = None
@@ -1501,6 +1521,7 @@ class SubmissionReviewModel(BaseModel):
     reviewer_id: str
     review_status: str
     score: Optional[int] = Field(default=None, ge=0)
+    scoring_config: AssignmentScoringConfig
     reflection_score: Optional[int] = Field(default=None, ge=1, le=5)
     prompt_score: Optional[int] = Field(default=None, ge=1, le=5)
     overall_comment: Optional[str] = None
@@ -1526,6 +1547,7 @@ class EducationNotificationModel(BaseModel):
 
 class AssignmentCreateForm(BaseModel):
     model_config = ConfigDict(extra='forbid')
+    photo_transcription_enabled: bool = Field(default=False, strict=True)
     image_reading_enabled: bool = Field(default=False, strict=True)
     title: str
     description: Optional[str] = None
@@ -1571,8 +1593,20 @@ class AssignmentCreateForm(BaseModel):
         return self
 
 
-class AssignmentUpdateForm(BaseModel):
+class AssignmentChangeForm(BaseModel):
     model_config = ConfigDict(extra='forbid')
+
+    change_summary: str = Field(min_length=1, max_length=1000, strict=True)
+
+    @field_validator('change_summary', mode='before')
+    @classmethod
+    def strip_change_summary(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+
+class AssignmentUpdateForm(AssignmentChangeForm):
+    model_config = ConfigDict(extra='forbid')
+    photo_transcription_enabled: Optional[bool] = Field(default=None, strict=True)
     image_reading_enabled: Optional[bool] = Field(default=None, strict=True)
     title: Optional[str] = None
     description: Optional[str] = None
@@ -1584,7 +1618,6 @@ class AssignmentUpdateForm(BaseModel):
     scoring_mode: Optional[Literal['dimensions', 'total']] = None
     expected_config_revision: int = Field(gt=0)
     adopt_latest_teaching_config: bool = False
-    change_summary: Optional[str] = Field(default=None, max_length=1000)
     challenge_enabled: Optional[bool] = None
     challenge_rounds: Optional[int] = None
     # 焦点 key 要对着「更新后」的 rubric 校验,而 rubric 可能不在本次请求里,
@@ -1752,6 +1785,11 @@ class StudentAssignmentListItem(BaseModel):
     writing_session_id: Optional[str] = None
 
 
+class SubmissionTiming(BaseModel):
+    effective_due_at: Optional[int] = None
+    is_late: bool
+
+
 class AssignmentWorkspaceListItem(BaseModel):
     project_mode: str = "assignment_writing"
     assignment: AssignmentModel
@@ -1764,6 +1802,7 @@ class AssignmentWorkspaceListItem(BaseModel):
     score: Optional[int] = None
     effective_due_at: Optional[int] = None
     round_no: Optional[int] = None
+    submission_timing: Optional[SubmissionTiming] = None
 
 
 class AutosaveForm(BaseModel):
@@ -1899,6 +1938,7 @@ class SubmissionReviewForm(BaseModel):
 
     expected_final_version_id: str = Field(min_length=1)
     expected_review_revision: int = Field(ge=0)
+    expected_scoring_config: AssignmentScoringConfig
     review_status: Literal["pending", "reviewed", "returned"] = "reviewed"
     score: Optional[int] = Field(default=None, ge=0)
     reflection_score: Optional[int] = Field(default=None, ge=1, le=5)
@@ -1975,6 +2015,7 @@ class AssignmentRemindResult(BaseModel):
 
 class SubmissionListItem(BaseModel):
     submission: SubmissionModel
+    timing: SubmissionTiming
     session: WritingSessionModel
     assignment: AssignmentModel
     classroom: Optional[ClassroomModel] = None
@@ -1989,6 +2030,7 @@ class SubmissionListItem(BaseModel):
 
 class SubmissionDetailResponse(BaseModel):
     submission: SubmissionModel
+    timing: SubmissionTiming
     assignment: AssignmentModel
     writing_session: WritingSessionModel
     final_version: WritingVersionModel
@@ -2030,6 +2072,9 @@ class MySubmissionRound(BaseModel):
     round_no: int
     is_current: int
     submitted_at: int
+    timing: SubmissionTiming
+    score_max: int
+    rubric_schema: RubricSchema
     content: MySubmissionRoundContent
     review: Optional[MySubmissionRoundReview] = None
 
@@ -2626,6 +2671,7 @@ class SubmissionReviewEventModel(StrictProfileModel):
     reviewer_id: str
     review_status: Literal["pending", "reviewed", "returned"]
     score: Optional[int] = Field(default=None, ge=0)
+    scoring_config: AssignmentScoringConfig
     reflection_score: Optional[int] = Field(default=None, ge=1, le=5)
     prompt_score: Optional[int] = Field(default=None, ge=1, le=5)
     rubric_scores: Optional[dict[str, int]] = None
@@ -3022,9 +3068,9 @@ class EducationTable:
             if form_data.scoring_mode is not None:
                 assignment.scoring_mode = form_data.scoring_mode
             assignment.config_revision += 1
+            assignment.change_summary = form_data.change_summary
             if description_changed:
                 assignment.description_version += 1
-                assignment.change_summary = form_data.change_summary
             if reflection_changed:
                 assignment.reflection_version += 1
             if "title" in form_data.model_fields_set:
@@ -3059,6 +3105,10 @@ class EducationTable:
                 if form_data.challenge_enabled is None:
                     raise ValueError("Challenge switch is required")
                 assignment.challenge_enabled = form_data.challenge_enabled
+            if 'photo_transcription_enabled' in form_data.model_fields_set:
+                if form_data.photo_transcription_enabled is None:
+                    raise ValueError('Photo transcription must be a boolean')
+                assignment.photo_transcription_enabled = form_data.photo_transcription_enabled
             if 'image_reading_enabled' in form_data.model_fields_set:
                 if form_data.image_reading_enabled is None:
                     raise ValueError('Image reading switch is required')
@@ -3138,6 +3188,7 @@ class EducationTable:
                 scoring_mode=form_data.scoring_mode,
                 teaching_config=teaching_config,
                 challenge_enabled=form_data.challenge_enabled,
+                photo_transcription_enabled=form_data.photo_transcription_enabled,
                 image_reading_enabled=form_data.image_reading_enabled,
                 challenge_rounds=form_data.challenge_rounds,
                 challenge_focus_keys=list(form_data.challenge_focus_keys),
@@ -4709,6 +4760,7 @@ class EducationTable:
                 reviewer_id=review.reviewer_id,
                 review_status=review.review_status,
                 score=review.score,
+                scoring_config=review.scoring_config.model_dump(),
                 reflection_score=review.reflection_score,
                 prompt_score=review.prompt_score,
                 rubric_scores=review.rubric_scores,
@@ -5433,6 +5485,7 @@ class EducationTable:
         assignment_id: str,
         reviewer_id: str,
         form_data: SubmissionReviewForm,
+        scoring_config: AssignmentScoringConfig,
         commit: bool = True,
         db: Optional[Session] = None,
     ) -> SubmissionReviewModel:
@@ -5451,6 +5504,7 @@ class EducationTable:
                     reviewer_id=reviewer_id,
                     review_status=form_data.review_status,
                     score=form_data.score,
+                    scoring_config=scoring_config.model_dump(),
                     reflection_score=form_data.reflection_score,
                     prompt_score=form_data.prompt_score,
                     overall_comment=form_data.overall_comment,
@@ -5467,6 +5521,7 @@ class EducationTable:
                 review.reviewer_id = reviewer_id
                 review.review_status = form_data.review_status
                 review.score = form_data.score
+                review.scoring_config = scoring_config.model_dump()
                 review.reflection_score = form_data.reflection_score
                 review.prompt_score = form_data.prompt_score
                 review.overall_comment = form_data.overall_comment

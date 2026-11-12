@@ -1,4 +1,8 @@
 <script lang="ts">
+	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
+	let confirmation: ConfirmDialog;
+	import DisclosureChevron from '$lib/components/common/DisclosureChevron.svelte';
+	import { disclosureSlide } from '$lib/utils/disclosure';
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 	import { createEventDispatcher, getContext } from 'svelte';
@@ -374,7 +378,15 @@
 
 	const removeTeacherNote = async (noteId: string) => {
 		if (!profile) return;
-		if (!window.confirm(t('Delete this private teacher note?'))) return;
+		if (
+			!(await confirmation.ask({
+				title: t('Delete this private teacher note?'),
+				message: t('This action cannot be undone.'),
+				confirmLabel: t('Delete'),
+				variant: 'danger'
+			}))
+		)
+			return;
 		try {
 			await deleteTeacherStudentNote(localStorage.token, noteId);
 			if ('teacher_notes' in profile) {
@@ -475,52 +487,57 @@
 					{$i18n.t('More filters')}{#if assignmentFilter || roundFilter}
 						·
 						{[assignmentFilter, roundFilter].filter(Boolean).length}{/if}
-				</button>
+					<span class="ml-1 inline-flex align-middle"
+						><DisclosureChevron open={showMoreFilters} /></span
+					></button
+				>
 				{#if startDate || endDate || assignmentFilter || roundFilter || (variant === 'teacher' && metricVersionFilter !== profile.active_metric_version)}
 					<EduButton variant="link" on:click={clearFilters}>{$i18n.t('Clear')}</EduButton>
 				{/if}
 			</div>
 			{#if showMoreFilters}
-				<div class="flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
-					<select
-						class="max-w-56 {EDU_FILTER_FIELD_CLASS}"
-						aria-label={$i18n.t('Assignment')}
-						bind:value={assignmentFilter}
-						on:change={applyFilters}
-					>
-						<option value="">{$i18n.t('All Assignments')}</option>
-						{#each assignmentOptions as item}
-							<option value={item.assignment.id}>{item.assignment.title}</option>
-						{/each}
-					</select>
-					<select
-						class={EDU_FILTER_FIELD_CLASS}
-						aria-label={$i18n.t('Round')}
-						bind:value={roundFilter}
-						on:change={applyFilters}
-					>
-						<option value="">{$i18n.t('All rounds')}</option>
-						{#each roundOptions as round}
-							<option value={round}>{$i18n.t('Round {{round}}', { round })}</option>
-						{/each}
-					</select>
-					<!-- 指标版本是给教师/开发核对口径用的,学生端不出现 -->
-					{#if variant === 'teacher' && profile.available_metric_versions.length > 1}
+				<div transition:disclosureSlide>
+					<div class="flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
 						<select
-							class={EDU_FILTER_FIELD_CLASS}
-							aria-label={$i18n.t('Metric version')}
-							bind:value={metricVersionFilter}
+							class="max-w-56 {EDU_FILTER_FIELD_CLASS}"
+							aria-label={$i18n.t('Assignment')}
+							bind:value={assignmentFilter}
 							on:change={applyFilters}
 						>
-							{#each profile.available_metric_versions as version}
-								<option value={version}
-									>{version} · {$i18n.t(
-										version === profile.active_metric_version ? 'Current' : 'Historical'
-									)}</option
-								>
+							<option value="">{$i18n.t('All Assignments')}</option>
+							{#each assignmentOptions as item}
+								<option value={item.assignment.id}>{item.assignment.title}</option>
 							{/each}
 						</select>
-					{/if}
+						<select
+							class={EDU_FILTER_FIELD_CLASS}
+							aria-label={$i18n.t('Round')}
+							bind:value={roundFilter}
+							on:change={applyFilters}
+						>
+							<option value="">{$i18n.t('All rounds')}</option>
+							{#each roundOptions as round}
+								<option value={round}>{$i18n.t('Round {{round}}', { round })}</option>
+							{/each}
+						</select>
+						<!-- 指标版本是给教师/开发核对口径用的,学生端不出现 -->
+						{#if variant === 'teacher' && profile.available_metric_versions.length > 1}
+							<select
+								class={EDU_FILTER_FIELD_CLASS}
+								aria-label={$i18n.t('Metric version')}
+								bind:value={metricVersionFilter}
+								on:change={applyFilters}
+							>
+								{#each profile.available_metric_versions as version}
+									<option value={version}
+										>{version} · {$i18n.t(
+											version === profile.active_metric_version ? 'Current' : 'Historical'
+										)}</option
+									>
+								{/each}
+							</select>
+						{/if}
+					</div>
 				</div>
 			{/if}
 			{#if profile.timeline_pagination.total > profile.timeline_pagination.limit}
@@ -1316,3 +1333,5 @@
 		{/if}
 	</div>
 {/if}
+
+<ConfirmDialog bind:this={confirmation} />

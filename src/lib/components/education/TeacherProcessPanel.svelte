@@ -18,6 +18,8 @@
 	import { formatEpochTime, resolveErrorMessage } from '$lib/utils/education';
 	import { THINKING_SETTING_TEXT } from '$lib/utils/ai-steps';
 	import EduButton from './EduButton.svelte';
+	import DisclosureChevron from '$lib/components/common/DisclosureChevron.svelte';
+	import { disclosureDuration } from '$lib/utils/disclosure';
 	import { EDU_FILTER_FIELD_CLASS } from './styles';
 	const i18n = getContext<Writable<I18nType>>('i18n');
 	const t = (key: string, options?: Record<string, unknown>) => get(i18n).t(key, options);
@@ -65,6 +67,30 @@
 					})))
 	].sort((a, b) => a.time - b.time);
 	const html = (text: string) => DOMPurify.sanitize(marked.parse(text, { async: false }) as string);
+	// Measure both layouts so a long reply expands smoothly from its three-line preview.
+	function preview(node: HTMLElement, expanded: boolean) {
+		let animation: Animation | undefined;
+		node.classList.toggle('line-clamp-3', !expanded);
+		return {
+			update(next: boolean) {
+				const height = node.getBoundingClientRect().height;
+				animation?.cancel();
+				node.classList.toggle('line-clamp-3', !next);
+				if (node.animate && disclosureDuration()) {
+					animation = node.animate(
+						[
+							{ height: `${height}px`, overflow: 'hidden' },
+							{ height: `${node.getBoundingClientRect().height}px`, overflow: 'hidden' }
+						],
+						{ duration: disclosureDuration(), easing: 'ease' }
+					);
+				}
+			},
+			destroy() {
+				animation?.cancel();
+			}
+		};
+	}
 	const ensureCatalog = async () => {
 		if (catalog?.final_version_id === finalVersionId) return catalog;
 		if (catalogRequest) return catalogRequest;
@@ -289,10 +315,8 @@
 										: $i18n.t('Thinking level not recorded')}
 								</p>{/if}
 							<div
-								class="prose prose-sm max-w-none break-words dark:prose-invert {row.event.label
-									.length <= 180 || state.expanded.includes(row.key)
-									? ''
-									: 'line-clamp-3'}"
+								class="prose prose-sm max-w-none break-words dark:prose-invert"
+								use:preview={row.event.label.length <= 180 || state.expanded.includes(row.key)}
 							>
 								{@html html(row.event.label)}
 							</div>
@@ -306,10 +330,10 @@
 								{#if row.event.label.length > 180}<button
 										type="button"
 										class="text-gray-500 underline"
+										aria-expanded={state.expanded.includes(row.key)}
 										on:click={() => toggle(row.key)}
-										>{$i18n.t(
-											state.expanded.includes(row.key) ? 'Collapse' : 'Expand full text'
-										)}</button
+										>{$i18n.t(state.expanded.includes(row.key) ? 'Collapse' : 'Expand full text')}
+										<DisclosureChevron open={state.expanded.includes(row.key)} /></button
 									>{/if}
 							</div>
 						{:else if row.snapshot}

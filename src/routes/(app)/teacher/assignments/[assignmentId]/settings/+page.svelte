@@ -24,6 +24,7 @@
 	import AssignmentAiSummary from '$lib/components/education/AssignmentAiSummary.svelte';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import AssignmentForm from '$lib/components/education/AssignmentForm.svelte';
+	import AssignmentChangeReason from '$lib/components/education/AssignmentChangeReason.svelte';
 	import TeachingPreparationPanel from '$lib/components/education/TeachingPreparationPanel.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import Modal from '$lib/components/common/Modal.svelte';
@@ -46,6 +47,7 @@
 	const assignmentId = $page.params.assignmentId;
 
 	let allowedTaskModes: import('$lib/apis/education').TaskMode[] = [];
+	let photoTranscriptionModel: import('$lib/apis/education').ImageParsingModelView | null = null;
 	let imageParsingModel: import('$lib/apis/education').ImageParsingModelView | null = null;
 	let teachingConfigs: Partial<
 		Record<import('$lib/apis/education').TaskMode, import('$lib/apis/education').TeachingConfig>
@@ -73,7 +75,7 @@
 				assignmentId,
 				!item.assignment.hidden
 			);
-			item = { ...item, assignment: { ...item.assignment, hidden: assignment.hidden } };
+			item = { ...item, assignment };
 			toast.success(
 				t(assignment.hidden ? 'Assignment hidden.' : 'Assignment visible to students.')
 			);
@@ -83,6 +85,7 @@
 			changingVisibility = false;
 		}
 	};
+	let saveError = '';
 	let showDeleteConfirm = false;
 	let thinkingPolicy: { control: ThinkingControl; default: ThinkingSetting } | null = null;
 	// 保存后让 AI 设置卡重新读取生效值。
@@ -101,6 +104,7 @@
 			scoreMax: String(assignment.score_max),
 			coachingStyle: assignment.coaching_style,
 			taskMode: assignment.task_mode,
+			photoTranscriptionEnabled: assignment.photo_transcription_enabled,
 			imageReadingEnabled: assignment.image_reading_enabled,
 			challengeEnabled: assignment.challenge_enabled ?? false,
 			challengeRounds: assignment.challenge_rounds ?? 3,
@@ -132,6 +136,7 @@
 		);
 		allowedTaskModes = assignmentDefaults.allowed_task_modes;
 		teachingConfigs = assignmentDefaults.teaching_configs;
+		photoTranscriptionModel = assignmentDefaults.photo_transcription_model;
 		imageParsingModel = assignmentDefaults.image_parsing_model;
 		thinkingPolicy = assignmentDefaults.thinking;
 		classrooms = teacherClassrooms;
@@ -158,7 +163,7 @@
 		pendingPayload = {
 			...payload,
 			expected_config_revision: item.assignment.config_revision,
-			change_summary: changeSummary,
+			change_summary: '',
 			adopt_latest_teaching_config: adoptLatest,
 			classroom_id: classroomId
 		};
@@ -172,7 +177,8 @@
 			reflection_questions: 'Reflection Before Submitting',
 			task_mode: 'Assignment type',
 			coaching_style: 'AI Coaching Style',
-			image_reading_enabled: 'AI image reading for this assignment',
+			photo_transcription_enabled: '照片转正文',
+			image_reading_enabled: 'AI 读取参考图片',
 			challenge_enabled: 'AI Reader Check Before Submitting',
 			challenge_rounds: 'Rounds',
 			challenge_focus_keys: 'Rubric',
@@ -212,33 +218,48 @@
 			.filter(
 				(key) =>
 					key in pendingPayload &&
-					JSON.stringify(pendingPayload[key]) !== JSON.stringify(item.assignment[key])
+					JSON.stringify(pendingPayload[key] ?? '') !== JSON.stringify(item.assignment[key] ?? '')
 			)
 			.map((key) => ({
 				label: t(labels[key]),
 				before: describe(key, item.assignment[key]),
 				after: describe(key, pendingPayload[key])
 			}));
-		if (adoptLatest)
+		if (
+			adoptLatest &&
+			item.assignment.teaching_config.version !== teachingConfigs[draft.taskMode]?.version
+		)
 			changePreview.push({
 				label: t('AI 辅导说明'),
 				before: `v${item.assignment.teaching_config.version}`,
 				after: `v${teachingConfigs[draft.taskMode]?.version}`
 			});
+		if (!changePreview.length) {
+			toast.info(t('没有需要保存的修改。'));
+			return;
+		}
+		saveError = '';
 		showSaveConfirm = true;
 	};
 
 	const confirmSave = async () => {
-		if (!pendingPayload) return;
+		if (!pendingPayload || saving || !changeSummary.trim()) return;
 		saving = true;
+		saveError = '';
 		try {
-			await updateAssignment(localStorage.token, assignmentId, pendingPayload);
+			await updateAssignment(localStorage.token, assignmentId, {
+				...pendingPayload,
+				change_summary: changeSummary.trim()
+			});
 			showSaveConfirm = false;
+			changeSummary = '';
+			adoptLatest = false;
 			await loadData();
 			aiSummaryVersion += 1;
 			toast.success(t('Assignment updated.'));
 		} catch (error) {
-			toast.error(resolveErrorMessage(error, t));
+			saveError = resolveErrorMessage(error, t);
+			toast.error(saveError);
 		} finally {
 			saving = false;
 		}
@@ -281,18 +302,21 @@
 					<AssignmentAiSummary {assignmentId} />
 				{/key}{/if}
 			<div class="mb-4 grid gap-2 text-sm">
-				<label
-					>{$i18n.t('变更说明（学生已开始后修改要求时必填）')}<textarea
-						class="mt-1 w-full rounded-xl dark:bg-gray-800"
-						bind:value={changeSummary}
-					></textarea></label
-				>
+				<p class="rounded-xl bg-sky-50 p-3 text-sky-800 dark:bg-sky-950/40 dark:text-sky-200">
+					{$i18n.t('修改作业设置需填写修改说明；隐藏和恢复显示除外。')}
+				</p>
+				{#if item.assignment.change_summary}
+					<p class="text-gray-500 whitespace-pre-wrap break-words">
+						{$i18n.t('最近修改说明')}：{item.assignment.change_summary}
+					</p>
+				{/if}
 				{#if !item.task_mode_locked && draft.taskMode !== 'revise_argument'}<label
 						><input type="checkbox" bind:checked={adoptLatest} />
 						{$i18n.t('采用该类型最新教学配置')}</label
 					>{/if}
 			</div>
 			<AssignmentForm
+				{photoTranscriptionModel}
 				{imageParsingModel}
 				{allowedTaskModes}
 				{teachingConfigs}
@@ -360,47 +384,55 @@
 		{/if}
 	</div>
 
-	<Modal size="lg" bind:show={showSaveConfirm}>
-		<div class="max-h-[85vh] overflow-y-auto p-6">
-			<h2 class="font-semibold">{$i18n.t('请核对本次修改')}</h2>
-			<p class="my-2 text-sm">
-				{$i18n.t('已开始但尚未提交')}：{item?.writing_count ?? 0}；{$i18n.t(
-					'已提交'
-				)}：{item?.submission_count ?? 0}
-			</p>
-			<p class="mb-3 text-xs text-gray-500">
-				{$i18n.t('新要求作用于之后的辅导与提交，历史记录保留原内容。')}
-			</p>
-			{#if pendingPayload?.due_at && pendingPayload.due_at < Date.now() / 1000}<p
-					class="mb-3 text-sm text-amber-700"
-				>
-					{$i18n.t('新的截止时间将立即停止尚未获得延期的学生写作。')}
-				</p>{/if}
-			{#each changePreview as change}
-				<section class="mb-4 rounded-xl border p-3 dark:border-gray-700">
-					<h3 class="mb-2 text-sm font-medium">{change.label}</h3>
-					<div class="grid gap-3 text-sm sm:grid-cols-2">
-						<div>
-							<div class="text-xs text-gray-500">{$i18n.t('修改前')}</div>
-							<p class="whitespace-pre-wrap break-words">{change.before}</p>
-						</div>
-						<div>
-							<div class="text-xs text-gray-500">{$i18n.t('修改后')}</div>
-							<p class="whitespace-pre-wrap break-words">{change.after}</p>
-						</div>
+	<Modal size="lg" bind:show={showSaveConfirm} title={$i18n.t('请核对本次修改')} busy={saving}>
+		<p class="my-2 text-sm">
+			{$i18n.t('已开始但尚未提交')}：{item?.writing_count ?? 0}；{$i18n.t(
+				'已提交'
+			)}：{item?.submission_count ?? 0}
+		</p>
+		<p class="mb-3 text-xs text-gray-500">
+			{$i18n.t('新要求作用于之后的辅导与提交，历史记录保留原内容。')}
+		</p>
+		{#if pendingPayload?.due_at && pendingPayload.due_at < Date.now() / 1000}<p
+				class="mb-3 text-sm text-amber-700"
+			>
+				{$i18n.t('新的截止时间将立即停止尚未获得延期的学生写作。')}
+			</p>{/if}
+		{#each changePreview as change}
+			<section class="mb-4 rounded-xl border p-3 dark:border-gray-700">
+				<h3 class="mb-2 text-sm font-medium">{change.label}</h3>
+				<div class="grid gap-3 text-sm sm:grid-cols-2">
+					<div>
+						<div class="text-xs text-gray-500">{$i18n.t('修改前')}</div>
+						<p class="whitespace-pre-wrap break-words">{change.before}</p>
 					</div>
-				</section>
-			{/each}
-			<div class="flex justify-end gap-2">
-				<EduButton on:click={() => (showSaveConfirm = false)}>{$i18n.t('Cancel')}</EduButton
-				><EduButton variant="primary" disabled={saving} on:click={confirmSave}
-					>{$i18n.t('确认保存')}</EduButton
-				>
-			</div>
-		</div>
+					<div>
+						<div class="text-xs text-gray-500">{$i18n.t('修改后')}</div>
+						<p class="whitespace-pre-wrap break-words">{change.after}</p>
+					</div>
+				</div>
+			</section>
+		{/each}
+		<AssignmentChangeReason
+			id="assignment-change-reason"
+			bind:value={changeSummary}
+			disabled={saving}
+		/>
+		{#if saveError}<p role="alert" class="mt-3 text-sm text-red-600">{saveError}</p>{/if}
+		<svelte:fragment slot="footer">
+			<EduButton disabled={saving} on:click={() => (showSaveConfirm = false)}
+				>{$i18n.t('Cancel')}</EduButton
+			><EduButton
+				variant="primary"
+				disabled={saving || !changeSummary.trim()}
+				on:click={confirmSave}>{$i18n.t('确认保存')}</EduButton
+			>
+		</svelte:fragment>
 	</Modal>
 
 	<ConfirmDialog
+		confirmLabel={$i18n.t('Delete')}
+		variant="danger"
 		bind:show={showDeleteConfirm}
 		title={$i18n.t('Delete Assignment')}
 		message={$i18n.t(

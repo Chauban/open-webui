@@ -29,10 +29,23 @@ from open_webui.utils.thinking import THINKING_LEVEL_PARAM, ThinkingSupport
 log = logging.getLogger(__name__)
 
 StepKey = Literal[
-    'coaching_chat', 'first_read', 'revision_review', 'whole_review', 'reader_check', 'image_parsing', 'class_insight'
+    'coaching_chat',
+    'first_read',
+    'revision_review',
+    'whole_review',
+    'reader_check',
+    'photo_transcription',
+    'image_parsing',
+    'class_insight',
 ]
 PlatformStepKey = Literal[
-    'first_read', 'revision_review', 'whole_review', 'reader_check', 'image_parsing', 'class_insight'
+    'first_read',
+    'revision_review',
+    'whole_review',
+    'reader_check',
+    'photo_transcription',
+    'image_parsing',
+    'class_insight',
 ]
 # 管理员没给这一步指定模型时用谁的：学生在写作区选的 / 教师触发时选的 / 没有可回落的（必须指定）。
 ModelSource = Literal["student_chat_model", "teacher_chat_model", "admin_model"]
@@ -60,7 +73,8 @@ AI_STEPS: tuple[AiStep, ...] = (
     ),
     AiStep(key='whole_review', model_source='student_chat_model', model_configurable=True, teacher_controllable=False),
     AiStep(key='reader_check', model_source='student_chat_model', model_configurable=True, teacher_controllable=False),
-    # 图片识别没有可回落的模型：没指定就不提供图片导入。
+    # 两类图片识读没有可回落的模型：没指定就关闭对应识读，原图仍可上传。
+    AiStep(key='photo_transcription', model_source='admin_model', model_configurable=True, teacher_controllable=False),
     AiStep(key='image_parsing', model_source='admin_model', model_configurable=True, teacher_controllable=False),
     AiStep(key='class_insight', model_source='teacher_chat_model', model_configurable=True, teacher_controllable=False),
 )
@@ -125,7 +139,7 @@ class CoachingChatPolicy(BaseModel):
 class PlatformStepPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    # 空：按登记的 model_source 用学生 / 教师选的模型；图片识别为空即不提供图片导入。
+    # 空：按登记的 model_source 用学生 / 教师选的模型；两类图片识读为空即关闭对应调用。
     model: Optional[str] = Field(default=None, min_length=1, max_length=256)
     thinking: ThinkingSetting
 
@@ -138,6 +152,7 @@ class EducationAiStepPolicy(BaseModel):
     whole_review: PlatformStepPolicy
     first_read: PlatformStepPolicy
     reader_check: PlatformStepPolicy
+    photo_transcription: PlatformStepPolicy
     image_parsing: PlatformStepPolicy
     class_insight: PlatformStepPolicy
 
@@ -170,9 +185,14 @@ class ImageParsingModelView(BaseModel):
     available: bool
 
 
-async def describe_image_parsing_model(request, user, policy: EducationAiStepPolicy) -> ImageParsingModelView | None:
+async def describe_image_parsing_model(
+    request,
+    user,
+    policy: EducationAiStepPolicy,
+    step: Literal['image_parsing', 'photo_transcription'] = 'image_parsing',
+) -> ImageParsingModelView | None:
     """Read-only platform selection; never substitutes the assignment's coaching model."""
-    model_id = policy.image_parsing.model
+    model_id = getattr(policy, step).model
     if not model_id:
         return None
     model = (await available_models(request, user)).get(model_id)
@@ -220,12 +240,12 @@ async def call_step_model(
 
     policy = policy or await get_ai_step_policy()
     payload = {
-        "model": model.model_id,
-        "messages": messages,
-        "stream": False,
+        'model': model.model_id,
+        'messages': messages,
+        'stream': False,
         **thinking_params(getattr(policy, step).thinking),
         # 服务商一时出错时由 OpenAI 兼容路由自动重发;图片识别逐页自己重发(draft_import),这里不叠加。
-        "metadata": {RETRY_TRANSIENT_FLAG: step != "image_parsing"},
+        'metadata': {RETRY_TRANSIENT_FLAG: step not in ('image_parsing', 'photo_transcription')},
     }
     return await generate_chat_completion(
         request, form_data=payload, user=user, bypass_filter=model.fixed,
@@ -264,7 +284,7 @@ def ensure_step_models_valid(
         if model is None:
             raise StepModelNotAllowed(f"Model {model_id} is not available")
         capabilities = ((model.get("info") or {}).get("meta") or {}).get("capabilities") or {}
-        if step.key == "image_parsing" and capabilities.get("vision") is False:
+        if step.key in ('image_parsing', 'photo_transcription') and capabilities.get('vision') is False:
             raise StepModelNotAllowed(f"Model {model_id} cannot read images")
 
 

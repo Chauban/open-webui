@@ -50,6 +50,7 @@ describe('revision submission configuration', () => {
 		'sends no rubric or reader check for total-only %s',
 		(taskMode) => {
 			const draft: AssignmentDraft = {
+				photoTranscriptionEnabled: false,
 				imageReadingEnabled: false,
 				title: 'Argument',
 				description: '',

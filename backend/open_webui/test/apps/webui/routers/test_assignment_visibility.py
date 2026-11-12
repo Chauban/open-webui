@@ -36,6 +36,7 @@ def test_hide_and_restore_submitted_assignment(education_client):
     assert hidden.status_code == 200, hidden.text
     assert hidden.json()['hidden'] is True
     assert hidden.json()['config_revision'] == assignment['config_revision']
+    assert hidden.json()['change_summary'] == assignment['change_summary']
     listed = client.get('/api/v1/teacher/assignments').json()
     assert next(item for item in listed if item['assignment']['id'] == assignment_id)['assignment']['hidden']
     assert client.get(f'/api/v1/teacher/assignments/{assignment_id}').status_code == 200

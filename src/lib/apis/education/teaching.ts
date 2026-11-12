@@ -93,6 +93,7 @@ export async function trialAction(
 
 export function preparationAssignment(draft: AssignmentDraft, classrooms: string[]) {
 	return {
+		photo_transcription_enabled: draft.photoTranscriptionEnabled,
 		image_reading_enabled: draft.imageReadingEnabled,
 		title: draft.title,
 		description: draft.description,
@@ -124,6 +125,7 @@ export function assignmentFromPreparation(
 	a: Preparation['payload']['assignment']
 ): AssignmentDraft {
 	return {
+		photoTranscriptionEnabled: a.photo_transcription_enabled,
 		imageReadingEnabled: a.image_reading_enabled,
 		title: a.title,
 		description: a.description ?? '',

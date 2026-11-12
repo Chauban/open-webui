@@ -4,7 +4,7 @@ export type MaterialBlock = {
 	location: string;
 	text: string;
 	extracted_text: string;
-	status: 'read' | 'unreadable' | 'corrected' | 'disabled';
+	status: 'read' | 'unread' | 'unreadable' | 'corrected' | 'disabled';
 	detail: string;
 	image: boolean;
 };

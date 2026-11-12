@@ -105,10 +105,10 @@ def storage(monkeypatch, tmp_path):
 def vision(monkeypatch):
     calls = []
 
-    async def resolve(*args):
+    async def resolve(*args, **kwargs):
         return StepModel(model_id='evidence-vision', fixed=True)
 
-    async def generate(request, user, model, messages):
+    async def generate(request, user, model, messages, **kwargs):
         calls.append(messages)
         return '截图出处：《史料集》卷三，第42页。图示：横轴为年份，纵轴为数量。'
 
@@ -125,6 +125,30 @@ def imported_document(result, corrections=None):
         if node['type'] == 'writingImage' and node['attrs']['blockId'] in (corrections or {}):
             node['attrs'].update(transcription=corrections[node['attrs']['blockId']], transcriptionEdited=True)
     return document
+
+
+def read_imported_reference(client, sid, imported):
+    """Exercise the explicit per-image read action and bind its new immutable resource."""
+    result = copy.deepcopy(imported)
+    for image in [b for b in result['material']['blocks'] if b['image']]:
+        old_id = result['material']['id']
+        response = client.post(
+            f'/api/v1/writing-sessions/{sid}/materials/{old_id}/read', params={'block_id': image['id']}
+        )
+        assert response.status_code == 200, response.text
+        read = response.json()
+        result['material']['id'] = read['material_id']
+        recognized = {b['id']: b for b in read['blocks']}
+        result['material']['blocks'] = [recognized.get(b['id'], b) for b in result['material']['blocks']]
+        for node in walk_document(result['content_json']):
+            if node['type'].startswith('writing'):
+                node['attrs']['materialId'] = read['material_id']
+                if node['type'] == 'writingImage' and node['attrs']['blockId'] in recognized:
+                    block = recognized[node['attrs']['blockId']]
+                    node['attrs'].update(
+                        transcription=block['text'], readStatus=block['status'], readDetail=block['detail']
+                    )
+    return result
 
 
 def test_word_preserves_notes_textboxes_and_embedded_images():
@@ -177,6 +201,8 @@ def test_materials_reach_first_read_review_chat_and_frozen_submission(
     response = client.post(f'/api/v1/writing-sessions/{sid}/import/document', files={'file': (f'draft.{format}', data)})
     assert response.status_code == 200, response.text
     imported = response.json()
+    assert vision == []
+    imported = read_imported_reference(client, sid, imported)
     material = imported['material']
     image_block = next(block for block in material['blocks'] if block['image'])
     assert image_block['status'] == 'read'
@@ -262,12 +288,13 @@ def test_missing_vision_is_visible_and_does_not_block_submission(education_clien
         f'/api/v1/writing-sessions/{sid}/import/document', files={'file': ('mixed.pdf', pdf_document())}
     )
     assert response.status_code == 200, response.text
-    material = response.json()['material']
+    imported = read_imported_reference(client, sid, response.json())
+    material = imported['material']
     assert any(block['status'] == 'unreadable' for block in material['blocks'])
     assert (
         client.post(
             f'/api/v1/writing-sessions/{sid}/draft-baseline',
-            json={'content_json': imported_document(response.json()), 'materials': [{'id': material['id']}]},
+            json={'content_json': imported_document(imported), 'materials': [{'id': material['id']}]},
         ).status_code
         == 200
     )
@@ -303,7 +330,7 @@ def test_partial_image_failure_keeps_success_and_reports_missing(monkeypatch, vi
     parsed.add('image', '第二张来源', image=picture())
     count = 0
 
-    async def generate(*args):
+    async def generate(*args, **kwargs):
         nonlocal count
         count += 1
         if count == 1:
@@ -312,10 +339,11 @@ def test_partial_image_failure_keeps_success_and_reports_missing(monkeypatch, vi
 
     monkeypatch.setattr(draft_import, 'generate_transcription', generate)
     asyncio.run(materials.read_visuals(parsed, None, None, enabled=True))
-    assert parsed.blocks[0].status == 'unreadable'
-    assert parsed.blocks[0].detail
-    assert parsed.blocks[1].text == '第二张可读出处：第42页'
-    assert parsed.blocks[1].status == 'read'
+    failed = [b for b in parsed.blocks if b.status == 'unreadable']
+    succeeded = [b for b in parsed.blocks if b.status == 'read']
+    assert len(failed) == len(succeeded) == 1
+    assert failed[0].detail
+    assert succeeded[0].text == '第二张可读出处：第42页'
 
 
 def test_scanned_pdf_keeps_ocr_separate_until_explicit_insertion(education_client, storage, vision):
@@ -325,7 +353,7 @@ def test_scanned_pdf_keeps_ocr_separate_until_explicit_insertion(education_clien
         f'/api/v1/writing-sessions/{sid}/import/document', files={'file': ('scan.pdf', pdf_document(scan=True))}
     )
     assert result.status_code == 200, result.text
-    body = result.json()
+    body = read_imported_reference(client, sid, result.json())
     assert body['text'] == ''
     assert '第42页' in body['content_json']['content'][0]['attrs']['transcription']
     assert body['material']['blocks'][0]['image'] is True

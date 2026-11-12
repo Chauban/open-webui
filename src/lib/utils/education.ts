@@ -179,6 +179,9 @@ export const resolveErrorMessage = (error: unknown, t: Translate) => {
 	// FastAPI 请求体校验失败(422)给的是一组 {loc, msg, type}，对学生没有可读信息；
 	// 实际多半是页面停在部署前的旧版本，所以直接提示刷新。
 	if (Array.isArray(detail)) {
+		if (detail.some((issue) => Array.isArray(issue?.loc) && issue.loc.at(-1) === 'change_summary')) {
+			return t('请填写修改说明（1—1000 字）。');
+		}
 		console.error('Request validation failed', detail);
 		return t('The request could not be processed. Please refresh the page and try again.');
 	}

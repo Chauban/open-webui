@@ -444,6 +444,7 @@ def build_metric_projection(
     evidence: ProfileEvidenceSnapshotModel,
     review_event: Optional[SubmissionReviewEventModel],
     analysis: Optional[dict] = None,
+    previous_review_event: Optional[SubmissionReviewEventModel] = None,
 ) -> ProfileMetricProjectionPayload:
     facts = evidence.evidence_json
     versions = _evidence_versions(facts)
@@ -495,7 +496,7 @@ def build_metric_projection(
         review_event
         and review_event.score is not None
         and review_event.review_status != 'pending'
-        and (not facts.assignment.rubric_schema.criteria or review_event.rubric_scores is not None)
+        and (review_event.scoring_config.scoring_mode == 'total' or review_event.rubric_scores is not None)
     )
     scoring_status = (
         "complete"
@@ -534,8 +535,8 @@ def build_metric_projection(
         ),
         total_chars=len(facts.document.content_text),
         score=review_event.score if score_complete else None,
-        score_max=facts.assignment.score_max,
-        normalized_score=(round(review_event.score / facts.assignment.score_max * 100, 2) if score_complete else None),
+        score_max=review_event.scoring_config.score_max if review_event else facts.assignment.score_max,
+        normalized_score=(round(review_event.score / review_event.scoring_config.score_max * 100, 2) if score_complete else None),
         rubric=review_event.rubric_scores if score_complete else None,
         review_status=review_event.review_status if review_event else 'pending',
         inserted_chars=inserted_chars if version_complete else None,
@@ -615,7 +616,14 @@ def build_metric_projection(
             revision_ratio=int(round((1 - similarity) * 100)),
             score_delta=(
                 review_event.score - facts.previous_round.score
-                if score_complete and facts.previous_round.score is not None
+                if (
+                    score_complete
+                    and facts.previous_round.score is not None
+                    and previous_review_event is not None
+                    and previous_review_event.review_status != 'pending'
+                    and previous_review_event.score == facts.previous_round.score
+                    and previous_review_event.scoring_config == review_event.scoring_config
+                )
                 else None
             ),
             turnaround_seconds=(
@@ -642,12 +650,18 @@ def project_profile_evidence(
 ):
     ensure_current_profile_algorithm_release(db)
     analysis = analysis_payload or build_analysis_from_evidence(evidence)
-    payload = build_metric_projection(evidence, review_event, analysis)
+    previous_round = evidence.evidence_json.previous_round
+    previous_review_event = (
+        Education.get_latest_submission_review_event(previous_round.submission_id, db=db)
+        if previous_round is not None else None
+    )
+    payload = build_metric_projection(evidence, review_event, analysis, previous_review_event)
     review_revision = review_event.review_revision if review_event else 0
     input_hash = canonical_json_hash(
         {
             "evidence_hash": evidence.evidence_hash,
             "review": review_event.model_dump(mode="json") if review_event else None,
+            "previous_review": previous_review_event.model_dump(mode='json') if previous_review_event else None,
             "metric_version": PROFILE_METRIC_VERSION,
             "algorithm_checksum": profile_algorithm_code_checksum(),
         }

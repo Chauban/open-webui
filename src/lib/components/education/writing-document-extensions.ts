@@ -1,11 +1,13 @@
 import { Extension, Mark, Node, mergeAttributes } from '@tiptap/core';
-import { Fragment } from '@tiptap/pm/model';
+import { Fragment, Slice } from '@tiptap/pm/model';
+import { AllSelection, Plugin } from '@tiptap/pm/state';
 import {
 	extractImportImages,
 	getWritingMaterialAsset,
 	readWritingImage
 } from '$lib/apis/education';
 import { textDocument } from '$lib/utils/writing-document';
+import { writingAlignment } from '$lib/utils/writing-paste';
 
 type Options = {
 	t: (key: string) => string;
@@ -268,9 +270,12 @@ export function writingExtensions(options: Options) {
 					if (!file) return;
 					status.textContent = t('上传中…');
 					try {
-						const result = await extractImportImages(localStorage.token, options.sessionId(), [
-							file
-						]);
+						const result = await extractImportImages(
+							localStorage.token,
+							options.sessionId(),
+							[file],
+							'reference'
+						);
 						if (!disposed) {
 							setAttrs({ ...result.content_json.content![0].attrs, width: node.attrs.width });
 							status.textContent = '';
@@ -283,7 +288,7 @@ export function writingExtensions(options: Options) {
 				button('替换图片', () => replaceInput.click());
 				controls.append(replaceInput);
 				const recognize = button(
-					'识别图片文字',
+					'读取参考图片',
 					async () => {
 						const ref = `${node.attrs.materialId}/${node.attrs.blockId}`;
 						status.textContent = t('正在识别图片…');
@@ -302,7 +307,13 @@ export function writingExtensions(options: Options) {
 							readStatus: block.status,
 							readDetail: block.detail
 						});
-						status.textContent = block.text ? '' : t('未能读出图片文字，可重试或手动补充正文。');
+						status.textContent = block.text
+							? ''
+							: t(
+									block.status === 'read'
+										? '未发现可提取文字，原图已保留。'
+										: '未能读出图片文字，可重试或手动补充正文。'
+								);
 						details.open = true;
 					},
 					details
@@ -486,7 +497,7 @@ export function writingExtensions(options: Options) {
 				attributes: {
 					textAlign: {
 						default: null,
-						parseHTML: (element) => element.style.textAlign || null,
+						parseHTML: writingAlignment,
 						renderHTML: (attrs) =>
 							attrs.textAlign ? { style: `text-align:${attrs.textAlign}` } : {}
 					}
@@ -494,11 +505,32 @@ export function writingExtensions(options: Options) {
 			}
 		]
 	});
+	const clipboard = Extension.create({
+		name: 'writingClipboard',
+		addProseMirrorPlugins: () => [
+			new Plugin({
+				props: {
+					transformCopied: (slice, view) => {
+						if (!(view.state.selection instanceof AllSelection)) return slice;
+						// Ctrl+A includes the document's outer paragraph boundaries. Copy
+						// them as text-selection edges so pasting doesn't invent a new line.
+						// Inner paragraphs and non-paragraph blocks keep their structure.
+						return new Slice(
+							slice.content,
+							slice.content.firstChild?.type.name === 'paragraph' ? 1 : slice.openStart,
+							slice.content.lastChild?.type.name === 'paragraph' ? 1 : slice.openEnd
+						);
+					}
+				}
+			})
+		]
+	});
 	return [
 		image,
 		note,
 		placeholder,
 		alignment,
+		clipboard,
 		...(['superscript', 'subscript'] as const).map((name) =>
 			Mark.create({
 				name,

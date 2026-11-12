@@ -756,6 +756,12 @@ def education_client():
                                 event = Education.get_latest_submission_review_event(submission.id, db=db)
                                 body.setdefault('expected_final_version_id', submission.final_version_id)
                                 body.setdefault('expected_review_revision', event.review_revision if event else 0)
+                                from open_webui.services.education.scoring import assignment_scoring, review_scoring_assignment
+                                assignment = Education.get_assignment_by_id(submission.assignment_id, db=db)
+                                review = Education.get_submission_review_by_submission_id(submission.id, db=db)
+                                body.setdefault('expected_scoring_config', assignment_scoring(
+                                    review_scoring_assignment(assignment, review)
+                                ).model_dump())
                     kwargs['json'] = body
                 return super().request(method, url, **kwargs)
 
@@ -1130,7 +1136,7 @@ def test_student_resubmission_overwrites_previous_submission(education_client):
         assert stored_session.submitted_submission_id == first_submission_id
 
 
-def test_student_cannot_submit_after_assignment_due_time(education_client):
+def test_student_can_submit_late_and_timing_stays_frozen(education_client):
     client, teacher, _, student, _, _ = education_client
 
     UserContext.current_user = teacher
@@ -1177,8 +1183,21 @@ def test_student_cannot_submit_after_assignment_due_time(education_client):
             "reflection_answers": [],
         },
     )
-    assert submit_res.status_code == 400, submit_res.text
-    assert submit_res.json()["detail"] == "Assignment due time has passed"
+    assert submit_res.status_code == 200, submit_res.text
+    submission_id = submit_res.json()['submission_id']
+    timing = {'effective_due_at': 1, 'is_late': True}
+    home = client.get('/api/v1/me/writing/home').json()
+    assert home['assignment_items'][0]['submission_timing'] == timing
+    history = client.get(f"/api/v1/assignments/{assignment['id']}/me/submissions").json()
+    assert history['rounds'][0]['timing'] == timing
+
+    UserContext.current_user = teacher
+    changed = client.patch(f"/api/v1/assignments/{assignment['id']}", json={'due_at': 2100000000})
+    assert changed.status_code == 200, changed.text
+    detail = client.get(f'/api/v1/teacher/submissions/{submission_id}').json()
+    assert detail['timing'] == timing
+    queue = client.get('/api/v1/teacher/review').json()
+    assert queue['items'][0]['timing'] == timing
 
 
 def _open_past_due_assignment(client, teacher, students):
@@ -1233,7 +1252,7 @@ def _submit_assignment(client, assignment_id, html="<p>Essay body.</p>"):
     )
 
 
-def test_assignment_extension_reopens_submission_for_one_student(education_client):
+def test_assignment_extension_changes_late_status_for_one_student(education_client):
     client, teacher, _, student, outsider, _ = education_client
     assignment, _classroom = _open_past_due_assignment(
         client, teacher, [student, outsider]
@@ -1263,11 +1282,15 @@ def test_assignment_extension_reopens_submission_for_one_student(education_clien
     UserContext.current_user = student
     assert _submit_assignment(client, assignment["id"]).status_code == 200
 
-    # 延期只对被授予的学生生效,同班其他人仍然按原截止时间关闭。
+    # 延期学生按个人期限准时提交，其他学生仍可交但标为超时。
     UserContext.current_user = outsider
-    blocked_res = _submit_assignment(client, assignment["id"])
-    assert blocked_res.status_code == 400, blocked_res.text
-    assert blocked_res.json()["detail"] == "Assignment due time has passed"
+    late_res = _submit_assignment(client, assignment["id"])
+    assert late_res.status_code == 200, late_res.text
+    UserContext.current_user = teacher
+    queue = client.get('/api/v1/teacher/review').json()['items']
+    by_student = {item['submission']['student_id']: item['timing'] for item in queue}
+    assert by_student[student.id] == {'effective_due_at': extended_due_at, 'is_late': False}
+    assert by_student[outsider.id] == {'effective_due_at': 1, 'is_late': True}
 
     # 学生收到个人截止时间变更的通知。
     UserContext.current_user = student
@@ -1293,9 +1316,10 @@ def test_assignment_extension_revoke_restores_class_due_time(education_client):
     assert revoke_res.status_code == 200, revoke_res.text
 
     UserContext.current_user = student
-    blocked_res = _submit_assignment(client, assignment["id"])
-    assert blocked_res.status_code == 400, blocked_res.text
-    assert blocked_res.json()["detail"] == "Assignment due time has passed"
+    late_res = _submit_assignment(client, assignment["id"])
+    assert late_res.status_code == 200, late_res.text
+    history = client.get(f"/api/v1/assignments/{assignment['id']}/me/submissions").json()
+    assert history['rounds'][0]['timing'] == {'effective_due_at': 1, 'is_late': True}
 
     UserContext.current_user = teacher
     missing_res = client.delete(
@@ -2716,7 +2740,7 @@ def test_assignment_process_writes_enforce_readonly_state(education_client, endp
     history_url = f'/api/v1/assignments/{assignment["id"]}/me/submissions'
     history_before = client.get(history_url).json()
     response = client.post(f'/api/v1/writing-sessions/{session_id}/{endpoint}', json=payload)
-    expected = {'reviewed': 409, 'expired': 400}.get(state, 200)
+    expected = 409 if state == 'reviewed' else 200
     assert response.status_code == expected, response.text
     if expected != 200:
         after = client.get(workspace_url).json()
@@ -2789,13 +2813,13 @@ def test_teacher_personal_writing_autosave_stays_writable(education_client):
     assert saved['note']['data']['content']['md'] == 'Independent personal writing'
 
 
-def test_extension_reopens_process_writes_and_revoking_it_closes_them(education_client):
+def test_extension_and_revocation_keep_past_due_writing_open(education_client):
     client, teacher, _, student, _, _ = education_client
     assignment, _ = _open_past_due_assignment(client, teacher, [student])
     UserContext.current_user = student
     workspace = client.get(f'/api/v1/assignments/{assignment["id"]}/workspace').json()
     save_url = f'/api/v1/writing-sessions/{workspace["writing_session"]["id"]}/autosave'
-    assert client.post(save_url, json={'content_text': 'Too late'}).status_code == 400
+    assert client.post(save_url, json={'content_text': 'Late draft'}).status_code == 200
     UserContext.current_user = teacher
     extension_url = f'/api/v1/teacher/assignments/{assignment["id"]}/extensions/{student.id}'
     assert client.put(extension_url, json={'due_at': 2100000000}).status_code == 200
@@ -2804,7 +2828,7 @@ def test_extension_reopens_process_writes_and_revoking_it_closes_them(education_
     UserContext.current_user = teacher
     assert client.delete(extension_url).status_code == 200
     UserContext.current_user = student
-    assert client.post(save_url, json={'content_text': 'Closed again'}).status_code == 400
+    assert client.post(save_url, json={'content_text': 'Still editable'}).status_code == 200
 
 
 
@@ -2823,13 +2847,13 @@ def test_effective_due_uses_resubmit_due_after_return(education_client):
     client.patch(f"/api/v1/assignments/{assignment['id']}", json={"due_at": past_due})
 
     UserContext.current_user = student
-    blocked = client.post(
+    late = client.post(
         f'/api/v1/assignments/{assignment["id"]}/submit',
         json=_submit_body(
-            session_id, 'late resubmit should be blocked now', reflection_answers=[_reflection_answers()[1]]
+            session_id, 'late resubmit remains allowed', reflection_answers=[_reflection_answers()[1]]
         ),
     )
-    assert blocked.status_code == 400, blocked.text
+    assert late.status_code == 200, late.text
 
     UserContext.current_user = teacher
     future_due = int(time.time()) + 3600
@@ -2851,6 +2875,11 @@ def test_effective_due_uses_resubmit_due_after_return(education_client):
     )
     assert allowed.status_code == 200, allowed.text
     assert allowed.json()["submission_id"] != submission_id
+    rounds = client.get(f"/api/v1/assignments/{assignment['id']}/me/submissions").json()['rounds']
+    assert [item['timing'] for item in rounds] == [
+        {'effective_due_at': past_due, 'is_late': True},
+        {'effective_due_at': future_due, 'is_late': False},
+    ]
 
 
 def test_teacher_sees_rounds_and_diff(education_client):
@@ -5038,7 +5067,7 @@ def _fake_challenge_model(turn_text="你这一点说服不了我", closing=None,
         body = messages[1]["content"].split("【作者的文章】\n", 1)[1]
         return body.split("\n\n", 1)[0]
 
-    async def fake_generate(request, user, model, messages, step):
+    async def fake_generate(request, user, model, messages, step, **kwargs):
         calls.append({"model": model.model_id, "messages": messages})
         if '"stood"' in messages[0]["content"]:
             return json.dumps(
@@ -6835,7 +6864,7 @@ def _fake_diagnosis(payload):
     """替换模型调用:第一次通读只经过 challenge.generate_completion 这一个出口。"""
     calls = []
 
-    async def fake_generate(request, user, model, messages, step):
+    async def fake_generate(request, user, model, messages, step, **kwargs):
         calls.append({"model_id": model.model_id, "messages": messages})
         return json.dumps(payload, ensure_ascii=False)
 
@@ -7244,9 +7273,10 @@ def _set_image_model(model_id):
     asyncio.run(
         Config.upsert(
             {
-                "education.ai_steps": {
+                'education.ai_steps': {
                     **DEFAULT_EDUCATION_AI_STEPS,
-                    "image_parsing": {"model": model_id or None, "thinking": "off"},
+                    'photo_transcription': {'model': model_id or None, 'thinking': 'off'},
+                    'image_parsing': {'model': model_id or None, 'thinking': 'off'},
                 }
             }
         )
@@ -7258,7 +7288,7 @@ def _fake_transcription(by_channel=None, error=None):
     """替换模型调用:图片导入只经过 draft_import.generate_transcription 这一个出口。"""
     calls = []
 
-    async def fake_generate(request, user, model, messages):
+    async def fake_generate(request, user, model, messages, **kwargs):
         image_url = messages[-1]["content"][1]["image_url"]["url"]
         calls.append({"model_id": model.model_id, "messages": messages, "image_url": image_url})
         if error is not None:
@@ -7282,9 +7312,14 @@ def test_text_import_is_only_for_the_assignment_student_while_writable(education
         client, teacher, student
     )
     UserContext.current_user = teacher
-    enabled = client.patch(f'/api/v1/assignments/{assignment["id"]}', json={
-        'expected_config_revision': assignment['config_revision'], 'image_reading_enabled': True,
-    })
+    enabled = client.patch(
+        f'/api/v1/assignments/{assignment["id"]}',
+        json={
+            'expected_config_revision': assignment['config_revision'],
+            'image_reading_enabled': True,
+            'photo_transcription_enabled': True,
+        },
+    )
     assert enabled.status_code == 200, enabled.text
     doc_url = f"/api/v1/writing-sessions/{session_id}/import/document"
     image_url = f"/api/v1/writing-sessions/{session_id}/import/images"
@@ -7295,10 +7330,12 @@ def test_text_import_is_only_for_the_assignment_student_while_writable(education
     assert res.status_code == 200, res.text
     assert res.json()['text'] == "第一段。\n第二段。"
     with _fake_transcription({"r": "照片里的字。"}):
-        res = client.post(image_url, files=[("files", ("p.png", _png_bytes("red"), "image/png"))])
+        res = client.post(
+            image_url, data={'purpose': 'photo_to_text'}, files=[('files', ('p.png', _png_bytes('red'), 'image/png'))]
+        )
     assert res.status_code == 200, res.text
-    assert res.json()["text"] == ""
-    assert res.json()["content_json"]["content"][0]["attrs"]["transcription"] == "照片里的字。"
+    assert res.json()['text'] == '照片里的字。'
+    assert res.json()['content_json']['content'][0]['type'] == 'paragraph'
 
     # 别人都不行:任课老师、同学、管理员(图片导入要调模型,只算学生自己的)
     admin = teacher.model_copy(update={"id": "admin-1", "role": "admin"})
@@ -7306,7 +7343,9 @@ def test_text_import_is_only_for_the_assignment_student_while_writable(education
         UserContext.current_user = other
         res = client.post(doc_url, files={"file": ("草稿.txt", "x".encode())})
         assert res.status_code == 403, res.text
-        res = client.post(image_url, files=[("files", ("p.png", _png_bytes("red"), "image/png"))])
+        res = client.post(
+            image_url, data={'purpose': 'photo_to_text'}, files=[('files', ('p.png', _png_bytes('red'), 'image/png'))]
+        )
         assert res.status_code == 403, res.text
 
     # 教师个人写作区没有导入，学生个人写作已关闭
@@ -7321,7 +7360,7 @@ def test_text_import_is_only_for_the_assignment_student_while_writable(education
     assert res.status_code == 400, res.text
 
     UserContext.current_user = student
-    # 过了截止不能导入
+    # 过了截止仍可导入
     def set_due(due_at):
         with SessionLocal() as db:
             db.query(Assignment).filter(Assignment.id == assignment["id"]).update(
@@ -7331,8 +7370,7 @@ def test_text_import_is_only_for_the_assignment_student_while_writable(education
 
     set_due(int(time.time()) - 60)
     res = client.post(doc_url, files={"file": ("草稿.txt", "x".encode())})
-    assert res.status_code == 400, res.text
-    assert res.json()["detail"] == "Assignment due time has passed"
+    assert res.status_code == 200, res.text
     set_due(2000000000)
 
     # 批改后定稿,不能再导入
@@ -7356,7 +7394,9 @@ def test_text_import_is_only_for_the_assignment_student_while_writable(education
 def test_draft_image_import_needs_an_admin_chosen_vision_model(education_client):
     client, teacher, _, student, _, _ = education_client
     client.app.state.MODELS = _VISION_MODELS
-    _, session_id = _setup_revise_draft_assignment(client, teacher, student, image_reading_enabled=True)
+    _, session_id = _setup_revise_draft_assignment(
+        client, teacher, student, image_reading_enabled=True, photo_transcription_enabled=True
+    )
     url = f"/api/v1/writing-sessions/{session_id}/import/images"
     files = [("files", ("p.png", _png_bytes("red"), "image/png"))]
 
@@ -7367,9 +7407,9 @@ def test_draft_image_import_needs_an_admin_chosen_vision_model(education_client)
     ]:
         _set_image_model(model_id)
         with _fake_transcription({"r": "不该调到模型。"}) as calls:
-            res = client.post(url, files=files)
-        assert res.status_code == 200, res.text
-        assert res.json()["materials"][0]["blocks"][0]["detail"] == detail
+            res = client.post(url, data={'purpose': 'photo_to_text'}, files=files)
+        assert res.status_code == 400, res.text
+        assert res.json()['detail'] == detail
         assert calls == []
 
 
@@ -7379,34 +7419,36 @@ def test_draft_images_are_transcribed_in_page_order_without_freezing_baseline(
     client, teacher, _, student, _, SessionLocal = education_client
     _set_image_model("vision-model")
     client.app.state.MODELS = _VISION_MODELS
-    _, session_id = _setup_revise_draft_assignment(client, teacher, student, image_reading_enabled=True)
+    _, session_id = _setup_revise_draft_assignment(
+        client, teacher, student, image_reading_enabled=True, photo_transcription_enabled=True
+    )
     url = f"/api/v1/writing-sessions/{session_id}/import/images"
 
     pages = {
-        "r": "第一页第一段，\n\n　　第一页第二段。\n",
-        "b": "```text\n第二页接着写。\n```",
-        "w": "<<NO_TEXT>>",
+        'r': '第一页第一段，\n\n　　第一页第二段。\n',
+        'b': '```text\n第二页接着写。\n```',
+        'w': '透明页面的正文。',
     }
     with _fake_transcription(pages) as calls:
         res = client.post(
             url,
+            data={'purpose': 'photo_to_text'},
             files=[
-                ("files", ("1.png", _png_bytes("red"), "image/png")),
-                ("files", ("2.png", _png_bytes((0, 255, 0, 0), mode="RGBA"), "image/png")),
-                ("files", ("3.png", _png_bytes("blue"), "image/png")),
+                ('files', ('1.png', _png_bytes('red'), 'image/png')),
+                ('files', ('2.png', _png_bytes((0, 255, 0, 0), mode='RGBA'), 'image/png')),
+                ('files', ('3.png', _png_bytes('blue'), 'image/png')),
             ],
         )
     assert res.status_code == 200, res.text
-    # Original images stay in document order; OCR only appears in the corresponding image metadata.
-    assert res.json()['text'] == ''
-    assert [n['attrs']['transcription'] for n in res.json()['content_json']['content']] == [
-        '第一页第一段，\n第一页第二段。', '', '第二页接着写。']
+    # Recognized prose goes directly into the editable document; original photos are retained separately.
+    assert res.json()['text'] == '第一页第一段，\n第一页第二段。\n\n透明页面的正文。\n\n第二页接着写。'
+    assert all(n['type'] == 'paragraph' for n in res.json()['content_json']['content'])
     assert [m['filename'] for m in res.json()['materials']] == ['1.png', '2.png', '3.png']
     assert len(calls) == 3
     assert {call["model_id"] for call in calls} == {"vision-model"}
     assert all(call["image_url"].startswith("data:image/jpeg;base64,") for call in calls)
     assert calls[0]["messages"][0]["role"] == "system"
-    assert "不改写、不纠错" in calls[0]["messages"][0]["content"]
+    assert '只转录，不改写' in calls[0]['messages'][0]['content']
     # 透明底铺白:全透明的那张转出来是白的,不是黑的
     assert sorted(_dominant_channel(call["image_url"]) for call in calls) == ["b", "r", "w"]
 
@@ -7418,7 +7460,9 @@ def test_draft_images_are_transcribed_in_page_order_without_freezing_baseline(
         json={"text": _DRAFT_TEXT},
     )
     with _fake_transcription(pages):
-        res = client.post(url, files=[("files", ("1.png", _png_bytes("red"), "image/png"))])
+        res = client.post(
+            url, data={'purpose': 'photo_to_text'}, files=[('files', ('1.png', _png_bytes('red'), 'image/png'))]
+        )
     assert res.status_code == 200, res.text
 
 
@@ -7426,7 +7470,9 @@ def test_draft_image_import_validates_files_and_model_failures(education_client)
     client, teacher, _, student, _, _ = education_client
     _set_image_model("vision-model")
     client.app.state.MODELS = _VISION_MODELS
-    _, session_id = _setup_revise_draft_assignment(client, teacher, student, image_reading_enabled=True)
+    _, session_id = _setup_revise_draft_assignment(
+        client, teacher, student, image_reading_enabled=True, photo_transcription_enabled=True
+    )
     url = f"/api/v1/writing-sessions/{session_id}/import/images"
     gif = io.BytesIO()
     from PIL import Image
@@ -7446,21 +7492,21 @@ def test_draft_image_import_validates_files_and_model_failures(education_client)
         ([("files", ("x.png", b"not an image", "image/png"))], "Could not read this image"),
     ]:
         with _fake_transcription({"r": "不该调到模型。"}) as calls:
-            res = client.post(url, files=files)
+            res = client.post(url, data={'purpose': 'photo_to_text'}, files=files)
         assert res.status_code == 400, res.text
         assert res.json()["detail"] == detail
         assert calls == []
 
     files = [("files", ("1.png", _png_bytes("red"), "image/png"))]
     with _fake_transcription({"r": "<<NO_TEXT>>"}):
-        res = client.post(url, files=files)
-    assert res.status_code == 200, res.text
-    assert res.json()["materials"][0]["blocks"][0]["detail"] == "No text found in these images"
+        res = client.post(url, data={'purpose': 'photo_to_text'}, files=files)
+    assert res.status_code == 400, res.text
+    assert res.json()['detail'] == 'No text found in these images'
 
     with _fake_transcription(error=RuntimeError("upstream timeout")):
-        res = client.post(url, files=files)
-    assert res.status_code == 200, res.text
-    assert res.json()["materials"][0]["blocks"][0]["detail"] == "Could not read the images. Please try again."
+        res = client.post(url, data={'purpose': 'photo_to_text'}, files=files)
+    assert res.status_code == 400, res.text
+    assert res.json()['detail'] == 'Could not read the images. Please try again.'
 
 
 def test_prepare_draft_image_uprights_and_shrinks_photos():
@@ -7563,14 +7609,17 @@ def test_admin_picks_step_models_in_education_settings(education_client):
 
     # 图片识别的模型要能看图;选的模型都必须存在
     assert save(image_parsing={"model": "text-only", "thinking": "off"}).status_code == 400
+    assert save(photo_transcription={'model': 'text-only', 'thinking': 'off'}).status_code == 400
     assert save(reader_check={"model": "no-such-model", "thinking": "low"}).status_code == 400
     res = save(
-        image_parsing={"model": "vision-model", "thinking": "off"},
-        reader_check={"model": "reader-model", "thinking": "low"},
+        photo_transcription={'model': 'vision-model', 'thinking': 'low'},
+        image_parsing={'model': None, 'thinking': 'off'},
+        reader_check={'model': 'reader-model', 'thinking': 'low'},
     )
     assert res.status_code == 200, res.text
     stored = asyncio.run(Config.get("education.ai_steps"))
-    assert stored["image_parsing"]["model"] == "vision-model"
+    assert stored['image_parsing']['model'] is None
+    assert stored['photo_transcription'] == {'model': 'vision-model', 'thinking': 'low'}
     assert stored["reader_check"] == {"model": "reader-model", "thinking": "low"}
     views = {view["key"]: view for view in res.json()["EDUCATION_AI_STEP_VIEWS"]}
     assert (views["reader_check"]["model_name"], views["reader_check"]["model_available"]) == ("Reader", True)
@@ -7617,7 +7666,7 @@ def test_draft_images_are_transcribed_concurrently_with_a_small_limit():
     in_flight = 0
     peak = 0
 
-    async def fake_generate(request, user, model, messages):
+    async def fake_generate(request, user, model, messages, **kwargs):
         nonlocal in_flight, peak
         page = messages[-1]["content"][1]["image_url"]["url"]
         in_flight += 1
@@ -7662,7 +7711,7 @@ def _fake_chat_completion(handler):
 
     async def fake(request, user, step, model, messages):
         # 识图模型是管理员指定的,跳过学生的模型访问控制
-        assert step == "image_parsing" and model.fixed
+        assert step in ('image_parsing', 'photo_transcription') and model.fixed
         page = messages[-1]["content"][1]["image_url"]["url"]
         calls.append(page)
         return await handler(page, calls.count(page))
@@ -7753,18 +7802,21 @@ def test_image_import_reports_busy_after_retries(education_client):
     client, teacher, _, student, _, _ = education_client
     _set_image_model("vision-model")
     client.app.state.MODELS = _VISION_MODELS
-    _, session_id = _setup_revise_draft_assignment(client, teacher, student, image_reading_enabled=True)
+    _, session_id = _setup_revise_draft_assignment(
+        client, teacher, student, image_reading_enabled=True, photo_transcription_enabled=True
+    )
 
     async def handler(page, attempt):
         return JSONResponse(status_code=529, content={"error": {"type": "overloaded_error"}})
 
     with _fake_chat_completion(handler) as calls:
         res = client.post(
-            f"/api/v1/writing-sessions/{session_id}/import/images",
-            files=[("files", ("1.png", _png_bytes("red"), "image/png"))],
+            f'/api/v1/writing-sessions/{session_id}/import/images',
+            data={'purpose': 'photo_to_text'},
+            files=[('files', ('1.png', _png_bytes('red'), 'image/png'))],
         )
-    assert res.status_code == 200, res.text
-    assert res.json()["materials"][0]["blocks"][0]["detail"] == "The image model is busy right now. Wait a minute, then import again."
+    assert res.status_code == 400, res.text
+    assert res.json()['detail'] == 'The image model is busy right now. Wait a minute, then import again.'
     assert len(calls) == 4
 
 

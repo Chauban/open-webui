@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { readable } from 'svelte/store';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import Page from './+page.svelte';
@@ -277,7 +277,11 @@ test('saving after editing retains the tested trial and adopts only after explic
 	await fireEvent.click(screen.getByRole('button', { name: '保存方案' }));
 	await screen.findByLabelText('方案名称');
 	expect(screen.getByText('当前修改尚未测试，保存的是这次反馈实际使用的配置。')).toBeTruthy();
-	await fireEvent.click(screen.getByRole('button', { name: '保存' }));
+	await fireEvent.click(
+		within(screen.getByRole('dialog', { name: '保存方案' })).getByRole('button', {
+			name: '保存方案'
+		})
+	);
 	await screen.findByText('方案已保存，可在下方「已保存方案」中使用。');
 	const request = api.mock.calls.find(
 		([path, method]) => path === '/teacher/saved-teaching-plans' && method === 'POST'
@@ -297,10 +301,12 @@ test('saving after editing retains the tested trial and adopts only after explic
 });
 
 test('prompt comparison saves two independent prompts with one model and shared settings', async () => {
-	const confirmation = vi.spyOn(window, 'confirm').mockReturnValue(true);
 	render(Page, { context });
 	await screen.findByLabelText('比较方式');
 	await fireEvent.change(screen.getByLabelText('比较方式'), { target: { value: 'prompts' } });
+	await fireEvent.click(
+		within(screen.getByRole('dialog')).getByRole('button', { name: '确认切换' })
+	);
 	await fireEvent.input(screen.getByLabelText('辅导提示词 B'), {
 		target: { value: 'ask before advising' }
 	});
@@ -321,7 +327,6 @@ test('prompt comparison saves two independent prompts with one model and shared 
 		'model_default',
 		'model_default'
 	]);
-	confirmation.mockRestore();
 });
 
 test('same-model results have distinct labels for folding and sending', async () => {
@@ -366,5 +371,4 @@ test('canceling a comparison mode switch keeps the selector and edited prompt', 
 	expect((screen.getByLabelText('比较方式') as HTMLSelectElement).value).toBe('models');
 	expect((screen.getByLabelText('辅导提示词') as HTMLTextAreaElement).value).toBe('keep my edits');
 	expect(screen.queryByLabelText('辅导提示词 B')).toBeNull();
-	confirmation.mockRestore();
 });

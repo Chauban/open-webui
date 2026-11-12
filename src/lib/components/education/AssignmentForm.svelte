@@ -1,4 +1,6 @@
 <script lang="ts">
+	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
+	let confirmation: ConfirmDialog;
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 	import { getContext } from 'svelte';
@@ -34,12 +36,15 @@
 	import { THINKING_SETTING_TEXT } from '$lib/utils/ai-steps';
 	import ReflectionQuestionsEditor from './ReflectionQuestionsEditor.svelte';
 	import { EDU_FIELD_CLASS, eduSegmentClass } from './styles';
+	import DisclosureChevron from '$lib/components/common/DisclosureChevron.svelte';
+	import { disclosure } from '$lib/utils/disclosure';
 
 	// 新建作业与作业设置共用。此前是一张九段平铺的长表单,满分和评分维度隔着好几块;
-	// 现在分四组,满分与维度放一起(二者要加总一致),辅导/试读和反思题这两组
-	// 大多沿用上次的配置,默认折叠成一行摘要。
+	// 现在分四组,满分与维度放一起(二者要加总一致),辅导与反思默认展开。
 
 	export let draft: AssignmentDraft;
+	export let photoTranscriptionModel: import('$lib/apis/education').ImageParsingModelView | null =
+		null;
 	export let imageParsingModel: import('$lib/apis/education').ImageParsingModelView | null = null;
 	export let allowedTaskModes: TaskMode[] = [];
 	export let teachingConfigs: Partial<Record<TaskMode, TeachingConfig>> = {};
@@ -53,12 +58,11 @@
 	export let multiClassroom = false;
 	export let selectedClassroomIds: Set<string> = new Set();
 	export let classroomId = '';
-	/** 已有提交后,班级、满分与评分维度锁定(后端同样拒绝)。 */
+	/** 已有提交后班级锁定；评分设置仍可编辑。 */
 	export let hasSubmissions = false;
 	export let reflectionQuestionSets: ReflectionQuestionSet[] = [];
 	export let reflectionNotice = '';
 	export let currentAssignmentId = '';
-	export let expandAll = false;
 	/** 有学生交了初稿或已有提交后,作业形式锁定(后端同样拒绝)。 */
 	export let taskModeLocked = false;
 	/** 只有新建作业传:管理员按作业形式设的默认评分维度。作业设置页不传,改形式不碰已有维度。 */
@@ -98,7 +102,7 @@
 	// 左侧对话本身就是按维度诊断与追问,提交前再质疑一次是重复。
 	const TASK_MODES = TASK_TYPES;
 
-	let aiOpen = expandAll;
+	let aiOpen = true;
 	// 反思题折起来只剩一行摘要,老师以为题没了;它是提交那一刻学生要答的,默认展开。
 	let reflectionOpen = true;
 
@@ -106,7 +110,8 @@
 	$: isReviseDraft = isRevision(draft.taskMode);
 	$: taskModeHint = TASK_MODES.find((mode) => mode.key === draft.taskMode)?.hint ?? '';
 	$: aiSummary = [
-		t(draft.imageReadingEnabled ? 'AI image reading on' : 'AI image reading off'),
+		t(draft.photoTranscriptionEnabled ? '照片转正文已开启' : '照片转正文已关闭'),
+		t(draft.imageReadingEnabled ? '参考图片识读已开启' : '参考图片识读已关闭'),
 		...(coachingEnabled ? [t(COACHING_TITLES[draft.coachingStyle])] : []),
 		...(thinkingDelegated && draft.thinking
 			? [t('Thinking: {{level}}', { level: t(THINKING_SETTING_TEXT[draft.thinking]) })]
@@ -131,14 +136,16 @@
 	// 题目还是原形式的默认题、教师没动过时，跟着换；动过就不碰。
 	// 评分维度同理：还是原形式的默认维度、满分也没改时，换成新形式的默认（修订初稿的
 	// 第一次通读按评分维度逐项下结论，实例会把这一份设成提示词里的标准）。
-	const chooseTaskMode = (taskMode: TaskMode) => {
+	const chooseTaskMode = async (taskMode: TaskMode) => {
 		if (taskMode === draft.taskMode || !allowedTaskModes.includes(taskMode)) return;
 		const next = teachingConfigs[taskMode];
 		if (!next) return;
 		if (
-			!window.confirm(
-				t('切换类型会采用目标类型的教学规则、默认说明、评分与反思，请确认替换这些字段。')
-			)
+			!(await confirmation.ask({
+				title: t('切换作业类型'),
+				message: t('切换类型会采用目标类型的教学规则、默认说明、评分与反思，请确认替换这些字段。'),
+				confirmLabel: t('确认切换')
+			}))
 		)
 			return;
 		draft = applyTeachingDefaults(draft, next);
@@ -298,7 +305,12 @@
 				<p class="text-sm text-gray-500">
 					{$i18n.t('评分设置用于教师评阅，AI 按本作业类型的教学规则辅导。')}
 				</p>
-				<select bind:value={draft.scoringMode} disabled={hasSubmissions} class={EDU_FIELD_CLASS}>
+				{#if hasSubmissions}
+					<p class="text-sm text-gray-500">
+						{$i18n.t('新评分设置适用于尚未批改的提交；已发布成绩保留原评分标准。')}
+					</p>
+				{/if}
+				<select bind:value={draft.scoringMode} class={EDU_FIELD_CLASS}>
 					<option value="dimensions">{$i18n.t('按维度评分')}</option>
 					<option value="total">{$i18n.t('仅总分与总评')}</option>
 				</select>
@@ -310,23 +322,13 @@
 						min="1"
 						step="1"
 						required
-						disabled={hasSubmissions}
-						class="w-full {EDU_FIELD_CLASS} disabled:opacity-60"
+						class="w-full {EDU_FIELD_CLASS}"
 					/>
-					{#if hasSubmissions}
-						<div class="mt-1 text-xs text-gray-400">
-							{$i18n.t('Maximum score is locked after the first submission.')}
-						</div>
-					{/if}
 				</div>
 				{#if draft.scoringMode === 'dimensions'}
 					<RubricCriteriaEditor
 						bind:criteria={draft.rubricCriteria}
 						scoreMax={draft.scoreMax}
-						disabled={hasSubmissions}
-						lockedHint={hasSubmissions
-							? $i18n.t('Rubric criteria are locked after the first submission.')
-							: ''}
 					/>
 				{/if}
 			</section>
@@ -339,6 +341,7 @@
 						type="button"
 						class="flex w-full items-start justify-between gap-4 text-left"
 						aria-expanded={aiOpen}
+						aria-controls="assignment-ai-content"
 						on:click={() => (aiOpen = !aiOpen)}
 					>
 						<div>
@@ -347,34 +350,39 @@
 								<div class="mt-1 text-sm text-gray-500 dark:text-gray-400">{aiSummary}</div>
 							{/if}
 						</div>
-						<span class="shrink-0 text-sm text-gray-500 dark:text-gray-400">
-							{aiOpen ? $i18n.t('Collapse') : $i18n.t('Edit')}
+						<span class="flex shrink-0 items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+							{aiOpen ? $i18n.t('Collapse') : $i18n.t('Expand')}
+							<DisclosureChevron open={aiOpen} />
 						</span>
 					</button>
-					<div class="mt-4 grid gap-4" class:hidden={!aiOpen}>
-						<AssignmentImageReadingSettings
-							bind:enabled={draft.imageReadingEnabled}
-							platformModel={imageParsingModel}
-						/>
-						{#if coachingEnabled}
-							<CoachingStyleSelector bind:value={draft.coachingStyle} />
-						{/if}
-						{#if thinkingDelegated && thinkingPolicy}
-							<AssignmentThinkingSettings
-								control={thinkingPolicy.control}
-								adminDefault={thinkingPolicy.default}
-								bind:value={draft.thinking}
-								bind:studentsChoose={draft.studentsChooseThinking}
+					<div id="assignment-ai-content" use:disclosure={aiOpen}>
+						<div class="pt-4 grid gap-4">
+							<AssignmentImageReadingSettings
+								bind:enabled={draft.imageReadingEnabled}
+								bind:photoEnabled={draft.photoTranscriptionEnabled}
+								{photoTranscriptionModel}
+								platformModel={imageParsingModel}
 							/>
-						{/if}
-						{#if hasReaderCheck}
-							<ChallengeSettings
-								criteria={draft.rubricCriteria}
-								bind:enabled={draft.challengeEnabled}
-								bind:rounds={draft.challengeRounds}
-								bind:focusKeys={draft.challengeFocusKeys}
-							/>
-						{/if}
+							{#if coachingEnabled}
+								<CoachingStyleSelector bind:value={draft.coachingStyle} />
+							{/if}
+							{#if thinkingDelegated && thinkingPolicy}
+								<AssignmentThinkingSettings
+									control={thinkingPolicy.control}
+									adminDefault={thinkingPolicy.default}
+									bind:value={draft.thinking}
+									bind:studentsChoose={draft.studentsChooseThinking}
+								/>
+							{/if}
+							{#if hasReaderCheck}
+								<ChallengeSettings
+									criteria={draft.rubricCriteria}
+									bind:enabled={draft.challengeEnabled}
+									bind:rounds={draft.challengeRounds}
+									bind:focusKeys={draft.challengeFocusKeys}
+								/>
+							{/if}
+						</div>
 					</div>
 				</section>
 			</EduCard>
@@ -386,6 +394,7 @@
 					type="button"
 					class="flex w-full items-start justify-between gap-4 text-left"
 					aria-expanded={reflectionOpen}
+					aria-controls="assignment-reflection-content"
 					on:click={() => (reflectionOpen = !reflectionOpen)}
 				>
 					<div>
@@ -399,20 +408,23 @@
 							{/if}
 						{/if}
 					</div>
-					<span class="shrink-0 text-sm text-gray-500 dark:text-gray-400">
-						{reflectionOpen ? $i18n.t('Collapse') : $i18n.t('Edit')}
+					<span class="flex shrink-0 items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+						{reflectionOpen ? $i18n.t('Collapse') : $i18n.t('Expand')}
+						<DisclosureChevron open={reflectionOpen} />
 					</span>
 				</button>
-				<div class="mt-4" class:hidden={!reflectionOpen}>
-					<ReflectionQuestionsEditor
-						bind:questions={draft.reflectionQuestions}
-						questionSets={reflectionQuestionSets}
-						notice={reflectionNotice}
-						taskMode={draft.taskMode}
-						defaultQuestions={teachingConfigs[draft.taskMode]?.reflection_questions ?? null}
-						{currentAssignmentId}
-						{hasSubmissions}
-					/>
+				<div id="assignment-reflection-content" use:disclosure={reflectionOpen}>
+					<div class="pt-4">
+						<ReflectionQuestionsEditor
+							bind:questions={draft.reflectionQuestions}
+							questionSets={reflectionQuestionSets}
+							notice={reflectionNotice}
+							taskMode={draft.taskMode}
+							defaultQuestions={teachingConfigs[draft.taskMode]?.reflection_questions ?? null}
+							{currentAssignmentId}
+							{hasSubmissions}
+						/>
+					</div>
 				</div>
 			</section>
 		</EduCard>
@@ -420,3 +432,5 @@
 		<slot name="footer" />
 	</div>
 </div>
+
+<ConfirmDialog bind:this={confirmation} />

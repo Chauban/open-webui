@@ -107,23 +107,18 @@
 	</details>
 {/if}
 
-<Modal bind:show={showPreview} size="xl">
-	<div class="flex max-h-[90vh] flex-col gap-3 p-5">
-		<div class="flex items-center justify-between gap-3">
-			<span class="break-all font-medium">{previewName}</span><button
-				on:click={() => (showPreview = false)}>{$i18n.t('Close')}</button
-			>
-		</div>
-		<p class="text-xs text-gray-500">{$i18n.t('这是上传时的原文件，不包含在线修改。')}</p>
-		<div class="min-h-0 flex-1 overflow-auto">
-			{#if docxData}<DocxPreview data={docxData} />
-			{:else if /\.pdf$/i.test(previewName)}<iframe
-					title={previewName}
-					class="h-[70vh] w-full"
-					src={previewUrl}
-				></iframe>
-			{:else if previewUrl}<img src={previewUrl} alt={previewName} class="max-w-full" />
-			{:else}<pre class="whitespace-pre-wrap break-words">{previewText}</pre>{/if}
-		</div>
-	</div>
+<Modal
+	bind:show={showPreview}
+	size="xl"
+	title={previewName}
+	description={$i18n.t('这是上传时的原文件，不包含在线修改。')}
+>
+	{#if docxData}<DocxPreview data={docxData} />
+	{:else if /\.pdf$/i.test(previewName)}<iframe
+			title={previewName}
+			class="h-[70vh] w-full"
+			src={previewUrl}
+		></iframe>
+	{:else if previewUrl}<img src={previewUrl} alt={previewName} class="max-w-full" />
+	{:else}<pre class="whitespace-pre-wrap break-words">{previewText}</pre>{/if}
 </Modal>

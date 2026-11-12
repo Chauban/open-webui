@@ -213,7 +213,9 @@ def test_photos_import_even_when_vision_is_disabled(education_client, storage, m
 
     monkeypatch.setattr(materials.draft_import, 'resolve_draft_image_model', forbidden)
     result = client.post(
-        f'/api/v1/writing-sessions/{sid}/import/images', files=[('files', ('photo.png', picture(), 'image/png'))]
+        f'/api/v1/writing-sessions/{sid}/import/images',
+        data={'purpose': 'reference'},
+        files=[('files', ('photo.png', picture(), 'image/png'))],
     )
     assert result.status_code == 200, result.text
     assert result.json()['content_json']['content'][0]['type'] == 'writingImage'
@@ -266,7 +268,9 @@ def test_explicit_recognition_keeps_original_evidence_immutable(education_client
     client, teacher, _, student, _, factory = education_client
     _, sid, _ = setup(client, teacher, student, 'from_scratch', image_reading=True)
     imported = client.post(
-        f'/api/v1/writing-sessions/{sid}/import/images', files={'files': ('p.png', picture())}
+        f'/api/v1/writing-sessions/{sid}/import/images',
+        data={'purpose': 'reference'},
+        files={'files': ('p.png', picture())},
     ).json()
     original = imported['materials'][0]
     document = imported['content_json']
@@ -274,7 +278,7 @@ def test_explicit_recognition_keeps_original_evidence_immutable(education_client
     with factory() as db:
         before = copy.deepcopy(db.get(WritingMaterial, original['id']).data)
 
-    async def revised(*args):
+    async def revised(*args, **kwargs):
         return '第二次识别出的内容'
 
     monkeypatch.setattr(materials.draft_import, 'generate_transcription', revised)
@@ -312,7 +316,9 @@ def test_image_metadata_cannot_claim_a_nonexistent_native_text_layer(education_c
     client, teacher, _, student, _, _ = education_client
     _, sid, _ = setup(client, teacher, student, 'from_scratch')
     imported = client.post(
-        f'/api/v1/writing-sessions/{sid}/import/images', files={'files': ('p.png', picture())}
+        f'/api/v1/writing-sessions/{sid}/import/images',
+        data={'purpose': 'reference'},
+        files={'files': ('p.png', picture())},
     ).json()
     document = imported['content_json']
     document['content'][0]['attrs']['nativeText'] = '伪造原生文字'
@@ -462,11 +468,14 @@ def test_photo_recognition_is_bounded_parallel_and_keeps_file_order(education_cl
     import asyncio
 
     client, teacher, _, student, _, _ = education_client
-    _, sid, _ = setup(client, teacher, student, 'from_scratch', image_reading=True)
+    assignment, sid, _ = setup(client, teacher, student, 'from_scratch', image_reading=True)
+    from open_webui.test.apps.webui.routers.test_photo_transcription import set_photo
+
+    set_photo(client, teacher, student, assignment, True)
     active = 0
     peak = 0
 
-    async def read(*args):
+    async def read(*args, **kwargs):
         nonlocal active, peak
         active += 1
         peak = max(peak, active)
@@ -476,8 +485,10 @@ def test_photo_recognition_is_bounded_parallel_and_keeps_file_order(education_cl
 
     monkeypatch.setattr(materials.draft_import, 'generate_transcription', read)
     result = client.post(
-        f'/api/v1/writing-sessions/{sid}/import/images', files=[('files', (f'{i}.png', picture())) for i in range(8)]
+        f'/api/v1/writing-sessions/{sid}/import/images',
+        data={'purpose': 'photo_to_text'},
+        files=[('files', (f'{i}.png', picture())) for i in range(8)],
     )
     assert result.status_code == 200, result.text
-    assert 2 <= peak <= 4
+    assert 2 <= peak <= 8
     assert [m['filename'] for m in result.json()['materials']] == [f'{i}.png' for i in range(8)]

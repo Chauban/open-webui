@@ -85,6 +85,7 @@ class DraftModelParams(StrictModel):
 class DraftAssignment(StrictModel):
     """Editable values, including incomplete numbers/questions; never used for execution."""
 
+    photo_transcription_enabled: StrictBool = False
     image_reading_enabled: StrictBool = False
     title: str = Field(default='', max_length=1000)
     description: str | None = Field(default='', max_length=200000)

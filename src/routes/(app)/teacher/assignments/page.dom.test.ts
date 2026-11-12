@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { readable } from 'svelte/store';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import Page from './+page.svelte';
@@ -26,7 +26,7 @@ vi.mock('$lib/apis/education/teaching', () => ({ teachingApi: vi.fn(async () => 
 vi.mock('$lib/utils/transitions', () => ({ flyAndScale: () => ({ duration: 0 }) }));
 const context = new Map([['i18n', readable({ t: (key: string) => key, language: 'en' })]]);
 const row = (id: string, hidden: boolean) => ({
-	assignment: { id, title: id, hidden, due_at: 2000000000 },
+	assignment: { id, title: id, hidden, due_at: 2000000000, config_revision: 1 },
 	classroom: { id: 'class', name: 'Writing' },
 	submission_count: 1,
 	student_count: 2,
@@ -49,7 +49,10 @@ beforeEach(() => {
 	visibility.mockReset();
 	visibility.mockImplementation(async (_, id, hidden) => row(id, hidden).assignment);
 });
-afterEach(cleanup);
+afterEach(() => {
+	cleanup();
+	vi.restoreAllMocks();
+});
 
 test.each([{}, { ctrlKey: true }, { metaKey: true }, { shiftKey: true }])(
 	'assignment links reach the router without triggering row navigation (%j)',
@@ -87,22 +90,21 @@ test('row space navigates once while its menu leaves navigation alone', async ()
 	expect(goto).not.toHaveBeenCalled();
 });
 
-test('hides and restores assignments between separate groups', async () => {
+test('hides and restores immediately without a change description', async () => {
 	render(Page, { context });
 	const visibleGroup = await screen.findByRole('region', { name: 'Assignments Shown to Students' });
 	const hiddenGroup = screen.getByRole('region', { name: 'Hidden Assignments' });
-	expect(within(visibleGroup).getByText('Visible essay')).toBeTruthy();
-	expect(within(hiddenGroup).getByText('Hidden essay').className).toContain('text-gray-500');
 	await fireEvent.click(within(visibleGroup).getByRole('button', { name: 'More' }));
 	await fireEvent.click(await screen.findByRole('button', { name: 'Hide Assignment' }));
 	await within(hiddenGroup).findByText('Visible essay');
 	expect(visibility).toHaveBeenCalledWith(expect.anything(), 'Visible essay', true);
-	expect(screen.queryByRole('region', { name: 'Assignments Shown to Students' })).toBeNull();
-	const hiddenRow = within(hiddenGroup).getByText('Visible essay').closest('tr')!;
-	await fireEvent.click(within(hiddenRow).getByRole('button', { name: 'More' }));
+	expect(screen.queryByRole('dialog')).toBeNull();
+	const row = within(hiddenGroup).getByText('Visible essay').closest('tr')!;
+	await fireEvent.click(within(row).getByRole('button', { name: 'More' }));
 	await fireEvent.click(await screen.findByRole('button', { name: 'Show Assignment' }));
 	expect(await screen.findByRole('region', { name: 'Assignments Shown to Students' })).toBeTruthy();
 	expect(visibility).toHaveBeenLastCalledWith(expect.anything(), 'Visible essay', false);
+	expect(screen.queryByLabelText('修改说明（必填）')).toBeNull();
 });
 
 test('failed visibility changes leave the assignment in its original group', async () => {
@@ -111,6 +113,7 @@ test('failed visibility changes leave the assignment in its original group', asy
 	const group = await screen.findByRole('region', { name: 'Assignments Shown to Students' });
 	await fireEvent.click(within(group).getByRole('button', { name: 'More' }));
 	await fireEvent.click(await screen.findByRole('button', { name: 'Hide Assignment' }));
+	await waitFor(() => expect(visibility).toHaveBeenCalled());
 	expect(within(group).getByText('Visible essay')).toBeTruthy();
 	expect(
 		within(screen.getByRole('region', { name: 'Hidden Assignments' })).queryByText('Visible essay')
@@ -164,14 +167,106 @@ test('deleting a server draft passes its revision and removes its list entry', a
 	vi.mocked(teachingApi).mockImplementation(async (_path, method) =>
 		method === 'DELETE' ? { deleted: true } : [server]
 	);
-	const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
 	render(Page, { context });
 	await screen.findByText('可删除的草稿');
 	await fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+	const dialog = screen.getByRole('dialog', { name: '删除这份草稿？' });
+	expect(dialog.textContent).toContain('草稿删除后无法恢复，试教记录和已保存方案会保留。');
+	expect(vi.mocked(teachingApi).mock.calls.some(([, method]) => method === 'DELETE')).toBe(false);
+	await fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+	await waitFor(() => expect(screen.queryByText('可删除的草稿')).toBeNull());
 	expect(teachingApi).toHaveBeenCalledWith(
 		'/teacher/teaching-preparations/draft-delete?expected_revision=3',
 		'DELETE'
 	);
 	expect(screen.queryByText('可删除的草稿')).toBeNull();
-	confirm.mockRestore();
 });
+
+test.each(['cancel', 'failure', 'success'])(
+	'draft deletion keeps the local backup until confirmed server success (%s)',
+	async (outcome) => {
+		const server = {
+			id: 'trial-draft',
+			assignment_id: null,
+			revision: 2,
+			published: null,
+			payload: { assignment: { title: '试教草稿', classroom_ids: [] }, ai: {} },
+			trials: [{ id: 'trial-one', sequence: 1, created_at: 1 }]
+		};
+		const key = 'assignment-drafts:teacher-1:trial-draft';
+		const backup = JSON.stringify({
+			id: server.id,
+			assignmentId: null,
+			preparation: server,
+			payload: server.payload,
+			updatedAt: 1
+		});
+		localStorage.setItem(key, backup);
+		vi.mocked(teachingApi).mockImplementation(async (_path, method) => {
+			if (method !== 'DELETE') return [server];
+			if (outcome === 'failure') throw { status: 409, detail: 'Preparation changed' };
+			return { deleted: true };
+		});
+		render(Page, { context });
+		await screen.findByRole('link', { name: 'Visible essay' });
+		await fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+		await fireEvent.click(
+			within(screen.getByRole('dialog')).getByRole('button', {
+				name: outcome === 'cancel' ? 'Cancel' : 'Delete'
+			})
+		);
+		if (outcome !== 'cancel')
+			await waitFor(() =>
+				expect(vi.mocked(teachingApi).mock.calls.some(([, method]) => method === 'DELETE')).toBe(
+					true
+				)
+			);
+		const deletions = vi.mocked(teachingApi).mock.calls.filter(([, method]) => method === 'DELETE');
+		expect(deletions).toHaveLength(outcome === 'cancel' ? 0 : 1);
+		if (outcome === 'success') {
+			expect(localStorage.getItem(key)).toBeNull();
+			expect(screen.queryByText('试教草稿')).toBeNull();
+		} else {
+			expect(localStorage.getItem(key)).toBe(backup);
+			expect(screen.getByText('试教草稿')).toBeTruthy();
+		}
+	}
+);
+
+test.each([true, false])(
+	'deletes a local draft after checking for an unacknowledged save (%s)',
+	async (saved) => {
+		const server = {
+			id: 'local-draft',
+			assignment_id: null,
+			revision: 1,
+			published: null,
+			payload: { assignment: { title: '本地草稿', classroom_ids: [] }, ai: {} }
+		};
+		const key = 'assignment-drafts:teacher-1:local-draft';
+		localStorage.setItem(
+			key,
+			JSON.stringify({ id: server.id, assignmentId: null, payload: server.payload, updatedAt: 1 })
+		);
+		vi.mocked(teachingApi).mockImplementation(async (path, method) => {
+			if (path === '/teacher/teaching-preparations') return [];
+			if (method === 'DELETE') return { deleted: true };
+			if (saved) return server;
+			throw { status: 404 };
+		});
+		render(Page, { context });
+		await screen.findByRole('link', { name: 'Visible essay' });
+		await fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+		await fireEvent.click(
+			within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' })
+		);
+		await waitFor(() =>
+			expect(teachingApi).toHaveBeenCalledWith('/teacher/teaching-preparations/local-draft')
+		);
+		expect(vi.mocked(teachingApi).mock.calls.filter(([, method]) => method === 'DELETE')).toEqual(
+			saved ? [['/teacher/teaching-preparations/local-draft?expected_revision=1', 'DELETE']] : []
+		);
+		await waitFor(() => expect(localStorage.getItem(key)).toBeNull());
+		expect(screen.queryByText('本地草稿')).toBeNull();
+	}
+);

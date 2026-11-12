@@ -331,6 +331,7 @@ type Config = {
 		enable_personal_writing?: boolean;
 		enable_education_return?: boolean;
 		enable_education_coaching_styles?: boolean;
+		enable_education_photo_transcription?: boolean;
 		enable_education_draft_image_import?: boolean;
 		enable_plugins?: boolean;
 		enable_autocomplete_generation: boolean;

@@ -94,8 +94,47 @@ test('reveals the reviewed assignment and updates its unread reason without mark
 	expect(await screen.findByText('Returned essay')).toBeTruthy();
 	expect(screen.getByText(/Unread return notice/)).toBeTruthy();
 	expect(
-		screen.getByRole('button', { name: /Past due, not submitted 1/ }).getAttribute('aria-expanded')
+		screen
+			.getByRole('button', { name: /Overdue · still open for submission 1/ })
+			.getAttribute('aria-expanded')
 	).toBe('true');
+});
+
+test('overdue work remains actionable and only late submissions get a late label', async () => {
+	vi.mocked(getWritingHome).mockResolvedValue({
+		role: 'student',
+		classrooms: [{ name: 'Class' }],
+		assignment_items: [
+			{
+				assignment: { id: 'late', title: 'Overdue essay' },
+				status: 'not_started',
+				effective_due_at: 1
+			},
+			{
+				assignment: { id: 'submitted', title: 'Late essay' },
+				status: 'submitted',
+				review_status: 'pending',
+				effective_due_at: 1,
+				submission_timing: { effective_due_at: 1, is_late: true }
+			},
+			{
+				assignment: { id: 'on-time', title: 'On-time essay' },
+				status: 'submitted',
+				review_status: 'pending',
+				effective_due_at: 1,
+				submission_timing: { effective_due_at: 1, is_late: false }
+			}
+		]
+	});
+	render(WritingPage, { context: new Map([['i18n', readable({ t: (key: string) => key })]]) });
+	const title = await screen.findByText('Overdue essay');
+	expect(title.closest('.rounded-3xl')?.className).toContain('bg-rose-50');
+	expect(screen.getAllByText('Late submission')).toHaveLength(1);
+	expect(screen.getByText('On-time essay').closest('.rounded-3xl')?.className).not.toContain(
+		'bg-rose-50'
+	);
+	await fireEvent.click(screen.getByRole('button', { name: 'Start Writing' }));
+	expect(goto).toHaveBeenCalledWith('/assignments/late/write');
 });
 
 test.each(['student', 'teacher'])(

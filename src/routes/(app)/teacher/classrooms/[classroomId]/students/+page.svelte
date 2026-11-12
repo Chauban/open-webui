@@ -490,105 +490,111 @@
 		{/if}
 	</div>
 
-	<Modal bind:show={showAdd} size="sm">
-		<div class="p-6">
-			<div class="text-lg font-semibold">{$i18n.t('Add Student')}</div>
-			<div class="mt-4 flex gap-2">
-				<button class={eduSegmentClass(addMode === 'search')} on:click={() => (addMode = 'search')}>
-					{$i18n.t('Search')}
-				</button>
-				<button class={eduSegmentClass(addMode === 'import')} on:click={() => (addMode = 'import')}>
-					{$i18n.t('Bulk Import Students')}
-				</button>
-			</div>
-
-			{#if addMode === 'search'}
-				<form class="mt-4 flex gap-2" on:submit|preventDefault={searchStudents}>
-					<!-- svelte-ignore a11y-autofocus -->
-					<input
-						bind:value={memberQuery}
-						autofocus
-						class="min-w-0 flex-1 {EDU_FIELD_CLASS}"
-						placeholder={$i18n.t('Search by student name or email')}
-					/>
-					<EduButton variant="primary" type="submit" disabled={searching}>
-						{searching ? $i18n.t('Searching...') : $i18n.t('Search')}
-					</EduButton>
-				</form>
-				{#if searchResults.length > 0}
-					<div class="mt-3 max-h-72 space-y-2 overflow-y-auto">
-						{#each searchResults as candidate}
-							<EduTile class="flex items-center justify-between gap-3">
-								<div class="min-w-0">
-									<div class="truncate font-medium">{candidate.name}</div>
-									<div class="truncate text-xs text-gray-500 dark:text-gray-400">
-										{candidate.email}
-									</div>
-								</div>
-								<EduButton
-									size="sm"
-									disabled={addingStudentId !== ''}
-									on:click={() => addStudent(candidate.id)}
-								>
-									{addingStudentId === candidate.id ? $i18n.t('Adding...') : $i18n.t('Add')}
-								</EduButton>
-							</EduTile>
-						{/each}
-					</div>
-				{:else if searched}
-					<div class="mt-3 text-sm text-gray-500 dark:text-gray-400">
-						{$i18n.t('No matching students who can be added.')}
-					</div>
-				{/if}
-			{:else}
-				<textarea
-					bind:value={bulkImportInput}
-					class="mt-4 min-h-32 w-full {EDU_FIELD_CLASS}"
-					placeholder={$i18n.t('Enter one student email or user ID per line')}
-				></textarea>
-				<div class="mt-3 flex justify-end">
-					<EduButton variant="primary" disabled={importing} on:click={bulkImportStudents}>
-						{importing ? $i18n.t('Importing...') : $i18n.t('Import')}
-					</EduButton>
-				</div>
-				{#if bulkImportResult && (bulkImportResult.failed_users?.length || bulkImportResult.skipped_users?.length)}
-					<div class="mt-4 max-h-60 space-y-3 overflow-y-auto">
-						{#if bulkImportResult.failed_users?.length}
-							<EduTile tone="rose">
-								<div class="mb-2 text-xs font-semibold text-rose-600 dark:text-rose-400">
-									{$i18n.t('Failed')} ({bulkImportResult.failed_users.length})
-								</div>
-								<div class="space-y-1 text-sm text-rose-700 dark:text-rose-300">
-									{#each bulkImportResult.failed_users as failure}
-										<div>{failure.value} — {$i18n.t(failure.reason)}</div>
-									{/each}
-								</div>
-							</EduTile>
-						{/if}
-						{#if bulkImportResult.skipped_users?.length}
-							<EduTile tone="amber">
-								<div class="mb-2 text-xs font-semibold text-amber-600 dark:text-amber-400">
-									{$i18n.t('Skipped (already in this classroom)')} ({bulkImportResult.skipped_users
-										.length})
-								</div>
-								<div class="space-y-1 text-sm text-amber-700 dark:text-amber-300">
-									{#each bulkImportResult.skipped_users as skipped}
-										<div>{skipped}</div>
-									{/each}
-								</div>
-							</EduTile>
-						{/if}
-					</div>
-				{/if}
-			{/if}
-
-			<div class="mt-6 flex justify-end">
-				<EduButton on:click={() => (showAdd = false)}>{$i18n.t('Done')}</EduButton>
-			</div>
+	<Modal
+		bind:show={showAdd}
+		size="sm"
+		title={$i18n.t('Add Student')}
+		busy={importing || addingStudentId !== ''}
+	>
+		<div class="flex gap-2">
+			<button class={eduSegmentClass(addMode === 'search')} on:click={() => (addMode = 'search')}>
+				{$i18n.t('Search')}
+			</button>
+			<button class={eduSegmentClass(addMode === 'import')} on:click={() => (addMode = 'import')}>
+				{$i18n.t('Bulk Import Students')}
+			</button>
 		</div>
+
+		{#if addMode === 'search'}
+			<form class="mt-4 flex gap-2" on:submit|preventDefault={searchStudents}>
+				<!-- svelte-ignore a11y-autofocus -->
+				<input
+					bind:value={memberQuery}
+					autofocus
+					class="min-w-0 flex-1 {EDU_FIELD_CLASS}"
+					placeholder={$i18n.t('Search by student name or email')}
+				/>
+				<EduButton variant="primary" type="submit" disabled={searching}>
+					{searching ? $i18n.t('Searching...') : $i18n.t('Search')}
+				</EduButton>
+			</form>
+			{#if searchResults.length > 0}
+				<div class="mt-3 max-h-72 space-y-2 overflow-y-auto">
+					{#each searchResults as candidate}
+						<EduTile class="flex items-center justify-between gap-3">
+							<div class="min-w-0">
+								<div class="truncate font-medium">{candidate.name}</div>
+								<div class="truncate text-xs text-gray-500 dark:text-gray-400">
+									{candidate.email}
+								</div>
+							</div>
+							<EduButton
+								size="sm"
+								disabled={addingStudentId !== ''}
+								on:click={() => addStudent(candidate.id)}
+							>
+								{addingStudentId === candidate.id ? $i18n.t('Adding...') : $i18n.t('Add')}
+							</EduButton>
+						</EduTile>
+					{/each}
+				</div>
+			{:else if searched}
+				<div class="mt-3 text-sm text-gray-500 dark:text-gray-400">
+					{$i18n.t('No matching students who can be added.')}
+				</div>
+			{/if}
+		{:else}
+			<textarea
+				bind:value={bulkImportInput}
+				class="mt-4 min-h-32 w-full {EDU_FIELD_CLASS}"
+				placeholder={$i18n.t('Enter one student email or user ID per line')}
+			></textarea>
+			<div class="mt-3 flex justify-end">
+				<EduButton variant="primary" disabled={importing} on:click={bulkImportStudents}>
+					{importing ? $i18n.t('Importing...') : $i18n.t('Import')}
+				</EduButton>
+			</div>
+			{#if bulkImportResult && (bulkImportResult.failed_users?.length || bulkImportResult.skipped_users?.length)}
+				<div class="mt-4 max-h-60 space-y-3 overflow-y-auto">
+					{#if bulkImportResult.failed_users?.length}
+						<EduTile tone="rose">
+							<div class="mb-2 text-xs font-semibold text-rose-600 dark:text-rose-400">
+								{$i18n.t('Failed')} ({bulkImportResult.failed_users.length})
+							</div>
+							<div class="space-y-1 text-sm text-rose-700 dark:text-rose-300">
+								{#each bulkImportResult.failed_users as failure}
+									<div>{failure.value} — {$i18n.t(failure.reason)}</div>
+								{/each}
+							</div>
+						</EduTile>
+					{/if}
+					{#if bulkImportResult.skipped_users?.length}
+						<EduTile tone="amber">
+							<div class="mb-2 text-xs font-semibold text-amber-600 dark:text-amber-400">
+								{$i18n.t('Skipped (already in this classroom)')} ({bulkImportResult.skipped_users
+									.length})
+							</div>
+							<div class="space-y-1 text-sm text-amber-700 dark:text-amber-300">
+								{#each bulkImportResult.skipped_users as skipped}
+									<div>{skipped}</div>
+								{/each}
+							</div>
+						</EduTile>
+					{/if}
+				</div>
+			{/if}
+		{/if}
+
+		<svelte:fragment slot="footer">
+			<EduButton disabled={importing || addingStudentId !== ''} on:click={() => (showAdd = false)}
+				>{$i18n.t('Done')}</EduButton
+			>
+		</svelte:fragment>
 	</Modal>
 
 	<ConfirmDialog
+		confirmLabel={$i18n.t('Remove')}
+		variant="danger"
 		bind:show={showRemoveConfirm}
 		title={$i18n.t('Remove Student')}
 		message={$i18n.t(
@@ -598,6 +604,8 @@
 	/>
 
 	<ConfirmDialog
+		confirmLabel={$i18n.t('Remove')}
+		variant="danger"
 		bind:show={showBulkRemoveConfirm}
 		title={$i18n.t('Remove Selected Students')}
 		message={$i18n.t(

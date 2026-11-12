@@ -5,6 +5,7 @@ import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import aiohttp
 import pytest
@@ -28,6 +29,11 @@ from open_webui.utils.retry import (
 from open_webui.utils.session_pool import stream_wrapper
 
 DEADLINE = 60.0
+
+
+@pytest.fixture(autouse=True)
+def isolate_model_health_storage(monkeypatch):
+    monkeypatch.setattr('open_webui.utils.model_health.save_call', AsyncMock())
 
 
 class FakeContent:

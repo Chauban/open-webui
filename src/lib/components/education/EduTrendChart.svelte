@@ -1,4 +1,6 @@
 <script lang="ts">
+	import DisclosureChevron from '$lib/components/common/DisclosureChevron.svelte';
+	import { disclosureSlide } from '$lib/utils/disclosure';
 	import { getContext } from 'svelte';
 	import { buildTrendPath } from '$lib/utils/growth-profile';
 
@@ -202,41 +204,45 @@
 		on:click={() => (showTable = !showTable)}
 	>
 		{$i18n.t(showTable ? 'Hide data table' : 'Show data table')}
-	</button>
+		<span class="ml-1 inline-flex align-middle"><DisclosureChevron open={showTable} /></span
+		></button
+	>
 
 	{#if showTable}
-		<div class="mt-3 overflow-x-auto">
-			<table class="min-w-full border-collapse text-left text-xs">
-				<caption class="sr-only">{$i18n.t('Trend chart data')}</caption>
-				<thead>
-					<tr>
-						<th class="border-b border-gray-200 px-2 py-2 font-medium dark:border-gray-700"
-							>{$i18n.t('Submission')}</th
-						>
-						{#each series as item}
-							<th class="border-b border-gray-200 px-2 py-2 font-medium dark:border-gray-700"
-								>{item.label}</th
-							>
-						{/each}
-					</tr>
-				</thead>
-				<tbody>
-					{#each labels as label, index}
+		<div transition:disclosureSlide>
+			<div class="mt-3 overflow-x-auto">
+				<table class="min-w-full border-collapse text-left text-xs">
+					<caption class="sr-only">{$i18n.t('Trend chart data')}</caption>
+					<thead>
 						<tr>
-							<th class="border-b border-gray-100 px-2 py-2 font-normal dark:border-gray-800"
-								>{label}</th
+							<th class="border-b border-gray-200 px-2 py-2 font-medium dark:border-gray-700"
+								>{$i18n.t('Submission')}</th
 							>
 							{#each series as item}
-								<td class="border-b border-gray-100 px-2 py-2 dark:border-gray-800">
-									{typeof item.values[index] === 'number'
-										? formatValue(item.values[index] as number)
-										: $i18n.t('Data missing')}
-								</td>
+								<th class="border-b border-gray-200 px-2 py-2 font-medium dark:border-gray-700"
+									>{item.label}</th
+								>
 							{/each}
 						</tr>
-					{/each}
-				</tbody>
-			</table>
+					</thead>
+					<tbody>
+						{#each labels as label, index}
+							<tr>
+								<th class="border-b border-gray-100 px-2 py-2 font-normal dark:border-gray-800"
+									>{label}</th
+								>
+								{#each series as item}
+									<td class="border-b border-gray-100 px-2 py-2 dark:border-gray-800">
+										{typeof item.values[index] === 'number'
+											? formatValue(item.values[index] as number)
+											: $i18n.t('Data missing')}
+									</td>
+								{/each}
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
 		</div>
 	{/if}
 {/if}

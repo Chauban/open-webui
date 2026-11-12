@@ -3,6 +3,29 @@ import { describe, expect, test } from 'vitest';
 import { createSerializedSaveRunner } from './save-coordinator';
 
 describe('createSerializedSaveRunner', () => {
+	test('multiple simultaneous forced saves share one serial follow-up', async () => {
+		let release!: () => void;
+		let active = 0;
+		let peak = 0;
+		let count = 0;
+		const save = createSerializedSaveRunner(async () => {
+			active++;
+			peak = Math.max(peak, active);
+			count++;
+			if (count === 1)
+				await new Promise<void>((resolve) => {
+					release = resolve;
+				});
+			active--;
+		});
+		const first = save('autosave');
+		const second = save('manual', { force: true });
+		const third = save('submit_preflight', { force: true });
+		release();
+		await Promise.all([first, second, third]);
+		expect(peak).toBe(1);
+		expect(count).toBe(2);
+	});
 	test('forced saves wait for an in-flight autosave and then run again', async () => {
 		const calls: string[] = [];
 		let releaseAutosave: () => void = () => {};

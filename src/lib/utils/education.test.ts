@@ -6,6 +6,11 @@ import { formatDateTimeInput, formatEpoch, resolveErrorMessage } from './educati
 // 2026-09-10 23:59 UTC
 const DUE_AT = Math.floor(Date.UTC(2026, 8, 10, 23, 59) / 1000);
 
+test('修改说明校验失败显示填写提示', () => {
+	expect(resolveErrorMessage({ detail: [{ loc: ['body', 'change_summary'], type: 'string_too_short' }] }, (key) => key))
+		.toBe('请填写修改说明（1—1000 字）。');
+});
+
 const withLanguage = (language: string, run: () => void) => {
 	(i18next as { language?: string }).language = language;
 	run();

@@ -22,8 +22,17 @@
 	import EduButton from './EduButton.svelte';
 	import TextImportActions from './TextImportActions.svelte';
 	import WritingEditor from './WritingEditor.svelte';
+	import WritingSaveNotice from './WritingSaveNotice.svelte';
+	import { user } from '$lib/stores';
+	import {
+		createWritingBackup,
+		downloadWritingBackup,
+		type WritingBackup
+	} from '$lib/utils/writing-backup';
+	import { writingSaveProblem, type WritingSaveProblem } from '$lib/utils/writing-save';
 	import UploadedOriginals from './UploadedOriginals.svelte';
 	export let sessionId: string;
+	export let photoTranscriptionEnabled = false;
 	export let imageReadingEnabled = false;
 	export let onSubmitted: () => Promise<void> | void;
 	const i18n = getContext<Writable<I18n>>('i18n');
@@ -40,9 +49,63 @@
 	let downloading = false;
 	let dragging = false;
 	let error = '';
+	let problem: WritingSaveProblem | null = null;
+	let localSafe = true;
+	let backups: WritingBackup[] = [];
+	let backupStore: ReturnType<typeof createWritingBackup<any>> | null = null;
+	let recovered: WritingBackup | null = null;
+	let retryAttempt = 0;
+	function backup() {
+		try {
+			backupStore?.write({ document, materials, revision });
+			localSafe = !!backupStore;
+		} catch {
+			localSafe = false;
+		}
+	}
+	function discard(item: WritingBackup) {
+		try {
+			backupStore?.discard(item);
+			backups = backups.filter((b) => b.id !== item.id);
+		} catch {
+			localSafe = false;
+		}
+	}
+	function restore(item: WritingBackup) {
+		if (busy) return;
+		if (item.data.revision !== revision) {
+			error = t('服务器初稿已变化，请下载备份后核对，不能直接覆盖当前初稿。');
+			return;
+		}
+		document = structuredClone(item.data.document);
+		materials = structuredClone(item.data.materials);
+		recovered = item;
+		backups = backups.filter((b) => b.id !== item.id);
+		changed();
+	}
+	function failed(err: unknown) {
+		problem = writingSaveProblem(err);
+		error = '';
+		backup();
+		if (!disposed && problem.retryable && retryAttempt < 3) {
+			if (timer) clearTimeout(timer);
+			const delay = Math.max([2000, 4000, 8000][retryAttempt++], problem.retryAfterMs || 0);
+			timer = setTimeout(() => {
+				timer = null;
+				void save().catch(failed);
+			}, delay);
+		}
+	}
+	async function copy() {
+		try {
+			await navigator.clipboard.writeText(text);
+			toast.success(t('全文已复制。'));
+		} catch {
+			toast.error(t('复制失败，请下载文字备份。'));
+		}
+	}
 	let importer: TextImportActions;
 	let editor: any = null;
-	let insertAtCursor = false;
 	let timer: ReturnType<typeof setTimeout> | null = null;
 	let queue = Promise.resolve();
 	let disposed = false;
@@ -51,6 +114,12 @@
 	$: busy = loading || loadFailed || importing || submitting;
 	const fingerprint = () => JSON.stringify({ document, materials: materials.map((m) => m.id) });
 	onMount(async () => {
+		backupStore = createWritingBackup($user?.id ?? '', sessionId, 'baseline');
+		try {
+			backups = backupStore.list();
+		} catch {
+			localSafe = false;
+		}
 		try {
 			const state = await getPendingWritingDraft(localStorage.token, sessionId);
 			if (disposed) return;
@@ -69,7 +138,7 @@
 		disposed = true;
 		if (timer) {
 			clearTimeout(timer);
-			void save().catch(() => {});
+			backup();
 		}
 	});
 	function save() {
@@ -81,7 +150,7 @@
 			.catch(() => {})
 			.then(async () => {
 				const mark = fingerprint();
-				if (mark === saved || loading || loadFailed) return;
+				if (disposed || mark === saved || loading || loadFailed) return;
 				const content = structuredClone(document);
 				const selected = materials.map(selectMaterial);
 				const result = await savePendingWritingDraft(localStorage.token, sessionId, {
@@ -92,33 +161,51 @@
 				revision = result.revision;
 				saved = mark;
 				error = '';
+				problem = null;
+				retryAttempt = 0;
+				if (mark === fingerprint()) {
+					try {
+						backupStore?.clear();
+						if (recovered) backupStore?.discard(recovered);
+						recovered = null;
+					} catch {
+						localSafe = false;
+					}
+				} else backup();
 			});
 		queue = next;
 		return next;
 	}
 	function changed() {
+		retryAttempt = 0;
+		backup();
 		if (timer) clearTimeout(timer);
 		timer = setTimeout(() => {
 			timer = null;
-			void save().catch((err) => {
-				error = resolveErrorMessage(err, t);
-			});
+			void save().catch(failed);
 		}, 800);
 	}
 	function onImported(imported: string, info: ImportInfo) {
 		const incoming = info.document ?? textDocument(imported);
 		const originals = info.materials ?? (info.material ? [info.material] : []);
-		if (insertAtCursor && editor) {
-			editor.chain().focus().insertContent(incoming.content).run();
+		if (hasDocumentContent(document)) {
+			if (editor) editor.chain().focus().insertContent(incoming.content).run();
+			else
+				document = {
+					type: 'doc',
+					content: [...(document.content ?? []), ...(incoming.content ?? [])]
+				};
 			materials = [...materials, ...originals];
 		} else {
 			document = incoming;
 			materials = originals;
 		}
+		if (info.purpose === 'photo_to_text')
+			toast.success(t('照片文字已进入编辑框，请对照原稿核对；□ 表示未辨认清楚的字。'));
 		changed();
 	}
 	async function confirm() {
-		if (busy || charCount < MIN_CHARS) return;
+		if (busy || backups.length || charCount < MIN_CHARS) return;
 		submitting = true;
 		try {
 			await save();
@@ -130,9 +217,14 @@
 				document,
 				revision
 			);
+			try {
+				backupStore?.clear();
+			} catch {
+				localSafe = false;
+			}
 			await onSubmitted();
 		} catch (err) {
-			error = resolveErrorMessage(err, t);
+			failed(err);
 		} finally {
 			submitting = false;
 		}
@@ -164,6 +256,7 @@
 			<div class="flex flex-wrap items-center justify-between gap-2">
 				<TextImportActions
 					baselineHelp
+					{photoTranscriptionEnabled}
 					{imageReadingEnabled}
 					bind:this={importer}
 					bind:busy={importing}
@@ -177,6 +270,23 @@
 					on:click={download}>{$i18n.t('下载当前稿（Word）')}</EduButton
 				>
 			</div>
+			<WritingSaveNotice
+				{problem}
+				{localSafe}
+				{backups}
+				{busy}
+				readonly={loadFailed}
+				onRetry={() => void save().catch(failed)}
+				onCopy={copy}
+				onLogin={() => {
+					backup();
+					window.location.assign(`/auth?redirect=${encodeURIComponent(window.location.pathname)}`);
+				}}
+				onDownload={() => downloadWritingBackup(document)}
+				onRestore={restore}
+				onDiscard={discard}
+				onDownloadBackup={(item) => downloadWritingBackup(item.data.document)}
+			/>
 			<UploadedOriginals {materials} />
 			{#if !imageReadingEnabled && materials.length}<p class="my-2 text-xs text-gray-500">
 					{$i18n.t('AI 本次只读取文字，图片仍会随作业保存。')}
@@ -199,14 +309,9 @@
 		>
 			<WritingEditor
 				bind:editor
-				onImportFiles={async (files, source) => {
+				onImportFiles={async (files) => {
 					dragging = false;
-					insertAtCursor = source === 'paste';
-					try {
-						await importer.importFiles(files);
-					} finally {
-						insertAtCursor = false;
-					}
+					await importer.importFiles(files);
 				}}
 				bind:value={document}
 				{sessionId}
@@ -237,7 +342,10 @@
 		>
 			{$i18n.t('{{count}} / {{min}} characters at least', { count: charCount, min: MIN_CHARS })}
 		</div>
-		<EduButton variant="primary" disabled={busy || charCount < MIN_CHARS} on:click={confirm}
+		<EduButton
+			variant="primary"
+			disabled={busy || backups.length > 0 || charCount < MIN_CHARS}
+			on:click={confirm}
 			>{submitting ? $i18n.t('Saving...') : $i18n.t('Confirm this is my first draft')}</EduButton
 		>
 	</div>

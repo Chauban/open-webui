@@ -342,3 +342,8 @@ export type StudentProfileFilters = {
 	limit?: number;
 	offset?: number;
 };
+
+export type SubmissionTiming = {
+	effective_due_at: number | null;
+	is_late: boolean;
+};

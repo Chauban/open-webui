@@ -1,5 +1,6 @@
 <script lang="ts">
 	import DOMPurify from 'dompurify';
+	import { getSignInRedirect } from '$lib/utils/student-navigation';
 	import { marked } from 'marked';
 
 	import { toast } from 'svelte-sonner';
@@ -74,10 +75,10 @@
 			}
 
 			if (!redirectPath) {
-				redirectPath = $page.url.searchParams.get('redirect') || '/';
+				redirectPath = $page.url.searchParams.get('redirect');
 			}
 
-			goto(redirectPath);
+			goto(getSignInRedirect(sessionUser, redirectPath));
 			localStorage.removeItem('redirectPath');
 		}
 	};
@@ -108,12 +109,10 @@
 			generateInitialsImage(name),
 			educationRole,
 			educationRole === 'student' ? classroomInviteCode.trim() : null
-		).catch(
-			(error) => {
-				toast.error(`${error}`);
-				return null;
-			}
-		);
+		).catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
 
 		// 注册时已凭邀请码入班，不再回到 /join 让学生把码填第二遍。
 		await setSessionUser(sessionUser, joiningWithInviteCode ? '/me/writing' : null);
@@ -200,7 +199,7 @@
 		const logout = $page.url.searchParams.get('state') === 'logout';
 
 		if ($user && !logout) {
-			goto(redirectPath || '/');
+			goto(getSignInRedirect($user, redirectPath));
 		} else {
 			if (redirectPath) {
 				localStorage.setItem('redirectPath', redirectPath);
@@ -365,11 +364,7 @@
 												<label for="education-role" class="text-sm font-medium text-left mb-1 block"
 													>{$i18n.t('Identity')}</label
 												>
-												<select
-													bind:value={educationRole}
-													id="education-role"
-													class={fieldClass}
-												>
+												<select bind:value={educationRole} id="education-role" class={fieldClass}>
 													<option value="student">{$i18n.t('Student')}</option>
 													<option value="teacher">{$i18n.t('Teacher')}</option>
 												</select>

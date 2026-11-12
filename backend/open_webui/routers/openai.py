@@ -1545,6 +1545,28 @@ async def generate_chat_completion_endpoint(
 
 # 平台内部经 utils/chat.py 直接调用;请求体是 /api/chat/completions 已按权限处理过的,或由平台拼成。
 async def generate_chat_completion(request: Request, form_data: dict, user):
+    from open_webui.utils.model_health import ModelCallRecorder, current_call, error_reason
+
+    external = current_call.get()
+    diagnostics = external or ModelCallRecorder(form_data.get('model'), user.id)
+    try:
+        response = await _generate_with_fallback(request, form_data, user, diagnostics)
+    except BaseException as error:
+        reason = error_reason(error, getattr(error, 'status_code', None))
+        if diagnostics.attempts and not isinstance(error, asyncio.CancelledError):
+            latest = diagnostics.attempts[-1]
+            if getattr(error, 'status_code', None) == 504 and latest.data['reason'] == 'cancelled':
+                latest.data.update(reason='timeout', outcome='failed')
+            reason = latest.data['reason'] or reason
+        if external is None:
+            await diagnostics.finish(reason)
+        elif diagnostics.attempts:
+            diagnostics.attempts[-1].finish(reason)
+        raise
+    return await diagnostics.observe(response, finalize=external is None)
+
+
+async def _generate_with_fallback(request, form_data, user, diagnostics):
     from open_webui.services.education.teaching_runtime import authorized_binding
     from open_webui.utils.model_fallback import notify_retry, resolve_fallback
 
@@ -1552,7 +1574,7 @@ async def generate_chat_completion(request: Request, form_data: dict, user):
     teaching = authorized_binding(request, form_data.get('model'))
     fallback = teaching['binding'].get('fallback') if teaching else await resolve_fallback(request, user, source_info)
     if not fallback:
-        return await _generate_chat_completion(request, copy.deepcopy(form_data), user)
+        return await _generate_chat_completion(request, copy.deepcopy(form_data), user, diagnostics=diagnostics)
 
     # Only this provider adapter is retried: filters, tools and teaching capture run once.
     metadata = form_data.get('metadata') or {}
@@ -1560,7 +1582,9 @@ async def generate_chat_completion(request: Request, form_data: dict, user):
     try:
         async with asyncio.timeout(200):
             try:
-                return await _generate_chat_completion(request, copy.deepcopy(form_data), user, fallback_plan=fallback)
+                return await _generate_chat_completion(
+                    request, copy.deepcopy(form_data), user, fallback_plan=fallback, diagnostics=diagnostics
+                )
             except asyncio.TimeoutError:
                 disconnected = getattr(request, 'is_disconnected', None)
                 if disconnected and await disconnected():
@@ -1568,7 +1592,12 @@ async def generate_chat_completion(request: Request, form_data: dict, user):
                 switched = True
                 await notify_retry(request, metadata)
                 return await _generate_chat_completion(
-                    request, copy.deepcopy(form_data), user, fallback_plan=fallback, use_fallback=True
+                    request,
+                    copy.deepcopy(form_data),
+                    user,
+                    fallback_plan=fallback,
+                    use_fallback=True,
+                    diagnostics=diagnostics,
                 )
     except asyncio.TimeoutError as error:
         raise HTTPException(504, '模型响应超时，请稍后重试。') from error
@@ -1577,7 +1606,9 @@ async def generate_chat_completion(request: Request, form_data: dict, user):
             await notify_retry(request, metadata, done=True)
 
 
-async def _generate_chat_completion(request: Request, form_data: dict, user, *, fallback_plan=None, use_fallback=False):
+async def _generate_chat_completion(
+    request: Request, form_data: dict, user, *, fallback_plan=None, use_fallback=False, diagnostics=None
+):
     if not await Config.get('openai.enable'):
         raise HTTPException(status_code=503, detail='OpenAI API is disabled')
 
@@ -1788,6 +1819,8 @@ async def _generate_chat_completion(request: Request, form_data: dict, user, *, 
 
         async def send():
             nonlocal head
+            from open_webui.utils.model_health import error_reason
+            health_attempt = diagnostics.begin(model_id, url, idx, use_fallback) if diagnostics else None
             attempt = record_provider_request(request, teaching_payload) if teaching_payload is not None else None
             if attempt is None and getattr(request.state, 'reading_context', None) is not None:
                 attempt = {'request': provider_payload, 'started_at': int(time.time())}
@@ -1821,7 +1854,13 @@ async def _generate_chat_completion(request: Request, form_data: dict, user, *, 
                 )
                 if attempt is not None:
                     attempt.update(http_status=response.status)
+                if health_attempt is not None:
+                    health_attempt.data['http_status'] = response.status
+                    if response.status >= 400:
+                        health_attempt.finish(error_reason(status=response.status))
             except BaseException as error:
+                if health_attempt is not None:
+                    health_attempt.finish(error_reason(error))
                 if attempt is not None:
                     attempt.update(error_type=type(error).__name__, elapsed_ms=int((time.monotonic() - started) * 1000))
                 raise
@@ -1837,6 +1876,8 @@ async def _generate_chat_completion(request: Request, form_data: dict, user, *, 
                     response, stream='text/event-stream' in response.headers.get('Content-Type', '')
                 )
             except BaseException as error:
+                if health_attempt is not None:
+                    health_attempt.finish(error_reason(error))
                 if attempt is not None:
                     attempt.update(error_type=type(error).__name__, elapsed_ms=int((time.monotonic() - started) * 1000))
                 await cleanup_response(response)
@@ -1930,6 +1971,9 @@ async def _generate_chat_completion(request: Request, form_data: dict, user, *, 
     except Exception as e:
         if fallback_plan and isinstance(e, asyncio.TimeoutError):
             raise
+        if diagnostics and diagnostics.attempts:
+            from open_webui.utils.model_health import error_reason
+            diagnostics.attempts[-1].finish(error_reason(e))
         log.exception(e)
 
         raise HTTPException(

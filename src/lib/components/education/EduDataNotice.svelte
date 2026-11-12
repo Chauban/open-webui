@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { getContext, onMount } from 'svelte';
 	import InfoCircle from '$lib/components/icons/InfoCircle.svelte';
+	import DisclosureChevron from '$lib/components/common/DisclosureChevron.svelte';
+	import { disclosureSlide } from '$lib/utils/disclosure';
 
 	// 给学生看的采集告知。刻意只说「记录了什么、谁能看到」,不含任何阈值、指标名
 	// 或判定规则 —— 那些是 index_formula 的内容,只发给教师端。学生知道过程被记录
@@ -48,30 +50,42 @@
 			<button
 				type="button"
 				class="ml-1 font-medium hover:text-gray-700 hover:underline dark:hover:text-gray-300"
+				aria-expanded={expanded}
 				on:click={() => (expanded = true)}
 			>
 				{$i18n.t('Details')}
+				<DisclosureChevron open={expanded} className="size-3" />
 			</button>
 		</div>
 	{:else}
-	<div class="space-y-1">
-		<p>
-			{$i18n.t(
-				'This writing space records how you write: every edit, every saved version, your conversations with the AI, and where each passage came from.'
-			)}
-		</p>
-		{#if scope === 'personal'}
-			<p>
-				{$i18n.t('This is your personal writing space. Teachers cannot see anything in it.')}
-			</p>
-		{:else}
+		<div class="space-y-1" transition:disclosureSlide>
 			<p>
 				{$i18n.t(
-					'For assignment writing, your teacher can see these records and uses them to understand your process and give feedback.'
+					'This writing space records how you write: every edit, every saved version, your conversations with the AI, and where each passage came from.'
 				)}
 			</p>
-			<p>{$i18n.t('Your personal writing space stays private — teachers cannot see it.')}</p>
-		{/if}
-	</div>
+			{#if scope === 'personal'}
+				<p>
+					{$i18n.t('This is your personal writing space. Teachers cannot see anything in it.')}
+				</p>
+			{:else}
+				<p>
+					{$i18n.t(
+						'For assignment writing, your teacher can see these records and uses them to understand your process and give feedback.'
+					)}
+				</p>
+				<p>{$i18n.t('Your personal writing space stays private — teachers cannot see it.')}</p>
+			{/if}
+			{#if collapsible}
+				<button
+					type="button"
+					class="inline-flex items-center gap-1 font-medium hover:underline"
+					aria-expanded={expanded}
+					on:click={() => (expanded = false)}
+				>
+					{$i18n.t('Collapse')}<DisclosureChevron open={expanded} className="size-3" />
+				</button>
+			{/if}
+		</div>
 	{/if}
 </div>

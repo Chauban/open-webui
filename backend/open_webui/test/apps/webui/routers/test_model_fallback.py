@@ -6,6 +6,7 @@ import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
@@ -19,6 +20,11 @@ from open_webui.test.apps.webui.routers.test_transient_retry import FakeResponse
 from open_webui.utils import model_fallback
 
 education_client = base_education_client
+
+
+@pytest.fixture(autouse=True)
+def isolate_model_health_storage(monkeypatch):
+    monkeypatch.setattr('open_webui.utils.model_health.save_call', AsyncMock())
 
 
 @pytest.fixture

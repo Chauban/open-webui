@@ -1,4 +1,6 @@
 <script lang="ts">
+	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
+	let confirmation: ConfirmDialog;
 	import { navigateTableRow } from '$lib/utils/education-navigation';
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
@@ -40,7 +42,16 @@
 				p.payload.assignment.title.toLowerCase().includes(keyword.trim().toLowerCase()))
 	);
 	async function deleteDraft(item: (typeof draftRows)[number]) {
-		if (!window.confirm(t('删除这份草稿？'))) return;
+		if (deletingDraft) return;
+		if (
+			!(await confirmation.ask({
+				title: t('删除这份草稿？'),
+				message: t('草稿删除后无法恢复，试教记录和已保存方案会保留。'),
+				confirmLabel: t('Delete'),
+				variant: 'danger'
+			}))
+		)
+			return;
 		deletingDraft = item.id;
 		try {
 			// A first save may have committed even if this browser did not receive its response.
@@ -402,3 +413,5 @@
 		{/if}
 	</div>
 </TeacherPageShell>
+
+<ConfirmDialog bind:this={confirmation} />

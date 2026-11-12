@@ -57,6 +57,7 @@ test('预览中粘贴图片保留已经核对的文字，确认时携带两份�
 			getData: () => ''
 		}
 	});
+	await fireEvent.click(screen.getByText('插入图片'));
 	await waitFor(() => expect(body.querySelector('.writing-figure')).toBeTruthy());
 	expect(body.textContent).toContain('已经核对的文字');
 	await fireEvent.click(screen.getByText('Insert at cursor').closest('button')!);

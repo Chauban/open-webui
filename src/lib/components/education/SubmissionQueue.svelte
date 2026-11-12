@@ -1,4 +1,5 @@
 <script lang="ts">
+	import SubmissionTimingBadge from './SubmissionTimingBadge.svelte';
 	import { navigateTableRow } from '$lib/utils/education-navigation';
 	import { isRevision } from '$lib/utils/task-types';
 	import type { Writable } from 'svelte/store';
@@ -347,6 +348,7 @@
 								title={formatEpoch(item.submission.submitted_at)}
 							>
 								{formatRelative(item.submission.submitted_at)}
+								<SubmissionTimingBadge timing={item.timing} />
 							</td>
 							<td class="whitespace-nowrap px-4 py-3">
 								<EduBadge soft tone={STATUS_TONES[item.review_status] ?? 'gray'}>

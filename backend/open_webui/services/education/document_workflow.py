@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from open_webui.models.notes import Note
 from open_webui.models.writing_materials import MaterialSelection
 from open_webui.services.education.writing_document import (
+    DocumentValidationError,
     check_document_resources,
     document_content,
     export_docx,
@@ -34,9 +35,24 @@ class WordExportForm(BaseModel):
 def checked_content(document, text, session_id, db):
     try:
         document = validate_document(document if document is not None else text_document(text))
-    except ValueError as error:
-        raise HTTPException(400, str(error)) from error
-    check_document_resources(document, session_id, db)
+    except DocumentValidationError as error:
+        raise HTTPException(
+            400,
+            str(error),
+            headers={
+                'X-Writing-Error-Code': 'document_format',
+                'X-Writing-Error-Field': error.field,
+            },
+        ) from error
+    try:
+        check_document_resources(document, session_id, db)
+    except HTTPException as error:
+        error.headers = {
+            **(error.headers or {}),
+            'X-Writing-Error-Code': 'material_reference',
+            'X-Writing-Error-Field': 'content_json',
+        }
+        raise
     return document_content(document)
 
 

@@ -33,6 +33,7 @@ W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
 
 IMAGE_READING_DISABLED = 'Image reading is disabled for this assignment.'
+PHOTO_TRANSCRIPTION_DISABLED = '照片转正文未开启，请联系老师开启，或选择插入图片。'
 VISUAL_KINDS = frozenset(('image', 'page'))
 
 EVIDENCE_PROMPT = """你是文档材料识读工具。输入是学生文档里的截图、图表或完整页面。
@@ -274,10 +275,18 @@ async def read_visuals(parsed, request, user, *, enabled: bool):
         async with semaphore:
             try:
                 url = await run_in_threadpool(prepare_material_image, parsed.images[block.id])
-                pages = await draft_import.transcribe_draft_images(request, user, model, [url], prompt=EVIDENCE_PROMPT)
+                pages = await draft_import.transcribe_draft_images(
+                    request, user, model, [url], prompt=EVIDENCE_PROMPT, allow_empty=True
+                )
                 block.text = block.extracted_text = pages[0]
-                block.status = 'unreadable' if not block.text or '□' in block.text else 'read'
-                block.detail = 'Some content could not be read' if block.status == 'unreadable' else ''
+                block.status = 'unreadable' if '□' in block.text else 'read'
+                block.detail = (
+                    'Some content could not be read'
+                    if block.status == 'unreadable'
+                    else ''
+                    if block.text
+                    else '未发现可提取文字，原图已保留。'
+                )
             except draft_import.DraftImageError as error:
                 block.detail = str(error)
 
@@ -308,6 +317,34 @@ def image_reading_enabled(session, db=None):
     return assignment is not None and assignment.image_reading_enabled
 
 
+def ensure_photo_transcription_enabled(session, db):
+    from open_webui.models.education import Education
+
+    assignment = Education.get_assignment_by_id(session.assignment_id, db=db)
+    if assignment is None or not assignment.photo_transcription_enabled:
+        raise HTTPException(403, PHOTO_TRANSCRIPTION_DISABLED)
+
+
+async def prepare_photo_transcriptions(uploads, request, user):
+    """Read the entire ordered batch before saving anything; never silently omit a page."""
+    urls = await draft_import.prepare_draft_images([data for _, data in uploads])
+    model = await draft_import.resolve_draft_image_model(request, user, step='photo_transcription')
+    pages = await draft_import.transcribe_draft_images(request, user, model, urls, step='photo_transcription')
+    if any(not page.strip() for page in pages):
+        raise draft_import.DraftImageError('部分照片未识别出正文，请检查照片后重试，或选择插入图片。')
+    if sum(map(len, pages)) > MAX_TEXT:
+        raise DraftFileError('The document contains too much text')
+    result = []
+    for (name, data), page in zip(uploads, pages):
+        parsed = await run_in_threadpool(parse_document, name, data)
+        block = parsed.blocks[0]
+        block.text = block.extracted_text = page
+        block.status = 'unreadable' if '□' in page else 'read'
+        block.detail = 'Some content could not be read' if '□' in page else ''
+        result.append((parsed, model.model_id))
+    return result
+
+
 def prepare_material_image(data):
     """Word also embeds BMP/TIFF/GIF; normalize those without broadening photo uploads."""
     try:
@@ -330,12 +367,14 @@ async def prepare_import_document(filename, data, request, user, *, enabled):
     return parsed, model_id
 
 
-async def import_document(filename, data, session, request, user, db, *, prepared=None):
-    from open_webui.services.education.writing_document import validate_document
-    enabled_at_start = image_reading_enabled(session, db)
+async def import_document(filename, data, session, request, user, db, *, prepared=None, purpose='reference'):
+    from open_webui.services.education.writing_document import text_document, validate_document
+
     db.commit()
-    parsed, model_id = prepared if prepared is not None else await prepare_import_document(
-        filename, data, request, user, enabled=enabled_at_start
+    parsed, model_id = (
+        prepared
+        if prepared is not None
+        else await prepare_import_document(filename, data, request, user, enabled=False)
     )
     identifier = str(uuid.uuid4())
     bundle = io.BytesIO()
@@ -365,8 +404,17 @@ async def import_document(filename, data, session, request, user, db, *, prepare
         await run_in_threadpool(lock_assignment, session.assignment_id, db)
         session = Education.get_writing_session_by_id(session.id, db=db)
         _ensure_text_import_open(user, session, db)
-        if not image_reading_enabled(session, db):
+        if purpose == 'photo_to_text':
+            ensure_photo_transcription_enabled(session, db)
+            # The administrator can revoke the capability while transcription is running.
+            await draft_import.resolve_draft_image_model(request, user, step='photo_transcription')
+        elif not image_reading_enabled(session, db):
             disable_visuals(parsed)
+        else:
+            for block in parsed.blocks:
+                if block.kind in VISUAL_KINDS:
+                    block.status = 'unread'
+                    block.detail = '尚未读取；原图已保存，需要时可在图旁读取。'
         blocks = {b.id: b for b in parsed.blocks}
         def bind_nodes(nodes):
             result = []
@@ -395,7 +443,12 @@ async def import_document(filename, data, session, request, user, db, *, prepare
             writing_session_id=session.id,
             filename=Path(filename).name,
             bundle_path=path,
-            data={'blocks': [b.model_dump() for b in parsed.blocks], 'model_id': model_id, 'document': parsed.document},
+            data={
+                'blocks': [b.model_dump() for b in parsed.blocks],
+                'model_id': model_id,
+                'document': parsed.document,
+                'purpose': purpose,
+            },
             active=False,
             created_at=int(time.time()),
         )
@@ -405,6 +458,9 @@ async def import_document(filename, data, session, request, user, db, *, prepare
         db.rollback()
         await run_in_threadpool(Storage.delete_file, path)
         raise
+    if purpose == 'photo_to_text':
+        text = '\n\n'.join(block.text for block in parsed.blocks)
+        return {'text': text, 'content_json': text_document(text), 'material': material_view(row)}
     return {'text': parsed.text, 'content_json': parsed.document, 'material': material_view(row)}
 
 
@@ -510,9 +566,18 @@ def model_materials(session_id, enabled, db=None, *, document=None):
             if block['kind'] in VISUAL_KINDS:
                 text = (attrs.get('transcription', '') if enabled else '') or (attrs.get('nativeText', '') if block.get('native_text') else '')
                 native = bool(text and not (enabled and attrs.get('transcription')))
-                block.update(text=text, extracted_text=block['extracted_text'] if enabled else '',
-                             status=('corrected' if text != block.get('native_text' if native else 'extracted_text', '') else 'read') if text else 'unreadable' if enabled else 'disabled',
-                             detail='' if text else 'This material has not been read.' if enabled else IMAGE_READING_DISABLED)
+                block.update(
+                    text=text,
+                    extracted_text=block['extracted_text'] if enabled else '',
+                    status=(
+                        'corrected' if text != block.get('native_text' if native else 'extracted_text', '') else 'read'
+                    )
+                    if text
+                    else block['status']
+                    if enabled
+                    else 'disabled',
+                    detail='' if text else (block['detail'] or 'This material has not been read.') if enabled else IMAGE_READING_DISABLED,
+                )
                 if native:
                     block['kind'] = 'textbox'
                     block['detail'] = 'PDF native text layer'

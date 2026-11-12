@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { readable } from 'svelte/store';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
@@ -150,7 +150,6 @@ describe('StudentGrowthProfile browser interactions', () => {
 			updated_at: 2
 		});
 		vi.mocked(deleteTeacherStudentNote).mockResolvedValue({ ok: true });
-		vi.spyOn(window, 'confirm').mockReturnValue(true);
 		render(StudentGrowthProfile, {
 			context,
 			props: { profile: makeProfile(true), variant: 'teacher' }
@@ -163,7 +162,10 @@ describe('StudentGrowthProfile browser interactions', () => {
 		await waitFor(() => expect(updateTeacherStudentNote).toHaveBeenCalledTimes(1));
 
 		await fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
-		expect(window.confirm).toHaveBeenCalledTimes(1);
+		expect(deleteTeacherStudentNote).not.toHaveBeenCalled();
+		await fireEvent.click(
+			within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' })
+		);
 		await waitFor(() => expect(deleteTeacherStudentNote).toHaveBeenCalledTimes(1));
 	});
 });

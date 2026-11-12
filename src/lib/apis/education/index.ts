@@ -1,5 +1,5 @@
 import type { ProviderQuirk } from '$lib/utils/provider-quirks';
-import { WEBUI_API_BASE_URL } from '$lib/constants';
+import { WEBUI_API_BASE_URL, WEBUI_BUILD_HASH } from '$lib/constants';
 import type {
 	EditorOperationType,
 	ReflectionAnswer,
@@ -29,16 +29,28 @@ export const getWritingProcessSummary = async (
 
 const parseErrorResponse = async (res: Response) => {
 	const contentType = res.headers.get('content-type') || '';
+	const retryAfter = res.headers.get('retry-after');
+	const metadata = {
+		status: res.status,
+		requestId: res.headers.get('x-request-id') ?? undefined,
+		field: res.headers.get('x-writing-error-field') ?? undefined,
+		retryAfterMs: retryAfter
+			? Math.max(
+					0,
+					/^\d+$/.test(retryAfter) ? Number(retryAfter) * 1000 : Date.parse(retryAfter) - Date.now()
+				)
+			: undefined
+	};
 	if (contentType.includes('application/json')) {
 		try {
-			return await res.json();
+			return { ...(await res.clone().json()), ...metadata };
 		} catch {}
 	}
 
 	const text = await res.text();
 	return {
 		detail: text || res.statusText || 'Request failed',
-		status: res.status
+		...metadata
 	};
 };
 
@@ -54,6 +66,18 @@ const withAuth = (token: string) => ({
 	'Content-Type': 'application/json',
 	authorization: `Bearer ${token}`
 });
+
+const writingSaveRequest = async (url: string, options: RequestInit) => {
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), 20000);
+	const headers = new Headers(options.headers);
+	headers.set('X-Writing-Client-Build', WEBUI_BUILD_HASH);
+	try {
+		return await fetch(url, { ...options, headers, signal: controller.signal }).then(handleJson);
+	} finally {
+		clearTimeout(timer);
+	}
+};
 
 export const getMyClassroom = async (token: string) => {
 	return fetch(`${WEBUI_API_BASE_URL}/me/classroom`, {
@@ -200,6 +224,7 @@ export type AiStepKey =
 	| 'revision_review'
 	| 'whole_review'
 	| 'reader_check'
+	| 'photo_transcription'
 	| 'image_parsing'
 	| 'class_insight';
 /** 管理员没给这一步指定模型时用谁的;admin_model 表示必须指定(图片识别)。 */
@@ -254,6 +279,7 @@ export type AiStepPolicy = {
 	whole_review: PlatformStepPolicy;
 	first_read: PlatformStepPolicy;
 	reader_check: PlatformStepPolicy;
+	photo_transcription: PlatformStepPolicy;
 	image_parsing: PlatformStepPolicy;
 	class_insight: PlatformStepPolicy;
 };
@@ -261,6 +287,7 @@ export type AiStepPolicy = {
 export const createAssignment = async (
 	token: string,
 	payload: {
+		photo_transcription_enabled?: boolean;
 		image_reading_enabled?: boolean;
 		title: string;
 		description?: string;
@@ -306,6 +333,7 @@ export const getTeacherAssignmentDefaults = async (
 	task_mode: TaskMode | null;
 	allowed_task_modes: TaskMode[];
 	teaching_configs: Record<TaskMode, TeachingConfig>;
+	photo_transcription_model: ImageParsingModelView | null;
 	image_parsing_model: ImageParsingModelView | null;
 	rubrics: Record<TaskMode, Array<{ label: string; max_score: number }>>;
 	thinking: { control: ThinkingControl; default: ThinkingSetting };
@@ -411,8 +439,9 @@ export const updateAssignment = async (
 	assignmentId: string,
 	payload: {
 		expected_config_revision: number;
-		change_summary?: string;
+		change_summary: string;
 		adopt_latest_teaching_config?: boolean;
+		photo_transcription_enabled?: boolean;
 		image_reading_enabled?: boolean;
 		title?: string;
 		description?: string;
@@ -491,11 +520,11 @@ export const autosaveWritingSession = async (
 		save_reason?: string;
 	}
 ) => {
-	return fetch(`${WEBUI_API_BASE_URL}/writing-sessions/${sessionId}/autosave`, {
+	return writingSaveRequest(`${WEBUI_API_BASE_URL}/writing-sessions/${sessionId}/autosave`, {
 		method: 'POST',
 		headers: withAuth(token),
 		body: JSON.stringify(payload)
-	}).then(handleJson);
+	});
 };
 
 export const createWritingVersion = async (
@@ -507,11 +536,11 @@ export const createWritingVersion = async (
 		content_text: string;
 	}
 ) => {
-	return fetch(`${WEBUI_API_BASE_URL}/writing-sessions/${sessionId}/versions`, {
+	return writingSaveRequest(`${WEBUI_API_BASE_URL}/writing-sessions/${sessionId}/versions`, {
 		method: 'POST',
 		headers: withAuth(token),
 		body: JSON.stringify(payload)
-	}).then(handleJson);
+	});
 };
 
 export const createProvenanceSegments = async (
@@ -531,11 +560,11 @@ export const createProvenanceSegments = async (
 		replace_existing?: boolean;
 	}
 ) => {
-	return fetch(`${WEBUI_API_BASE_URL}/writing-sessions/${sessionId}/provenance`, {
+	return writingSaveRequest(`${WEBUI_API_BASE_URL}/writing-sessions/${sessionId}/provenance`, {
 		method: 'POST',
 		headers: withAuth(token),
 		body: JSON.stringify(payload)
-	}).then(handleJson);
+	});
 };
 
 /** 修订初稿作业:冻结课外写好的初稿为修改起点,成功后返回更新过的写作会话。 */
@@ -619,10 +648,16 @@ export const getWritingMaterialAsset = async (
 	return response.blob();
 };
 
-// 照片交给管理员选定的识图模型逐张转录:text 按传入顺序拼好,pages 是逐张结果(读 PDF 时插回原页);
-// 一次要十几秒到一分钟。
-export const extractImportImages = async (token: string, sessionId: string, files: File[]) => {
+// 上传用途由学生明确选择：照片转录返回正文；参考图返回图像节点。两种方式均保留原件。
+export type ImageUploadPurpose = 'photo_to_text' | 'reference';
+export const extractImportImages = async (
+	token: string,
+	sessionId: string,
+	files: File[],
+	purpose: ImageUploadPurpose
+) => {
 	const body = new FormData();
+	body.append('purpose', purpose);
 	for (const file of files) body.append('files', file);
 	return fetch(`${WEBUI_API_BASE_URL}/writing-sessions/${sessionId}/import/images`, {
 		method: 'POST',
@@ -649,11 +684,11 @@ export const savePendingWritingDraft = (
 		expected_revision: number;
 	}
 ) =>
-	fetch(`${WEBUI_API_BASE_URL}/writing-sessions/${sessionId}/pending-draft`, {
+	writingSaveRequest(`${WEBUI_API_BASE_URL}/writing-sessions/${sessionId}/pending-draft`, {
 		method: 'PUT',
 		headers: withAuth(token),
 		body: JSON.stringify(payload)
-	}).then(handleJson);
+	});
 
 export const readWritingImage = (
 	token: string,
@@ -723,11 +758,11 @@ export const createEditorOperations = async (
 		}>;
 	}
 ) => {
-	return fetch(`${WEBUI_API_BASE_URL}/writing-sessions/${sessionId}/operations`, {
+	return writingSaveRequest(`${WEBUI_API_BASE_URL}/writing-sessions/${sessionId}/operations`, {
 		method: 'POST',
 		headers: withAuth(token),
 		body: JSON.stringify(payload)
-	}).then(handleJson);
+	});
 };
 
 export const setWritingSessionActiveChat = async (
@@ -804,6 +839,11 @@ export const saveSubmissionReview = async (
 	payload: {
 		expected_final_version_id: string;
 		expected_review_revision: number;
+		expected_scoring_config: {
+			scoring_mode: 'dimensions' | 'total';
+			score_max: number;
+			rubric_schema: { criteria: Array<{ key: string; label: string; max_score: number }> };
+		};
 		review_status: string;
 		score?: number | null;
 		/** 教师给反思打的 1—5 分；标为「已批改」时必填。 */

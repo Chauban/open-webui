@@ -19,6 +19,7 @@ from open_webui.services.education.profile_aggregates import (
     build_student_profile_aggregate,
 )
 from open_webui.services.education.profile_evidence import canonical_json_hash
+from open_webui.services.education.scoring import review_scoring_assignment
 
 
 async def build_student_profile(
@@ -183,6 +184,7 @@ async def build_student_profile(
             assignment_items.append(StudentProfileAssignmentItem(assignment=assignment))
             continue
         review = reviews.get(current.id)
+        assignment = review_scoring_assignment(assignment, review)
         review_status = review.review_status if review else "pending"
         submitted_count += 1
         reviewed_count += int(review_status == "reviewed")

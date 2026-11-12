@@ -55,24 +55,30 @@ def safe_link(value):
         return False
 
 
+class DocumentValidationError(ValueError):
+    def __init__(self, message, field):
+        super().__init__(message)
+        self.field = field
+
+
 def validate_document(document):  # noqa: C901
     """Reject unknown nodes, unbounded structures and executable/resource URL attributes."""
     count = 0
     characters = 0
 
-    def visit(node, depth=0):  # noqa: C901
+    def visit(node, depth=0, path='content_json'):  # noqa: C901
         nonlocal count, characters
         count += 1
         if depth > 48 or count > 30_000 or not isinstance(node, dict):
-            raise ValueError('The document is too complex')
+            raise DocumentValidationError('The document is too complex', path)
         if node.keys() - {'type', 'attrs', 'content', 'text', 'marks'}:
-            raise ValueError('Unsupported document properties')
+            raise DocumentValidationError('Unsupported document properties', path)
         kind = node.get('type')
         if not isinstance(kind, str) or kind not in BLOCKS | INLINE | CONTAINERS:
-            raise ValueError('Unsupported document node')
+            raise DocumentValidationError('Unsupported document node', path + '.type')
         attrs = node.get('attrs') or {}
         if not isinstance(attrs, dict):
-            raise ValueError('Invalid document attributes')
+            raise DocumentValidationError('Invalid document attributes', path + '.attrs')
         allowed = {
             'paragraph': {'textAlign'},
             'heading': {'level', 'textAlign'},
@@ -97,12 +103,12 @@ def validate_document(document):  # noqa: C901
             'writingPlaceholder': {'materialId', 'blockId', 'label'},
         }.get(kind, set())
         if attrs.keys() - allowed:
-            raise ValueError('Unsupported document attributes')
+            raise DocumentValidationError('Unsupported document attributes', path + '.attrs')
         if kind == 'taskItem' and type(attrs.get('checked', False)) is not bool:
-            raise ValueError('Invalid document attribute type')
+            raise DocumentValidationError('Invalid document attribute type', path + '.attrs')
         for key in ('alt', 'readDetail', 'label', 'note', 'language'):
             if attrs.get(key) is not None and not isinstance(attrs[key], str):
-                raise ValueError('Invalid document attribute type')
+                raise DocumentValidationError('Invalid document attribute type', path + '.attrs')
         for key, value in attrs.items():
             if isinstance(value, str):
                 characters += len(value)
@@ -110,49 +116,49 @@ def validate_document(document):  # noqa: C901
             if not all(
                 isinstance(attrs.get(key), str) and ID.fullmatch(attrs[key]) for key in ('materialId', 'blockId')
             ):
-                raise ValueError('Invalid material reference')
+                raise DocumentValidationError('Invalid material reference', path + '.attrs.materialId')
         if kind == 'writingImage':
             width = attrs.get('width', 100)
             if type(width) is not int or not 20 <= width <= 100:
-                raise ValueError('Invalid image width')
+                raise DocumentValidationError('Invalid image width', path + '.attrs.width')
             if (
                 not isinstance(attrs.get('transcription', ''), str)
                 or type(attrs.get('transcriptionEdited', False)) is not bool
             ):
-                raise ValueError('Invalid image transcription')
+                raise DocumentValidationError('Invalid image transcription', path + '.attrs.transcription')
             if (
                 not isinstance(attrs.get('nativeText', ''), str)
                 or type(attrs.get('nativeTextEdited', False)) is not bool
             ):
-                raise ValueError('Invalid native text')
+                raise DocumentValidationError('Invalid native text', path + '.attrs.nativeText')
             if (
                 not isinstance(attrs.get('readStatus', ''), str)
-                or attrs.get('readStatus', '') not in {'', 'read', 'unreadable', 'corrected', 'disabled'}
+                or attrs.get('readStatus', '') not in {'', 'read', 'unread', 'unreadable', 'corrected', 'disabled'}
                 or not isinstance(attrs.get('readDetail', ''), str)
             ):
-                raise ValueError('Invalid reading status')
+                raise DocumentValidationError('Invalid reading status', path + '.attrs.readStatus')
         if kind == 'writingNote' and (
             not isinstance(attrs.get('kind'), str)
             or attrs.get('kind') not in {'footnote', 'endnote', 'annotation'}
             or not isinstance(attrs.get('note'), str)
         ):
-            raise ValueError('Invalid note')
+            raise DocumentValidationError('Invalid note', path + '.attrs.note')
         if attrs.get('textAlign') is not None and (
             not isinstance(attrs['textAlign'], str) or attrs['textAlign'] not in {'left', 'center', 'right', 'justify'}
         ):
-            raise ValueError('Invalid paragraph alignment')
+            raise DocumentValidationError('Invalid paragraph alignment', path + '.attrs.textAlign')
         for key, low, high in [('level', 1, 6), ('start', 1, 100000), ('colspan', 1, 30), ('rowspan', 1, 100)]:
             if key in attrs and (type(attrs[key]) is not int or not low <= attrs[key] <= high):
-                raise ValueError('Invalid document dimensions')
+                raise DocumentValidationError('Invalid document dimensions', path + '.attrs')
         if attrs.get('colwidth') is not None and (
             not isinstance(attrs['colwidth'], list)
             or len(attrs['colwidth']) > 30
             or any(type(n) is not int or n < 0 or n > 10000 for n in attrs['colwidth'])
         ):
-            raise ValueError('Invalid table column width')
+            raise DocumentValidationError('Invalid table column width', path + '.attrs.colwidth')
         children = node.get('content', [])
         if not isinstance(children, list):
-            raise ValueError('Invalid document content')
+            raise DocumentValidationError('Invalid document content', path + '.content')
         expected = {
             'doc': BLOCKS,
             'paragraph': INLINE,
@@ -170,23 +176,23 @@ def validate_document(document):  # noqa: C901
             'tableCell': BLOCKS,
             'tableHeader': BLOCKS,
         }.get(kind, set())
-        for child in children:
+        for index, child in enumerate(children):
             if (
                 not isinstance(child, dict)
                 or not isinstance(child.get('type'), str)
                 or child.get('type') not in expected
             ):
-                raise ValueError('Invalid document nesting')
-            visit(child, depth + 1)
+                raise DocumentValidationError('Invalid document nesting', path + '.content')
+            visit(child, depth + 1, f'{path}.content.{index}')
         if kind == 'text':
             if not isinstance(node.get('text'), str) or not node['text']:
-                raise ValueError('Invalid text node')
+                raise DocumentValidationError('Invalid text node', path + '.text')
             characters += len(node['text'])
         elif 'text' in node:
-            raise ValueError('Text is only allowed on text nodes')
+            raise DocumentValidationError('Text is only allowed on text nodes', path + '.text')
         marks = node.get('marks', [])
         if not isinstance(marks, list) or len(marks) > 12:
-            raise ValueError('Invalid document marks')
+            raise DocumentValidationError('Invalid document marks', path + '.marks')
         for mark in marks:
             if (
                 not isinstance(mark, dict)
@@ -194,31 +200,31 @@ def validate_document(document):  # noqa: C901
                 or not isinstance(mark.get('type'), str)
                 or mark.get('type') not in MARKS
             ):
-                raise ValueError('Unsupported text mark')
+                raise DocumentValidationError('Unsupported text mark', path + '.marks')
             ma = mark.get('attrs') or {}
             if not isinstance(ma, dict):
-                raise ValueError('Invalid text mark')
+                raise DocumentValidationError('Invalid text mark', path + '.marks')
             for value in ma.values():
                 if value is not None and not isinstance(value, str):
-                    raise ValueError('Invalid text mark')
+                    raise DocumentValidationError('Invalid text mark', path + '.marks')
                 if isinstance(value, str):
                     characters += len(value)
             if mark['type'] == 'link':
-                if ma.keys() - {'href', 'target', 'rel', 'class'} or not safe_link(ma.get('href')):
-                    raise ValueError('Invalid link')
+                if ma.keys() - {'href', 'target', 'rel', 'class', 'title'} or not safe_link(ma.get('href')):
+                    raise DocumentValidationError('Invalid link', path + '.marks.href')
             elif mark['type'] == 'highlight':
                 if ma.keys() - {'color'} or (
                     ma.get('color') is not None
                     and (not isinstance(ma['color'], str) or not re.fullmatch(r'#[0-9a-fA-F]{3,8}', ma['color']))
                 ):
-                    raise ValueError('Invalid highlight')
+                    raise DocumentValidationError('Invalid highlight', path + '.marks.color')
             elif ma:
-                raise ValueError('Unsupported text mark attributes')
+                raise DocumentValidationError('Unsupported text mark attributes', path + '.marks.attrs')
         if characters > MAX_TEXT:
-            raise ValueError('The document contains too much text')
+            raise DocumentValidationError('The document contains too much text', path)
 
     if not isinstance(document, dict) or document.get('type') != 'doc':
-        raise ValueError('A writing document is required')
+        raise DocumentValidationError('A writing document is required', 'content_json')
     visit(document)
     return copy.deepcopy(document)
 

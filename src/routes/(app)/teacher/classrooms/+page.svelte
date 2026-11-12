@@ -173,10 +173,9 @@
 		{/if}
 	</div>
 
-	<Modal bind:show={showCreate} size="sm">
-		<form class="p-6" on:submit|preventDefault={submitCreateClassroom}>
-			<div class="text-lg font-semibold">{$i18n.t('Create Classroom')}</div>
-			<label class="mt-4 block">
+	<Modal bind:show={showCreate} size="sm" title={$i18n.t('Create Classroom')} busy={creating}>
+		<form id="create-classroom-form" on:submit|preventDefault={submitCreateClassroom}>
+			<label class="block">
 				<span class="mb-2 block text-sm font-medium">{$i18n.t('Classroom name')}</span>
 				<!-- svelte-ignore a11y-autofocus -->
 				<input
@@ -186,12 +185,14 @@
 					placeholder={$i18n.t('Example: Writing and Communication, 2025 Section 2')}
 				/>
 			</label>
-			<div class="mt-6 flex justify-end gap-2">
-				<EduButton on:click={() => (showCreate = false)}>{$i18n.t('Cancel')}</EduButton>
-				<EduButton variant="primary" type="submit" disabled={creating}>
-					{creating ? $i18n.t('Creating...') : $i18n.t('Create Classroom')}
-				</EduButton>
-			</div>
 		</form>
+		<svelte:fragment slot="footer">
+			<EduButton disabled={creating} on:click={() => (showCreate = false)}
+				>{$i18n.t('Cancel')}</EduButton
+			>
+			<EduButton variant="primary" type="submit" form="create-classroom-form" disabled={creating}>
+				{creating ? $i18n.t('Creating...') : $i18n.t('Create Classroom')}
+			</EduButton>
+		</svelte:fragment>
 	</Modal>
 </TeacherPageShell>

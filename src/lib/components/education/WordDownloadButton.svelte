@@ -10,6 +10,8 @@
 	export let versionId: string | undefined = undefined;
 	export let contentJson: WritingNode | undefined = undefined;
 	export let disabled = false;
+	let className = '';
+	export { className as class };
 	export let beforeDownload: () => Promise<void> = async () => {};
 	const i18n: any = getContext('i18n');
 	let busy = false;
@@ -31,6 +33,6 @@
 	}
 </script>
 
-<EduButton size="sm" disabled={disabled || busy} on:click={download}>
+<EduButton size="sm" class={className} disabled={disabled || busy} on:click={download}>
 	{$i18n.t(busy ? '正在生成 Word…' : submissionId ? '下载已提交稿（Word）' : '下载当前稿（Word）')}
 </EduButton>

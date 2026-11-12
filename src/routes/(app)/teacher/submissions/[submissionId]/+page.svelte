@@ -1,4 +1,7 @@
 <script lang="ts">
+	import SubmissionTimingBadge from '$lib/components/education/SubmissionTimingBadge.svelte';
+	import DisclosureChevron from '$lib/components/common/DisclosureChevron.svelte';
+	import { disclosureSlide } from '$lib/utils/disclosure';
 	import WordDownloadButton from '$lib/components/education/WordDownloadButton.svelte';
 	import WritingMaterials from '$lib/components/education/WritingMaterials.svelte';
 	import { isRevision } from '$lib/utils/task-types';
@@ -532,6 +535,11 @@
 			const response = await saveSubmissionReview(localStorage.token, $page.params.submissionId, {
 				expected_final_version_id: detail.submission.final_version_id,
 				expected_review_revision: detail.review_revision,
+				expected_scoring_config: {
+					scoring_mode: detail.assignment.scoring_mode,
+					score_max: detail.assignment.score_max,
+					rubric_schema: detail.assignment.rubric_schema
+				},
 				review_status: effectiveStatus,
 				score: parsedScore,
 				reflection_score: parsedReflectionScore,
@@ -844,6 +852,12 @@
 						)}
 					</span>
 					<span>{$i18n.t('Submitted At')}: {formatEpoch(detail.submission.submitted_at)}</span>
+					<SubmissionTimingBadge timing={detail.timing} />
+					{#if detail.timing?.is_late}
+						<span class="font-medium text-rose-700 dark:text-rose-300">
+							{$i18n.t('Deadline at submission')}: {formatEpoch(detail.timing.effective_due_at)}
+						</span>
+					{/if}
 					<span
 						>{$i18n.t('Round {{round}}', { round: detail.submission.round_no })} · {$i18n.t(
 							'稿件版本'
@@ -982,7 +996,10 @@
 					<!-- Article body (scrollable) -->
 					<div class="px-6 py-5 lg:flex-1 lg:overflow-y-auto">
 						<div class="mb-3">
-							<WordDownloadButton submissionId={detail?.submission?.id} versionId={detail?.final_version?.id} />
+							<WordDownloadButton
+								submissionId={detail?.submission?.id}
+								versionId={detail?.final_version?.id}
+							/>
 							<WritingMaterials
 								materials={detail?.submission?.stats_json?.materials ?? []}
 								submissionId={detail?.submission?.id}
@@ -990,20 +1007,23 @@
 						</div>
 						<div class="rounded-2xl bg-stone-50 dark:bg-gray-900 p-5">
 							{#if docView === 'process'}
-								<ProcessDraftView submissionId={detail?.submission?.id}
+								<ProcessDraftView
+									submissionId={detail?.submission?.id}
 									inspection={processInspection}
 									source={conversationEvents.find((event) => event.key === processState.selectedKey)
 										?.source ?? null}
 								/>
 							{:else if highlight}
-								<SourceHighlightedText submissionId={detail?.submission?.id}
+								<SourceHighlightedText
+									submissionId={detail?.submission?.id}
 									json={detail.final_version.note_snapshot_json}
 									text={detail.final_version.note_snapshot_text ?? ''}
 									segments={analysisHighlights}
 									{activeSegmentId}
 								/>
 							{:else}
-								<SourceHighlightedText submissionId={detail?.submission?.id}
+								<SourceHighlightedText
+									submissionId={detail?.submission?.id}
 									json={detail.final_version.note_snapshot_json}
 									text={detail.final_version.note_snapshot_text ?? ''}
 									segments={[]}
@@ -1306,71 +1326,73 @@
 												on:click={() => (returnMode = !returnMode)}
 											>
 												{$i18n.t('Return for Revision')}
-												<span aria-hidden="true" class="text-xs">{returnMode ? '▲' : '▼'}</span>
+												<DisclosureChevron open={returnMode} />
 											</button>
 											{#if returnMode}
-												<div
-													class="space-y-4 border-t border-amber-100 px-4 pb-4 pt-3 dark:border-amber-900/60"
-												>
-													<div>
-														<label
-															for="review-returned-comment"
-															class="mb-1.5 block text-xs font-medium text-gray-400"
-														>
-															{$i18n.t('Returned Comment')}
-														</label>
-														<textarea
-															id="review-returned-comment"
-															bind:value={returnedComment}
-															disabled={isHistoricalRound}
-															class="min-h-20 w-full resize-none rounded-2xl border border-gray-200 dark:border-gray-800 px-4 py-3 text-sm outline-none focus:border-gray-400 transition-colors disabled:opacity-50"
-															placeholder={$i18n.t('Returned Comment')}
-														></textarea>
-													</div>
+												<div transition:disclosureSlide>
+													<div
+														class="space-y-4 border-t border-amber-100 px-4 pb-4 pt-3 dark:border-amber-900/60"
+													>
+														<div>
+															<label
+																for="review-returned-comment"
+																class="mb-1.5 block text-xs font-medium text-gray-400"
+															>
+																{$i18n.t('Returned Comment')}
+															</label>
+															<textarea
+																id="review-returned-comment"
+																bind:value={returnedComment}
+																disabled={isHistoricalRound}
+																class="min-h-20 w-full resize-none rounded-2xl border border-gray-200 dark:border-gray-800 px-4 py-3 text-sm outline-none focus:border-gray-400 transition-colors disabled:opacity-50"
+																placeholder={$i18n.t('Returned Comment')}
+															></textarea>
+														</div>
 
-													<!--
+														<!--
 													让质疑读者就这条意见追问。退回意见此前写完就没下文了，学生看不看、
 													改不改全凭自觉；勾上之后，下一轮提交前的质疑会围绕这条展开。
 													作业没启用质疑时不显示 —— 不在这里替教师悄悄打开那个环节。
 												-->
-													{#if detail?.assignment?.challenge_enabled}
-														<label
-															class="flex cursor-pointer items-start gap-2 rounded-2xl bg-gray-50 px-4 py-3 dark:bg-gray-800"
-														>
-															<input
-																type="checkbox"
-																class="mt-0.5 size-3.5 shrink-0 accent-black dark:accent-gray-100"
-																bind:checked={challengeFollowup}
-																disabled={isHistoricalRound}
-															/>
-															<span
-																class="text-xs leading-relaxed text-gray-700 dark:text-gray-200"
+														{#if detail?.assignment?.challenge_enabled}
+															<label
+																class="flex cursor-pointer items-start gap-2 rounded-2xl bg-gray-50 px-4 py-3 dark:bg-gray-800"
 															>
-																{$i18n.t('Have the reader follow up on this comment next round')}
-															</span>
-														</label>
-													{/if}
+																<input
+																	type="checkbox"
+																	class="mt-0.5 size-3.5 shrink-0 accent-black dark:accent-gray-100"
+																	bind:checked={challengeFollowup}
+																	disabled={isHistoricalRound}
+																/>
+																<span
+																	class="text-xs leading-relaxed text-gray-700 dark:text-gray-200"
+																>
+																	{$i18n.t('Have the reader follow up on this comment next round')}
+																</span>
+															</label>
+														{/if}
 
-													<!-- Resubmit due at (required when returning for revision) -->
-													<div>
-														<div class="mb-1.5 block text-xs font-medium text-gray-400">
-															{$i18n.t('Resubmit before')}
+														<!-- Resubmit due at (required when returning for revision) -->
+														<div>
+															<div class="mb-1.5 block text-xs font-medium text-gray-400">
+																{$i18n.t('Resubmit before')}
+															</div>
+															<EduDateTimeField
+																bind:value={resubmitDueLocal}
+																disabled={isHistoricalRound}
+																className="w-full rounded-2xl border border-gray-200 dark:border-gray-800 px-4 py-3 text-sm outline-none focus:border-gray-400 transition-colors disabled:opacity-50"
+															/>
 														</div>
-														<EduDateTimeField
-															bind:value={resubmitDueLocal}
-															disabled={isHistoricalRound}
-															className="w-full rounded-2xl border border-gray-200 dark:border-gray-800 px-4 py-3 text-sm outline-none focus:border-gray-400 transition-colors disabled:opacity-50"
-														/>
-													</div>
 
-													<div class="flex justify-end">
-														<button
-															class="rounded-full bg-amber-600 px-4 py-2 text-sm text-white transition-colors hover:bg-amber-700 disabled:opacity-60"
-															disabled={saving || isHistoricalRound}
-															on:click={() => saveReview('returned')}
-														>
-															{$i18n.t('Return to Student')}
-														</button>
+														<div class="flex justify-end">
+															<button
+																class="rounded-full bg-amber-600 px-4 py-2 text-sm text-white transition-colors hover:bg-amber-700 disabled:opacity-60"
+																disabled={saving || isHistoricalRound}
+																on:click={() => saveReview('returned')}
+															>
+																{$i18n.t('Return to Student')}
+															</button>
+														</div>
 													</div>
 												</div>
 											{/if}

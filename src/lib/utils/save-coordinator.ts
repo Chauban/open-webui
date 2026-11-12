@@ -9,22 +9,18 @@ export const createSerializedSaveRunner = (
 	let queuedReason: string | null = null;
 
 	const runLoop = async (reason: string): Promise<void> => {
-		await save(reason);
-		if (queuedReason) {
-			const nextReason = queuedReason;
+		let next: string | null = reason;
+		while (next !== null) {
 			queuedReason = null;
-			await runLoop(nextReason);
+			await save(next);
+			next = queuedReason;
 		}
 	};
 
-	return async (reason: string, options: SaveOptions = {}) => {
+	return async (reason: string, _options: SaveOptions = {}) => {
 		if (activeRun) {
-			if (!options.force) {
-				queuedReason = reason;
-				return activeRun;
-			}
-			queuedReason = null;
-			await activeRun;
+			queuedReason = reason;
+			return activeRun;
 		}
 
 		activeRun = runLoop(reason).finally(() => {

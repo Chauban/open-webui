@@ -34,6 +34,7 @@ const template: TeachingConfig = {
 	reflection_questions: []
 };
 const draft: AssignmentDraft = {
+	photoTranscriptionEnabled: false,
 	imageReadingEnabled: false,
 	title: '论证题',
 	description: '解释证据',
@@ -276,6 +277,7 @@ test.each(['from_scratch', 'revise_draft'] as const)(
 				...draft,
 				taskMode,
 				title: '普通作业草稿',
+				photoTranscriptionEnabled: false,
 				imageReadingEnabled: true,
 				challengeRounds: 2,
 				thinking: 'medium',
@@ -310,7 +312,7 @@ test('应用新版本仍需要调整说明与明确确认', async () => {
 	await editPrompt();
 	await screen.findByText('已自动保存');
 	expect(api.mock.calls.some(([path]) => path.endsWith('/publish'))).toBe(false);
-	await fireEvent.input(screen.getByLabelText('调整说明'), {
+	await fireEvent.input(screen.getByLabelText('修改说明（必填）'), {
 		target: { value: '调整证据阅读方式' }
 	});
 	await confirmPublish();

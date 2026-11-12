@@ -52,6 +52,7 @@
 
 	// RightWrite: the writing workspace hides chat-level context actions.
 	export let disableContextActions = false;
+	export let freeChat = false;
 	export let onSaveTempChat: () => {};
 	export let archiveChatHandler: (id: string) => void;
 	export let deleteChatHandler: (id: string) => void;
@@ -123,6 +124,12 @@
 				>
 					{#if chat?.id}
 						<div class="flex max-w-full min-w-0 items-center gap-2 mr-2">
+							{#if freeChat}
+								<span
+									class="shrink-0 rounded-md bg-[#F7F3EA] px-2 py-1 text-xs text-[#20406A] dark:bg-gray-800 dark:text-gray-200"
+									>{$i18n.t('Free Chat')}</span
+								>
+							{/if}
 							<div
 								class="min-w-0 truncate py-1 text-left text-[0.9375rem] font-normal text-gray-700 dark:text-gray-300"
 							>
@@ -157,11 +164,14 @@
 							{/if}
 						</div>
 					{:else}
-						<div class="pointer-events-none invisible flex max-w-full min-w-0 items-center gap-2">
+						<div
+							class="pointer-events-none flex max-w-full min-w-0 items-center gap-2"
+							class:invisible={!freeChat}
+						>
 							<div
 								class="min-w-0 truncate py-1 text-left text-[0.9375rem] font-normal text-gray-700 dark:text-gray-300"
 							>
-								{$i18n.t('New Chat')}
+								{$i18n.t(freeChat ? 'Free Chat' : 'New Chat')}
 							</div>
 						</div>
 					{/if}

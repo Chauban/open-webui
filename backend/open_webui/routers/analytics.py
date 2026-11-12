@@ -1,7 +1,8 @@
 import logging
+import time
 from collections import defaultdict
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Query
 from open_webui.internal.db import get_async_session
@@ -18,6 +19,35 @@ log = logging.getLogger(__name__)
 
 
 router = APIRouter()
+
+
+@router.get('/model-health')
+async def get_model_health(
+    period: Literal['1h', '24h', '7d'] = '24h',
+    user=Depends(get_admin_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    from open_webui.services.model_health import model_health_summary
+
+    end = int(time.time())
+    start = end - {'1h': 3600, '24h': 86400, '7d': 604800}[period]
+    return {'models': await model_health_summary(db, start, end), 'start': start, 'end': end}
+
+
+@router.get('/model-health/failures')
+async def get_model_health_failures(
+    period: Literal['1h', '24h', '7d'] = '24h',
+    model_id: str | None = Query(None, max_length=256),
+    offset: int = Query(0, ge=0, le=100000),
+    limit: int = Query(25, ge=1, le=100),
+    user=Depends(get_admin_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    from open_webui.services.model_health import model_health_failures
+
+    end = int(time.time())
+    start = end - {'1h': 3600, '24h': 86400, '7d': 604800}[period]
+    return await model_health_failures(db, start, end, model_id, offset, limit)
 
 
 ####################

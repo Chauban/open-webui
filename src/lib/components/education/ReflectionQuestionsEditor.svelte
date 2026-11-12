@@ -1,4 +1,6 @@
 <script lang="ts">
+	import DisclosureChevron from '$lib/components/common/DisclosureChevron.svelte';
+	import { disclosureSlide } from '$lib/utils/disclosure';
 	import { isRevision } from '$lib/utils/task-types';
 	// 提交前反思的出题器：新建作业页与作业详情页共用。
 	//
@@ -270,12 +272,16 @@
 			</div>
 			<div class="ml-auto flex flex-wrap items-center gap-2">
 				<EduButton
+					aria-expanded={showRecommended}
 					size="sm"
 					disabled={recommended.length === 0}
 					on:click={() => (showRecommended = !showRecommended)}
 				>
 					{$i18n.t('Recommended questions')}
-				</EduButton>
+					<span class="ml-1 inline-flex align-middle"
+						><DisclosureChevron open={showRecommended} /></span
+					></EduButton
+				>
 				{#if importableSets.length > 0}
 					<select
 						bind:value={importValue}
@@ -300,26 +306,28 @@
 		</div>
 
 		{#if showRecommended && recommended.length > 0}
-			<div class="mt-3 rounded-2xl bg-gray-50 p-3 dark:bg-gray-800/60">
-				<div class="mb-2 text-xs text-gray-500 dark:text-gray-400">
-					{$i18n.t('Click to add. Questions already in the list are hidden.')}
-				</div>
-				<div class="flex flex-wrap gap-2">
-					{#each recommended as item (item.question.prompt)}
-						<button
-							type="button"
-							disabled={atLimit}
-							class="rounded-full border border-gray-300 bg-white px-3 py-1.5 text-left text-xs text-gray-700 transition hover:border-gray-500 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-850 dark:text-gray-300"
-							on:click={() => addRecommended(item.question)}
-						>
-							+ {item.question.prompt}
-							<span class="text-gray-400"
-								>· {$i18n.t(
-									KINDS.find((kind) => kind.key === item.question.kind)?.label ?? ''
-								)}</span
+			<div transition:disclosureSlide>
+				<div class="mt-3 rounded-2xl bg-gray-50 p-3 dark:bg-gray-800/60">
+					<div class="mb-2 text-xs text-gray-500 dark:text-gray-400">
+						{$i18n.t('Click to add. Questions already in the list are hidden.')}
+					</div>
+					<div class="flex flex-wrap gap-2">
+						{#each recommended as item (item.question.prompt)}
+							<button
+								type="button"
+								disabled={atLimit}
+								class="rounded-full border border-gray-300 bg-white px-3 py-1.5 text-left text-xs text-gray-700 transition hover:border-gray-500 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-850 dark:text-gray-300"
+								on:click={() => addRecommended(item.question)}
 							>
-						</button>
-					{/each}
+								+ {item.question.prompt}
+								<span class="text-gray-400"
+									>· {$i18n.t(
+										KINDS.find((kind) => kind.key === item.question.kind)?.label ?? ''
+									)}</span
+								>
+							</button>
+						{/each}
+					</div>
 				</div>
 			</div>
 		{/if}

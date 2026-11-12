@@ -1,8 +1,14 @@
 // @vitest-environment jsdom
-import { render, waitFor } from '@testing-library/svelte';
+import { cleanup, render, waitFor } from '@testing-library/svelte';
 import { readable } from 'svelte/store';
-import { describe, expect, test, vi } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import RichTextInput from '$lib/components/common/RichTextInput.svelte';
+import { Editor } from '@tiptap/core';
+import StarterKit from '@tiptap/starter-kit';
+import WritingEditor from './WritingEditor.svelte';
+import { writingExtensions } from './writing-document-extensions';
+
+afterEach(cleanup);
 
 // 写作工作区靠这两个标志判断「这次 onChange 是不是学生在改稿」。
 // 判断错的代价见 f7ac3c140：整篇被记成一次删除、source map 被清空，
@@ -24,6 +30,31 @@ const emissions = (onChange: ReturnType<typeof vi.fn>) =>
 	}));
 
 describe('writing editor change emissions', () => {
+	test('opening another writing editor safely compares ProseMirror null-prototype attributes', async () => {
+		const source = new Editor({
+			extensions: [
+				StarterKit,
+				...writingExtensions({
+					t: (key) => key,
+					sessionId: () => 'test',
+					imageReading: () => false
+				})
+			],
+			content: '<p style="text-align:center"><a href="https://example.org">保留链接与居中</a></p>'
+		});
+		const value = source.getJSON();
+		expect(Object.getPrototypeOf(value.content![0].attrs)).toBeNull();
+		const first = render(WritingEditor, { props: { value }, context });
+		await waitFor(() =>
+			expect(first.container.querySelector('.tiptap')?.textContent).toBe('保留链接与居中')
+		);
+		const second = render(WritingEditor, { props: { value }, context });
+		await waitFor(() =>
+			expect(second.container.querySelector('.tiptap')?.textContent).toBe('保留链接与居中')
+		);
+		expect(first.container.querySelector('.tiptap')?.textContent).toBe('保留链接与居中');
+		source.destroy();
+	});
 	test('marks content the component itself pushes in, so it never reads as an edit', async () => {
 		const onChange = vi.fn();
 		const rendered = render(RichTextInput, {

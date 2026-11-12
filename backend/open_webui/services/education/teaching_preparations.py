@@ -256,6 +256,7 @@ async def publish(request, user, preparation_id, form, db):  # noqa: C901 -- one
             raise HTTPException(400, 'Describe the teaching change')
         rows = [db.get(Assignment, assignment.id)]
         rows[0].config_revision += 1
+        rows[0].change_summary = form.change_summary.strip()
     else:
         from open_webui.routers.education import _ensure_classroom_access, _get_classroom_or_404
 

@@ -21,7 +21,12 @@ vi.mock('focus-trap', () => ({
 	})
 }));
 vi.mock('$lib/stores', () => ({
-	config: readable({ features: { enable_education_draft_image_import: true } })
+	config: readable({
+		features: {
+			enable_education_draft_image_import: true,
+			enable_education_photo_transcription: true
+		}
+	})
 }));
 
 import EditorImportDialog from './EditorImportDialog.svelte';
@@ -69,7 +74,7 @@ test('导入的文字先进预览,学生可以改,再插到光标处', async () 
 	);
 });
 
-test('编辑器里已有正文时,替换全文要再点一次确认', async () => {
+test('编辑器里已有正文时,替换全文先通过独立确认框确认', async () => {
 	const onInsert = vi.fn();
 	render(EditorImportDialog, {
 		props: { show: true, sessionId: 'session-1', hasContent: true, onInsert },
@@ -80,7 +85,7 @@ test('编辑器里已有正文时,替换全文要再点一次确认', async () =
 	await fireEvent.click(screen.getByText('Replace all text').closest('button')!);
 	expect(onInsert).not.toHaveBeenCalled();
 	expect(
-		screen.getByText('This replaces everything you have written so far. Click again to confirm.')
+		screen.getByText('This replaces everything you have written so far.')
 	).toBeTruthy();
 
 	await fireEvent.click(screen.getByText('Confirm replacing all text').closest('button')!);
@@ -93,3 +98,44 @@ test('编辑器里已有正文时,替换全文要再点一次确认', async () =
 		})
 	);
 });
+
+test.each(['photo_to_text', 'reference'])(
+	'图片用途 %s 直接插入当前稿，无需二次确认',
+	async (purpose) => {
+		const onInsert = vi.fn();
+		const document =
+			purpose === 'photo_to_text'
+				? textDocument('手写正文')
+				: {
+						type: 'doc',
+						content: [{ type: 'writingImage', attrs: { materialId: 'm', blockId: 'm1' } }]
+					};
+		extractImportImages.mockResolvedValue({
+			text: purpose === 'photo_to_text' ? '手写正文' : '',
+			content_json: document,
+			materials: []
+		});
+		render(EditorImportDialog, {
+			props: {
+				show: true,
+				sessionId: 'session-1',
+				hasContent: true,
+				photoTranscriptionEnabled: true,
+				onInsert
+			},
+			context
+		});
+		await fireEvent.change(screen.getByTestId('draft-upload-input'), {
+			target: { files: [new File(['x'], 'photo.png', { type: 'image/png' })] }
+		});
+		await fireEvent.click(
+			screen.getByText(purpose === 'photo_to_text' ? '照片转正文' : '插入图片')
+		);
+		await waitFor(() => expect(onInsert).toHaveBeenCalledOnce());
+		expect(onInsert).toHaveBeenCalledWith(
+			purpose === 'photo_to_text' ? '手写正文' : '',
+			'insert',
+			expect.objectContaining({ purpose, document })
+		);
+	}
+);

@@ -20,6 +20,7 @@ const form: AssignmentDraft = {
 	scoringMode: 'dimensions',
 	taskMode: 'from_scratch',
 	coachingStyle: 'balanced',
+	photoTranscriptionEnabled: false,
 	imageReadingEnabled: true,
 	challengeEnabled: true,
 	challengeRounds: 2,

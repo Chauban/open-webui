@@ -16,6 +16,7 @@ import {
 export type RubricCriterionDraft = { key: string; label: string; maxScore: string };
 
 export type AssignmentDraft = {
+	photoTranscriptionEnabled: boolean;
 	imageReadingEnabled: boolean;
 	scoringMode: 'dimensions' | 'total';
 	title: string;
@@ -40,6 +41,7 @@ export const draftThinkingFrom = (params?: AssignmentModelParams | null) => ({
 });
 
 export type AssignmentPayload = {
+	photo_transcription_enabled: boolean;
 	image_reading_enabled: boolean;
 	scoring_mode: 'dimensions' | 'total';
 	title: string;
@@ -120,6 +122,7 @@ export const buildAssignmentPayload = (
 
 	return {
 		payload: {
+			photo_transcription_enabled: draft.photoTranscriptionEnabled,
 			image_reading_enabled: draft.imageReadingEnabled,
 			scoring_mode: draft.scoringMode,
 			title: draft.title.trim(),

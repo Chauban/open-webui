@@ -27,6 +27,7 @@ const STEPS: AiStep[] = [
 	step('revision_review', 'student_chat_model'),
 	step('whole_review', 'student_chat_model'),
 	step('reader_check', 'student_chat_model'),
+	step('photo_transcription', 'admin_model'),
 	step('image_parsing', 'admin_model'),
 	step('class_insight', 'teacher_chat_model')
 ];
@@ -36,6 +37,7 @@ const POLICY: AiStepPolicy = {
 	revision_review: { model: null, thinking: 'model_default' },
 	whole_review: { model: null, thinking: 'model_default' },
 	reader_check: { model: null, thinking: 'model_default' },
+	photo_transcription: { model: null, thinking: 'off' },
 	image_parsing: { model: 'vision-model', thinking: 'off' },
 	class_insight: { model: null, thinking: 'model_default' }
 };
@@ -76,6 +78,7 @@ test('每个平台步骤一行:模型与思考各一个下拉,通读那行带试
 		'revision_review',
 		'whole_review',
 		'reader_check',
+		'photo_transcription',
 		'image_parsing',
 		'class_insight'
 	]) {
@@ -100,8 +103,8 @@ test('每个平台步骤一行:模型与思考各一个下拉,通读那行带试
 		'Follow the teacher’s selected model'
 	);
 	// 图片识别只列能看图的
-	expect(optionLabels('Model for Image-to-text model')).toEqual([
-		'Off (no image import)',
+	expect(optionLabels('Model for AI 读取参考图片')).toEqual([
+		'关闭此识别能力（保留图片上传）',
 		'Vision'
 	]);
 
@@ -112,7 +115,7 @@ test('每个平台步骤一行:模型与思考各一个下拉,通读那行带试
 		...POLICY,
 		reader_check: { model: 'text-only', thinking: 'model_default' }
 	});
-	await fireEvent.change(screen.getByRole('combobox', { name: 'Image-to-text model' }), {
+	await fireEvent.change(screen.getByRole('combobox', { name: 'AI 读取参考图片' }), {
 		target: { value: 'low' }
 	});
 	expect(onChange).toHaveBeenLastCalledWith({

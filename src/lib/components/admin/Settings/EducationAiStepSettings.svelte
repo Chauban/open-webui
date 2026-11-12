@@ -59,7 +59,8 @@
 		models.filter(
 			(model) =>
 				model.owned_by !== 'arena' &&
-				(key !== 'image_parsing' || model.info?.meta?.capabilities?.vision !== false)
+				(!['image_parsing', 'photo_transcription'].includes(key) ||
+					model.info?.meta?.capabilities?.vision !== false)
 		);
 	// 指定的模型已被删掉:后端说不在,或前端的模型列表里也没有。
 	const isMissing = (key: PlatformStepKey) => {
@@ -227,7 +228,7 @@
 
 	<p class="text-[0.6875rem] text-gray-400 dark:text-gray-600">
 		{$i18n.t(
-			'A teacher’s setting only reaches the coaching chat; the other steps always follow this table, so their results stay comparable across classes.'
+			'教师可分别开启作业的照片转正文和参考图片识读；模型与思考由本表统一设置。辅导对话的思考可按授权交给教师设置。'
 		)}
 	</p>
 </div>

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { hasOpenDialogs, dismissTopDialog } from '$lib/utils/dialog-layer';
 	import { toast } from 'svelte-sonner';
 	import { onMount, tick, getContext } from 'svelte';
 	import { openDB, deleteDB } from 'idb';
@@ -334,6 +335,14 @@
 					event.preventDefault();
 					showSettings.set('shortcuts');
 				} else if (shortcut === Shortcut.CLOSE_MODAL) {
+					// Escape belongs to the focused popup / top dialog, not the settings store.
+					if (hasOpenDialogs()) {
+						if (event.key !== 'Escape') {
+							event.preventDefault();
+							dismissTopDialog();
+						}
+						return;
+					}
 					console.log('Shortcut triggered: CLOSE_MODAL');
 					event.preventDefault();
 					showSettings.set(false);

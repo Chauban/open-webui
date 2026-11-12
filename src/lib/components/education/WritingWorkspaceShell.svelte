@@ -1,4 +1,7 @@
 <script lang="ts">
+	import Modal from '$lib/components/common/Modal.svelte';
+	import DisclosureChevron from '$lib/components/common/DisclosureChevron.svelte';
+	import { disclosureSlide } from '$lib/utils/disclosure';
 	import { pollReadingProgress } from './reading-progress';
 	import { teachingApi } from '$lib/apis/education/teaching';
 	let teachingSummary = null;
@@ -32,11 +35,22 @@
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
-	import { config, models, selectedFolder } from '$lib/stores';
+	import { config, models, selectedFolder, user } from '$lib/stores';
 
 	import WritingEditor from './WritingEditor.svelte';
+	import WritingSaveNotice from './WritingSaveNotice.svelte';
+	import {
+		createWritingBackup,
+		downloadWritingBackup,
+		type WritingBackup
+	} from '$lib/utils/writing-backup';
+	import {
+		writingSaveProblem,
+		waitForWritingSave,
+		type WritingSaveProblem
+	} from '$lib/utils/writing-save';
 	import WordDownloadButton from './WordDownloadButton.svelte';
-	import { textDocument, hasDocumentContent } from '$lib/utils/writing-document';
+	import { textDocument, hasDocumentContent, documentText } from '$lib/utils/writing-document';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Chat from '$lib/components/chat/Chat.svelte';
 	import ReviewResultCard from '$lib/components/education/ReviewResultCard.svelte';
@@ -140,6 +154,75 @@
 	let saveRetryAttempt = 0;
 	let saveRetryTimer: ReturnType<typeof setTimeout> | null = null;
 	let hasUnsavedFailure = false;
+	let saveProblem: WritingSaveProblem | null = null;
+	let localSafe = true;
+	let recoveryBackups: WritingBackup[] = [];
+	let backupStore: ReturnType<typeof createWritingBackup<any>> | null = null;
+	let recoveredBackup: WritingBackup | null = null;
+	let pendingVersion: { key: string; id: string; text: string; runs: SourceRun[] } | null = null;
+	let lastSavedDocument = '';
+	let chatSaveBlocked = false;
+	let disposed = false;
+	let releaseRetry: (() => void) | null = null;
+	const backupDraft = () => {
+		if (!writingSession || !backupStore) return;
+		try {
+			backupStore.write({
+				document: noteJson ?? textDocument(noteText),
+				runs: sourceRuns,
+				operations: unsavedOperations,
+				baseline: writingSession.draft_baseline_at ?? null,
+				pendingVersion
+			});
+			localSafe = true;
+		} catch {
+			localSafe = false;
+		}
+	};
+	const copyDraft = async () => {
+		try {
+			await navigator.clipboard.writeText(noteText);
+			toast.success(t('全文已复制。'));
+		} catch {
+			toast.error(t('复制失败，请下载文字备份。'));
+		}
+	};
+	const downloadDraft = () => downloadWritingBackup(noteJson ?? textDocument(noteText));
+	const discardBackup = (backup: WritingBackup) => {
+		try {
+			backupStore?.discard(backup);
+			recoveryBackups = recoveryBackups.filter((item) => item.id !== backup.id);
+		} catch {
+			localSafe = false;
+		}
+	};
+	const restoreBackup = (backup: WritingBackup) => {
+		if (editorLocked || saving) return;
+		if (backup.data.baseline !== (writingSession.draft_baseline_at ?? null)) {
+			toast.error(t('初稿起点已变化，请下载备份后核对，不能直接覆盖当前稿件。'));
+			return;
+		}
+		noteJson = structuredClone(backup.data.document);
+		noteText = documentText(noteJson);
+		noteHtml = '';
+		lastText = noteText;
+		sourceRuns = structuredClone(backup.data.runs);
+		unsavedOperations = structuredClone(backup.data.operations);
+		clientOperationSequence = Math.max(0, ...unsavedOperations.map((op) => op.client_sequence + 1));
+		pendingVersion = backup.data.pendingVersion;
+		recoveredBackup = backup;
+		recoveryBackups = recoveryBackups.filter((item) => item.id !== backup.id);
+		scheduleSave();
+	};
+	const retrySave = () => {
+		if (autoSaveTimer) clearTimeout(autoSaveTimer);
+		autoSaveTimer = null;
+		void persistDraft('manual', { force: true });
+	};
+	const loginAgain = () => {
+		backupDraft();
+		void goto(`/auth?redirect=${encodeURIComponent($page.url.pathname + $page.url.search)}`);
+	};
 
 	let aiUsage: AiUsage = null;
 	let reflectionDrafts: ReflectionAnswerDrafts = {};
@@ -181,7 +264,7 @@
 	$: isPastDue = activeDueAt ? activeDueAt * 1000 <= nowTick : false;
 	// 已批改即定稿:只有老师退回(review_status 变回 returned)才重新解锁。
 	$: isGraded = review?.review_status === 'reviewed';
-	$: isReadOnly = isAssignment ? isPastDue || isGraded : false;
+	$: isReadOnly = isAssignment && isGraded;
 	// capabilities 在 Model 类型里是 object,运行时是各项能力的开关表,按宽类型读。
 	$: selectedModelThinks = Boolean(
 		(
@@ -204,7 +287,7 @@
 		isRevision(assignment?.task_mode) &&
 		!writingSession?.draft_baseline_at &&
 		!isReadOnly;
-	$: canSubmitAssignment = isAssignment && !isPastDue && !isGraded && !needsDraftBaseline;
+	$: canSubmitAssignment = isAssignment && !isGraded && !needsDraftBaseline;
 	// 确认后回到对话阅读开场；不替学生自动发送提问。
 	const onDraftBaselineSubmitted = async () => {
 		await load();
@@ -266,6 +349,8 @@
 	$: if (readings.length && hasRevisionCoaching) {
 		const linkedChatId = readings.find((record) => record.context?.chat_id)?.context.chat_id;
 		if (linkedChatId && !currentChatId) {
+			// 初读由阅读接口创建对话，不经过 Chat 的新对话刷新路径。
+			void refreshFolderChatLists(workspaceProject?.id, { id: linkedChatId });
 			void goto(`${projectBaseUrl}?chat=${linkedChatId}`, { replaceState: true });
 		}
 	}
@@ -362,9 +447,7 @@
 	// - 定稿后左栏不能再开新对话,空着没有意义,学生用过 AI 就载入那次对话供回看;
 	// - 修订初稿作业写作中,首轮通读那段对话是改稿的主线,学生隔天回来在空白对话里接着问,
 	//   之前 AI 说过什么就看不到了。
-	let lastChatAutoOpened = false;
-	$: if (loaded && !lastChatAutoOpened) {
-		lastChatAutoOpened = true;
+	$: if (loaded && !currentChatId && (isReadOnly || isRevision(assignment?.task_mode))) {
 		void openLastChat();
 	}
 	const openLastChat = async () => {
@@ -375,7 +458,7 @@
 		const exists = await getChatById(localStorage.token, activeChatId)
 			.then(() => true)
 			.catch(() => false);
-		if (!exists || currentChatId) return;
+		if (!exists || currentChatId || disposed) return;
 		lastPersistedActiveChatId = activeChatId;
 		await goto(`${projectBaseUrl}?chat=${activeChatId}`, { replaceState: true });
 	};
@@ -549,6 +632,7 @@
 	};
 
 	const scheduleSave = () => {
+		backupDraft();
 		saveStatusKey = 'Saving...';
 		if (autoSaveTimer) clearTimeout(autoSaveTimer);
 		autoSaveTimer = setTimeout(() => {
@@ -558,7 +642,7 @@
 	};
 
 	const performPersistDraft = async (triggerType: WritingVersionTrigger = 'autosave') => {
-		if (!writingSession || isReadOnly) return;
+		if (!writingSession || isReadOnly || disposed) return;
 		saving = true;
 		hasUnsavedFailure = false;
 		saveRetryAttempt = 0;
@@ -573,9 +657,18 @@
 			operations: unsavedOperations
 		});
 		const documentKey = JSON.stringify(draft.json);
-		let version = null;
+		let version = pendingVersion?.key === documentKey ? { id: pendingVersion.id } : null;
 		for (let attempt = 0; attempt <= MAX_SAVE_RETRIES; attempt += 1) {
 			try {
+				if (pendingVersion && pendingVersion.key !== documentKey) {
+					await createProvenanceSegments(localStorage.token, writingSession.id, {
+						version_id: pendingVersion.id,
+						replace_existing: true,
+						segments: sourceRunsToProvenanceSegments(pendingVersion.text, pendingVersion.runs)
+					});
+					pendingVersion = null;
+					backupDraft();
+				}
 				await autosaveWritingSession(localStorage.token, writingSession.id, {
 					content_json: draft.json,
 					content_html: draft.html,
@@ -591,15 +684,16 @@
 						content_text: draft.text
 					});
 					lastVersionedDocument = documentKey;
+					pendingVersion = { key: documentKey, id: version.id, text: draft.text, runs: draft.runs };
+					backupDraft();
 				}
 
-				if (draft.operations.length > 0) {
+				for (let offset = 0; offset < draft.operations.length; offset += 1000) {
+					const batch = draft.operations.slice(offset, offset + 1000);
 					await createEditorOperations(localStorage.token, writingSession.id, {
-						operations: draft.operations
+						operations: batch
 					});
-					const savedSequences = new Set(
-						draft.operations.map((operation) => operation.client_sequence)
-					);
+					const savedSequences = new Set(batch.map((operation) => operation.client_sequence));
 					unsavedOperations = unsavedOperations.filter(
 						(operation) => !savedSequences.has(operation.client_sequence)
 					);
@@ -621,15 +715,28 @@
 					JSON.stringify(noteJson) === documentKey && unsavedOperations.length === 0
 						? 'Saved'
 						: 'Saving...';
+				lastSavedDocument = documentKey;
+				pendingVersion = null;
+				saveProblem = null;
+				if (JSON.stringify(noteJson) === documentKey && unsavedOperations.length === 0) {
+					try {
+						backupStore?.clear();
+						if (recoveredBackup) backupStore?.discard(recoveredBackup);
+						recoveredBackup = null;
+					} catch {
+						localSafe = false;
+					}
+				} else backupDraft();
 				if (version) materialsRefresh += 1;
 				hasUnsavedFailure = false;
 				saveRetryAttempt = 0;
 				saving = false;
 				return;
 			} catch (error) {
-				console.error(error);
+				saveProblem = writingSaveProblem(error);
+				backupDraft();
 
-				if (attempt >= MAX_SAVE_RETRIES) {
+				if (disposed || !saveProblem.retryable || attempt >= MAX_SAVE_RETRIES) {
 					hasUnsavedFailure = true;
 					saveStatusKey = 'Save failed';
 					saveRetryAttempt = 0;
@@ -639,10 +746,19 @@
 
 				saveRetryAttempt = attempt + 1;
 				saveStatusKey = 'Retrying...';
-				await new Promise((resolve) => {
-					saveRetryTimer = setTimeout(resolve, SAVE_RETRY_DELAYS_MS[attempt]);
+				await new Promise<void>((resolve) => {
+					releaseRetry = resolve;
+					saveRetryTimer = setTimeout(
+						resolve,
+						Math.max(SAVE_RETRY_DELAYS_MS[attempt], saveProblem?.retryAfterMs || 0)
+					);
 				});
 				saveRetryTimer = null;
+				releaseRetry = null;
+				if (disposed) {
+					saving = false;
+					return;
+				}
 			}
 		}
 	};
@@ -656,23 +772,34 @@
 	// 发给 AI 之前把防抖窗口里还没存的正文立即存掉：后端每轮注入的是最近一次保存的正文，
 	// 并按保存时间判断学生在 AI 上次回复之后改没改稿。
 	// 最多等 5 秒；未保存成功就保留消息并停止发送，不能让 AI 把旧稿当成新改稿。
-	const FLUSH_BEFORE_CHAT_TIMEOUT_MS = 5000;
 	const flushDraftBeforeChat = async () => {
-		await refreshTeachingSummary();
-		if (!autoSaveTimer && !saving && !hasUnsavedFailure && unsavedOperations.length === 0) return;
+		const block = (message: string): never => {
+			chatSaveBlocked = true;
+			if (narrowLayout) showMobileDraft = true;
+			throw new Error(t(message));
+		};
+		if (recoveryBackups.length) block('请先处理本地备份，再发送消息。输入的消息已保留。');
 		if (autoSaveTimer) {
 			clearTimeout(autoSaveTimer);
 			autoSaveTimer = null;
 		}
-		const saved = await Promise.race([
-			persistDraft('autosave', { force: true }).then(() => !hasUnsavedFailure),
-			new Promise<boolean>((resolve) =>
-				setTimeout(() => resolve(false), FLUSH_BEFORE_CHAT_TIMEOUT_MS)
+		if (
+			saving ||
+			hasUnsavedFailure ||
+			unsavedOperations.length ||
+			JSON.stringify(noteJson) !== lastSavedDocument
+		) {
+			const saved = await waitForWritingSave(persistDraft('autosave', { force: true }));
+			if (
+				!saved ||
+				hasUnsavedFailure ||
+				unsavedOperations.length ||
+				JSON.stringify(noteJson) !== lastSavedDocument
 			)
-		]);
-		if (!saved) {
-			throw new Error($i18n.t('稿件尚未保存成功，请稍后再发送。输入的消息已保留。'));
+				block('稿件尚未保存成功，请先重试保存，再点击发送。输入的消息已保留。');
 		}
+		await refreshTeachingSummary();
+		chatSaveBlocked = false;
 	};
 
 	const saveTitle = async () => {
@@ -924,7 +1051,7 @@
 		// 试读针对的是服务端最新的那一稿，所以先把当前草稿落盘再开。
 		await persistDraft('manual', { force: true });
 		if (hasUnsavedFailure) {
-			toast.error($i18n.t('Save failed. Fix the connection before submitting.'));
+			toast.error(t(saveProblem?.message ?? '保存尚未完成，请先处理保存问题再提交。'));
 			return;
 		}
 		showChallenge = true;
@@ -959,7 +1086,7 @@
 		try {
 			await persistDraft('submit_preflight', { force: true });
 			if (hasUnsavedFailure) {
-				toast.error($i18n.t('Save failed. Fix the connection before submitting.'));
+				toast.error(t(saveProblem?.message ?? '保存尚未完成，请先处理保存问题再提交。'));
 				return;
 			}
 
@@ -992,6 +1119,21 @@
 		}
 	};
 
+	const refreshWorkspaceSidebar = async () => {
+		const projectId = workspaceProject?.id;
+		const activeChatId = writingSession?.active_chat_id;
+		if (!projectId) return;
+		try {
+			// workspace 接口会创建项目或恢复其侧栏可见性，不能等发送新消息才刷新。
+			await refreshFolderChatLists(null);
+			if (!disposed) {
+				await refreshFolderChatLists(projectId, activeChatId ? { id: activeChatId } : null);
+			}
+		} catch (error) {
+			console.error('Failed to refresh writing sidebar:', error);
+		}
+	};
+
 	const load = async () => {
 		try {
 			const workspace = await loadWorkspace();
@@ -1006,6 +1148,7 @@
 				!!writingSession?.draft_baseline_at &&
 				!readings.some((record) => record.purpose === 'first_read');
 			workspaceProject = workspace.project;
+			void refreshWorkspaceSidebar();
 			workspaceNote = workspace.note;
 			isSubmitted = workspace.writing_session?.status === 'submitted';
 			saveStatusKey = 'Saved';
@@ -1015,6 +1158,21 @@
 			noteTitle = normalizePersonalTitle(workspace.note?.title);
 			lastText = noteText;
 			lastVersionedDocument = JSON.stringify(noteJson);
+			lastSavedDocument = lastVersionedDocument;
+			saveProblem = null;
+			hasUnsavedFailure = false;
+			pendingVersion = null;
+			unsavedOperations = [];
+			backupStore = createWritingBackup(
+				writingSession.owner_user_id ?? $user?.id ?? '',
+				writingSession.id,
+				'draft'
+			);
+			try {
+				recoveryBackups = backupStore.list();
+			} catch {
+				localSafe = false;
+			}
 			sourceRuns = workspace.source_map?.length
 				? provenanceSegmentsToSourceRuns(noteText, workspace.source_map)
 				: normalizeSourceRuns([], noteText.length);
@@ -1043,6 +1201,8 @@
 	});
 
 	onDestroy(() => {
+		disposed = true;
+		releaseRetry?.();
 		stopReadingProgress?.();
 		if (revisionTimer) clearTimeout(revisionTimer);
 		if (
@@ -1055,13 +1215,12 @@
 		}
 		if (countdownIntervalId) clearInterval(countdownIntervalId);
 
-		// beforeunload 只能拦住关闭/刷新,拦不住 SvelteKit 客户端路由跳转,
-		// 所以销毁前要把防抖窗口内的最后一次编辑补交,否则这段编辑会丢。
+		// Leaving a page preserves the draft locally; no new request starts after disposal.
 		const hasPendingDraft = autoSaveTimer !== null || unsavedOperations.length > 0;
 		if (autoSaveTimer) clearTimeout(autoSaveTimer);
 		if (saveRetryTimer) clearTimeout(saveRetryTimer);
 		if (hasPendingDraft) {
-			void persistDraft('autosave');
+			backupDraft();
 		}
 	});
 
@@ -1093,7 +1252,7 @@
 <svelte:window
 	bind:innerWidth={viewportWidth}
 	on:beforeunload={(event) => {
-		if (autoSaveTimer || saving || hasUnsavedFailure) {
+		if (autoSaveTimer || saving || hasUnsavedFailure || recoveryBackups.length) {
 			event.preventDefault();
 			event.returnValue = '';
 		}
@@ -1143,6 +1302,18 @@
 		rightPanelClassName="hidden lg:flex"
 	>
 		<svelte:fragment slot="input-accessory">
+			{#if chatSaveBlocked || saveProblem || recoveryBackups.length}
+				<p role="status" class="px-4 py-2 text-sm text-amber-700 dark:text-amber-300">
+					{t(
+						chatSaveBlocked
+							? '消息尚未发送，输入已保留。请先处理稿件保存，再点击发送。'
+							: '稿件需要处理保存问题，请查看写作区提示。'
+					)}
+					{#if narrowLayout}<button class="ml-2 underline" on:click={() => (showMobileDraft = true)}
+							>{t('查看保存提示')}</button
+						>{/if}
+				</p>
+			{/if}
 			{#if teachingNotice}<p role="status" class="px-4 py-2 text-sm text-amber-700">
 					{$i18n.t(teachingNotice)}
 					{teachingSummary?.change_summary}
@@ -1177,10 +1348,10 @@
 												: $i18n.t('Graded. The assignment is now view-only.')}
 										{:else if isPastDue}
 											{$i18n.t(
-												'Submitted assignments stay available for review in read-only mode.'
+												'You can still write and submit. Your teacher will see a late submission label.'
 											)}
 										{:else}
-											{$i18n.t('Submitted. You can revise and resubmit before the deadline.')}
+											{$i18n.t('Submitted. You can revise and resubmit until it is graded.')}
 										{/if}
 									</div>
 								{/if}
@@ -1242,7 +1413,7 @@
 							{/if}
 							{#if canSubmitAssignment}
 								<EduButton
-									disabled={readingLocked}
+									disabled={readingLocked || recoveryBackups.length > 0}
 									variant="primary"
 									on:click={() => {
 										loadReflectionDraft();
@@ -1259,6 +1430,7 @@
 					</div>
 					{#if lockedDetailsCollapsed}
 						<button
+							aria-expanded={showLockedDetails}
 							type="button"
 							class="mt-2 text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:underline"
 							on:click={() => (showLockedDetails = true)}
@@ -1266,34 +1438,58 @@
 							{challengeEnabled
 								? $i18n.t('Show assignment requirements and read-through notes')
 								: $i18n.t('Show assignment requirements')}
-						</button>
+							<span class="ml-1 inline-flex align-middle"
+								><DisclosureChevron open={showLockedDetails} /></span
+							></button
+						>
 					{:else}
-						{#if isAssignment}
-							<AssignmentBrief {assignment} />
-							{#if hasRevisionCoaching && !isReadOnly && !isSubmitted && !readingLocked}
-								<p class="mt-2 text-xs leading-relaxed text-gray-500">
-									{$i18n.t('初稿已保存，还未交作业。你可以边聊边改，完成后点击「提交作业」。')}
-								</p>
+						<div transition:disclosureSlide>
+							{#if isAssignment}
+								<AssignmentBrief {assignment} />
+								{#if hasRevisionCoaching && !isReadOnly && !isSubmitted && !readingLocked}
+									<p class="mt-2 text-xs leading-relaxed text-gray-500">
+										{$i18n.t('初稿已保存，还未交作业。你可以边聊边改，完成后点击「提交作业」。')}
+									</p>
+								{/if}
+								<ChallengeChecklist
+									detail={challengeDetail}
+									onDetailChange={onChallengeDetailChange}
+									readonly={isReadOnly}
+								/>
 							{/if}
-							<ChallengeChecklist
-								detail={challengeDetail}
-								onDetailChange={onChallengeDetailChange}
-								readonly={isReadOnly}
-							/>
-						{/if}
-						<EduDataNotice {scope} collapsible class="mt-3" />
-						{#if isAssignment && isReadOnly}
-							<button
-								type="button"
-								class="mt-2 text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:underline"
-								on:click={() => (showLockedDetails = false)}
-							>
-								{$i18n.t('Collapse')}
-							</button>
-						{/if}
+							<EduDataNotice {scope} collapsible class="mt-3" />
+							{#if isAssignment && isReadOnly}
+								<button
+									aria-expanded={showLockedDetails}
+									type="button"
+									class="mt-2 text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:underline"
+									on:click={() => (showLockedDetails = false)}
+								>
+									{$i18n.t('Collapse')}
+									<span class="ml-1 inline-flex align-middle"
+										><DisclosureChevron open={showLockedDetails} /></span
+									></button
+								>
+							{/if}
+						</div>
 					{/if}
 				</div>
 			</div>
+			<WritingSaveNotice
+				problem={saveProblem}
+				{localSafe}
+				backups={recoveryBackups}
+				busy={saving || readingLocked}
+				readonly={isReadOnly}
+				chatBlocked={chatSaveBlocked}
+				onRetry={retrySave}
+				onLogin={loginAgain}
+				onCopy={copyDraft}
+				onDownload={downloadDraft}
+				onRestore={restoreBackup}
+				onDiscard={discardBackup}
+				onDownloadBackup={(backup) => downloadWritingBackup(backup.data.document)}
+			/>
 			<ReadingLock
 				locked={readingLocked}
 				showProgress={!readingProgressInChat}
@@ -1312,27 +1508,31 @@
 							: ''}"
 					>
 						{#if isAssignment && review}
-							<ReviewResultCard {review} {assignment} onRevise={null} />
+							<ReviewResultCard {review} assignment={review} onRevise={null} />
 						{/if}
 						{#if showComposition}
 							<WritingComposition {sourceRuns} {clarificationAnsweredCount} />
 						{/if}
 						{#if needsDraftBaseline}
 							<DraftBaselineStep
+								photoTranscriptionEnabled={assignment?.photo_transcription_enabled === true}
 								imageReadingEnabled={assignment?.image_reading_enabled === true}
 								sessionId={writingSession.id}
 								onSubmitted={onDraftBaselineSubmitted}
 							/>
 						{:else}
-							{#if canImportIntoEditor}
-								<div class="mb-2 flex justify-end">
-									<EduButton size="sm" on:click={() => (showImportDialog = true)}>
+							<div class="mb-4 flex flex-wrap items-center justify-end gap-2">
+								{#if canImportIntoEditor}
+									<EduButton
+										size="sm"
+										class="h-9 whitespace-nowrap"
+										on:click={() => (showImportDialog = true)}
+									>
 										{$i18n.t('Import from file or images')}
 									</EduButton>
-								</div>
-							{/if}
-							<div class="mb-2 flex justify-end">
+								{/if}
 								<WordDownloadButton
+									class="h-9 whitespace-nowrap"
 									sessionId={writingSession.id}
 									contentJson={noteJson}
 									disabled={editorLocked}
@@ -1427,7 +1627,7 @@
 				</EduButton>
 				{#if canSubmitAssignment}
 					<EduButton
-						disabled={readingLocked}
+						disabled={readingLocked || recoveryBackups.length > 0}
 						variant="primary"
 						size="sm"
 						on:click={() => {
@@ -1443,14 +1643,13 @@
 	{/if}
 
 	{#if showMobileDraft}
-		<div
-			class="fixed inset-0 z-40 flex items-end bg-black/40 lg:hidden"
-			on:click={() => (showMobileDraft = false)}
+		<Modal
+			bind:show={showMobileDraft}
+			size="full"
+			placement="bottom"
+			ariaLabel={$i18n.t('Assignment Writing')}
 		>
-			<div
-				class="flex h-[78dvh] w-full flex-col rounded-t-3xl bg-stone-50 dark:bg-gray-900"
-				on:click|stopPropagation
-			>
+			<div class="flex h-[78dvh] w-full flex-col">
 				<div
 					class="shrink-0 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-5 py-4 {needsDraftBaseline
 						? 'max-h-[40%] overflow-y-auto'
@@ -1464,10 +1663,17 @@
 							<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">
 								{isAssignment ? assignment?.title : noteTitle}
 							</div>
+							{#if isPastDue && !isGraded}
+								<p class="mt-1 text-xs text-rose-700 dark:text-rose-300">
+									{$i18n.t(
+										'You can still write and submit. Your teacher will see a late submission label.'
+									)}
+								</p>
+							{/if}
 						</div>
 						{#if canSubmitAssignment}
 							<EduButton
-								disabled={readingLocked}
+								disabled={readingLocked || recoveryBackups.length > 0}
 								size="sm"
 								variant="primary"
 								on:click={() => {
@@ -1493,6 +1699,7 @@
 					</div>
 					{#if lockedDetailsCollapsed}
 						<button
+							aria-expanded={showLockedDetails}
 							type="button"
 							class="mt-2 text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:underline"
 							on:click={() => (showLockedDetails = true)}
@@ -1500,33 +1707,57 @@
 							{challengeEnabled
 								? $i18n.t('Show assignment requirements and read-through notes')
 								: $i18n.t('Show assignment requirements')}
-						</button>
+							<span class="ml-1 inline-flex align-middle"
+								><DisclosureChevron open={showLockedDetails} /></span
+							></button
+						>
 					{:else}
-						{#if isAssignment}
-							<AssignmentBrief {assignment} />
-							{#if hasRevisionCoaching && !isReadOnly && !isSubmitted && !readingLocked}
-								<p class="mt-2 text-xs leading-relaxed text-gray-500">
-									{$i18n.t('初稿已保存，还未交作业。你可以边聊边改，完成后点击「提交作业」。')}
-								</p>
+						<div transition:disclosureSlide>
+							{#if isAssignment}
+								<AssignmentBrief {assignment} />
+								{#if hasRevisionCoaching && !isReadOnly && !isSubmitted && !readingLocked}
+									<p class="mt-2 text-xs leading-relaxed text-gray-500">
+										{$i18n.t('初稿已保存，还未交作业。你可以边聊边改，完成后点击「提交作业」。')}
+									</p>
+								{/if}
+								<ChallengeChecklist
+									detail={challengeDetail}
+									onDetailChange={onChallengeDetailChange}
+									readonly={isReadOnly}
+								/>
 							{/if}
-							<ChallengeChecklist
-								detail={challengeDetail}
-								onDetailChange={onChallengeDetailChange}
-								readonly={isReadOnly}
-							/>
-						{/if}
-						<EduDataNotice {scope} collapsible class="mt-3" />
-						{#if isAssignment && isReadOnly}
-							<button
-								type="button"
-								class="mt-2 text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:underline"
-								on:click={() => (showLockedDetails = false)}
-							>
-								{$i18n.t('Collapse')}
-							</button>
-						{/if}
+							<EduDataNotice {scope} collapsible class="mt-3" />
+							{#if isAssignment && isReadOnly}
+								<button
+									aria-expanded={showLockedDetails}
+									type="button"
+									class="mt-2 text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:underline"
+									on:click={() => (showLockedDetails = false)}
+								>
+									{$i18n.t('Collapse')}
+									<span class="ml-1 inline-flex align-middle"
+										><DisclosureChevron open={showLockedDetails} /></span
+									></button
+								>
+							{/if}
+						</div>
 					{/if}
 				</div>
+				<WritingSaveNotice
+					problem={saveProblem}
+					{localSafe}
+					backups={recoveryBackups}
+					busy={saving || readingLocked}
+					readonly={isReadOnly}
+					chatBlocked={chatSaveBlocked}
+					onRetry={retrySave}
+					onLogin={loginAgain}
+					onCopy={copyDraft}
+					onDownload={downloadDraft}
+					onRestore={restoreBackup}
+					onDiscard={discardBackup}
+					onDownloadBackup={(backup) => downloadWritingBackup(backup.data.document)}
+				/>
 				<ReadingLock locked={readingLocked}>
 					<div
 						class="min-h-0 flex-1 overflow-y-auto px-5 py-5 {needsDraftBaseline
@@ -1534,27 +1765,31 @@
 							: ''}"
 					>
 						{#if isAssignment && review}
-							<ReviewResultCard {review} {assignment} onRevise={null} />
+							<ReviewResultCard {review} assignment={review} onRevise={null} />
 						{/if}
 						{#if showComposition}
 							<WritingComposition {sourceRuns} {clarificationAnsweredCount} />
 						{/if}
 						{#if needsDraftBaseline}
 							<DraftBaselineStep
+								photoTranscriptionEnabled={assignment?.photo_transcription_enabled === true}
 								imageReadingEnabled={assignment?.image_reading_enabled === true}
 								sessionId={writingSession.id}
 								onSubmitted={onDraftBaselineSubmitted}
 							/>
 						{:else}
-							{#if canImportIntoEditor}
-								<div class="mb-2 flex justify-end">
-									<EduButton size="sm" on:click={() => (showImportDialog = true)}>
+							<div class="mb-4 flex flex-wrap items-center justify-end gap-2">
+								{#if canImportIntoEditor}
+									<EduButton
+										size="sm"
+										class="h-9 whitespace-nowrap"
+										on:click={() => (showImportDialog = true)}
+									>
 										{$i18n.t('Import from file or images')}
 									</EduButton>
-								</div>
-							{/if}
-							<div class="mb-2 flex justify-end">
+								{/if}
 								<WordDownloadButton
+									class="h-9 whitespace-nowrap"
 									sessionId={writingSession.id}
 									contentJson={noteJson}
 									disabled={editorLocked}
@@ -1624,12 +1859,13 @@
 					</div>
 				</ReadingLock>
 			</div>
-		</div>
+		</Modal>
 	{/if}
 
 	{#if canImportIntoEditor && writingSession}
 		<EditorImportDialog
 			bind:this={importDialog}
+			photoTranscriptionEnabled={assignment?.photo_transcription_enabled === true}
 			imageReadingEnabled={assignment?.image_reading_enabled === true}
 			bind:show={showImportDialog}
 			sessionId={writingSession.id}
@@ -1641,6 +1877,7 @@
 	{#if isAssignment && assignment}
 		<SubmissionHistoryModal bind:show={showSubmissionHistory} {assignment} />
 		<ConfirmDialog
+			variant="danger"
 			bind:show={showWithdrawDraftConfirm}
 			title={$i18n.t('Withdraw first draft and start over')}
 			message={$i18n.t(
@@ -1663,87 +1900,71 @@
 	{/if}
 
 	{#if isAssignment && showSubmitModal}
-		<!--
-			弹窗高度卡在视口内：题目由教师自定、数量不定，只让中间的题目区滚动，
-			标题和「提交作业」按钮始终留在可见处。之前整块跟着内容长高，矮屏上按钮被挤出屏幕点不到。
-		-->
-		<div
-			role="dialog"
-			aria-modal="true"
-			aria-labelledby="submission-reflection-title"
-			tabindex="-1"
-			class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+		<Modal
+			bind:show={showSubmitModal}
+			size="md"
+			busy={isSubmitting}
+			title={$i18n.t(
+				reflectionQuestions.length ? 'Reflection Before Submitting Assignment' : '确认提交作业'
+			)}
+			description={$i18n.t(
+				reflectionQuestions.length
+					? '请核对反思题并确认提交；选答题可以留空。'
+					: '核对正文后即可提交。'
+			)}
 		>
-			<div
-				class="flex max-h-[calc(100dvh-2rem)] w-full max-w-xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl dark:bg-gray-850"
-			>
-				<div class="shrink-0 px-6 pb-3 pt-6">
-					<h2
-						id="submission-reflection-title"
-						class="text-xl font-semibold text-gray-900 dark:text-gray-100"
-					>
-						{$i18n.t(
-							reflectionQuestions.length
-								? 'Reflection Before Submitting Assignment'
-								: '确认提交作业'
-						)}
-					</h2>
-					<p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-						{$i18n.t(
-							reflectionQuestions.length
-								? '请核对反思题并确认提交；选答题可以留空。'
-								: '核对正文后即可提交。'
-						)}
-					</p>
-				</div>
-
-				<div class="min-h-0 flex-1 overflow-y-auto px-6 py-2">
-					{#if sameAsDraft}
-						<!-- 只是提醒，不拦提交：学生可能真的认为初稿不用改，理由写在清单里由老师判断。 -->
-						<div
-							class="mb-3 rounded-xl bg-gray-50 px-3 py-2 text-xs text-gray-600 dark:bg-gray-800 dark:text-gray-300"
-						>
-							{$i18n.t(
-								'Your text is still exactly the same as the first draft you submitted. You can still submit; your teacher will see this.'
-							)}
-						</div>
-					{/if}
-
-					<ReflectionAnswerForm
-						questions={reflectionQuestions}
-						askAiUsage={asksAiUsage}
-						bind:aiUsage
-						bind:drafts={reflectionDrafts}
-						onChange={saveReflectionDraft}
-					/>
-				</div>
-
+			{#if sameAsDraft}
+				<!-- 只是提醒，不拦提交：学生可能真的认为初稿不用改，理由写在清单里由老师判断。 -->
 				<div
-					class="flex shrink-0 justify-end gap-3 border-t border-gray-100 px-6 py-4 dark:border-gray-800"
+					class="mb-3 rounded-xl bg-gray-50 px-3 py-2 text-xs text-gray-600 dark:bg-gray-800 dark:text-gray-300"
 				>
-					<EduButton
-						on:click={() => {
-							showSubmitModal = false;
-						}}
-					>
-						{$i18n.t('Cancel')}
-					</EduButton>
-					<EduButton
-						variant="primary"
-						class="flex items-center gap-2 disabled:cursor-not-allowed"
-						disabled={isSubmitting || readingLocked}
-						on:click={submit}
-					>
-						{#if isSubmitting}
-							<Spinner className="size-4" />
-							{$i18n.t('Submitting...')}
-						{:else}
-							{$i18n.t('Submit Assignment')}
-						{/if}
-					</EduButton>
+					{$i18n.t(
+						'Your text is still exactly the same as the first draft you submitted. You can still submit; your teacher will see this.'
+					)}
 				</div>
-			</div>
-		</div>
+			{/if}
+
+			{#if isPastDue}
+				<p
+					class="mb-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700 dark:bg-rose-950/40 dark:text-rose-300"
+					role="status"
+				>
+					{$i18n.t(
+						'This submission is past the deadline and will be marked as late for your teacher.'
+					)}
+				</p>
+			{/if}
+			<ReflectionAnswerForm
+				questions={reflectionQuestions}
+				askAiUsage={asksAiUsage}
+				bind:aiUsage
+				bind:drafts={reflectionDrafts}
+				onChange={saveReflectionDraft}
+			/>
+			<svelte:fragment slot="footer">
+				<EduButton
+					disabled={isSubmitting}
+					on:click={() => {
+						showSubmitModal = false;
+					}}
+				>
+					{$i18n.t('Cancel')}
+				</EduButton>
+				<EduButton
+					variant="primary"
+					class="flex items-center gap-2 disabled:cursor-not-allowed"
+					disabled={isSubmitting || readingLocked}
+					on:click={submit}
+				>
+					{#if isSubmitting}
+						<Spinner className="size-4" />
+						{$i18n.t('Submitting...')}
+					{:else}
+						{$i18n.t('Submit Assignment')}
+					{/if}
+				</EduButton>
+			</svelte:fragment>
+		</Modal>
 	{/if}
 {:else if loadError}
 	<div class="mx-auto max-w-3xl px-4 py-16">

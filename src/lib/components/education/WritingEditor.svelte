@@ -6,6 +6,7 @@
 	import RichTextInput from '$lib/components/common/RichTextInput.svelte';
 	import { writingExtensions } from './writing-document-extensions';
 	import { documentText, textDocument, type WritingNode } from '$lib/utils/writing-document';
+	import { prepareWritingPaste, safeWritingLink } from '$lib/utils/writing-paste';
 	export let editor: any = null;
 	export let value: WritingNode = textDocument('');
 	export let sessionId = '';
@@ -34,6 +35,17 @@
 		void Promise.resolve(onImportFiles(files, source)).catch(() =>
 			toast.error(t('导入失败，请重试。'))
 		);
+	}
+	function transformPastedHTML(html: string) {
+		const prepared = prepareWritingPaste(html);
+		if (prepared.simplified) {
+			toast.info(t('粘贴文字已保留，无法保存的对齐格式或文档内链接已简化。'));
+		}
+		// Keep ProseMirror's clipboard slice parsing, selection mapping and history.
+		// insertContent preserves HTML source whitespace as literal document content.
+		return /<img\b/i.test(html) && !html.includes('data-writing-image')
+			? DOMPurify.sanitize(prepared.html, { FORBID_TAGS: ['img', 'script', 'style'] })
+			: prepared.html;
 	}
 	function paste(event: CustomEvent) {
 		const original = event.detail?.event ?? event;
@@ -64,16 +76,21 @@
 		}
 		const html = clipboard?.getData('text/html') ?? '';
 		if (/<img\b/i.test(html) && !html.includes('data-writing-image')) {
-			original.preventDefault();
 			const sanitized = DOMPurify.sanitize(html, { FORBID_TAGS: ['img', 'script', 'style'] });
-			if (new DOMParser().parseFromString(sanitized, 'text/html').body.textContent?.trim()) {
-				dispatch('paste', event.detail);
-				editor?.commands.insertContent(sanitized);
-			}
 			toast.info(t('粘贴中的图片未导入，请上传原文件保留图文。'));
-			return;
+			if (!new DOMParser().parseFromString(sanitized, 'text/html').body.textContent?.trim()) {
+				original.preventDefault();
+				return;
+			}
 		}
-		if (clipboard?.getData('text/plain')) dispatch('paste', event.detail);
+		if (
+			clipboard?.getData('text/plain') ||
+			(html &&
+				new DOMParser()
+					.parseFromString(DOMPurify.sanitize(html), 'text/html')
+					.body.textContent?.trim())
+		)
+			dispatch('paste', event.detail);
 	}
 </script>
 
@@ -98,6 +115,8 @@
 		bind:value
 		json={true}
 		link={true}
+		linkOptions={{ isAllowedUri: safeWritingLink }}
+		{transformPastedHTML}
 		showFloatingToolbar={false}
 		selectTemplates={false}
 		additionalExtensions={extensions}

@@ -1,4 +1,6 @@
 <script lang="ts">
+	import DisclosureChevron from '$lib/components/common/DisclosureChevron.svelte';
+	import { disclosureSlide } from '$lib/utils/disclosure';
 	// 读者试读收尾清单回流到写作面板。
 	//
 	// 没有这一步，试读就只是「被问一顿」，学生带不走任何东西，下次必然跳过。
@@ -64,9 +66,7 @@
 			class="flex w-full items-center justify-between gap-2 text-left"
 			on:click={() => (expanded = !expanded)}
 		>
-			<span
-				class="text-[11px] font-medium text-amber-800 dark:text-amber-300"
-			>
+			<span class="text-[11px] font-medium text-amber-800 dark:text-amber-300">
 				{$i18n.t('From the read-through')}
 			</span>
 			<span class="text-[11px] text-amber-700 dark:text-amber-400">
@@ -104,6 +104,7 @@
 			{#if turns.length > 0}
 				<div class="mt-2.5 border-t border-amber-200/70 pt-2 dark:border-amber-900/50">
 					<button
+						aria-expanded={transcriptExpanded}
 						type="button"
 						class="text-[11px] font-medium text-amber-700 underline-offset-2 hover:underline dark:text-amber-400"
 						on:click={() => (transcriptExpanded = !transcriptExpanded)}
@@ -111,11 +112,16 @@
 						{transcriptExpanded
 							? $i18n.t('Hide what the reader asked')
 							: $i18n.t('See what the reader asked')}
-					</button>
+						<span class="ml-1 inline-flex align-middle"
+							><DisclosureChevron open={transcriptExpanded} /></span
+						></button
+					>
 
 					{#if transcriptExpanded}
-						<div class="mt-2 rounded-xl bg-white/70 px-3 py-2.5 dark:bg-gray-900/50">
-							<ChallengeTranscript {turns} {plannedRounds} />
+						<div transition:disclosureSlide>
+							<div class="mt-2 rounded-xl bg-white/70 px-3 py-2.5 dark:bg-gray-900/50">
+								<ChallengeTranscript {turns} {plannedRounds} />
+							</div>
 						</div>
 					{/if}
 				</div>

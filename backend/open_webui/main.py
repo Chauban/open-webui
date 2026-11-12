@@ -2447,6 +2447,9 @@ async def get_app_config(request: Request):
                     'enable_personal_writing': await personal_writing_enabled(user),
                     'enable_education_return': config.get('education.enable_return'),
                     'enable_education_coaching_styles': config.get('education.enable_coaching_styles'),
+                    'enable_education_photo_transcription': bool(
+                        ((config.get('education.ai_steps') or {}).get('photo_transcription') or {}).get('model')
+                    ),
                     'enable_education_draft_image_import': bool(
                         ((config.get('education.ai_steps') or {}).get('image_parsing') or {}).get('model')
                     ),

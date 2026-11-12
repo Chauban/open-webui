@@ -75,7 +75,9 @@ def test_default_off_keeps_originals_and_never_resolves_a_vision_model(
     assert visual['image'] is True
     assert client.get(f'/api/v1/writing-materials/{material["id"]}/assets/original').content == data
     photo = client.post(
-        f'/api/v1/writing-sessions/{sid}/import/images', files={'files': ('photo.png', picture(), 'image/png')}
+        f'/api/v1/writing-sessions/{sid}/import/images',
+        data={'purpose': 'reference'},
+        files={'files': ('photo.png', picture(), 'image/png')},
     )
     assert photo.status_code == 200
     assert photo.json()['text'] == ''
@@ -169,17 +171,20 @@ def test_switch_off_during_recognition_discards_result_before_returning(educatio
     client, teacher, _, student, _, _ = education_client
     assignment, sid, _ = setup(client, teacher, student, 'from_scratch', image_reading=True)
 
-    async def in_flight(*args):
+    async def in_flight(*args, **kwargs):
         switch(client, teacher, student, assignment, False)
         return 'OCR_SHOULD_NOT_ENTER_DRAFT'
 
     monkeypatch.setattr(draft_import, 'generate_transcription', in_flight)
-    result = client.post(
+    imported = client.post(
         f'/api/v1/writing-sessions/{sid}/import/document', files={'file': ('scan.pdf', pdf_document(scan=True))}
+    ).json()['material']
+    result = client.post(
+        f'/api/v1/writing-sessions/{sid}/materials/{imported["id"]}/read',
+        params={'block_id': imported['blocks'][0]['id']},
     )
-    assert result.status_code == 200, result.text
+    assert result.status_code == 403, result.text
     assert 'OCR_SHOULD_NOT_ENTER_DRAFT' not in result.text
-    assert result.json()['material']['blocks'][0]['status'] == 'disabled'
 
 
 def test_image_blocks_are_removed_from_provider_input_but_saved_messages_are_untouched():

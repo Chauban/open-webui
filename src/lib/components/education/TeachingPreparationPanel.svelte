@@ -1,4 +1,7 @@
 <script lang="ts">
+	import AssignmentChangeReason from './AssignmentChangeReason.svelte';
+	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
+	let confirmation: ConfirmDialog;
 	import { getContext, onMount, onDestroy } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto, replaceState } from '$app/navigation';
@@ -384,9 +387,13 @@
 			type="button"
 			class="text-sm underline"
 			disabled={unavailable}
-			on:click={() => {
+			on:click={async () => {
 				if (
-					window.confirm(`${$i18n.t('将替换为以下推荐提示词，是否继续？')}\n\n${template.prompt}`)
+					await confirmation.ask({
+						title: $i18n.t('恢复推荐版本'),
+						message: `${$i18n.t('将替换为以下推荐提示词，是否继续？')}\n\n${template.prompt}`,
+						confirmLabel: $i18n.t('确认替换')
+					})
 				)
 					ai = { ...ai, prompt: template.prompt, template_version: template.version };
 			}}>{$i18n.t('恢复推荐版本')}</button
@@ -495,14 +502,9 @@
 						>{new Date(trial.created_at * 1000).toLocaleString()} · {trial.model_id}</button
 					>{/each}
 			</details>{/if}
-		{#if assignment}<label class="block"
-				>{$i18n.t('调整说明')}<textarea
-					class="w-full {EDU_FIELD_CLASS}"
-					bind:value={changeSummary}
-					maxlength="1000"
-					disabled={unavailable}
-				></textarea></label
-			>{/if}
+		{#if assignment}
+			<AssignmentChangeReason id="teaching-change-reason" bind:value={changeSummary} disabled={unavailable} />
+		{/if}
 	{/if}
 	<div class="text-sm text-gray-500" aria-live="polite">
 		<p role="status">
@@ -596,3 +598,5 @@
 			{/if}
 		</div>{/if}
 </section>
+
+<ConfirmDialog bind:this={confirmation} />

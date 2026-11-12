@@ -123,6 +123,7 @@
 	import DeleteConfirmDialog from '../common/ConfirmDialog.svelte';
 	import WebSearchConfirmDialog from '../common/ConfirmDialog.svelte';
 	import Placeholder from './Placeholder.svelte';
+	import FreeChatNotice from './FreeChatNotice.svelte';
 	import FilesOverlay from './MessageInput/FilesOverlay.svelte';
 	import NotificationToast from '../NotificationToast.svelte';
 	import Spinner from '../common/Spinner.svelte';
@@ -164,11 +165,15 @@
 	export let lockModelOverrides = false;
 	export let fixedTeachingModel: Model | null = null;
 	$: chatModels = fixedTeachingModel ? [fixedTeachingModel] : $models;
-	$: if (fixedTeachingModel) { selectedModels = [fixedTeachingModel.id]; atSelectedModel = undefined; }
+	$: if (fixedTeachingModel) {
+		selectedModels = [fixedTeachingModel.id];
+		atSelectedModel = undefined;
+	}
 	// RightWrite: 写作区额外附在请求参数里的值(作业里学生关掉思考时的 thinking_level)。
 	// 服务端只认它允许的那几个,见 main.py 的作业写作分支。
 	export let extraRequestParams: Record<string, unknown> = {};
 	export let projectBaseUrl = '';
+	$: freeChat = $user?.education_role === 'student' && !projectBaseUrl && !embedded;
 	export let showRightPanel = false;
 	export let rightPanelWidth = 480;
 	export let rightPanelMinWidth = 360;
@@ -295,7 +300,7 @@
 	$: revisionAction =
 		draftChanged && !readOnly
 			? {
-					label: prompt.trim() ? '发送说明，请看修改' : '改好了，请看看',
+					label: '改好了，请看看',
 					disabled:
 						sendingRevision ||
 						revisionReplyPending ||
@@ -532,7 +537,8 @@
 		const currentModels = atSelectedModel?.id ? [atSelectedModel.id] : selectedModels;
 		const allModelsSupportWebSearch =
 			currentModels.filter(
-				(model) => chatModels.find((m) => m.id === model)?.info?.meta?.capabilities?.web_search ?? true
+				(model) =>
+					chatModels.find((m) => m.id === model)?.info?.meta?.capabilities?.web_search ?? true
 			).length === currentModels.length;
 
 		webSearchActive = Boolean(
@@ -3110,7 +3116,14 @@
 	// Chat functions
 	//////////////////////////
 
-	const submitPrompt = async (inputContent, inputFiles, { meta = undefined } = {}) => {
+	const submitPrompt = async (
+		inputContent,
+		inputFiles,
+		{ meta = undefined, draftReady = false } = {}
+	) => {
+		// Complete the writing guard before changing the input or conversation history.
+		// The normal submit path has already done this immediately before clearing input.
+		if (!draftReady) await beforeSend?.();
 		const _files = structuredClone(inputFiles);
 
 		chatFiles.push(
@@ -3156,7 +3169,7 @@
 
 		saveSessionSelectedModels();
 
-		await sendMessage(history, userMessageId);
+		await sendMessage(history, userMessageId, { draftReady: true });
 	};
 
 	const handleManualCompact = async () => {
@@ -3447,7 +3460,7 @@
 		files = [];
 		messageInput?.setText('');
 
-		await submitPrompt(userPrompt, _files, { meta: messageMeta });
+		await submitPrompt(userPrompt, _files, { meta: messageMeta, draftReady: true });
 	};
 
 	const sendMessage = async (
@@ -3457,19 +3470,21 @@
 			messages = null,
 			modelId = null,
 			modelIdx = null,
-			regenerationPrompt = null
+			regenerationPrompt = null,
+			draftReady = false
 		}: {
 			messages?: any[] | null;
 			modelId?: string | null;
 			modelIdx?: number | null;
 			regenerationPrompt?: string | null;
+			draftReady?: boolean;
 		} = {}
 	) => {
 		if (autoScroll) {
 			scrollToBottom();
 		}
 
-		await beforeSend?.();
+		if (!draftReady) await beforeSend?.();
 
 		let _chatId = JSON.parse(JSON.stringify($chatId));
 		_history = structuredClone(_history);
@@ -4398,10 +4413,12 @@
 {#if getChatVariablesForm(selectedModelIds, chatVariables, chatModels).conflicts.length > 0}
 	<Modal bind:show={showChatVariablesModal} size="md">
 		<div>
-			<div class="flex justify-between px-4 pt-3 pb-1 dark:text-gray-300">
-				<div class="self-center text-sm font-medium">{$i18n.t('Chat Variables')}</div>
+			<div class="rw-dialog-header-custom flex justify-between px-4 pt-3 pb-1 dark:text-gray-300">
+				<div class="rw-dialog-heading self-center text-sm font-medium">
+					{$i18n.t('Chat Variables')}
+				</div>
 				<button
-					class="self-center rounded-lg p-1 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+					class="rw-dialog-close self-center rounded-lg p-1 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
 					on:click={() => {
 						showChatVariablesModal = false;
 					}}
@@ -4410,7 +4427,7 @@
 				</button>
 			</div>
 
-			<div class="px-5 pb-4 text-sm text-gray-600 dark:text-gray-300">
+			<div class="rw-dialog-body-custom px-5 pb-4 text-sm text-gray-600 dark:text-gray-300">
 				<div class="mb-2 text-xs text-gray-500 dark:text-gray-400">
 					{$i18n.t('Selected models define incompatible Chat Variables.')}
 				</div>
@@ -4454,6 +4471,8 @@
 />
 
 <DeleteConfirmDialog
+	confirmLabel={$i18n.t('Delete')}
+	variant="danger"
 	bind:show={showDeleteConfirm}
 	title={$i18n.t('Delete chat?')}
 	on:confirm={() => {
@@ -4555,6 +4574,7 @@
 							bind:this={navbarElement}
 							readOnly={chatReadOnly}
 							{disableContextActions}
+							{freeChat}
 							chat={{
 								id: $chatId,
 								chat: {
@@ -4693,6 +4713,7 @@
 									id={embedded ? messageInputDropzoneId : undefined}
 									class=" pb-2 {dragged ? 'z-0' : 'z-10'}"
 								>
+									{#if freeChat}<FreeChatNotice />{/if}
 									<slot name="input-accessory" />
 									<MessageInput
 										fixedModelName={fixedTeachingModel?.name ?? fixedTeachingModel?.id ?? null}
@@ -4787,6 +4808,7 @@
 									</div>
 								{/if}
 								<div id={embedded ? messageInputDropzoneId : undefined} class="pb-2 z-10">
+									{#if freeChat}<FreeChatNotice />{/if}
 									<slot name="input-accessory" />
 									<MessageInput
 										fixedModelName={fixedTeachingModel?.name ?? fixedTeachingModel?.id ?? null}
@@ -4908,7 +4930,8 @@
 									>
 										<!-- 还没有消息时也要显示输入框上方的附加行(如作业写作区的「深度思考」开关) -->
 										<svelte:fragment slot="input-accessory"
-											><slot name="input-accessory" /></svelte:fragment
+											>{#if freeChat}<FreeChatNotice />{/if}
+											<slot name="input-accessory" /></svelte:fragment
 										>
 									</Placeholder>
 								{/if}

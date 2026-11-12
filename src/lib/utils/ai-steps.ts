@@ -21,9 +21,13 @@ export const AI_STEP_TEXT: Record<AiStepKey, { title: string; hint: string; note
 		title: 'AI reader check',
 		hint: 'The questions about the student’s text before submitting.'
 	},
+	photo_transcription: {
+		title: '照片转正文',
+		hint: '将手写或打印稿照片转为可编辑正文，只转录、不润色。独立选择模型；关闭后不能转换照片。教师按作业开启。'
+	},
 	image_parsing: {
-		title: 'Image-to-text model',
-		hint: 'Platform-wide model for reading document images, scanned pages and photos. It is separate from the assignment coaching model; teachers decide whether image reading is enabled for each assignment.'
+		title: 'AI 读取参考图片',
+		hint: '按需读取参考图片中的文字和图表信息，作为随附材料，不自动加入正文。关闭不影响保存原图。教师按作业开启。'
 	},
 	class_insight: {
 		title: 'Class argument summary',
@@ -42,7 +46,7 @@ export const MODEL_SOURCE_TEXT: Record<AiStepModelSource, string> = {
 export const FOLLOW_MODEL_TEXT: Record<AiStepModelSource, string> = {
 	student_chat_model: 'Follow the student’s selected model',
 	teacher_chat_model: 'Follow the teacher’s selected model',
-	admin_model: 'Off (no image import)'
+	admin_model: '关闭此识别能力（保留图片上传）'
 };
 
 /** 指定的模型已被删掉时,这一步实际怎么办。 */
@@ -51,8 +55,7 @@ export const MISSING_MODEL_TEXT: Record<AiStepModelSource, string> = {
 		'The chosen model is no longer available; this step uses the student’s model until you pick another one.',
 	teacher_chat_model:
 		'The chosen model is no longer available; this step uses the teacher’s model until you pick another one.',
-	admin_model:
-		'The chosen model is no longer available. Image import will fail until you pick another one.'
+	admin_model: '所选模型不可用，请重新选择；原图仍可上传和保存。'
 };
 
 export const THINKING_SETTING_TEXT: Record<ThinkingSetting, string> = {

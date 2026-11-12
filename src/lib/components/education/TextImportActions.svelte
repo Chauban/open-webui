@@ -1,11 +1,15 @@
 <script lang="ts">
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
-	import { getContext } from 'svelte';
+	import { getContext, onDestroy } from 'svelte';
 	import { get } from 'svelte/store';
 
 	import { config } from '$lib/stores';
-	import { extractImportDocument, extractImportImages } from '$lib/apis/education';
+	import {
+		extractImportDocument,
+		extractImportImages,
+		type ImageUploadPurpose
+	} from '$lib/apis/education';
 	import { resolveErrorMessage } from '$lib/utils/education';
 	import {
 		DOCUMENT_ACCEPT,
@@ -25,8 +29,9 @@
 	export let sessionId: string;
 	export let disabled = false;
 	export let imageReadingEnabled = false;
+	export let photoTranscriptionEnabled = false;
 	export let baselineHelp = false;
-	export let onImported: (text: string, info: ImportInfo) => void;
+	export let onImported: (text: string, info: ImportInfo) => Promise<void> | void;
 	// 外层据此锁住输入框和确认按钮。
 	export let busy = false;
 
@@ -36,11 +41,20 @@
 	let uploadInput: HTMLInputElement;
 	let reading: 'document' | 'images' | null = null;
 	let importError = '';
+	let pendingImages: File[] = [];
+	let finishChoice: (() => void) | null = null;
+	let imagePurpose: ImageUploadPurpose | null = null;
+	onDestroy(() => finishChoice?.());
 
-	$: busy = reading !== null;
+	$: busy = reading !== null || pendingImages.length > 0;
 	// 模型可用性影响帮助说明，不隐藏图片上传。
 	$: imageImportEnabled =
 		imageReadingEnabled && $config?.features?.enable_education_draft_image_import === true;
+	$: photoImportEnabled =
+		photoTranscriptionEnabled && $config?.features?.enable_education_photo_transcription === true;
+	$: photoDisabledReason = !photoTranscriptionEnabled
+		? t('本作业未开启照片转正文，请联系老师；仍可插入图片。')
+		: t('平台未配置照片转正文模型，请联系管理员；仍可插入图片。');
 	$: acceptedFiles = `${DOCUMENT_ACCEPT},${IMAGE_ACCEPT}`;
 	$: helpText = [
 		t(
@@ -59,24 +73,26 @@
 			: [])
 	].join('\n\n');
 
-	const run = async (kind: ImportInfo['kind'], files: File[]) => {
+	const run = async (kind: ImportInfo['kind'], files: File[], purpose?: ImageUploadPurpose) => {
 		reading = kind;
+		imagePurpose = purpose ?? null;
 		try {
 			const names = files.map((file) => file.name);
 			if (kind === 'images') {
 				const images = files;
 				const error = checkImageFiles(images);
 				if (error) throw error;
-				const result = await extractImportImages(localStorage.token, sessionId, images);
-				onImported(result.text, {
+				const result = await extractImportImages(localStorage.token, sessionId, images, purpose!);
+				await onImported(result.text, {
 					kind,
+					purpose,
 					names,
 					document: result.content_json,
 					materials: result.materials
 				});
 			} else {
 				const result = await extractImportDocument(localStorage.token, sessionId, files[0]);
-				onImported(result.text, {
+				await onImported(result.text, {
 					kind,
 					names,
 					document: result.content_json,
@@ -87,8 +103,27 @@
 			importError = resolveErrorMessage(error, t);
 		} finally {
 			reading = null;
+			imagePurpose = null;
 		}
 	};
+
+	function cancelChoice() {
+		pendingImages = [];
+		finishChoice?.();
+		finishChoice = null;
+	}
+	async function choose(purpose: ImageUploadPurpose) {
+		if (reading || (purpose === 'photo_to_text' && !photoImportEnabled)) return;
+		importError = '';
+		await run('images', pendingImages, purpose);
+		// Keep the selected files and order available for a retry after a failed request.
+		if (!importError) cancelChoice();
+	}
+	function move(index: number, direction: number) {
+		const files = [...pendingImages];
+		[files[index], files[index + direction]] = [files[index + direction], files[index]];
+		pendingImages = files;
+	}
 
 	/** 单个文档由后端统一解析；照片仍按上传顺序转录。 */
 	export const importFiles = async (files: File[]) => {
@@ -99,7 +134,15 @@
 				importError = t('Upload at most 8 images at a time');
 				return;
 			}
-			await run('images', sortImageFiles(files));
+			const error = checkImageFiles(files);
+			if (error) {
+				importError = resolveErrorMessage(error, t);
+				return;
+			}
+			pendingImages = sortImageFiles(files);
+			await new Promise<void>((resolve) => {
+				finishChoice = resolve;
+			});
 			return;
 		}
 		if (files.length > 1) {
@@ -150,6 +193,56 @@
 			</button>
 		</Tooltip>
 	</div>
+	{#if pendingImages.length}
+		<div
+			class="max-w-full space-y-3 rounded-lg border border-gray-200 p-3 dark:border-gray-700"
+			aria-label={$i18n.t('选择图片用途')}
+		>
+			<p class="text-sm font-medium">{$i18n.t('这些图片用于什么？')}</p>
+			<ol class="space-y-1 text-xs text-gray-600 dark:text-gray-300">
+				{#each pendingImages as file, index}
+					<li class="flex items-center gap-2">
+						<span class="min-w-0 flex-1 break-all">{index + 1}. {file.name}</span>
+						{#if pendingImages.length > 1}
+							<button
+								type="button"
+								class="shrink-0 rounded px-2 py-1 disabled:opacity-30"
+								disabled={!!reading || index === 0}
+								aria-label={$i18n.t('上移 {{name}}', { name: file.name })}
+								on:click={() => move(index, -1)}>↑</button
+							>
+							<button
+								type="button"
+								class="shrink-0 rounded px-2 py-1 disabled:opacity-30"
+								disabled={!!reading || index === pendingImages.length - 1}
+								aria-label={$i18n.t('下移 {{name}}', { name: file.name })}
+								on:click={() => move(index, 1)}>↓</button
+							>
+						{/if}
+					</li>
+				{/each}
+			</ol>
+			<div class="flex flex-wrap gap-2">
+				<EduButton
+					variant="primary"
+					disabled={!!reading || !photoImportEnabled}
+					on:click={() => choose('photo_to_text')}>{$i18n.t('照片转正文')}</EduButton
+				>
+				<EduButton disabled={!!reading} on:click={() => choose('reference')}
+					>{$i18n.t('插入图片')}</EduButton
+				>
+				<EduButton disabled={!!reading} on:click={cancelChoice}>{$i18n.t('Cancel')}</EduButton>
+			</div>
+			<p class="text-xs leading-relaxed text-gray-500">
+				{$i18n.t(
+					'照片转正文：识别手写或打印稿，文字直接进入编辑框。插入图片：保留参考图，不自动识别。'
+				)}
+			</p>
+			{#if !photoImportEnabled}<p role="status" class="text-xs text-amber-700 dark:text-amber-300">
+					{photoDisabledReason}
+				</p>{/if}
+		</div>
+	{/if}
 	{#if importError}<p role="alert" class="text-xs text-rose-600 dark:text-rose-400">
 			{importError}
 		</p>{/if}
@@ -159,7 +252,9 @@
 		</p>
 	{:else if reading === 'images'}
 		<p class="text-xs text-sky-600 dark:text-sky-400" role="status">
-			{$i18n.t('正在保存图片，请稍候。')}
+			{$i18n.t(
+				imagePurpose === 'photo_to_text' ? '正在将照片转为正文，请稍候。' : '正在保存图片，请稍候。'
+			)}
 		</p>
 	{/if}
 </div>

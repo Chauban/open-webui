@@ -1,6 +1,5 @@
 """Assignment writing state and effective deadlines shared by writing entry points."""
 
-import time
 from typing import Optional
 
 from fastapi import HTTPException, status
@@ -88,7 +87,3 @@ def ensure_writing_session_writable(session, db: Optional[Session] = None) -> No
     review = reviews.get(current.id) if current else None
     if review is not None and review.review_status == 'reviewed':
         raise HTTPException(status.HTTP_409_CONFLICT, 'Submission has already been reviewed')
-    extension = Education.get_assignment_extension(assignment.id, session.owner_user_id, db=db)
-    due_at = resolve_effective_due_at(assignment, rounds, reviews, extension.due_at if extension else None)
-    if due_at is not None and due_at <= int(time.time()):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, 'Assignment due time has passed')

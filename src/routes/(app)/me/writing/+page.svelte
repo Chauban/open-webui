@@ -1,4 +1,5 @@
 <script lang="ts">
+	import SubmissionTimingBadge from '$lib/components/education/SubmissionTimingBadge.svelte';
 	import { isRevision, taskTypeLabel } from '$lib/utils/task-types';
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
@@ -30,7 +31,9 @@
 	import EduStateCard from '$lib/components/education/EduStateCard.svelte';
 	import EduPageShell from '$lib/components/education/EduPageShell.svelte';
 	import Plus from '$lib/components/icons/Plus.svelte';
+	import DisclosureChevron from '$lib/components/common/DisclosureChevron.svelte';
 	import ChevronRight from '$lib/components/icons/ChevronRight.svelte';
+	import { disclosureSlide } from '$lib/utils/disclosure';
 	import { EDU_FIELD_CLASS, eduSegmentClass } from '$lib/components/education/styles';
 
 	const i18n = getContext<Writable<i18nType>>('i18n');
@@ -43,8 +46,8 @@
 	let joining = false;
 	let creatingPersonal = false;
 	let activeTab = 'personal';
-	let showDone = false;
-	let showMissed = false;
+	let showDone = true;
+	let showMissed = true;
 	let deletingPersonalIds = new Set<string>();
 	let homeLoading = false;
 	let pendingDeleteSessionId = '';
@@ -63,9 +66,7 @@
 	// 退回的作业要学生动手,和没交的一起算「待完成」;其余已提交的收进下方折叠区。
 	const needsAction = (item) => item.status !== 'submitted' || item.review_status === 'returned';
 
-	// 待完成:还能交的,截止最近的在前(没有截止的垫底);
-	// 已截止未交:过了截止交不了了,只剩回看,收进折叠区,截止最近的在前——
-	// 混在待完成里会排在最前头,把真正要做的作业挤到下面去;
+	// 待完成按截止排序；超时未交仍可完成，单独分组并标红，默认展开。
 	// 已提交:最近更新的在前。
 	const groupAssignmentItems = (items) => {
 		const todo = [];
@@ -291,9 +292,9 @@
 	<!--
 		此前首页最上面是 12 张「最近写作」卡片,把待完成作业挤出第一屏,
 		而它们与下面两个列表几乎全部重复。现在顶部只留一条「接着写」,
-		作业分「待完成 / 已提交」两组,已提交的默认折叠。
+		已提交的作业默认展开,可手动收起。
 	-->
-	<EduPageShell title={$i18n.t('Writing')}>
+	<EduPageShell title={$i18n.t(isStudent ? 'My Assignments' : 'Writing')}>
 		<svelte:fragment slot="nav-actions">
 			<EduButton on:click={() => goto('/me/writing/growth')}>
 				{$i18n.t('My Growth')}
@@ -332,8 +333,10 @@
 							on:click={() => (activeTab = 'assignment')}
 						>
 							{$i18n.t('Assignment Writing')}
-							{#if assignmentGroups.todo.length > 0}
-								<span class="ml-1 tabular-nums opacity-70">{assignmentGroups.todo.length}</span>
+							{#if assignmentGroups.todo.length + assignmentGroups.missed.length > 0}
+								<span class="ml-1 tabular-nums opacity-70"
+									>{assignmentGroups.todo.length + assignmentGroups.missed.length}</span
+								>
 							{/if}
 						</button>
 						{#if allowPersonal}
@@ -399,7 +402,9 @@
 							</span>
 						</h2>
 						{#if assignmentGroups.todo.length === 0}
-							<EduStateCard>{$i18n.t('All caught up. Nothing is waiting for you.')}</EduStateCard>
+							{#if assignmentGroups.missed.length === 0}
+								<EduStateCard>{$i18n.t('All caught up. Nothing is waiting for you.')}</EduStateCard>
+							{/if}
 						{:else}
 							<div class="grid gap-3">
 								{#each assignmentGroups.todo as item (item.assignment.id)}
@@ -414,18 +419,14 @@
 								aria-expanded={showMissed}
 								on:click={() => (showMissed = !showMissed)}
 							>
-								<ChevronRight
-									className="size-4 text-gray-400 transition-transform {showMissed
-										? 'rotate-90'
-										: ''}"
-								/>
-								{$i18n.t('Past due, not submitted')}
+								<DisclosureChevron open={showMissed} className="size-4 text-gray-400" />
+								{$i18n.t('Overdue · still open for submission')}
 								<span class="text-sm font-normal text-gray-500 tabular-nums dark:text-gray-400">
 									{assignmentGroups.missed.length}
 								</span>
 							</button>
 							{#if showMissed}
-								<div class="grid gap-3">
+								<div transition:disclosureSlide class="grid gap-3">
 									{#each assignmentGroups.missed as item (item.assignment.id)}
 										{@render assignmentCard(item)}
 									{/each}
@@ -439,18 +440,14 @@
 								aria-expanded={showDone}
 								on:click={() => (showDone = !showDone)}
 							>
-								<ChevronRight
-									className="size-4 text-gray-400 transition-transform {showDone
-										? 'rotate-90'
-										: ''}"
-								/>
+								<DisclosureChevron open={showDone} className="size-4 text-gray-400" />
 								{$i18n.t('Submitted')}
 								<span class="text-sm font-normal text-gray-500 tabular-nums dark:text-gray-400">
 									{assignmentGroups.done.length}
 								</span>
 							</button>
 							{#if showDone}
-								<div class="grid gap-3">
+								<div transition:disclosureSlide class="grid gap-3">
 									{#each assignmentGroups.done as item (item.assignment.id)}
 										{@render assignmentCard(item)}
 									{/each}
@@ -523,14 +520,20 @@
 
 	{#snippet assignmentCard(item)}
 		{@const action = getAssignmentAction(item)}
+		{@const overdue = needsAction(item) && isPastEffectiveDue(item)}
 		{@const notices = assignmentNotifications[item.assignment.id] ?? {}}
 		{@const countdown =
 			item.effective_due_at && needsAction(item) ? getDueCountdown(item.effective_due_at) : null}
-		<EduCard>
+		<EduCard tone={overdue || item.submission_timing?.is_late ? 'rose' : 'default'}>
 			<div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
 				<div class="min-w-0">
 					<div class="flex flex-wrap items-center gap-2">
 						<div class="text-base font-semibold">{item.assignment.title}</div>
+						{#if overdue}
+							<EduBadge soft tone="rose">{$i18n.t('Overdue · still open for submission')}</EduBadge>
+						{:else}
+							<SubmissionTimingBadge timing={item.submission_timing} />
+						{/if}
 						{#if notices.review_completed > 0}
 							<EduBadge soft tone="rose"
 								>{$i18n.t('Unread review')} · {notices.review_completed}</EduBadge
@@ -553,11 +556,9 @@
 								{item.score ?? ''}
 							</EduBadge>
 						{:else if item.review_status === 'pending'}
-							<!-- 待批改且未过截止时学生仍可改稿重交(覆盖当前轮),标签要说清楚 -->
+							<!-- 待批改时可以改稿重交，覆盖当前轮。 -->
 							<EduBadge soft>
-								{isPastEffectiveDue(item)
-									? $i18n.t('Awaiting review')
-									: $i18n.t('Submitted · editable before deadline')}
+								{$i18n.t('Submitted · editable until graded')}
 							</EduBadge>
 						{:else if item.status === 'draft'}
 							<EduBadge soft tone="sky">{$i18n.t('In progress')}</EduBadge>
@@ -609,6 +610,8 @@
 {/if}
 
 <ConfirmDialog
+	confirmLabel={$i18n.t('Delete')}
+	variant="danger"
 	bind:show={showDeleteConfirm}
 	title={$i18n.t('Delete Personal Writing')}
 	message={$i18n.t(

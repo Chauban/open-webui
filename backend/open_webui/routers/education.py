@@ -17,12 +17,13 @@ import time
 import uuid
 import zipfile
 from datetime import datetime
-from typing import NamedTuple, Optional
+from typing import Literal, NamedTuple, Optional
 
 from fastapi import (
     APIRouter,
     Depends,
     File,
+    Form,
     HTTPException,
     Query,
     Request,
@@ -175,12 +176,14 @@ from open_webui.services.education.ai_steps import (
     resolve_coaching_thinking,
 )
 from open_webui.services.education.profile import PROFILE_METRIC_VERSION
+from open_webui.services.education.scoring import assignment_scoring, review_scoring_assignment, review_for_scoring
 from open_webui.services.education.revision_items import (
     build_first_read_distribution,
     is_same_as_draft,
     summarize_revision_snapshot,
 )
 from open_webui.services.education.identity import get_education_role
+from open_webui.services.education.submission_timing import build_submission_timing, get_submission_timing
 from open_webui.services.education.writing_access import (
     ensure_writing_session_writable,
     ensure_personal_writing_allowed,
@@ -224,7 +227,9 @@ from open_webui.socket.main import emit_to_users
 from open_webui.tasks import stop_item_tasks
 from open_webui.utils.auth import get_admin_user, get_verified_user
 
-router = APIRouter()
+from open_webui.services.education.save_diagnostics import WritingSaveRoute
+
+router = APIRouter(route_class=WritingSaveRoute)
 
 MAX_STUDENT_ASSIGNMENTS = 100
 SUBMISSION_DETAIL_VERSION_LIMIT = 20
@@ -338,6 +343,8 @@ async def _build_submission_list_item(submission, assignment, db: Session):
     reflection = Education.get_micro_reflection_by_id(submission.micro_reflection_id, db=db)
     student = await Users.get_user_by_id(submission.student_id, db=db)
     review = Education.get_submission_review_by_submission_id(submission.id, db=db)
+    assignment = review_scoring_assignment(assignment, review)
+    review = review_for_scoring(review, assignment)
     classroom = Education.get_classroom_by_id(assignment.classroom_id, db=db) if assignment.classroom_id else None
     analysis = await get_materialized_submission_analysis(submission, session, db)
     revision_overview = None
@@ -347,6 +354,7 @@ async def _build_submission_list_item(submission, assignment, db: Session):
         )
     return SubmissionListItem(
         submission=submission,
+        timing=get_submission_timing(submission.id, db),
         session=session,
         assignment=assignment,
         classroom=classroom,
@@ -520,10 +528,14 @@ def _build_student_review_view(assignment, student_id: str, db: Session) -> tupl
     if submission is None:
         return None, effective_due_at
     review = reviews.get(submission.id)
+    scoring = review_scoring_assignment(assignment, review)
     view = {
         'round_no': submission.round_no,
+        'submission_timing': get_submission_timing(submission.id, db).model_dump(),
         'submitted_at': submission.submitted_at,
         'review_status': review.review_status if review else 'pending',
+        'score_max': scoring.score_max,
+        'rubric_schema': scoring.rubric_schema.model_dump(),
     }
     if review and review.review_status == 'reviewed':
         view.update(
@@ -961,14 +973,6 @@ async def update_assignment(
     )
     if form_data.adopt_latest_teaching_config and started:
         raise HTTPException(409, 'Teaching configuration is locked after students have started')
-    description_changed = any(
-        getattr(form_data, key) != getattr(assignment, key)
-        for key in ('title', 'description')
-        if key in form_data.model_fields_set
-    )
-    has_sessions = bool(Education.get_writing_sessions_by_assignment(assignment.id, db=db))
-    if description_changed and has_sessions and not (form_data.change_summary or '').strip():
-        raise HTTPException(400, 'Describe the change to the assignment requirements')
     teaching_config = (
         latest_teaching_config(next_mode, db)
         if next_mode != assignment.task_mode or form_data.adopt_latest_teaching_config
@@ -979,16 +983,6 @@ async def update_assignment(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail='Assignment due time is required',
-        )
-
-    if (
-        (form_data.scoring_mode is not None and form_data.scoring_mode != assignment.scoring_mode)
-        or ('score_max' in form_data.model_fields_set and form_data.score_max != assignment.score_max)
-        or ('rubric_schema' in form_data.model_fields_set and form_data.rubric_schema != assignment.rubric_schema)
-    ) and Education.get_submissions_by_assignment(assignment.id, db=db):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail='Scoring configuration cannot change after submissions exist',
         )
 
     if (
@@ -1090,6 +1084,7 @@ async def set_assignment_visibility(
     assignment: AssignmentModel = Depends(require_teacher_assignment),
     db: Session = Depends(get_session),
 ):
+    assignment = await run_in_threadpool(lock_assignment, assignment.id, db)
     updated = Education.set_assignment_hidden(assignment.id, form_data.hidden, db=db)
     student_ids = _get_classroom_student_ids(assignment.classroom_id, db) if assignment.classroom_id else []
     await emit_to_users(
@@ -1414,6 +1409,7 @@ class AssignmentDefaultsResponse(BaseModel):
     rubrics: dict[TaskMode, list[DefaultRubricCriterionItem]]
     # 辅导对话的思考档位由谁定、管理员默认是哪档；作业表单据此决定显不显示思考设置。
     thinking: CoachingChatPolicy
+    photo_transcription_model: ImageParsingModelView | None
     image_parsing_model: ImageParsingModelView | None
 
 
@@ -1443,6 +1439,7 @@ async def get_teacher_assignment_defaults(
         'teaching_configs': configs,
         'rubrics': {mode: config['rubric_schema']['criteria'] for mode, config in configs.items()},
         'thinking': policy.coaching_chat,
+        'photo_transcription_model': await describe_image_parsing_model(request, user, policy, 'photo_transcription'),
         'image_parsing_model': await describe_image_parsing_model(request, user, policy),
     }
 
@@ -1702,7 +1699,6 @@ async def get_classroom_members(
 ):
     members = Education.get_classroom_members(classroom.id, member_role='student', db=db)
     assignments = Education.get_assignments_by_classroom(classroom.id, db=db)
-    score_max_by_assignment = {assignment.id: assignment.score_max for assignment in assignments}
     submissions = [
         submission
         for assignment in assignments
@@ -1724,9 +1720,7 @@ async def get_classroom_members(
             if review is None or review.review_status == 'pending':
                 pending += 1
             elif review.review_status == 'reviewed' and review.score is not None:
-                score_max = score_max_by_assignment.get(submission.assignment_id)
-                if score_max:
-                    percents.append(review.score * 100 / score_max)
+                percents.append(review.score * 100 / review.scoring_config.score_max)
         items.append(
             ClassroomRosterItem(
                 **detail.model_dump(),
@@ -2289,6 +2283,7 @@ async def get_writing_home(
                     review_status=review_view['review_status'] if review_view else None,
                     score=(review_view or {}).get('score'),
                     round_no=(review_view or {}).get('round_no'),
+                    submission_timing=(review_view or {}).get('submission_timing'),
                     effective_due_at=effective_due_at,
                 )
             )
@@ -2539,7 +2534,7 @@ async def create_provenance_segments(
 
 
 def _ensure_draft_baseline_open(session: WritingSessionModel, db: Session) -> None:
-    """修订初稿作业、初稿还没交、作业没截止,才能交初稿(或解析初稿文件)。"""
+    """修订初稿作业尚未确认基线时，可以交初稿或解析初稿文件。"""
     if session.scope != 'assignment':
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Invalid writing scope')
     assignment = _get_assignment_or_404(session.assignment_id, db)
@@ -2552,12 +2547,6 @@ def _ensure_draft_baseline_open(session: WritingSessionModel, db: Session) -> No
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail='First draft has already been submitted',
-        )
-    effective_due_at = _get_effective_due_at(assignment, session.owner_user_id, db)
-    if effective_due_at is not None and effective_due_at <= int(time.time()):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail='Assignment due time has passed',
         )
 
 
@@ -2718,8 +2707,9 @@ async def attach_writing_materials(
     db: Session = Depends(get_session),
 ):
     await run_in_threadpool(lock_assignment, session.assignment_id, db)
+    session = Education.get_writing_session_by_id(session.id, db=db)
     _ensure_text_import_open(user, session, db)
-    if is_revision(_get_assignment_or_404(session.assignment_id, db).task_mode):
+    if is_revision(_get_assignment_or_404(session.assignment_id, db).task_mode) and session.draft_baseline_at is None:
         raise HTTPException(400, 'Confirm materials with your first draft')
     confirm_materials(session.id, form_data.materials, db, replace=form_data.replace)
     db.commit()
@@ -2762,13 +2752,21 @@ async def get_writing_material_asset(
 async def extract_import_images(
     request: Request,
     files: list[UploadFile] = File(...),
+    purpose: Literal['photo_to_text', 'reference'] = Form(...),
     user=Depends(get_verified_user),
     session: WritingSessionModel = Depends(require_owned_writing_session),
     db: Session = Depends(get_session),
 ):
-    """Keep every original photo and return image nodes; OCR never changes the displayed draft."""
+    """Explicit upload intent determines whether photos become prose or remain images."""
+    from open_webui.services.education.materials import (
+        ensure_photo_transcription_enabled,
+        prepare_photo_transcriptions,
+        prepare_import_document,
+    )
+
     _ensure_text_import_open(user, session, db)
-    enabled_at_start = image_reading_enabled(session, db)
+    if purpose == 'photo_to_text':
+        ensure_photo_transcription_enabled(session, db)
     db.commit()
     if not files or len(files) > DRAFT_IMAGE_MAX_COUNT:
         raise HTTPException(400, 'Upload at most 8 images at a time')
@@ -2785,20 +2783,28 @@ async def extract_import_images(
             uploads.append((file.filename or 'image.jpg', data))
         await prepare_draft_images([data for _, data in uploads])
         import asyncio
-        from open_webui.services.education.materials import prepare_import_document
         semaphore = asyncio.Semaphore(4)
         async def prepare(upload):
             async with semaphore:
                 name, data = upload
-                return await prepare_import_document(name, data, request, user, enabled=enabled_at_start)
-        prepared = await asyncio.gather(*(prepare(upload) for upload in uploads))
+                return await prepare_import_document(name, data, request, user, enabled=False)
+
+        prepared = (
+            await prepare_photo_transcriptions(uploads, request, user)
+            if purpose == 'photo_to_text'
+            else await asyncio.gather(*(prepare(upload) for upload in uploads))
+        )
         results = []
         for (name, data), document in zip(uploads, prepared):
-            results.append(await import_material_document(name, data, session, request, user, db, prepared=document))
+            results.append(
+                await import_material_document(
+                    name, data, session, request, user, db, prepared=document, purpose=purpose
+                )
+            )
     except (DraftImageError, DraftFileError) as error:
         raise HTTPException(400, str(error)) from error
     return {
-        'text': '',
+        'text': '\n\n'.join(item['text'] for item in results).strip(),
         'content_json': {'type': 'doc', 'content': [n for item in results for n in item['content_json']['content']]},
         'materials': [item['material'] for item in results],
     }
@@ -2846,17 +2852,10 @@ async def reset_draft_baseline(
 ):
     """撤回初稿重新开始:基线、正文、写作过程和本作业的对话全部删掉,不留痕。
 
-    只在从没提交过、作业没截止时可以;交过一次(含退回重交)基线就锁定。
+    只在从没提交过时可以；交过一次（含退回重交）基线就锁定。
     """
     if session.scope != 'assignment':
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Invalid writing scope')
-    assignment = _get_assignment_or_404(session.assignment_id, db)
-    effective_due_at = _get_effective_due_at(assignment, session.owner_user_id, db)
-    if effective_due_at is not None and effective_due_at <= int(time.time()):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail='Assignment due time has passed',
-        )
     updated = Education.reset_draft_baseline(session.id, db=db)
     if updated is None:
         raise HTTPException(
@@ -3519,6 +3518,7 @@ async def get_my_assignment_submissions(
     for submission in submissions:
         version = Education.get_version_by_id(submission.final_version_id, db=db)
         review = Education.get_submission_review_by_submission_id(submission.id, db=db)
+        scoring = review_scoring_assignment(assignment, review)
         rounds.append(
             MySubmissionRound(
                 submission_id=submission.id,
@@ -3526,6 +3526,9 @@ async def get_my_assignment_submissions(
                 round_no=submission.round_no,
                 is_current=submission.is_current,
                 submitted_at=submission.submitted_at,
+                timing=get_submission_timing(submission.id, db),
+                score_max=scoring.score_max,
+                rubric_schema=scoring.rubric_schema,
                 content=MySubmissionRoundContent(
                     content_json=version.note_snapshot_json if version else None,
                     content_text=(version.note_snapshot_text if version else '') or '',
@@ -3573,8 +3576,15 @@ async def get_submission_detail(
         ProvenanceSegmentModel.model_validate({**segment.model_dump(), 'writing_session_id': session.id})
         for segment in evidence.evidence_json.provenance
     ]
-    if 'assignment_config' in submission.stats_json:
-        assignment = AssignmentModel.model_validate(submission.stats_json['assignment_config'])
+    grading = review_scoring_assignment(assignment, review)
+    review = review_for_scoring(review, grading)
+    assignment = AssignmentModel.model_validate(submission.stats_json['assignment_config']).model_copy(
+        update={
+            'scoring_mode': grading.scoring_mode,
+            'score_max': grading.score_max,
+            'rubric_schema': grading.rubric_schema,
+        }
+    )
     student = await Users.get_user_by_id(submission.student_id, db=db)
     note = await Notes.get_note_by_id(session.note_id, db=db)
     if note is None:
@@ -3598,6 +3608,7 @@ async def get_submission_detail(
                 'submission_id': item.id,
                 'round_no': item.round_no,
                 'submitted_at': item.submitted_at,
+                'timing': get_submission_timing(item.id, db).model_dump(),
                 'is_current': item.is_current,
                 'review_status': (item_review.review_status if item_review else 'pending'),
                 'score': item_review.score if item_review else None,
@@ -3606,6 +3617,7 @@ async def get_submission_detail(
 
     return SubmissionDetailResponse(
         submission=submission,
+        timing=build_submission_timing(evidence.evidence_json),
         assignment=assignment,
         writing_session=session,
         final_version=final_version,
@@ -3874,6 +3886,7 @@ async def get_submission_review(
 ):
     submission = scope.submission
     review = Education.get_submission_review_by_submission_id(submission.id, db=db)
+    review = review_for_scoring(review, scope.assignment)
     return review.model_dump() if review else {'submission_id': submission.id, 'review_status': 'pending'}
 
 
@@ -3886,7 +3899,7 @@ async def save_submission_review(
 ):
     return_enabled = await Config.get('education.enable_return')
     submission, assignment = scope
-    await run_in_threadpool(lock_assignment, assignment.id, db)
+    assignment = await run_in_threadpool(lock_assignment, assignment.id, db)
     submission = Education.get_submission_by_id(submission.id, db=db)
     event = Education.get_latest_submission_review_event(submission.id, db=db)
     revision = event.review_revision if event else 0
@@ -3902,8 +3915,16 @@ async def save_submission_review(
         and form_data.review_status == 'pending'
     ):
         raise HTTPException(409, 'Published reviews cannot become drafts; save a correction instead')
-    if 'assignment_config' in submission.stats_json:
-        assignment = AssignmentModel.model_validate(submission.stats_json['assignment_config'])
+    assignment = review_scoring_assignment(assignment, previous_review)
+    scoring = assignment_scoring(assignment)
+    if form_data.expected_scoring_config != scoring:
+        raise HTTPException(409, 'Scoring settings changed; reload before saving your review')
+    frozen_assignment = AssignmentModel.model_validate(submission.stats_json['assignment_config'])
+    assignment = frozen_assignment.model_copy(update={
+        'scoring_mode': scoring.scoring_mode,
+        'score_max': scoring.score_max,
+        'rubric_schema': scoring.rubric_schema,
+    })
     if form_data.review_status not in {'pending', 'reviewed', 'returned'}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -4004,6 +4025,7 @@ async def save_submission_review(
             assignment.id,
             user.id,
             form_data,
+            scoring_config=scoring,
             commit=False,
             db=db,
         )

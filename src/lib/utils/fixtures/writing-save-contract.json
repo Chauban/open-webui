@@ -1,0 +1,358 @@
+[
+  {
+    "name": "word-and-web",
+    "document": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "heading",
+          "attrs": {
+            "textAlign": "left",
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "标题"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "attrs": {
+            "textAlign": null
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "正文 "
+            },
+            {
+              "type": "text",
+              "marks": [
+                {
+                  "type": "bold"
+                }
+              ],
+              "text": "加粗"
+            },
+            {
+              "type": "text",
+              "text": " "
+            },
+            {
+              "type": "text",
+              "marks": [
+                {
+                  "type": "italic"
+                }
+              ],
+              "text": "斜体"
+            },
+            {
+              "type": "text",
+              "text": " [1]"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "attrs": {
+            "textAlign": "left"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "右向文字"
+            }
+          ]
+        }
+      ]
+    },
+    "text": "标题\n正文 加粗 斜体 [1]\n右向文字"
+  },
+  {
+    "name": "lists-and-table",
+    "document": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "orderedList",
+          "attrs": {
+            "start": 3,
+            "type": null
+          },
+          "content": [
+            {
+              "type": "listItem",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "attrs": {
+                    "textAlign": null
+                  },
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "论点"
+                    }
+                  ]
+                },
+                {
+                  "type": "bulletList",
+                  "content": [
+                    {
+                      "type": "listItem",
+                      "content": [
+                        {
+                          "type": "paragraph",
+                          "attrs": {
+                            "textAlign": null
+                          },
+                          "content": [
+                            {
+                              "type": "text",
+                              "text": "证据"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "table",
+          "content": [
+            {
+              "type": "tableRow",
+              "content": [
+                {
+                  "type": "tableHeader",
+                  "attrs": {
+                    "colspan": 1,
+                    "rowspan": 1,
+                    "colwidth": null
+                  },
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {
+                        "textAlign": null
+                      },
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "甲"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "tableHeader",
+                  "attrs": {
+                    "colspan": 1,
+                    "rowspan": 1,
+                    "colwidth": null
+                  },
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {
+                        "textAlign": null
+                      },
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "乙"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "tableRow",
+              "content": [
+                {
+                  "type": "tableCell",
+                  "attrs": {
+                    "colspan": 2,
+                    "rowspan": 1,
+                    "colwidth": null
+                  },
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "attrs": {
+                        "textAlign": null
+                      },
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "内容"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "text": "论点\n证据\n甲\n乙\n内容"
+  },
+  {
+    "name": "links-code-and-notes",
+    "document": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "paragraph",
+          "attrs": {
+            "textAlign": null
+          },
+          "content": [
+            {
+              "type": "text",
+              "marks": [
+                {
+                  "type": "link",
+                  "attrs": {
+                    "href": "https://example.org/paper",
+                    "target": "_blank",
+                    "rel": "noopener noreferrer nofollow",
+                    "class": null,
+                    "title": null
+                  }
+                }
+              ],
+              "text": "文献"
+            },
+            {
+              "type": "text",
+              "text": " "
+            },
+            {
+              "type": "text",
+              "marks": [
+                {
+                  "type": "link",
+                  "attrs": {
+                    "href": "mailto:test@example.org",
+                    "target": "_blank",
+                    "rel": "noopener noreferrer nofollow",
+                    "class": null,
+                    "title": "联系作者"
+                  }
+                }
+              ],
+              "text": "邮箱"
+            },
+            {
+              "type": "text",
+              "text": " H"
+            },
+            {
+              "type": "text",
+              "marks": [
+                {
+                  "type": "subscript"
+                }
+              ],
+              "text": "2"
+            },
+            {
+              "type": "text",
+              "text": "O "
+            },
+            {
+              "type": "text",
+              "marks": [
+                {
+                  "type": "superscript"
+                }
+              ],
+              "text": "2"
+            }
+          ]
+        },
+        {
+          "type": "codeBlock",
+          "attrs": {
+            "language": null
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "line 1\nline 2"
+            }
+          ]
+        },
+        {
+          "type": "horizontalRule"
+        }
+      ]
+    },
+    "text": "文献 邮箱 H2O 2\nline 1\nline 2"
+  },
+  {
+    "name": "image-and-footnote",
+    "document": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "paragraph",
+          "attrs": {
+            "textAlign": null
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "有脚注的正文"
+            },
+            {
+              "type": "writingNote",
+              "attrs": {
+                "materialId": "test-material",
+                "blockId": "note",
+                "label": "1",
+                "note": "注释",
+                "kind": "footnote"
+              }
+            }
+          ]
+        },
+        {
+          "type": "writingImage",
+          "attrs": {
+            "materialId": "test-material",
+            "blockId": "image",
+            "width": 80,
+            "alt": "",
+            "transcription": "",
+            "transcriptionEdited": false,
+            "nativeText": "",
+            "nativeTextEdited": false,
+            "readStatus": "",
+            "readDetail": ""
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "图注"
+            }
+          ]
+        }
+      ]
+    },
+    "text": "有脚注的正文\n图注"
+  }
+]

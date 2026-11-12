@@ -29,7 +29,13 @@ EDUCATION_SOURCES = sorted((OPEN_WEBUI / 'services' / 'education').glob('*.py'))
     OPEN_WEBUI / 'routers' / 'education.py'
 ]
 # 接受步骤参数的模型调用出口，以及步骤参数的位置（从 0 数）。
-STEP_CALLS = {'call_step_model': 2, 'generate_completion': 4, 'resolve_step_model': 2}
+STEP_CALLS = {
+    'call_step_model': 2,
+    'generate_completion': 4,
+    'resolve_step_model': 2,
+    'resolve_draft_image_model': 2,
+    'transcribe_draft_images': 4,
+}
 PLATFORM_STEPS = {step.key for step in AI_STEPS} - {'coaching_chat'}
 
 
@@ -73,6 +79,9 @@ def test_every_model_call_names_a_registered_step():
                 continue
             step = _step_argument(call, STEP_CALLS[name])
             location = f'{path.name}:{call.lineno}'
+            if step is None and name in ('resolve_draft_image_model', 'transcribe_draft_images'):
+                used_steps.add('image_parsing')
+                continue
             if isinstance(step, ast.Name) and step.id == 'step':
                 continue  # 出口把调用方写明的步骤往下传
             assert isinstance(step, ast.Constant), f'{location} must name its AI step literally'
@@ -101,7 +110,7 @@ def test_teaching_defaults_send_deepseek_official_high_not_max():
     from open_webui.utils.thinking import apply_thinking_level
 
     for row in describe_steps(_policy(), {}):
-        if row.key == 'image_parsing':
+        if row.key in ('image_parsing', 'photo_transcription'):
             assert row.thinking == 'off'
             continue
         payload = apply_thinking_level({'model': 'deepseek-flash'}, row.thinking, 'deepseek')

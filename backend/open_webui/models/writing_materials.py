@@ -29,7 +29,7 @@ class MaterialBlock(BaseModel):
     text: str = Field(default='', max_length=200_000)
     extracted_text: str = Field(default='', max_length=200_000)
     native_text: str = Field(default='', max_length=200_000)
-    status: Literal['read', 'unreadable', 'corrected', 'disabled']
+    status: Literal['read', 'unread', 'unreadable', 'corrected', 'disabled']
     detail: str = ''
     image: bool = False
 

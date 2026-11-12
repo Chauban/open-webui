@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { marked } from 'marked';
 	import DOMPurify from 'dompurify';
-	import equal from 'fast-deep-equal';
 
 	marked.use({
 		breaks: true,
@@ -239,9 +238,12 @@
 	};
 
 	export let richText = true;
+	export let transformPastedHTML: ((html: string) => string) | undefined = undefined;
 	export let additionalExtensions = [];
 	export let dragHandle = false;
 	export let link = false;
+	export let linkOptions: Partial<import('@tiptap/extension-link').LinkOptions> | undefined =
+		undefined;
 	export let image = false;
 	export let fileHandler = false;
 	export let suggestions = null;
@@ -795,7 +797,7 @@
 			extensions: [
 				...additionalExtensions,
 				StarterKit.configure({
-					link: link,
+					link: link ? (linkOptions ?? {}) : false,
 					...(richText
 						? {
 								codeBlock: false,
@@ -932,7 +934,12 @@
 
 									// Only show on empty paragraphs at root depth
 									return (
-										showFloatingToolbar && view.hasFocus() && empty && isRootDepth && isEmptyTextBlock && editor.isEditable
+										showFloatingToolbar &&
+										view.hasFocus() &&
+										empty &&
+										isRootDepth &&
+										isEmptyTextBlock &&
+										editor.isEditable
 									);
 								}
 							})
@@ -1015,6 +1022,7 @@
 				}
 			},
 			editorProps: {
+				transformPastedHTML: (html) => transformPastedHTML?.(html) ?? html,
 				// the tiptap placeholder never becomes the field's accessible name;
 				// function form so a placeholder change is picked up after mount
 				attributes: () => ({ id, 'aria-label': _placeholder }),
@@ -1205,7 +1213,7 @@
 					paste: (view, event) => {
 						if (event.clipboardData) {
 							const plainText = event.clipboardData.getData('text/plain');
-							if (plainText) {
+							if (plainText || event.clipboardData.getData('text/html')) {
 								if (largeTextAsFile && plainText.length > PASTED_TEXT_CHARACTER_LIMIT) {
 									// Delegate handling of large text pastes to the parent component.
 									eventDispatch('paste', { event });
@@ -1349,7 +1357,6 @@
 	const onValueChange = () => {
 		if (!editor || editor.isDestroyed) return;
 
-		const jsonValue = editor.getJSON();
 		const htmlValue = editor.getHTML();
 		let mdValue = turndownService
 			.turndown(
@@ -1368,7 +1375,13 @@
 		}
 
 		if (json) {
-			if (!equal(value, jsonValue)) {
+			// ProseMirror attributes have null prototypes. Generic deep-equality calls
+			// valueOf on them and crashes when a second editor displays the same draft.
+			const sameDocument =
+				value &&
+				typeof value === 'object' &&
+				editor.state.doc.eq(editor.schema.nodeFromJSON(value));
+			if (!sameDocument) {
 				pushContent(() => editor.commands.setContent(value));
 				selectTemplate();
 			}

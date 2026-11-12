@@ -77,19 +77,18 @@
 			>{/if}
 	{/if}
 </article>
-<Modal bind:show={showSource} size="md">
-	{#if record}<div class="p-5">
-			<div class="mb-4 flex justify-between gap-3">
-				<h3 class="font-semibold">{$i18n.t('当时的稿件')}</h3>
-				<EduButton size="sm" on:click={() => (showSource = false)}>{$i18n.t('Close')}</EduButton>
-			</div>
-			<p class="mb-3 text-xs text-gray-500">
-				{new Date(record.created_at * 1000).toLocaleString()} · {$i18n.t(
-					'这里保留阅读时的记录，不会替换当前正文。'
-				)}
-			</p>
-			<div class="max-h-[55dvh] overflow-y-auto whitespace-pre-wrap text-sm leading-7">
-				{record.source_text}
-			</div>
-		</div>{/if}
+<Modal
+	bind:show={showSource}
+	size="md"
+	title={$i18n.t('当时的稿件')}
+	description={$i18n.t('这里保留阅读时的记录，不会替换当前正文。')}
+>
+	{#if record}
+		<p class="mb-4 text-xs text-gray-500">{new Date(record.created_at * 1000).toLocaleString()}</p>
+		<div class="whitespace-pre-wrap text-sm leading-7">{record.source_text}</div>
+	{/if}
+	<svelte:fragment slot="footer"
+		><EduButton on:click={() => (showSource = false)}>{$i18n.t('Close')}</EduButton
+		></svelte:fragment
+	>
 </Modal>

@@ -138,6 +138,76 @@ def student_session(env, assignment):
     return sid
 
 
+def test_delete_trial_draft_retains_evidence_saved_plans_and_published_versions(env):
+    prep = prepare(env)
+    tested = action(env, trial(env, prep), 'confirm', DRAFT)
+    assert tested.status_code == 200, tested.text
+    tested = tested.json()
+    plan_response = env.client.post(
+        '/api/v1/teacher/saved-teaching-plans', json={'trial_id': tested['id'], 'name': '保留的试教方案'}
+    )
+    assert plan_response.status_code == 200, plan_response.text
+    plan = plan_response.json()
+
+    # Another published preparation can already cite this draft's trial evidence.
+    published_prep = prepare(env)
+    published = publish(env, published_prep)
+    assert published.status_code == 200, published.text
+    assignment = published.json()[0]
+    revisions_path = f'/api/v1/assignments/{assignment["id"]}/ai-revisions'
+    revisions = env.client.get(revisions_path).json()
+    assert tested['events'][-1]['id'] in revisions[0]['evidence']['event_ids']
+
+    path = f'/api/v1/teacher/teaching-preparations/{prep["id"]}'
+    deleted = env.client.delete(path, params={'expected_revision': prep['revision']})
+    assert deleted.status_code == 200, deleted.text
+    assert deleted.json() == {'deleted': True}
+    assert env.client.get(path).status_code == 404
+    assert prep['id'] not in {row['id'] for row in env.client.get('/api/v1/teacher/teaching-preparations').json()}
+    assert env.client.get(f'/api/v1/teacher/teaching-trials/{tested["id"]}').json() == tested
+    assert env.client.get('/api/v1/teacher/saved-teaching-plans').json() == [plan]
+    assert env.client.get(revisions_path).json() == revisions
+    with env.factory() as db:
+        assert Education.get_assignment_by_id(assignment['id'], db=db).model_dump() == assignment
+
+    target = prepare(env, payload(env, title='另一个草稿'))
+    adopted = env.client.post(
+        f'/api/v1/teacher/saved-teaching-plans/{plan["id"]}/adopt/{target["id"]}',
+        json={'expected_revision': target['revision'], 'include_task': True, 'idempotency_key': str(uuid.uuid4())},
+    )
+    assert adopted.status_code == 200, adopted.text
+    assert adopted.json()['payload']['assignment']['title'] == tested['config']['title']
+    target_view = env.client.get(f'/api/v1/teacher/teaching-preparations/{target["id"]}').json()
+    assert tested['events'][-1]['id'] in target_view['coverage']['event_ids']
+
+
+@pytest.mark.parametrize(
+    'guard,expected_status', [('other', 404), ('student', 403), ('stale', 409), ('published', 409)]
+)
+def test_delete_trial_draft_preserves_ownership_revision_and_publication_guards(env, guard, expected_status):
+    prep = prepare(env)
+    tested = trial(env, prep)
+    if guard == 'published':
+        result = publish(env, prep)
+        assert result.status_code == 200, result.text
+    if guard in ('other', 'student'):
+        UserContext.current_user = getattr(env, guard)
+    path = f'/api/v1/teacher/teaching-preparations/{prep["id"]}'
+    response = env.client.delete(path, params={'expected_revision': prep['revision'] + (guard == 'stale')})
+    assert response.status_code == expected_status, response.text
+    UserContext.current_user = env.teacher
+    assert env.client.get(path).status_code == 200
+    assert env.client.get(f'/api/v1/teacher/teaching-trials/{tested["id"]}').status_code == 200
+
+
+def test_delete_draft_without_trial(env):
+    prep = prepare(env)
+    path = f'/api/v1/teacher/teaching-preparations/{prep["id"]}'
+    response = env.client.delete(path, params={'expected_revision': prep['revision']})
+    assert response.status_code == 200, response.text
+    assert env.client.get(path).status_code == 404
+
+
 def test_private_draft_trial_without_publication_and_adopt_is_not_publish(env):
     data = payload(env)
     data['assignment'].update(classroom_ids=[], due_at=None)
@@ -251,6 +321,7 @@ def test_inflight_v1_is_not_overwritten_by_v2_and_submission_freezes_all(env):
     prep2 = prepare(env, payload(env, prompt='第二版完整提示词', model='model-B'), first['id'])
     second = publish(env, prep2, first['config_revision'])
     assert second.status_code == 200, second.text
+    assert second.json()[0]['change_summary'] == '按课堂反馈调整'
     assert config1['ai']['model_id'] == 'model-A'
     runtime.finish_formal(call1, 'ready')
     with env.factory() as db:

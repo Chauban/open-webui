@@ -14,6 +14,7 @@ export type ImportKind = 'document' | 'images';
 // scannedPages:读 PDF 时有几页扫描页交给了识图模型(kind 因此是 images);
 // modelId:转录这些图片实际用的模型,随导入记进编辑操作。
 export type ImportInfo = {
+	purpose?: import('$lib/apis/education').ImageUploadPurpose;
 	material?: import('$lib/types/writing-materials').WritingMaterial;
 	materials?: import('$lib/types/writing-materials').WritingMaterial[];
 	document?: import('$lib/utils/writing-document').WritingNode;

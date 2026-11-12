@@ -1,5 +1,7 @@
 <script lang="ts">
 	import CoursewareLink from './CoursewareLink.svelte';
+	import StudentNavigationLink from './Sidebar/StudentNavigationLink.svelte';
+	import { getHomeHref } from '$lib/utils/student-navigation';
 	import { toast } from 'svelte-sonner';
 	import { v4 as uuidv4 } from 'uuid';
 	import Sortable from 'sortablejs';
@@ -64,6 +66,7 @@
 	import { updateUserSettings } from '$lib/apis/users';
 	import { createNoteHandler } from '$lib/components/notes/utils';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
+	import { createLatestRequestGate } from '$lib/utils/latest-request';
 
 	import UserMenu from './Sidebar/UserMenu.svelte';
 	import ChatItem from './Sidebar/ChatItem.svelte';
@@ -97,6 +100,10 @@
 	import MobileSwipePanel from '../common/MobileSwipePanel.svelte';
 
 	const BREAKPOINT = 768;
+	$: isStudent = $user?.education_role === 'student';
+	$: homeHref = getHomeHref($user);
+	$: assignmentsActive =
+		$page.url.pathname.startsWith('/me/writing') || $page.url.pathname.startsWith('/assignments/');
 	const DEFAULT_PINNED_ITEMS = ['notes', 'workspace', 'writing', 'teaching'];
 
 	// RightWrite: unread counts drive the badges on the teaching entries.
@@ -198,9 +205,7 @@
 				next[folder.parent_id].childrenIds = next[folder.parent_id].childrenIds
 					? [...next[folder.parent_id].childrenIds, folder.id]
 					: [folder.id];
-				next[folder.parent_id].childrenIds.sort(
-					(a, b) => next[b].updated_at - next[a].updated_at
-				);
+				next[folder.parent_id].childrenIds.sort((a, b) => next[b].updated_at - next[a].updated_at);
 			}
 		}
 		writingProjects = next;
@@ -251,7 +256,7 @@
 			return;
 		}
 
-		folderRegistry[folder.id]?.setFolderItems?.();
+		getFolderEntry(folder.id)?.setFolderItems?.();
 	};
 
 	$: pinnedItems = $settings?.pinnedMenuItems ?? DEFAULT_PINNED_ITEMS;
@@ -283,7 +288,7 @@
 					($user?.role === 'admin' || $user?.permissions?.features?.calendar)
 				);
 			case 'writing':
-				return $user?.education_role === 'student' || $config?.features?.enable_personal_writing;
+				return !isStudent && $config?.features?.enable_personal_writing;
 			case 'teaching':
 				return $user?.education_role === 'teacher' || $user?.role === 'admin';
 			case 'playground':
@@ -349,7 +354,9 @@
 
 	$: initSelectedFolderChats($selectedFolder as SelectedSidebarFolder);
 
+	const folderLoadGate = createLatestRequestGate();
 	const initFolders = async () => {
+		const requestId = folderLoadGate.next();
 		if ($config?.features?.enable_folders === false) {
 			return;
 		}
@@ -362,6 +369,8 @@
 				return [];
 			})
 		]);
+		// 打开工作区会再拉取项目；较早的请求不能覆盖刚创建或恢复显示的项目。
+		if (!folderLoadGate.isLatest(requestId)) return;
 		_folders.set(folderList.sort((a, b) => b.updated_at - a.updated_at));
 
 		buildWritingProjects(folderList);
@@ -837,8 +846,12 @@
 			if (folderId) {
 				// 写作区分组挂在独立的 writingProjectRegistry 上;新对话要让学生马上在侧栏看到,
 				// 所以写作分组收到新对话时直接展开。刚建的写作分组侧栏可能还没加载,先刷新分组树。
-				if (chat && !folderRegistry[folderId] && !writingProjectRegistry[folderId]) {
+				if (!folderRegistry[folderId] && !writingProjectRegistry[folderId]) {
 					await initFolders();
+					await tick();
+				}
+				if (writingProjects[folderId]) {
+					showWriting = true;
 					await tick();
 				}
 				if (writingProjectRegistry[folderId]) {
@@ -1103,29 +1116,38 @@
 				</div>
 
 				<div class="-gap-0.5">
-					<div class="">
-						<Tooltip content={$i18n.t('New Chat')} placement="right">
-							<a
-								class=" cursor-pointer flex size-8 items-center justify-center transition group"
-								href="/"
-								draggable="false"
-								on:click={async (e) => {
-									e.stopImmediatePropagation();
-									e.preventDefault();
+					{#if isStudent}
+						<StudentNavigationLink
+							collapsed
+							active={assignmentsActive}
+							unread={studentUnread}
+							onNavigate={itemClickHandler}
+						/>
+					{:else}
+						<div class="">
+							<Tooltip content={$i18n.t('New Chat')} placement="right">
+								<a
+									class=" cursor-pointer flex size-8 items-center justify-center transition group"
+									href="/"
+									draggable="false"
+									on:click={async (e) => {
+										e.stopImmediatePropagation();
+										e.preventDefault();
 
-									goto('/');
-									newChatHandler();
-								}}
-								aria-label={$i18n.t('New Chat')}
-							>
-								<div
-									class="self-center flex size-[calc(30px*var(--app-text-scale,1))] items-center justify-center rounded-lg transition group-hover:bg-gray-100 dark:group-hover:bg-gray-900"
+										goto('/');
+										newChatHandler();
+									}}
+									aria-label={$i18n.t('New Chat')}
 								>
-									<EditPencilIcon className="size-4" strokeWidth="1.5" />
-								</div>
-							</a>
-						</Tooltip>
-					</div>
+									<div
+										class="self-center flex size-[calc(30px*var(--app-text-scale,1))] items-center justify-center rounded-lg transition group-hover:bg-gray-100 dark:group-hover:bg-gray-900"
+									>
+										<EditPencilIcon className="size-4" strokeWidth="1.5" />
+									</div>
+								</a>
+							</Tooltip>
+						</div>
+					{/if}
 
 					<div>
 						<Tooltip content={$i18n.t('Search')} placement="right">
@@ -1195,7 +1217,11 @@
 													stroke="currentColor"
 													class="size-4"
 												>
-													<path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487 18.549 2.8a1.875 1.875 0 1 1 2.652 2.652L7.832 18.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.862 4.487ZM19.5 7.125 16.875 4.5" />
+													<path
+														stroke-linecap="round"
+														stroke-linejoin="round"
+														d="M16.862 4.487 18.549 2.8a1.875 1.875 0 1 1 2.652 2.652L7.832 18.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.862 4.487ZM19.5 7.125 16.875 4.5"
+													/>
 												</svg>
 											{:else if itemId === 'teaching'}
 												<svg
@@ -1206,7 +1232,11 @@
 													stroke="currentColor"
 													class="size-4"
 												>
-													<path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5 4.462 5 2 6.462 2 8.267v7.466C2 17.538 4.462 19 7.5 19c1.746 0 3.332-.477 4.5-1.253m0-11.494C13.168 5.477 14.754 5 16.5 5 19.538 5 22 6.462 22 8.267v7.466C22 17.538 19.538 19 16.5 19c-1.746 0-3.332-.477-4.5-1.253" />
+													<path
+														stroke-linecap="round"
+														stroke-linejoin="round"
+														d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5 4.462 5 2 6.462 2 8.267v7.466C2 17.538 4.462 19 7.5 19c1.746 0 3.332-.477 4.5-1.253m0-11.494C13.168 5.477 14.754 5 16.5 5 19.538 5 22 6.462 22 8.267v7.466C22 17.538 19.538 19 16.5 19c-1.746 0-3.332-.477-4.5-1.253"
+													/>
 												</svg>
 											{/if}
 											{#if (itemId === 'writing' && studentUnread > 0) || (itemId === 'teaching' && teacherUnread > 0)}
@@ -1223,6 +1253,11 @@
 							</div>
 						{/if}
 					{/each}
+					{#if isStudent}
+						<div class="mt-2 border-t border-gray-200 pt-2 dark:border-gray-800">
+							<StudentNavigationLink kind="free-chat" collapsed onNavigate={newChatHandler} />
+						</div>
+					{/if}
 				</div>
 			</button>
 
@@ -1301,9 +1336,9 @@
 				>
 					<a
 						class="flex items-center rounded-xl size-8.5 h-full justify-center hover:bg-gray-100 dark:hover:bg-gray-900 transition no-drag-region"
-						href="/"
+						href={homeHref}
 						draggable="false"
-						on:click={newChatHandler}
+						on:click={isStudent ? itemClickHandler : newChatHandler}
 					>
 						<!-- LICENSE covers this Open WebUI sidebar logo.
 					Do not alter, remove, obscure, or replace it except as LICENSE permits:
@@ -1316,7 +1351,11 @@
 						/>
 					</a>
 
-					<a href="/" class="flex flex-1 px-0.5" on:click={newChatHandler}>
+					<a
+						href={homeHref}
+						class="flex flex-1 px-0.5"
+						on:click={isStudent ? itemClickHandler : newChatHandler}
+					>
 						<!-- LICENSE covers this Open WebUI sidebar name.
 					Do not alter, remove, obscure, or replace it except as LICENSE permits:
 					https://docs.openwebui.com/license. -->
@@ -1364,26 +1403,34 @@
 					}}
 				>
 					<div class="pb-1">
-						<div class="px-1 flex justify-center text-gray-700 dark:text-gray-300">
-							<a
-								id="sidebar-new-chat-button"
-								class="group grow flex items-center space-x-2 rounded-xl px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-900 transition outline-none"
-								href="/"
-								draggable="false"
-								on:click={newChatHandler}
-								aria-label={$i18n.t('New Chat')}
-							>
-								<div class="self-center flex size-4 shrink-0 items-center justify-center">
-									<EditPencilIcon className=" size-4" strokeWidth="1.5" />
-								</div>
+						{#if isStudent}
+							<StudentNavigationLink
+								active={assignmentsActive}
+								unread={studentUnread}
+								onNavigate={itemClickHandler}
+							/>
+						{:else}
+							<div class="px-1 flex justify-center text-gray-700 dark:text-gray-300">
+								<a
+									id="sidebar-new-chat-link"
+									class="group grow flex items-center space-x-2 rounded-xl px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-900 transition outline-none"
+									href="/"
+									draggable="false"
+									on:click={newChatHandler}
+									aria-label={$i18n.t('New Chat')}
+								>
+									<div class="self-center flex size-4 shrink-0 items-center justify-center">
+										<EditPencilIcon className=" size-4" strokeWidth="1.5" />
+									</div>
 
-								<div class="flex flex-1 self-center translate-y-[0.5px]">
-									<div class=" self-center text-[0.8125rem] leading-5">{$i18n.t('New Chat')}</div>
-								</div>
+									<div class="flex flex-1 self-center translate-y-[0.5px]">
+										<div class=" self-center text-[0.8125rem] leading-5">{$i18n.t('New Chat')}</div>
+									</div>
 
-								<HotkeyHint name="newChat" className=" hover-reveal " />
-							</a>
-						</div>
+									<HotkeyHint name="newChat" className=" hover-reveal " />
+								</a>
+							</div>
+						{/if}
 
 						<div class="px-1 flex justify-center text-gray-700 dark:text-gray-300">
 							<button
@@ -1441,29 +1488,35 @@
 												{:else if itemId === 'playground'}
 													<CodeIcon className="size-4" strokeWidth="1.5" />
 												{:else if itemId === 'writing'}
-														<svg
-															xmlns="http://www.w3.org/2000/svg"
-															fill="none"
-															viewBox="0 0 24 24"
-															stroke-width="1.5"
-															stroke="currentColor"
-															class="size-4"
-														>
-															<path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487 18.549 2.8a1.875 1.875 0 1 1 2.652 2.652L7.832 18.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.862 4.487ZM19.5 7.125 16.875 4.5" />
-														</svg>
-											
+													<svg
+														xmlns="http://www.w3.org/2000/svg"
+														fill="none"
+														viewBox="0 0 24 24"
+														stroke-width="1.5"
+														stroke="currentColor"
+														class="size-4"
+													>
+														<path
+															stroke-linecap="round"
+															stroke-linejoin="round"
+															d="M16.862 4.487 18.549 2.8a1.875 1.875 0 1 1 2.652 2.652L7.832 18.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.862 4.487ZM19.5 7.125 16.875 4.5"
+														/>
+													</svg>
 												{:else if itemId === 'teaching'}
-														<svg
-															xmlns="http://www.w3.org/2000/svg"
-															fill="none"
-															viewBox="0 0 24 24"
-															stroke-width="1.5"
-															stroke="currentColor"
-															class="size-4"
-														>
-															<path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5 4.462 5 2 6.462 2 8.267v7.466C2 17.538 4.462 19 7.5 19c1.746 0 3.332-.477 4.5-1.253m0-11.494C13.168 5.477 14.754 5 16.5 5 19.538 5 22 6.462 22 8.267v7.466C22 17.538 19.538 19 16.5 19c-1.746 0-3.332-.477-4.5-1.253" />
-														</svg>
-											
+													<svg
+														xmlns="http://www.w3.org/2000/svg"
+														fill="none"
+														viewBox="0 0 24 24"
+														stroke-width="1.5"
+														stroke="currentColor"
+														class="size-4"
+													>
+														<path
+															stroke-linecap="round"
+															stroke-linejoin="round"
+															d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5 4.462 5 2 6.462 2 8.267v7.466C2 17.538 4.462 19 7.5 19c1.746 0 3.332-.477 4.5-1.253m0-11.494C13.168 5.477 14.754 5 16.5 5 19.538 5 22 6.462 22 8.267v7.466C22 17.538 19.538 19 16.5 19c-1.746 0-3.332-.477-4.5-1.253"
+														/>
+													</svg>
 												{/if}
 											</div>
 
@@ -1602,132 +1655,139 @@
 						</SidebarSection>
 					{/if}
 
+					{#if $user?.education_role === 'student' || $config?.features?.enable_personal_writing}
+						<SidebarSection
+							id="sidebar-writing-projects"
+							bind:open={showWriting}
+							className="mt-0.5"
+							name={$i18n.t('Writing')}
+							dragAndDrop={false}
+						>
+							<Folders
+								bind:folderRegistry={writingProjectRegistry}
+								folders={writingProjects}
+								{shiftKey}
+								lockFolders={true}
+								showVisibilityToggle={true}
+								onCloseFolder={toggleWritingFolderVisibility}
+								folderHrefBuilder={(folder) =>
+									getProjectMode(folder) === 'assignment_writing' && folder?.meta?.assignment_id
+										? `/assignments/${folder.meta.assignment_id}/write`
+										: folder?.meta?.writing_session_id
+											? `/writing/${folder.meta.writing_session_id}`
+											: '/'}
+								chatHrefBuilder={(chat, folder) =>
+									getProjectMode(folder) === 'assignment_writing' && folder?.meta?.assignment_id
+										? `/assignments/${folder.meta.assignment_id}/write?chat=${chat.id}`
+										: folder?.meta?.writing_session_id
+											? `/writing/${folder.meta.writing_session_id}?chat=${chat.id}`
+											: `/c/${chat.id}`}
+								clearSelectedProjectOnChatClick={false}
+								onDelete={() => {
+									initChatList();
+								}}
+								on:update={() => {
+									initChatList();
+								}}
+								on:change={async () => {
+									initChatList();
+								}}
+							/>
+						</SidebarSection>
+					{/if}
 
-				{#if $user?.education_role === 'student' || $config?.features?.enable_personal_writing}
+					{#if isStudent}
+						<div class="mx-1 mt-2 border-t border-gray-200 pt-2 dark:border-gray-800">
+							<StudentNavigationLink kind="free-chat" onNavigate={newChatHandler} />
+						</div>
+					{/if}
+
 					<SidebarSection
-						id="sidebar-writing-projects"
-						bind:open={showWriting}
+						id="sidebar-chats"
 						className="mt-0.5"
-						name={$i18n.t('Writing')}
-						dragAndDrop={false}
-					>
-						<Folders
-							bind:folderRegistry={writingProjectRegistry}
-							folders={writingProjects}
-							{shiftKey}
-							lockFolders={true}
-							showVisibilityToggle={true}
-							onCloseFolder={toggleWritingFolderVisibility}
-							folderHrefBuilder={(folder) =>
-								getProjectMode(folder) === 'assignment_writing' && folder?.meta?.assignment_id
-									? `/assignments/${folder.meta.assignment_id}/write`
-									: folder?.meta?.writing_session_id
-										? `/writing/${folder.meta.writing_session_id}`
-										: '/'}
-							chatHrefBuilder={(chat, folder) =>
-								getProjectMode(folder) === 'assignment_writing' && folder?.meta?.assignment_id
-									? `/assignments/${folder.meta.assignment_id}/write?chat=${chat.id}`
-									: folder?.meta?.writing_session_id
-										? `/writing/${folder.meta.writing_session_id}?chat=${chat.id}`
-										: `/c/${chat.id}`}
-							clearSelectedProjectOnChatClick={false}
-							onDelete={() => {
-								initChatList();
-							}}
-							on:update={() => {
-								initChatList();
-							}}
-							on:change={async () => {
-								initChatList();
-							}}
-						/>
-					</SidebarSection>
-				{/if}
+						name={$i18n.t('Chats')}
+						on:change={async (e) => {
+							selectedFolder.set(null);
+						}}
+						on:import={(e) => {
+							importChatHandler(e.detail);
+						}}
+						on:drop={async (e) => {
+							const { type, id, item } = e.detail;
 
-				<SidebarSection
-					id="sidebar-chats"
-					className="mt-0.5"
-					name={$i18n.t('Chats')}
-					on:change={async (e) => {
-						selectedFolder.set(null);
-					}}
-					on:import={(e) => {
-						importChatHandler(e.detail);
-					}}
-					on:drop={async (e) => {
-						const { type, id, item } = e.detail;
+							if (type === 'chat') {
+								let chat = await getChatById(localStorage.token, id).catch((error) => {
+									return null;
+								});
+								if (!chat && item) {
+									if (!canImportChats) {
+										toast.error($i18n.t('Access prohibited'));
+										return;
+									}
 
-						if (type === 'chat') {
-							let chat = await getChatById(localStorage.token, id).catch((error) => {
-								return null;
-							});
-							if (!chat && item) {
-								if (!canImportChats) {
-									toast.error($i18n.t('Access prohibited'));
+									chat = await importChats(localStorage.token, [
+										{
+											chat: item.chat,
+											meta: item?.meta ?? {},
+											pinned: false,
+											folder_id: null,
+											created_at: item?.created_at ?? null,
+											updated_at: item?.updated_at ?? null
+										}
+									]);
+								}
+
+								if (chat) {
+									console.log(chat);
+									if (chat.folder_id) {
+										const res = await updateChatFolderIdById(
+											localStorage.token,
+											chat.id,
+											null
+										).catch((error) => {
+											toast.error(`${error}`);
+											return null;
+										});
+
+										folderRegistry[chat.folder_id]?.setFolderItems();
+									}
+
+									if (chat.pinned) {
+										const res = await toggleChatPinnedStatusById(localStorage.token, chat.id);
+									}
+
+									initChatList();
+								}
+							} else if (type === 'folder') {
+								if (folders[id].parent_id === null) {
 									return;
 								}
 
-								chat = await importChats(localStorage.token, [
-									{
-										chat: item.chat,
-										meta: item?.meta ?? {},
-										pinned: false,
-										folder_id: null,
-										created_at: item?.created_at ?? null,
-										updated_at: item?.updated_at ?? null
+								const res = await updateFolderParentIdById(localStorage.token, id, null).catch(
+									(error) => {
+										toast.error(`${error}`);
+										return null;
 									}
-								]);
-							}
+								);
 
-							if (chat) {
-								console.log(chat);
-								if (chat.folder_id) {
-									const res = await updateChatFolderIdById(localStorage.token, chat.id, null).catch(
-										(error) => {
-											toast.error(`${error}`);
-											return null;
-										}
-									);
-
-									folderRegistry[chat.folder_id]?.setFolderItems();
+								if (res) {
+									await initFolders();
 								}
-
-								if (chat.pinned) {
-									const res = await toggleChatPinnedStatusById(localStorage.token, chat.id);
-								}
-
-								initChatList();
 							}
-						} else if (type === 'folder') {
-							if (folders[id].parent_id === null) {
-								return;
-							}
-
-							const res = await updateFolderParentIdById(localStorage.token, id, null).catch(
-								(error) => {
-									toast.error(`${error}`);
-									return null;
-								}
-							);
-
-							if (res) {
-								await initFolders();
-							}
-						}
-					}}
-				>
-					<svelte:fragment slot="action">
-						<Dropdown bind:show={showChatsMenu} align="end">
-							<Tooltip content={$i18n.t('More')}>
-								<button
-									type="button"
-									class="flex items-center justify-center w-7 h-7 rounded-lg text-gray-300 hover:text-gray-500 dark:text-gray-600 dark:hover:text-gray-400 transition-colors duration-100"
-									aria-label={$i18n.t('More')}
-									on:pointerup|stopPropagation
-								>
-									<MoreHorizontalIcon className="size-3.5" strokeWidth="2" />
-								</button>
-							</Tooltip>
+						}}
+					>
+						<svelte:fragment slot="action">
+							<Dropdown bind:show={showChatsMenu} align="end">
+								<Tooltip content={$i18n.t('More')}>
+									<button
+										type="button"
+										class="flex items-center justify-center w-7 h-7 rounded-lg text-gray-300 hover:text-gray-500 dark:text-gray-600 dark:hover:text-gray-400 transition-colors duration-100"
+										aria-label={$i18n.t('More')}
+										on:pointerup|stopPropagation
+									>
+										<MoreHorizontalIcon className="size-3.5" strokeWidth="2" />
+									</button>
+								</Tooltip>
 
 								<div slot="content">
 									<DropdownMenu className="min-w-[10.625rem]">

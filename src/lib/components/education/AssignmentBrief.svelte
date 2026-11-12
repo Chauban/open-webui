@@ -1,4 +1,6 @@
 <script lang="ts">
+	import DisclosureChevron from '$lib/components/common/DisclosureChevron.svelte';
+	import { disclosureSlide } from '$lib/utils/disclosure';
 	import { getContext } from 'svelte';
 
 	export let assignment: any = null;
@@ -36,41 +38,47 @@
 			>
 				{$i18n.t(expanded ? 'Collapse' : 'Expand')}
 			</span>
-		</button>
+			<span class="ml-1 inline-flex align-middle"><DisclosureChevron open={expanded} /></span
+			></button
+		>
 
 		{#if expanded}
-			<p class="mt-2 text-xs text-gray-500">
-				{$i18n.t('要求版本')}
-				{assignment.description_version} · {new Date(assignment.updated_at * 1000).toLocaleString()}
-			</p>
-			{#if assignment.change_summary}<p class="text-xs text-gray-500">
-					{assignment.change_summary}
-				</p>{/if}
-			{#if assignment.scoring_mode === 'total'}<p class="text-xs">
-					{$i18n.t('仅总分与总评')} · {assignment.score_max}
-				</p>{/if}
-			{#if description}
-				<div
-					class="mt-1.5 whitespace-pre-wrap text-xs leading-relaxed text-gray-600 dark:text-gray-300"
-				>
-					{description}
-				</div>
-			{/if}
-			{#if criteria.length > 0}
-				<div class="mt-2 flex flex-wrap items-center gap-1.5">
-					<span class="text-[11px] text-gray-500 dark:text-gray-400">{$i18n.t('Rubric')}</span>
-					{#each criteria as criterion (criterion.key)}
-						<span
-							class="rounded-full border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-2 py-0.5 text-[11px] text-gray-600 dark:text-gray-300"
-						>
-							{criterion.label} · {criterion.max_score}
+			<div transition:disclosureSlide>
+				<p class="mt-2 text-xs text-gray-500">
+					{$i18n.t('要求版本')}
+					{assignment.description_version} · {new Date(
+						assignment.updated_at * 1000
+					).toLocaleString()}
+				</p>
+				{#if assignment.change_summary}<p class="text-xs text-gray-500">
+						{assignment.change_summary}
+					</p>{/if}
+				{#if assignment.scoring_mode === 'total'}<p class="text-xs">
+						{$i18n.t('仅总分与总评')} · {assignment.score_max}
+					</p>{/if}
+				{#if description}
+					<div
+						class="mt-1.5 whitespace-pre-wrap text-xs leading-relaxed text-gray-600 dark:text-gray-300"
+					>
+						{description}
+					</div>
+				{/if}
+				{#if criteria.length > 0}
+					<div class="mt-2 flex flex-wrap items-center gap-1.5">
+						<span class="text-[11px] text-gray-500 dark:text-gray-400">{$i18n.t('Rubric')}</span>
+						{#each criteria as criterion (criterion.key)}
+							<span
+								class="rounded-full border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-850 px-2 py-0.5 text-[11px] text-gray-600 dark:text-gray-300"
+							>
+								{criterion.label} · {criterion.max_score}
+							</span>
+						{/each}
+						<span class="text-[11px] text-gray-500 dark:text-gray-400">
+							{$i18n.t('Total {{score}} points', { score: assignment.score_max })}
 						</span>
-					{/each}
-					<span class="text-[11px] text-gray-500 dark:text-gray-400">
-						{$i18n.t('Total {{score}} points', { score: assignment.score_max })}
-					</span>
-				</div>
-			{/if}
+					</div>
+				{/if}
+			</div>
 		{/if}
 	</div>
 {/if}
