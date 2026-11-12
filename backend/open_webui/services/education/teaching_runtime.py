@@ -151,19 +151,9 @@ async def validate_binding(request, user, config, *, check_execution=True):
 
     current = await resolve_binding(request, user, AiCandidate.model_validate(config['ai']))
     binding = config['binding']
-    # Global sampling changes invalidate trial coverage but do not overwrite a
-    # published generation snapshot. Routing/capability changes require republishing.
-    if current.get('fallback') != binding.get('fallback') or any(
-        current[k] != binding[k]
-        for k in (
-            'route',
-            'workspace_model',
-            'thinking_support',
-            'thinking_format',
-            'capabilities',
-            'filter_fingerprint',
-        )
-    ):
+    # A teaching revision fixes the model and teaching behavior. Administrator
+    # transport settings are captured per call, without republishing assignments.
+    if any(current[k] != binding[k] for k in ('model_id', 'base_model_id', 'filter_fingerprint')):
         raise HTTPException(409, 'Teaching model configuration changed; publish a new teaching version')
     return current
 
@@ -238,10 +228,22 @@ def build_messages(config, stage, source, dialogue, materials=None, image_readin
     return [{'role': 'system', 'content': system}, *attach_current_revision_draft(history, source, materials)]
 
 
-def install_binding(request, config, evidence):
-    request.state.teaching_binding = copy.deepcopy(config)
+def install_binding(request, config, evidence, current_binding):
+    # Internal retries/tool rounds share one transport snapshot. A new request
+    # takes current routes and capabilities but keeps the published generation
+    # parameters, prompt and logical model. Never mutate the published config.
+    if getattr(request.state, 'teaching_evidence', None) is evidence:
+        return request.state.teaching_binding
+    effective = copy.deepcopy(config)
+    effective['binding'] = copy.deepcopy(current_binding)
+    effective['binding']['params'] = copy.deepcopy(config['binding']['params'])
+    request.state.teaching_binding = effective
     request.state.teaching_evidence = evidence
     request.state.education_revision_context = True
+    evidence['config'] = copy.deepcopy(effective)
+    evidence['fingerprint'] = config_fingerprint(effective)
+    evidence['actual_thinking'] = actual_thinking(effective)
+    return effective
 
 
 def authorized_binding(request, model_id):
@@ -479,8 +481,8 @@ def frozen_evidence(session_id, db):
 async def execute(request, user, config, context, messages, stream=False):
     # Configuration was captured by an authorized adapter. An internal retry
     # keeps that snapshot; safety revocation and routing validity still apply.
-    await validate_binding(request, user, config, check_execution=False)
-    install_binding(request, config, context)
+    current_binding = await validate_binding(request, user, config, check_execution=False)
+    config = install_binding(request, config, context, current_binding)
     from open_webui.services.education.ai_steps import call_captured_model
 
     return await call_captured_model(request, user, context['purpose'], config, messages, stream=stream)
@@ -609,6 +611,7 @@ async def formal_first_read(request, user, session, assignment, form, db, dialog
         call.status = context['status']
         call.completed_at = int(time.time())
         reading.context = copy.deepcopy(context)
+        reading.thinking = context['actual_thinking']
         reading.status = context['status']
         reading.feedback = feedback
         reading.completed_at = call.completed_at

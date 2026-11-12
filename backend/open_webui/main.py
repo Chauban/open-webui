@@ -1097,12 +1097,12 @@ async def chat_completion(
             from starlette.concurrency import run_in_threadpool
             teaching_config, teaching_context = await run_in_threadpool(capture_teaching_request)
             try:
-                await validate_binding(request, user, teaching_config)
+                current_binding = await validate_binding(request, user, teaching_config)
             except BaseException:
                 from open_webui.services.education.teaching_runtime import finish_formal
                 await run_in_threadpool(finish_formal, teaching_context, 'failed')
                 raise
-            install_binding(request, teaching_config, teaching_context)
+            teaching_config = install_binding(request, teaching_config, teaching_context, current_binding)
             form_data['model'] = teaching_config['ai']['model_id']
             form_data.pop('model_item', None)
             entries = form_data.get('message_ids')

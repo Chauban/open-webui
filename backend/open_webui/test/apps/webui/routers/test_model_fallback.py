@@ -347,20 +347,22 @@ def test_reading_retry_progress_persists_without_duplicate_reading(education_cli
     assert len(records) == 1
 
 
-def test_captured_teaching_binding_rejects_changed_fallback(monkeypatch):
+def test_published_teaching_binding_accepts_current_fallback(monkeypatch):
     from open_webui.services.education import teaching_runtime as runtime
 
+    binding = {'model_id': 'primary', 'base_model_id': 'primary', 'filter_fingerprint': 'unchanged'}
+
     async def changed(*args):
-        return {'fallback': {'model_id': 'different-backup'}}
+        return {**binding, 'fallback': {'model_id': 'different-backup'}}
 
     monkeypatch.setattr(runtime, 'resolve_binding', changed)
     config = {
-        'binding': {'fallback': {'model_id': 'original-backup'}},
+        'binding': {**binding, 'fallback': {'model_id': 'original-backup'}},
         'ai': {'model_id': 'primary', 'prompt': 'Prompt', 'thinking': 'model_default', 'template_version': 1},
     }
-    with pytest.raises(HTTPException) as error:
-        asyncio.run(runtime.validate_binding(None, None, config, check_execution=False))
-    assert error.value.status_code == 409
+    current = asyncio.run(runtime.validate_binding(None, None, config, check_execution=False))
+    assert current['fallback']['model_id'] == 'different-backup'
+    assert config['binding']['fallback']['model_id'] == 'original-backup'
 
 
 def test_admin_can_save_reload_and_clear_fallback(education_client, monkeypatch):
