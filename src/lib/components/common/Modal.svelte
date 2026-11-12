@@ -1,161 +1,83 @@
 <script lang="ts">
-	// @ts-nocheck
-	import { onDestroy, onMount } from 'svelte';
-	import { fade } from 'svelte/transition';
+	import { createEventDispatcher, getContext } from 'svelte';
+	import { v4 as uuidv4 } from 'uuid';
+	import { dialogLayer } from '$lib/utils/dialog-layer';
+	import XMark from '$lib/components/icons/XMark.svelte';
 
-	import { flyAndScale } from '$lib/utils/transitions';
-	import * as FocusTrap from 'focus-trap';
 	export let show = true;
 	export let size = 'md';
-	export let containerClassName = 'p-3';
-	export let className = 'bg-white dark:bg-gray-900 rounded-4xl';
-
-	let modalElement = null;
-	let mounted = false;
-	// Create focus trap to trap user tabs inside modal
-	// https://www.w3.org/WAI/WCAG21/Understanding/focus-order.html
-	// https://www.w3.org/WAI/WCAG21/Understanding/keyboard.html
-	let focusTrap: FocusTrap.FocusTrap | null = null;
-
-	const sizeToWidth = (size) => {
-		if (size === 'full') {
-			return 'w-full';
-		}
-		if (size === 'xs') {
-			return 'w-[16rem]';
-		} else if (size === 'sm') {
-			return 'w-[30rem]';
-		} else if (size === 'md') {
-			return 'w-[42rem]';
-		} else if (size === 'lg') {
-			return 'w-[56rem]';
-		} else if (size === 'xl') {
-			return 'w-[70rem]';
-		} else if (size === '2xl') {
-			return 'w-[84rem]';
-		} else if (size === '3xl') {
-			return 'w-[100rem]';
-		} else {
-			return 'w-[56rem]';
-		}
+	export let containerClassName = '';
+	export let className = '';
+	export let title = '';
+	export let description = '';
+	export let dismissible = true;
+	export let busy = false;
+	export let placement: 'center' | 'bottom' = 'center';
+	export let bodyClassName = '';
+	export let ariaLabel = '';
+	const i18n: any = getContext('i18n');
+	const dispatch = createEventDispatcher();
+	const id = `dialog-${uuidv4()}`;
+	const widths: Record<string, string> = {
+		xs: '24rem',
+		sm: '30rem',
+		md: '42rem',
+		lg: '56rem',
+		xl: '70rem',
+		'2xl': '84rem',
+		'3xl': '100rem',
+		full: '100%'
 	};
-
-	const handleKeyDown = (event: KeyboardEvent) => {
-		if (event.key === 'Escape' && isTopModal()) {
-			console.log('Escape');
-			show = false;
-		}
-	};
-
-	const isTopModal = () => {
-		const modals = document.getElementsByClassName('modal');
-		return modals.length && modals[modals.length - 1] === modalElement;
-	};
-
-	onMount(() => {
-		mounted = true;
-	});
-
-	let handleOutsidePointerDown;
-	let handleModalFocusIn;
-
-	$: if (show && modalElement) {
-		document.body.appendChild(modalElement);
-		focusTrap = FocusTrap.createFocusTrap(modalElement, {
-			allowOutsideClick: (e) => {
-				return (
-					e.target.closest('[data-sonner-toast]') !== null ||
-					e.target.closest('.modal-content') === null
-				);
-			}
-		});
-		focusTrap.activate();
-
-		// Auto-pause focus trap when interacting with portaled content (e.g. Dropdown)
-		handleOutsidePointerDown = (e) => {
-			if (focusTrap && modalElement && !modalElement.contains(e.target)) {
-				focusTrap.pause();
-			}
-		};
-		handleModalFocusIn = () => {
-			if (focusTrap) {
-				focusTrap.unpause();
-			}
-		};
-		document.addEventListener('pointerdown', handleOutsidePointerDown, true);
-		modalElement.addEventListener('focusin', handleModalFocusIn);
-
-		window.addEventListener('keydown', handleKeyDown);
-		document.body.style.overflow = 'hidden';
-	} else if (modalElement) {
-		if (focusTrap) {
-			focusTrap.deactivate();
-			focusTrap = null;
-		}
-		if (handleOutsidePointerDown) {
-			document.removeEventListener('pointerdown', handleOutsidePointerDown, true);
-		}
-		if (handleModalFocusIn) {
-			modalElement.removeEventListener('focusin', handleModalFocusIn);
-		}
-		window.removeEventListener('keydown', handleKeyDown);
-		document.body.removeChild(modalElement);
-		document.body.style.overflow = 'unset';
-	}
-
-	onDestroy(() => {
+	function close() {
+		if (!dismissible || busy) return;
 		show = false;
-		if (focusTrap) {
-			focusTrap.deactivate();
-		}
-		if (modalElement && modalElement.parentNode === document.body) {
-			document.body.removeChild(modalElement);
-		}
-	});
+		dispatch('close');
+	}
 </script>
 
 {#if show}
-	<!-- svelte-ignore a11y-click-events-have-key-events -->
-	<!-- svelte-ignore a11y-no-static-element-interactions -->
-	<!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
 	<div
-		bind:this={modalElement}
-		aria-modal="true"
-		role="dialog"
-		class="modal fixed top-0 right-0 left-0 bottom-0 bg-black/45 dark:bg-black/60 w-full h-screen max-h-[100dvh] {containerClassName}  flex justify-center z-9999 overflow-y-auto overscroll-contain"
-		style="scrollbar-gutter: stable;"
-		in:fade={{ duration: 10 }}
-		on:mousedown={() => {
-			show = false;
-		}}
+		class="modal rw-dialog-overlay {placement === 'bottom'
+			? 'rw-dialog-bottom'
+			: ''} {containerClassName}"
+		use:dialogLayer={{ dismissible: dismissible && !busy, onDismiss: close }}
 	>
 		<div
-			class="m-auto max-w-full {sizeToWidth(size)} {size !== 'full'
-				? 'mx-2'
-				: ''} shadow-3xl min-h-fit scrollbar-hidden {className} border border-white dark:border-gray-850"
-			in:flyAndScale
-			on:mousedown={(e) => {
-				e.stopPropagation();
-			}}
+			role="dialog"
+			aria-modal="true"
+			aria-label={!title ? ariaLabel || $i18n?.t('Dialog') || 'Dialog' : undefined}
+			aria-labelledby={title ? `${id}-title` : undefined}
+			aria-describedby={description ? `${id}-description` : undefined}
+			aria-busy={busy}
+			tabindex="-1"
+			class="modal-content rw-dialog-surface {title ? 'rw-dialog-framed' : ''} {className}"
+			style:--dialog-width={widths[size] ?? widths.md}
 		>
-			<slot />
+			{#if title}
+				<header class="rw-dialog-header">
+					<div class="min-w-0 flex-1">
+						<h2 id={`${id}-title`} class="rw-dialog-title">{title}</h2>
+						{#if description}<p id={`${id}-description`} class="rw-dialog-description">
+								{description}
+							</p>{/if}
+					</div>
+					{#if dismissible}
+						<button
+							type="button"
+							class="rw-dialog-close"
+							aria-label={$i18n.t('Close')}
+							disabled={busy}
+							on:click={close}
+						>
+							<XMark className="size-5" />
+						</button>
+					{/if}
+				</header>
+				<div class="rw-dialog-body {bodyClassName}"><slot /></div>
+				{#if $$slots.footer}<footer class="rw-dialog-footer"><slot name="footer" /></footer>{/if}
+			{:else}
+				<slot />
+			{/if}
 		</div>
 	</div>
 {/if}
-
-<style>
-	.modal-content {
-		animation: scaleUp 0.1s ease-out forwards;
-	}
-
-	@keyframes scaleUp {
-		from {
-			transform: scale(0.985);
-			opacity: 0;
-		}
-		to {
-			transform: scale(1);
-			opacity: 1;
-		}
-	}
-</style>

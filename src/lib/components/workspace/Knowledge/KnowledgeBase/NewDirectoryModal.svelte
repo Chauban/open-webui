@@ -31,10 +31,12 @@
 <Modal size="sm" bind:show>
 	<div>
 		<!-- Header -->
-		<div class="flex justify-between items-center dark:text-gray-100 px-4 pt-3 pb-1">
-			<h3 class="text-base font-normal">{$i18n.t('New Directory')}</h3>
+		<div
+			class="rw-dialog-header-custom flex justify-between items-center dark:text-gray-100 px-4 pt-3 pb-1"
+		>
+			<h3 class="rw-dialog-heading text-base font-normal">{$i18n.t('New Directory')}</h3>
 			<button
-				class="self-center shrink-0 ml-2"
+				class="rw-dialog-close self-center shrink-0 ml-2"
 				aria-label={$i18n.t('Close')}
 				on:click={() => (show = false)}
 			>
@@ -43,7 +45,7 @@
 		</div>
 
 		<!-- Form -->
-		<div class="px-4 pb-2 flex flex-col gap-3">
+		<div class="rw-dialog-body-custom px-4 pb-2 flex flex-col gap-3">
 			<div>
 				<div class="mb-1 text-xs text-gray-500">{$i18n.t('Name')}</div>
 				<input
@@ -68,7 +70,7 @@
 				{$i18n.t('Cancel')}
 			</button>
 			<button
-				class="px-3.5 py-1.5 text-sm bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
+				class="rw-dialog-button rw-dialog-button-primary px-3.5 py-1.5 text-sm bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
 				on:click={submitHandler}
 				type="button"
 			>

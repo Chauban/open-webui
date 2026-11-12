@@ -155,6 +155,8 @@
 </script>
 
 <ConfirmDialog
+	confirmLabel={$i18n.t('Delete')}
+	variant="danger"
 	bind:show={showDeleteConfirmDialog}
 	title={$i18n.t('Delete Message')}
 	message={$i18n.t('Are you sure you want to delete this message?')}

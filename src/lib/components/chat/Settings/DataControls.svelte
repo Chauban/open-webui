@@ -127,6 +127,8 @@
 />
 
 <ConfirmDialog
+	confirmLabel={$i18n.t('Delete')}
+	variant="danger"
 	title={$i18n.t('Delete All Chats')}
 	message={$i18n.t('Are you sure you want to delete all chats? This action cannot be undone.')}
 	bind:show={showDeleteConfirmDialog}

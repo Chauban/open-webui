@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { hasOpenDialogs } from '$lib/utils/dialog-layer';
 	import { flyAndScale } from '$lib/utils/transitions';
 	import { tick } from 'svelte';
 	import DropdownMenu from '$lib/components/common/DropdownMenu.svelte';
@@ -111,6 +112,14 @@
 
 	function handleKeydown(event) {
 		if (event.key === 'Escape' && open) {
+			if (
+				hasOpenDialogs() &&
+				!contentEl?.contains(event.target as Node) &&
+				!triggerEl?.contains(event.target as Node)
+			)
+				return;
+			event.preventDefault();
+			event.stopImmediatePropagation();
 			open = false;
 			onClose();
 		}

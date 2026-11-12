@@ -1,0 +1,368 @@
+/* Right Write overlays: one paper surface, one action hierarchy. */
+:root {
+	--rw-ink: #20406a;
+	--rw-deep: #15314e;
+	--rw-paper: #f7f3ea;
+	--rw-coral: #ff6a45;
+	--rw-surface: #ffffff;
+	--rw-text: #253448;
+	--rw-muted: #647084;
+	--rw-line: #dce2e9;
+	--rw-soft: #f5f7fa;
+	--rw-danger: #b53f3f;
+	--rw-heading-font: 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', SimSun, serif;
+	--rw-body-font: 'Noto Sans SC', 'Source Han Sans SC', 'Microsoft YaHei', system-ui, sans-serif;
+}
+.dark {
+	--rw-ink: #bdd3ef;
+	--rw-deep: #dce9fa;
+	--rw-paper: #232b35;
+	--rw-surface: #1b2430;
+	--rw-text: #e5eaf1;
+	--rw-muted: #a4b0c0;
+	--rw-line: #3b4859;
+	--rw-soft: #263140;
+	--rw-danger: #ffaaaa;
+}
+.rw-dialog-overlay {
+	position: fixed;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 24px;
+	background: rgb(21 49 78 / 46%);
+	overscroll-behavior: contain;
+}
+.dark .rw-dialog-overlay {
+	background: rgb(5 12 22 / 72%);
+}
+.rw-dialog-surface {
+	width: var(--dialog-width, 42rem);
+	max-width: 100%;
+	max-height: calc(100dvh - 48px);
+	min-height: 0;
+	overflow: auto;
+	border: 1px solid var(--rw-line);
+	border-radius: 18px;
+	background: var(--rw-surface);
+	color: var(--rw-text);
+	box-shadow:
+		0 24px 80px rgb(21 49 78 / 20%),
+		0 4px 16px rgb(21 49 78 / 8%);
+	font-family: var(--rw-body-font);
+	outline: none;
+	animation: rw-dialog-enter 140ms ease-out;
+}
+.rw-dialog-framed {
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+}
+.rw-dialog-header {
+	display: flex;
+	flex: none;
+	align-items: flex-start;
+	gap: 20px;
+	padding: 24px 24px 20px;
+}
+.rw-dialog-title {
+	font-family: var(--rw-heading-font);
+	font-size: 20px;
+	font-weight: 600;
+	line-height: 1.5;
+	color: var(--rw-ink);
+}
+.rw-dialog-description {
+	margin-top: 6px;
+	color: var(--rw-muted);
+	font-size: 13px;
+	line-height: 1.7;
+}
+.rw-dialog-body {
+	min-height: 0;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	padding: 0 24px 24px;
+	font-size: 14px;
+	line-height: 1.7;
+}
+.rw-dialog-footer {
+	display: flex;
+	flex: none;
+	flex-wrap: wrap;
+	justify-content: flex-end;
+	align-items: center;
+	gap: 10px;
+	padding: 16px 24px;
+	border-top: 1px solid var(--rw-line);
+	background: var(--rw-paper);
+}
+.rw-dialog-close {
+	display: inline-flex;
+	flex: none;
+	align-items: center;
+	justify-content: center;
+	width: 36px;
+	height: 36px;
+	margin: -3px -6px 0 0;
+	border-radius: 9px;
+	color: var(--rw-muted);
+}
+.rw-dialog-close:hover {
+	background: var(--rw-soft);
+	color: var(--rw-ink);
+}
+.rw-dialog-close:disabled {
+	opacity: 0.4;
+	cursor: not-allowed;
+}
+.rw-dialog-surface :where(button, input, select, textarea, a):focus-visible,
+.rw-toast :where(button, a):focus-visible {
+	outline: 2px solid var(--rw-ink);
+	outline-offset: 3px;
+}
+.rw-dialog-button {
+	display: inline-flex;
+	justify-content: center;
+	align-items: center;
+	gap: 8px;
+	min-height: 40px;
+	padding: 8px 18px;
+	border: 1px solid var(--rw-line);
+	border-radius: 10px;
+	background: var(--rw-surface);
+	color: var(--rw-text);
+	font-size: 14px;
+	font-weight: 500;
+	line-height: 1.5;
+	transition: background-color 120ms ease;
+}
+.rw-dialog-button:hover {
+	background: var(--rw-soft);
+}
+.rw-dialog-button-primary {
+	border-color: transparent;
+	background: var(--rw-ink);
+	color: var(--rw-surface);
+}
+.rw-dialog-button-primary:hover {
+	background: var(--rw-deep);
+}
+.rw-dialog-button-danger {
+	border-color: var(--rw-danger);
+	color: var(--rw-danger);
+}
+.rw-dialog-button-danger:hover {
+	background: color-mix(in srgb, var(--rw-danger) 9%, var(--rw-surface));
+}
+.rw-dialog-button:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+.rw-dialog-input {
+	width: 100%;
+	margin-top: 16px;
+	border: 1px solid var(--rw-line);
+	border-radius: 10px;
+	padding: 10px 12px;
+	background: var(--rw-surface);
+	color: var(--rw-text);
+}
+.rw-dialog-error {
+	margin-top: 12px;
+	color: var(--rw-danger);
+	font-size: 13px;
+}
+.rw-dialog-message {
+	white-space: pre-line;
+}
+.rw-dialog-message p + p {
+	margin-top: 10px;
+}
+.rw-dialog-bottom {
+	align-items: flex-end;
+	padding: 0;
+}
+.rw-dialog-bottom .rw-dialog-surface {
+	max-height: 92dvh;
+	border-radius: 18px 18px 0 0;
+}
+/* Explicit tokens for the application's existing custom modal contents. */
+.rw-dialog-surface .rw-dialog-heading {
+	font-family: var(--rw-heading-font);
+	font-size: 20px;
+	font-weight: 600;
+	line-height: 1.5;
+	color: var(--rw-ink);
+}
+.rw-dialog-surface .edu-button {
+	border-radius: 10px;
+	min-height: 40px;
+	font-size: 14px;
+}
+.rw-dialog-surface .edu-button-primary {
+	background: var(--rw-ink);
+	color: var(--rw-surface);
+}
+.rw-dialog-surface .edu-button-primary:hover {
+	background: var(--rw-deep);
+}
+.rw-dialog-surface .edu-button-secondary {
+	border-color: var(--rw-line);
+	color: var(--rw-text);
+	background: var(--rw-surface);
+}
+.rw-dialog-surface .edu-button-danger {
+	border-color: var(--rw-danger);
+	color: var(--rw-danger);
+}
+[data-sonner-toaster] {
+	font-family: var(--rw-body-font);
+}
+[data-sonner-toast][data-styled='true'].rw-toast,
+.rw-notification-toast {
+	border: 1px solid var(--rw-line);
+	border-radius: 12px;
+	background: var(--rw-surface);
+	color: var(--rw-text);
+	box-shadow: 0 8px 32px rgb(21 49 78 / 12%);
+	padding: 16px 42px 16px 18px;
+	font-size: 13px;
+	line-height: 1.6;
+}
+[data-sonner-toast][data-styled='true'].rw-toast [data-icon] {
+	color: var(--rw-ink);
+}
+[data-sonner-toast][data-type='success'].rw-toast [data-icon] {
+	color: #287650;
+}
+[data-sonner-toast][data-type='error'].rw-toast [data-icon] {
+	color: var(--rw-danger);
+}
+[data-sonner-toast][data-type='warning'].rw-toast [data-icon] {
+	color: #9a650c;
+}
+.dark [data-sonner-toast][data-type='success'].rw-toast [data-icon] {
+	color: #90d8ad;
+}
+.dark [data-sonner-toast][data-type='warning'].rw-toast [data-icon] {
+	color: #f4c672;
+}
+[data-sonner-toast].rw-toast [data-close-button],
+.rw-notification-close {
+	position: absolute;
+	inset: 10px 8px auto auto;
+	transform: none;
+	width: 26px;
+	height: 26px;
+	border: 0;
+	border-radius: 7px;
+	color: var(--rw-muted);
+	background: transparent;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+}
+[data-sonner-toast].rw-toast [data-close-button]:hover,
+.rw-notification-close:hover {
+	color: var(--rw-ink);
+	background: var(--rw-soft);
+}
+@keyframes rw-dialog-enter {
+	from {
+		opacity: 0;
+		transform: translateY(6px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+@media (max-width: 639px) {
+	.rw-dialog-overlay {
+		padding: 12px;
+	}
+	.rw-dialog-surface {
+		max-height: calc(100dvh - 24px);
+		border-radius: 14px;
+	}
+	.rw-dialog-header {
+		padding: 20px 20px 16px;
+		gap: 12px;
+	}
+	.rw-dialog-body {
+		padding: 0 20px 20px;
+	}
+	.rw-dialog-footer {
+		padding: 14px 20px;
+		gap: 8px;
+	}
+	.rw-dialog-footer > button {
+		flex: 1;
+	}
+	.rw-dialog-bottom {
+		padding: 0;
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	.rw-dialog-surface {
+		animation: none;
+	}
+	.rw-dialog-button {
+		transition: none;
+	}
+}
+
+.rw-image-overlay {
+	padding: 0;
+}
+.rw-image-overlay .rw-image-viewer {
+	position: relative;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 100%;
+	height: 100dvh;
+	max-height: 100dvh;
+	border: 0;
+	border-radius: 0;
+	overflow: hidden;
+	background: #000;
+	color: #fff;
+}
+.rw-dialog-surface .rw-dialog-header-custom {
+	position: sticky;
+	top: 0;
+	z-index: 2;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 20px;
+	padding: 24px 24px 20px;
+	margin: 0;
+	background: var(--rw-surface);
+}
+.rw-dialog-surface .rw-dialog-body-custom {
+	padding-inline: 24px;
+	padding-bottom: 24px;
+}
+@media (max-width: 639px) {
+	.rw-dialog-surface .rw-dialog-header-custom {
+		padding: 20px 20px 16px;
+	}
+	.rw-dialog-surface .rw-dialog-body-custom {
+		padding-inline: 20px;
+		padding-bottom: 20px;
+	}
+}
+/* Override the app's highly specific default focus ring within modal surfaces. */
+.rw-dialog-overlay
+	.modal-content.rw-dialog-surface
+	:is(button, input, textarea, select, a):focus-visible {
+	outline: 2px solid var(--rw-ink);
+	outline-offset: 3px;
+}
+.rw-dialog-overlay .modal-content.rw-dialog-surface:focus-visible {
+	outline: none;
+}

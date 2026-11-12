@@ -7,11 +7,7 @@
 	import { goto } from '$app/navigation';
 	import { onMount, tick, getContext } from 'svelte';
 
-	import {
-		OPENAI_API_BASE_URL,
-		WEBUI_API_BASE_URL,
-		WEBUI_BASE_URL
-	} from '$lib/constants';
+	import { OPENAI_API_BASE_URL, WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 	import { WEBUI_NAME, config, user, models, settings } from '$lib/stores';
 
 	import { chatCompletion } from '$lib/apis/openai';
@@ -319,10 +315,10 @@
 
 <Modal size="sm" bind:show={showControls}>
 	<div class="text-gray-700 dark:text-gray-100">
-		<div class="flex justify-between px-4 pt-3 pb-1">
-			<div class="text-sm font-medium self-center">{$i18n.t('Controls')}</div>
+		<div class="rw-dialog-header-custom flex justify-between px-4 pt-3 pb-1">
+			<div class="rw-dialog-heading text-sm font-medium self-center">{$i18n.t('Controls')}</div>
 			<button
-				class="self-center rounded-lg p-1 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+				class="rw-dialog-close self-center rounded-lg p-1 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
 				aria-label={$i18n.t('Close')}
 				on:click={() => {
 					showControls = false;
@@ -331,7 +327,7 @@
 				<XMark className="size-4" />
 			</button>
 		</div>
-		<div class="px-4.5 pb-5 overflow-y-auto max-h-[70vh]">
+		<div class="rw-dialog-body-custom px-4.5 pb-5 overflow-y-auto max-h-[70vh]">
 			<AdvancedParams admin={$user?.role === 'admin'} custom={true} bind:params />
 		</div>
 	</div>

@@ -49,7 +49,7 @@
 		const rect = triggerEl.getBoundingClientRect();
 
 		contentEl.style.position = 'fixed';
-		contentEl.style.zIndex = '99999';
+		contentEl.style.zIndex = '9999';
 
 		// Reset bridge padding
 		contentEl.style.paddingLeft = '0';

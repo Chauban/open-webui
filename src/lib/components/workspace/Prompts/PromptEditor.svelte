@@ -308,10 +308,10 @@
 <!-- Edit Modal -->
 <Modal size="lg" bind:show={showEditModal}>
 	<div class="px-4 pt-3 pb-4">
-		<div class="flex justify-between items-center mb-2 dark:text-gray-100">
-			<div class="text-xs">{$i18n.t('Edit Prompt')}</div>
+		<div class="rw-dialog-header-custom flex justify-between items-center mb-2 dark:text-gray-100">
+			<div class="rw-dialog-heading text-xs">{$i18n.t('Edit Prompt')}</div>
 			<button
-				class="rounded-lg p-1 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+				class="rw-dialog-close rounded-lg p-1 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
 				aria-label={$i18n.t('Close')}
 				on:click={() => (showEditModal = false)}
 			>
@@ -319,7 +319,7 @@
 			</button>
 		</div>
 
-		<form on:submit|preventDefault={submitHandler}>
+		<form class="rw-dialog-body-custom" on:submit|preventDefault={submitHandler}>
 			<div class="my-2">
 				<div class="flex w-full justify-between">
 					<div class="text-gray-500 text-xs">{$i18n.t('Prompt Content')}</div>
@@ -362,7 +362,7 @@
 				</label>
 				<div>
 					<button
-						class="px-3 py-1.5 text-xs transition rounded-full {loading
+						class="rw-dialog-button rw-dialog-button-primary px-3 py-1.5 text-xs transition rounded-full {loading
 							? 'cursor-not-allowed bg-gray-200 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
 							: 'bg-black hover:bg-gray-900 text-white dark:bg-white dark:hover:bg-gray-100 dark:text-black'} flex justify-center"
 						type="submit"

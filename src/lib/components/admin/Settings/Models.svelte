@@ -83,6 +83,8 @@
 	let sortable = null;
 
 	let models = null;
+	import { getModelHealth, type ModelHealth } from '$lib/apis/analytics/model-health';
+	let healthByModel: Record<string, ModelHealth> = {};
 	let modelsConfig = null;
 	let modelOrderList: string[] = [];
 	let defaultModelIds: string[] = [];
@@ -748,6 +750,13 @@
 
 	onMount(async () => {
 		await init();
+		getModelHealth(localStorage.token)
+			.then(({ models }) => {
+				healthByModel = Object.fromEntries(models.map((model) => [model.model_id, model]));
+			})
+			.catch(() => {
+				healthByModel = {};
+			});
 
 		const onKeyDown = (event) => {
 			if (event.key === 'Shift') {
@@ -784,6 +793,8 @@
 </script>
 
 <ConfirmDialog
+	confirmLabel={$i18n.t('Reset')}
+	variant="danger"
 	title={$i18n.t('Reset All Models')}
 	message={$i18n.t('This will delete all models including custom models and cannot be undone.')}
 	bind:show={showResetModal}
@@ -1170,6 +1181,19 @@
 									</div>
 								</button>
 								<div class="flex shrink-0 flex-row gap-0.5 items-center self-center">
+									{#if healthByModel[model.id]}
+										{@const health = healthByModel[model.id]}
+										<a
+											class="text-xs px-2 py-2 underline"
+											href="/?settings=admin%3Aanalytics&model-health=1"
+											title={$i18n.t('Model health')}
+										>
+											{$i18n.t('24h failures')}: {health.failure_rate === null
+												? '—'
+												: `${(health.failure_rate * 100).toFixed(1)}%`} ({health.failures}/{health.successes +
+												health.failures})
+										</a>
+									{/if}
 									{#if shiftKey}
 										<Tooltip content={model?.meta?.hidden ? $i18n.t('Show') : $i18n.t('Hide')}>
 											<button

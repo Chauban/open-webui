@@ -274,8 +274,8 @@
 
 <Modal size="sm" bind:show>
 	<div>
-		<div class=" flex justify-between dark:text-gray-100 px-5 pt-4 pb-1.5">
-			<h1 class="text-lg font-medium self-center font-primary">
+		<div class="rw-dialog-header-custom flex justify-between dark:text-gray-100 px-5 pt-4 pb-1.5">
+			<h1 class="rw-dialog-heading text-lg font-medium self-center font-primary">
 				{#if edit}
 					{$i18n.t('Edit Connection')}
 				{:else}
@@ -283,7 +283,7 @@
 				{/if}
 			</h1>
 			<button
-				class="self-center"
+				class="rw-dialog-close self-center"
 				aria-label={$i18n.t('Close modal')}
 				on:click={() => {
 					show = false;
@@ -293,7 +293,9 @@
 			</button>
 		</div>
 
-		<div class="flex flex-col md:flex-row w-full px-4 pb-4 md:space-x-4 dark:text-gray-200">
+		<div
+			class="rw-dialog-body-custom flex flex-col md:flex-row w-full px-4 pb-4 md:space-x-4 dark:text-gray-200"
+		>
 			<div class=" flex flex-col w-full sm:flex-row sm:justify-center sm:space-x-6">
 				<form
 					class="flex flex-col w-full"
@@ -786,7 +788,7 @@
 						</div>
 
 						<button
-							class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full flex items-center gap-2 whitespace-nowrap {loading
+							class="rw-dialog-button rw-dialog-button-primary px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full flex items-center gap-2 whitespace-nowrap {loading
 								? ' cursor-not-allowed'
 								: ''}"
 							type="submit"

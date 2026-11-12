@@ -92,6 +92,7 @@
 </script>
 
 <ConfirmDialog
+	variant="danger"
 	bind:show={showDeleteConfirm}
 	title={$i18n.t('Delete Calendar')}
 	message={$i18n.t(

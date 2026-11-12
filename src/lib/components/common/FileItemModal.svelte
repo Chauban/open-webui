@@ -282,8 +282,9 @@
 					</div>
 				</div>
 
-				<div>
+				<div class="rw-dialog-header-custom">
 					<button
+						class="rw-dialog-close"
 						on:click={() => {
 							show = false;
 						}}

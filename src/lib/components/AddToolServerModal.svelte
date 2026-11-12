@@ -491,8 +491,8 @@
 				{/if}
 			</h1>
 
-			<div class="flex items-center gap-3">
-				<div class="flex gap-1.5 text-xs justify-end">
+			<div class="rw-dialog-header-custom flex items-center gap-3">
+				<div class="rw-dialog-heading flex gap-1.5 text-xs justify-end">
 					<button
 						class=" hover:underline"
 						type="button"
@@ -508,7 +508,7 @@
 					</button>
 				</div>
 				<button
-					class="self-center"
+					class="rw-dialog-close self-center"
 					aria-label={$i18n.t('Close Configure Connection Modal')}
 					on:click={() => {
 						show = false;
@@ -1044,7 +1044,7 @@
 						</div>
 
 						<button
-							class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full flex items-center gap-2 whitespace-nowrap {loading
+							class="rw-dialog-button rw-dialog-button-primary px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full flex items-center gap-2 whitespace-nowrap {loading
 								? ' cursor-not-allowed'
 								: ''}"
 							type="submit"

@@ -90,9 +90,9 @@
 >
 	<div class="flex max-h-[58vh] flex-col">
 		<div
-			class="flex shrink-0 items-start justify-between gap-4 px-4 pb-2.5 pt-3.5 dark:text-white text-black"
+			class="rw-dialog-header-custom flex shrink-0 items-start justify-between gap-4 px-4 pb-2.5 pt-3.5 dark:text-white text-black"
 		>
-			<div class="min-w-0">
+			<div class="rw-dialog-heading min-w-0">
 				<!-- LICENSE covers this Open WebUI release identifier.
 				Do not alter, remove, obscure, or replace it except as LICENSE permits:
 				https://docs.openwebui.com/license. -->
@@ -108,7 +108,7 @@
 			</div>
 
 			<button
-				class="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-500 dark:hover:bg-white/10 dark:hover:text-gray-200"
+				class="rw-dialog-close flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-500 dark:hover:bg-white/10 dark:hover:text-gray-200"
 				on:click={closeModal}
 				aria-label={$i18n.t('Close')}
 			>
@@ -117,7 +117,7 @@
 		</div>
 
 		<div
-			class="min-h-0 flex-1 overflow-y-auto px-4 py-2 text-gray-700 scrollbar-hidden dark:text-gray-100"
+			class="rw-dialog-body-custom min-h-0 flex-1 overflow-y-auto px-4 py-2 text-gray-700 scrollbar-hidden dark:text-gray-100"
 		>
 			{#if changelog}
 				<div class="space-y-4">

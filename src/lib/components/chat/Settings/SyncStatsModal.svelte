@@ -328,7 +328,7 @@
 
 				<div class="flex justify-end">
 					<button
-						class="flex items-center justify-center gap-2 rounded-full bg-black px-4 py-2 text-sm text-white transition hover:bg-gray-900 dark:bg-white dark:text-black dark:hover:bg-gray-100"
+						class="rw-dialog-button rw-dialog-button-primary flex items-center justify-center gap-2 rounded-full bg-black px-4 py-2 text-sm text-white transition hover:bg-gray-900 dark:bg-white dark:text-black dark:hover:bg-gray-100"
 						on:click={closeModal}
 					>
 						{$i18n.t('Done')}
@@ -344,7 +344,7 @@
 
 				<div class="flex justify-end">
 					<button
-						class="flex items-center justify-center gap-2 rounded-full bg-black px-4 py-2 text-sm text-white transition hover:bg-gray-900 dark:bg-white dark:text-black dark:hover:bg-gray-100"
+						class="rw-dialog-button rw-dialog-button-primary flex items-center justify-center gap-2 rounded-full bg-black px-4 py-2 text-sm text-white transition hover:bg-gray-900 dark:bg-white dark:text-black dark:hover:bg-gray-100"
 						on:click={() => {
 							error = false;
 							errorMessage = '';
@@ -355,10 +355,12 @@
 				</div>
 			</div>
 		{:else}
-			<div class="flex justify-between px-4 pt-3 pb-1">
-				<div class="text-sm font-medium self-center">{$i18n.t('Sync Usage Stats')}</div>
+			<div class="rw-dialog-header-custom flex justify-between px-4 pt-3 pb-1">
+				<div class="rw-dialog-heading text-sm font-medium self-center">
+					{$i18n.t('Sync Usage Stats')}
+				</div>
 				<button
-					class="self-center rounded-lg p-1 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+					class="rw-dialog-close self-center rounded-lg p-1 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
 					aria-label={$i18n.t('Close modal')}
 					on:click={() => {
 						show = false;
@@ -369,7 +371,7 @@
 				</button>
 			</div>
 
-			<div class="px-5 pt-2 pb-5">
+			<div class="rw-dialog-body-custom px-5 pt-2 pb-5">
 				<div class="text-sm text-gray-500 dark:text-gray-400">
 					<!-- LICENSE covers this Open WebUI Community wordmark.
 					Do not alter, remove, obscure, or replace it except as LICENSE permits:
@@ -488,7 +490,7 @@
 					</button>
 
 					<button
-						class="px-3.5 py-1.5 text-sm font-normal bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition-colors rounded-full"
+						class="rw-dialog-button rw-dialog-button-primary px-3.5 py-1.5 text-sm font-normal bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition-colors rounded-full"
 						on:click={syncStats}
 						disabled={syncing}
 					>

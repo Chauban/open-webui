@@ -1706,6 +1706,8 @@
 </div>
 
 <ConfirmDialog
+	confirmLabel={$i18n.t('Delete')}
+	variant="danger"
 	bind:show={showDeleteDirectoryConfirm}
 	title={$i18n.t('Delete directory?')}
 	on:confirm={() => {
@@ -1729,6 +1731,8 @@
 </ConfirmDialog>
 
 <ConfirmDialog
+	confirmLabel={$i18n.t('Reset')}
+	variant="danger"
 	bind:show={showResetConfirm}
 	title={$i18n.t('Reset knowledge base?')}
 	on:confirm={async () => {

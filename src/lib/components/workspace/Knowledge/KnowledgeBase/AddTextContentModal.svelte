@@ -20,9 +20,9 @@
 </script>
 
 <Modal size="full" containerClassName="" className="h-full bg-white dark:bg-gray-900" bind:show>
-	<div class="absolute top-0 right-0 p-5">
+	<div class="rw-dialog-header-custom absolute top-0 right-0 p-5">
 		<button
-			class="self-center dark:text-white"
+			class="rw-dialog-close self-center dark:text-white"
 			type="button"
 			on:click={() => {
 				show = false;
@@ -31,7 +31,9 @@
 			<XMark className="size-3.5" />
 		</button>
 	</div>
-	<div class="flex flex-col md:flex-row w-full h-full md:space-x-4 dark:text-gray-200">
+	<div
+		class="rw-dialog-body-custom flex flex-col md:flex-row w-full h-full md:space-x-4 dark:text-gray-200"
+	>
 		<form
 			class="flex flex-col w-full h-full"
 			on:submit|preventDefault={() => {
@@ -131,7 +133,7 @@
 				<div class=" shrink-0">
 					<Tooltip content={$i18n.t('Save')}>
 						<button
-							class=" px-3.5 py-2 bg-black text-white dark:bg-white dark:text-black transition rounded-full"
+							class="rw-dialog-button rw-dialog-button-primary px-3.5 py-2 bg-black text-white dark:bg-white dark:text-black transition rounded-full"
 							type="submit"
 						>
 							{$i18n.t('Save')}

@@ -13,8 +13,8 @@
 	export let show = false;
 </script>
 
-<Modal bind:show size="xs">
-	<div class="px-4 pt-4 pb-5 w-full flex flex-col justify-center">
+<Modal bind:show size="xs" title={$i18n.t('Tags')}>
+	<div class="w-full flex flex-col">
 		<Tags
 			{tags}
 			on:delete={(e) => {

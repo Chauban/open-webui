@@ -195,7 +195,7 @@
 	};
 </script>
 
-<Modal size="md" bind:show>
+<Modal size="md" bind:show title={$i18n.t('Event')}>
 	<div>
 		<div class="dark:text-gray-100 px-4 pt-3 pb-1">
 			<input
@@ -327,7 +327,7 @@
 					{$i18n.t('Cancel')}
 				</button>
 				<button
-					class="px-3.5 py-1.5 text-sm bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full flex items-center gap-2 {loading
+					class="rw-dialog-button rw-dialog-button-primary px-3.5 py-1.5 text-sm bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full flex items-center gap-2 {loading
 						? 'cursor-not-allowed'
 						: ''}"
 					on:click={submitHandler}
@@ -345,6 +345,8 @@
 </Modal>
 
 <DeleteConfirmDialog
+	confirmLabel={$i18n.t('Delete')}
+	variant="danger"
 	bind:show={showDeleteConfirmDialog}
 	title={$i18n.t('Delete Event')}
 	message={$i18n.t('This action cannot be undone. Do you wish to continue?')}

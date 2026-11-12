@@ -150,7 +150,7 @@
 <Modal size="md" bind:show>
 	<div>
 		<!-- Header -->
-		<div class="flex justify-between dark:text-gray-100 px-4 pt-3 pb-1">
+		<div class="rw-dialog-header-custom flex justify-between dark:text-gray-100 px-4 pt-3 pb-1">
 			<input
 				class="w-full text-sm font-medium bg-transparent outline-hidden placeholder:text-gray-300 dark:placeholder:text-gray-700"
 				type="text"
@@ -158,7 +158,7 @@
 				placeholder={$i18n.t('Automation title')}
 			/>
 			<button
-				class="self-center shrink-0 ml-2"
+				class="rw-dialog-close self-center shrink-0 ml-2"
 				aria-label={$i18n.t('Close')}
 				on:click={() => (show = false)}
 			>
@@ -167,7 +167,7 @@
 		</div>
 
 		<!-- Prompt -->
-		<div class="px-5 pb-2">
+		<div class="rw-dialog-body-custom px-5 pb-2">
 			<div class="mb-1 text-xs text-gray-500">{$i18n.t('Instructions')}</div>
 			<textarea
 				class="w-full text-sm bg-transparent outline-hidden placeholder:text-gray-300 dark:placeholder:text-gray-700 resize-none min-h-[12rem]"
@@ -206,7 +206,7 @@
 					{$i18n.t('Cancel')}
 				</button>
 				<button
-					class="px-3.5 py-1.5 text-sm font-normal bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full flex items-center gap-2 {loading
+					class="rw-dialog-button rw-dialog-button-primary px-3.5 py-1.5 text-sm font-normal bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full flex items-center gap-2 {loading
 						? 'cursor-not-allowed'
 						: ''}"
 					on:click={submitHandler}

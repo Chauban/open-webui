@@ -202,8 +202,8 @@
 
 <Modal size="xl" bind:show>
 	<div>
-		<div class="flex justify-between dark:text-gray-300 px-4 pt-3 pb-1">
-			<div class="flex items-center gap-2 text-sm font-medium self-center">
+		<div class="rw-dialog-header-custom flex justify-between dark:text-gray-300 px-4 pt-3 pb-1">
+			<div class="rw-dialog-heading flex items-center gap-2 text-sm font-medium self-center">
 				<div>{$i18n.t('Files')}</div>
 				{#if query && files}
 					<div class="text-sm font-medium text-gray-500 dark:text-gray-500">
@@ -217,7 +217,7 @@
 			</div>
 			<button
 				aria-label={$i18n.t('Close')}
-				class="self-center rounded-lg p-1 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+				class="rw-dialog-close self-center rounded-lg p-1 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
 				on:click={() => {
 					show = false;
 				}}
@@ -237,7 +237,7 @@
 			</button>
 		</div>
 
-		<div class="flex flex-col w-full px-5 pb-4 dark:text-gray-200">
+		<div class="rw-dialog-body-custom flex flex-col w-full px-5 pb-4 dark:text-gray-200">
 			<!-- Search -->
 			<div class="flex w-full space-x-2 mb-0.5">
 				<div class="flex flex-1">

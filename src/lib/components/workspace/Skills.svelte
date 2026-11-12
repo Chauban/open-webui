@@ -611,6 +611,8 @@
 	</div>
 
 	<DeleteConfirmDialog
+		confirmLabel={$i18n.t('Delete')}
+		variant="danger"
 		bind:show={showDeleteConfirm}
 		title={$i18n.t('Delete skill?')}
 		on:confirm={() => {

@@ -114,10 +114,10 @@
 
 <Modal bind:show size="md">
 	<div>
-		<div class=" flex justify-between dark:text-gray-300 px-4 pt-3 pb-1">
-			<div class=" text-sm font-medium self-center">{$i18n.t('Share Chat')}</div>
+		<div class="rw-dialog-header-custom flex justify-between dark:text-gray-300 px-4 pt-3 pb-1">
+			<div class="rw-dialog-heading text-sm font-medium self-center">{$i18n.t('Share Chat')}</div>
 			<button
-				class="self-center rounded-lg p-1 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+				class="rw-dialog-close self-center rounded-lg p-1 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
 				aria-label={$i18n.t('Close')}
 				on:click={() => {
 					show = false;
@@ -186,7 +186,7 @@
 					{/if}
 
 					<button
-						class="flex items-center gap-1 px-3.5 py-2 text-sm font-normal bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
+						class="rw-dialog-button rw-dialog-button-primary flex items-center gap-1 px-3.5 py-2 text-sm font-normal bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
 						type="button"
 						id="copy-and-share-chat-button"
 						on:click={async () => {

@@ -395,13 +395,13 @@
 
 <Modal bind:show={showWebhookModal} size="sm" className="bg-white dark:bg-gray-900 rounded-4xl">
 	<div>
-		<div class="flex justify-between dark:text-gray-100 px-4 pt-3 pb-1">
-			<h1 class="text-sm font-medium self-center">
+		<div class="rw-dialog-header-custom flex justify-between dark:text-gray-100 px-4 pt-3 pb-1">
+			<h1 class="rw-dialog-heading text-sm font-medium self-center">
 				{editing ? $i18n.t('Edit webhook') : $i18n.t('Add webhook')}
 			</h1>
 
 			<button
-				class="self-center rounded-lg p-1 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+				class="rw-dialog-close self-center rounded-lg p-1 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
 				aria-label={$i18n.t('Close')}
 				type="button"
 				on:click={resetForm}
@@ -670,7 +670,7 @@
 
 					<button
 						type="submit"
-						class="px-3.5 py-1.5 text-sm font-normal bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full flex flex-row space-x-1 items-center"
+						class="rw-dialog-button rw-dialog-button-primary px-3.5 py-1.5 text-sm font-normal bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full flex flex-row space-x-1 items-center"
 					>
 						{$i18n.t('Save')}
 					</button>

@@ -371,6 +371,8 @@
 
 {#if loaded}
 	<DeleteConfirmDialog
+		confirmLabel={$i18n.t('Delete')}
+		variant="danger"
 		bind:show={showDeleteConfirm}
 		title={$i18n.t('Delete prompt?')}
 		on:confirm={() => {

@@ -56,12 +56,12 @@
 
 <Modal size="sm" bind:show>
 	<div>
-		<div class=" flex justify-between dark:text-gray-100 px-5 pt-3 pb-1">
-			<div class=" text-sm self-center">
+		<div class="rw-dialog-header-custom flex justify-between dark:text-gray-100 px-5 pt-3 pb-1">
+			<div class="rw-dialog-heading text-sm self-center">
 				{$i18n.t('Share')}: {folder?.name ?? ''}
 			</div>
 			<button
-				class="self-center rounded-lg p-1 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+				class="rw-dialog-close self-center rounded-lg p-1 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
 				on:click={() => {
 					show = false;
 				}}
@@ -70,7 +70,7 @@
 			</button>
 		</div>
 
-		<div class="w-full px-5 pb-4 dark:text-white">
+		<div class="rw-dialog-body-custom w-full px-5 pb-4 dark:text-white">
 			<AccessControl
 				bind:accessGrants
 				onChange={handleAccessChange}

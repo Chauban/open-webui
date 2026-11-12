@@ -580,6 +580,7 @@
 </div>
 
 <ConfirmDialog
+	variant="danger"
 	bind:show={showDeleteAPIKeyConfirm}
 	title={$i18n.t('Delete API Key?')}
 	confirmLabel={$i18n.t('Delete')}
@@ -590,12 +591,12 @@
 	</div>
 </ConfirmDialog>
 
-<Modal size="sm" bind:show={variableModalOpen}>
-	<form class="p-4" on:submit|preventDefault={saveVariableForm}>
-		<h2 class="mb-3 text-sm font-medium text-gray-900 dark:text-white">
-			{variableFormIndex === null ? $i18n.t('Add User Variable') : $i18n.t('Edit User Variable')}
-		</h2>
-
+<Modal
+	size="sm"
+	bind:show={variableModalOpen}
+	title={variableFormIndex === null ? $i18n.t('Add User Variable') : $i18n.t('Edit User Variable')}
+>
+	<form class="min-w-0" on:submit|preventDefault={saveVariableForm}>
 		<div class="mb-1 text-[0.625rem] text-gray-400 dark:text-gray-600">
 			{$i18n.t('Key')}
 		</div>
@@ -645,7 +646,7 @@
 					{$i18n.t('Cancel')}
 				</button>
 				<button
-					class="rounded-full bg-black px-3.5 py-1.5 text-sm font-normal text-white transition hover:bg-gray-900 dark:bg-white dark:text-black dark:hover:bg-gray-100"
+					class="rw-dialog-button rw-dialog-button-primary rounded-full bg-black px-3.5 py-1.5 text-sm font-normal text-white transition hover:bg-gray-900 dark:bg-white dark:text-black dark:hover:bg-gray-100"
 					type="submit"
 				>
 					{$i18n.t('Done')}

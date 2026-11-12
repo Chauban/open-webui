@@ -34,15 +34,15 @@
 
 <Modal size="md" bind:show>
 	<div>
-		<div class=" flex justify-between dark:text-gray-100 px-4 pt-3 mb-1">
-			<div class=" text-sm font-medium self-center min-w-0 truncate">
+		<div class="rw-dialog-header-custom flex justify-between dark:text-gray-100 px-4 pt-3 mb-1">
+			<div class="rw-dialog-heading text-sm font-medium self-center min-w-0 truncate">
 				{$i18n.t('User Preview')}
 				{#if userName}
 					<span class="text-sm font-normal text-gray-500 ml-1">{userName}</span>
 				{/if}
 			</div>
 			<button
-				class="self-center flex-shrink-0"
+				class="rw-dialog-close self-center flex-shrink-0"
 				on:click={() => {
 					show = false;
 				}}
@@ -51,7 +51,7 @@
 			</button>
 		</div>
 
-		<div class="flex flex-col w-full px-5 pb-4">
+		<div class="rw-dialog-body-custom flex flex-col w-full px-5 pb-4">
 			{#if loading}
 				<div class="flex justify-center items-center py-8">
 					<Spinner className="size-5" />

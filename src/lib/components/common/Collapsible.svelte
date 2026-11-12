@@ -29,11 +29,9 @@
 	// Assuming $i18n.languages is an array of language codes
 	$: loadLocale($i18n.languages);
 
-	import { slide } from 'svelte/transition';
-	import { quintOut } from 'svelte/easing';
+	import { disclosureSlide } from '$lib/utils/disclosure';
 
-	import ChevronUp from '../icons/ChevronUp.svelte';
-	import ChevronDown from '../icons/ChevronDown.svelte';
+	import DisclosureChevron from './DisclosureChevron.svelte';
 	import Spinner from './Spinner.svelte';
 
 	export let open = false;
@@ -124,11 +122,11 @@
 
 				{#if !disabled}
 					<div class="flex self-center translate-y-[1px]">
-						{#if open}
-							<ChevronUp strokeWidth={chevronStrokeWidth} className={chevronClassName} />
-						{:else}
-							<ChevronDown strokeWidth={chevronStrokeWidth} className={chevronClassName} />
-						{/if}
+						<DisclosureChevron
+							{open}
+							strokeWidth={chevronStrokeWidth}
+							className={chevronClassName}
+						/>
 					</div>
 				{/if}
 			</div>
@@ -149,11 +147,11 @@
 
 					{#if chevron}
 						<div class="flex self-start translate-y-1">
-							{#if open}
-								<ChevronUp strokeWidth={chevronStrokeWidth} className={chevronClassName} />
-							{:else}
-								<ChevronDown strokeWidth={chevronStrokeWidth} className={chevronClassName} />
-							{/if}
+							<DisclosureChevron
+								{open}
+								strokeWidth={chevronStrokeWidth}
+								className={chevronClassName}
+							/>
 						</div>
 					{/if}
 				</div>
@@ -161,7 +159,7 @@
 				{#if grow}
 					{#if open && !hide}
 						<div
-							transition:slide={{ duration: 300, easing: quintOut, axis: 'y' }}
+							transition:disclosureSlide
 							on:click={(e) => {
 								e.stopPropagation();
 							}}
@@ -176,7 +174,7 @@
 
 	{#if !grow}
 		{#if open && !hide}
-			<div transition:slide={{ duration: 300, easing: quintOut, axis: 'y' }}>
+			<div transition:disclosureSlide>
 				<slot name="content" />
 			</div>
 		{/if}

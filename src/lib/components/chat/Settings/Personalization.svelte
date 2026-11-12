@@ -286,6 +286,8 @@
 />
 
 <ConfirmDialog
+	confirmLabel={$i18n.t('Delete')}
+	variant="danger"
 	title={$i18n.t('Delete Memory?')}
 	show={showDeleteConfirm}
 	on:confirm={async () => {

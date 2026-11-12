@@ -183,6 +183,8 @@
 </script>
 
 <ConfirmDialog
+	confirmLabel={$i18n.t('Delete')}
+	variant="danger"
 	bind:show={showDeleteConfirm}
 	title={$i18n.t('Delete Model')}
 	message={$i18n.t('This will delete the cached model and cannot be undone.')}

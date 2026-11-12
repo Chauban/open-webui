@@ -19,6 +19,7 @@
 </script>
 
 <ConfirmDialog
+	variant="danger"
 	bind:show={showDeleteConfirmDialog}
 	title={$i18n.t('Delete Version')}
 	message={$i18n.t(

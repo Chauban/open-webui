@@ -295,6 +295,8 @@
 
 {#if loaded}
 	<DeleteConfirmDialog
+		confirmLabel={$i18n.t('Delete')}
+		variant="danger"
 		bind:show={showDeleteConfirm}
 		on:confirm={() => {
 			deleteHandler(selectedItem);

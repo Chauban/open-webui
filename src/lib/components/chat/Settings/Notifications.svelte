@@ -338,12 +338,12 @@
 	</div>
 </div>
 
-<Modal size="sm" bind:show={formOpen}>
-	<div class="p-4">
-		<h2 class="mb-3 text-sm font-medium text-gray-900 dark:text-white">
-			{editingId ? $i18n.t('Edit') : $i18n.t('Add Notification Target')}
-		</h2>
-
+<Modal
+	size="sm"
+	bind:show={formOpen}
+	title={editingId ? $i18n.t('Edit') : $i18n.t('Add Notification Target')}
+>
+	<div class="min-w-0">
 		<div class="text-[0.625rem] text-gray-400 dark:text-gray-600">
 			{$i18n.t('Target ID for notify')}
 		</div>

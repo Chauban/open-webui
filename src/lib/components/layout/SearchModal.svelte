@@ -562,6 +562,8 @@
 <ShareChatModal bind:show={showShareChatModal} chatId={menuChatId} />
 
 <DeleteConfirmDialog
+	confirmLabel={$i18n.t('Delete')}
+	variant="danger"
 	bind:show={showDeleteConfirm}
 	title={$i18n.t('Delete chat?')}
 	on:confirm={() => {
