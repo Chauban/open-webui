@@ -1,0 +1,10 @@
+{
+  "checks": [
+    "A→home→B: late A response does not replace B draft or conversation",
+    {
+      "slow_tags_ready_ms": 1328.6000000238419
+    },
+    "Socket event during delayed history survives initial state application"
+  ],
+  "errors": []
+}

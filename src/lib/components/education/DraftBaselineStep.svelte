@@ -6,7 +6,6 @@
 	import { toast } from 'svelte-sonner';
 	import {
 		submitDraftBaseline,
-		getPendingWritingDraft,
 		savePendingWritingDraft,
 		downloadWritingWord
 	} from '$lib/apis/education';
@@ -32,6 +31,7 @@
 	import { writingSaveProblem, type WritingSaveProblem } from '$lib/utils/writing-save';
 	import UploadedOriginals from './UploadedOriginals.svelte';
 	export let sessionId: string;
+	export let initialState: import('$lib/apis/education/types').PendingWritingDraft;
 	export let photoTranscriptionEnabled = false;
 	export let imageReadingEnabled = false;
 	export let onSubmitted: () => Promise<void> | void;
@@ -113,7 +113,7 @@
 	$: charCount = text.replace(/\s/g, '').length;
 	$: busy = loading || loadFailed || importing || submitting;
 	const fingerprint = () => JSON.stringify({ document, materials: materials.map((m) => m.id) });
-	onMount(async () => {
+	onMount(() => {
 		backupStore = createWritingBackup($user?.id ?? '', sessionId, 'baseline');
 		try {
 			backups = backupStore.list();
@@ -121,8 +121,8 @@
 			localSafe = false;
 		}
 		try {
-			const state = await getPendingWritingDraft(localStorage.token, sessionId);
-			if (disposed) return;
+			// Consume the validated workspace state once. Later prop updates must not replace input.
+			const state = JSON.parse(JSON.stringify(initialState));
 			document = state.content_json;
 			materials = state.materials;
 			revision = state.revision;

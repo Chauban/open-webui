@@ -75,7 +75,8 @@ npm run test:education
 ## 排障
 
 - 模型或 AI 对话异常先检查管理员功能开关、直连、模型可见性与角色权限。浏览器请求通常应走本地 `/api/...`；直接请求外部模型商可能是直连设置引起。
-- Vite 默认代理到后端 8080，可用 `WEBUI_BACKEND_URL` 指定目标；先检查浏览器 Origin、代理目标与后端 CORS。
+- Vite 的 HTTP 与 WebSocket 默认代理到 `http://127.0.0.1:8080`，与本地后端的 IPv4 监听一致，避免每次转发重新解析 `localhost`；浏览器仍可使用 `http://localhost:5050`。可用 `WEBUI_BACKEND_URL` 显式指定其他后端，先检查浏览器 Origin、代理目标与后端 CORS。
+- 若短时间内重复打开“我的作业”或同一份作业仍很慢，分别测量前端代理的 `http://localhost:5050/api/config` 与后端直连的 `http://localhost:8080/api/config`。二者耗时差异很大时，优先检查本地转发层；页面已访问过仍会读取最新作业状态，代理的逐请求延迟会在恢复工作区的多个阶段叠加。修改 Vite 配置会自动重载开发服务器，重载后的首次编译时间应单独记录。
 - Vite 在 5050 被占用时可能顺延端口，以终端打印的地址为准。使用其他端口前确认它在 CORS 白名单中；后端 8080 被占用时先确认占用进程，避免启动错项目。
 - Socket.IO 使用自身的 WebSocket 重连，不人为降级到 polling。更改 CORS 后需重启后端。
 - 默认 SQLite 为 `backend/data/webui.db`；登录密钥为 `backend/.webui_secret_key`，不要随意更换或提交。

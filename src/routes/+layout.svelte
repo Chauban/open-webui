@@ -41,6 +41,7 @@
 	import { refreshChatList, refreshFolderChatLists } from '$lib/stores/chatList';
 	import { getFileContentById } from '$lib/apis/files';
 	import { getEducationNotificationSummary } from '$lib/apis/education';
+	import { invalidateWritingHome, writingHomeRequests } from '$lib/apis/education/home';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { beforeNavigate } from '$app/navigation';
@@ -110,6 +111,15 @@
 	setContext('i18n', i18n);
 
 	const bc = new BroadcastChannel('active-tab-channel');
+	let homeIdentity = '';
+	const stopHomeIdentity = user.subscribe((value) => {
+		const next = JSON.stringify([value?.id, value?.role, value?.education_role]);
+		if (next !== homeIdentity) {
+			homeIdentity = next;
+			writingHomeRequests.reset();
+		}
+	});
+	onDestroy(stopHomeIdentity);
 
 	let loaded = false;
 	let tokenTimer = null;
@@ -193,6 +203,7 @@
 			clearDisconnectToastTimer();
 
 			if (hasConnectedOnce) {
+				invalidateWritingHome();
 				socketConnected.set(true);
 				// Only show "Reconnected" if the user actually saw the disconnect warning
 				if (disconnectWarningShown) {
@@ -877,6 +888,7 @@
 	};
 
 	const educationNotificationHandler = async (data) => {
+		invalidateWritingHome();
 		const payload = data?.payload ?? {};
 		const title = payload.assignment_title ?? '';
 		if (data?.type === 'assignment_visibility_changed') {

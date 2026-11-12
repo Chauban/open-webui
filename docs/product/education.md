@@ -38,6 +38,8 @@ Right Write 基于 Open WebUI v0.11.2。前端使用 Svelte 5、SvelteKit 2、Ty
 - `challenge.py` / `challenge_insight.py`：提交前 AI 读者试读及维度聚合；`analysis.py`：来源、过程指标及分析缓存。
 - `profile_evidence.py` / `profile_snapshots.py`：冻结证据；`profile.py` / `profile_aggregates.py`：画像指标和聚合投影；`profile_recompute.py`：显式批量重算。细节参见 [画像投影说明](../../backend/open_webui/services/education/PROFILE_PROJECTIONS.md)。
 
+- `workspace.py` 在既有访问校验后依次装配工作区 `initial_state`：学生可见辅导摘要、适用的完整初稿暂存及 revision、阅读事实和当轮试读；共用原服务，不通过 HTTP 回调自己的路由，不并发使用 Session，不调用模型。两种 workspace 响应同步提供评阅、有效截止及思考开关；该读取不是并发生成活动的原子快照。独立读取接口继续用于轮询与主动刷新。首页仅保留同身份、班级范围的展示状态，内容每次校验；不缓存写权限或在悬停时创建工作区。
+
 ## Frontend Entry Points
 
 - API 与类型：`src/lib/apis/education/index.ts`、`types.ts`；教学组件：`src/lib/components/education/`。
@@ -66,6 +68,8 @@ Right Write 基于 Open WebUI v0.11.2。前端使用 Svelte 5、SvelteKit 2、Ty
 - 完成批改后重新读取教师待批改队列，优先继续原后序记录，否则进入剩余队列首项；仅服务器总数为零时提示清空，刷新失败返回队列页。
 
 ## Task Modes & Writing Context
+
+- 从零写作和两类修订的辅导上下文均不自动注入评分模式、评分维度、数值分数、反思题或截止时间。题目、作业要求、辅导提示词及适用档位照常提供；教师主动写在要求或提示词中的内容不做文本删改。独立的 AI 读者试读仍按教师选择的维度工作，评分、反思提交和超时判定沿用各自业务规则。
 
 - `single_conversation.py` 管理修订作业的单对话边界。`Chats.insert_new_chat` 在同一事务中锁定作业/写作会话、检查现有对话并绑定 `chat_id / active_chat_id`；SQLite 与 PostgreSQL 都通过实际写锁串行首条创建，普通聊天与从零写作不限制数量。
 - 模型写入口同时拦截导入、移入/移出与归档；API 拒绝复制/分支、直接删除及会清掉修订记录的全量聊天清理。撤回初稿和显式维护仍走原有授权操作。已有多个对话的从零作业不能直接切换成修订类型，须先处理多余对话。

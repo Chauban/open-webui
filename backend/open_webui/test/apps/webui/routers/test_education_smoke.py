@@ -4738,6 +4738,32 @@ def test_assignment_defaults_to_balanced_coaching_style(education_client):
     assert "【辅导方式】平衡" in system_prompt
 
 
+def test_scratch_coaching_excludes_assessment_and_deadline(education_client):
+    client, teacher, _, student, _, factory = education_client
+    assignment, open_workspace = _create_coaching_assignment(client, teacher, student)
+    prompt = open_workspace()['project']['data']['system_prompt']
+    assert assignment['title'] in prompt
+    assert assignment['description'] in prompt
+    assert assignment['teaching_config']['prompt'] in prompt
+    assert '【辅导方式】平衡' in prompt
+    assert '【评分维度】' not in prompt
+    assert '【截止】' not in prompt
+
+    # Reopening an existing workspace must not pick up assessment metadata.
+    with factory() as db:
+        row = db.get(Assignment, assignment['id'])
+        row.score_max = 137
+        row.rubric_schema = {'criteria': [{'key': 'private', 'label': '评分专用标记', 'max_score': 137}]}
+        row.reflection_questions = [{
+            'id': 'private_reflection', 'kind': 'text', 'prompt': '反思专用标记',
+            'required': True, 'show_when': 'always',
+        }]
+        row.due_at = 2100000000
+        db.commit()
+
+    assert open_workspace()['project']['data']['system_prompt'] == prompt
+
+
 def test_assignment_coaching_style_changes_system_prompt(education_client):
     client, teacher, _, student, _, _ = education_client
 

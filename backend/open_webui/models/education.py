@@ -1669,6 +1669,22 @@ class ClassroomMemberCreateForm(BaseModel):
     member_role: str = "student"
 
 
+class PendingWorkspaceDraft(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    content_json: dict
+    materials: list[dict]
+    revision: int = Field(ge=0)
+
+
+class WorkspaceInitialState(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    # Required keys distinguish an empty state from a failed/missing read.
+    teaching_summary: Optional[dict]
+    pending_draft: Optional[PendingWorkspaceDraft]
+    readings: list[dict]
+    challenge: Optional["ChallengeSessionDetail"]
+
+
 class AssignmentWorkspaceResponse(BaseModel):
     assignment: AssignmentModel
     membership_role: str
@@ -1681,6 +1697,7 @@ class AssignmentWorkspaceResponse(BaseModel):
     effective_due_at: Optional[int] = None
     # 老师把辅导对话的思考交给学生开关时为真；学生端据此显示「深度思考」开关。
     can_switch_thinking: bool = False
+    initial_state: WorkspaceInitialState
 
 
 class WritingProcessSummaryResponse(BaseModel):
@@ -1728,6 +1745,10 @@ class UnifiedWritingWorkspaceResponse(BaseModel):
     project: dict
     active_chat_id: Optional[str] = None
     source_map: list[ProvenanceSegmentModel] = Field(default_factory=list)
+    review: Optional[dict] = None
+    effective_due_at: Optional[int] = None
+    can_switch_thinking: bool = False
+    initial_state: WorkspaceInitialState
 
 
 class ClassroomMemberDetail(BaseModel):

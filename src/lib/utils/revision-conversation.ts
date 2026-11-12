@@ -10,6 +10,21 @@ type ConversationMessage = {
 	meta?: { education_context?: { source_text?: string; called_at?: number; reading_id?: string } };
 };
 
+export const missingReadingMessages = (
+	readings: RevisionReading[],
+	chatId: string,
+	messages: Record<string, unknown>
+) =>
+	readings
+		.filter(
+			(record) =>
+				record.status === 'ready' &&
+				record.context?.chat_id === chatId &&
+				record.context.message_id &&
+				!messages[record.context.message_id]
+		)
+		.map((record) => record.context.message_id);
+
 /** Interleave immutable readings with the active chat branch, without creating fake chat messages. */
 export const revisionTimeline = (messages: ConversationMessage[], readings: RevisionReading[]) => {
 	const rows = [

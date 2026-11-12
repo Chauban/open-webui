@@ -347,3 +347,15 @@ export type SubmissionTiming = {
 	effective_due_at: number | null;
 	is_late: boolean;
 };
+export type PendingWritingDraft = {
+	content_json: import('$lib/utils/writing-document').WritingNode;
+	materials: import('$lib/types/writing-materials').WritingMaterial[];
+	revision: number;
+};
+
+export type WorkspaceInitialState = {
+	teaching_summary: any | null;
+	pending_draft: PendingWritingDraft | null;
+	readings: import('./index').RevisionReading[];
+	challenge: any | null;
+};

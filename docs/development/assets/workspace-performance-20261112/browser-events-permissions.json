@@ -1,0 +1,9 @@
+{
+  "errors": [],
+  "checks": [
+    "Visibility event refreshes home even when unread counts stay unchanged",
+    "Permission refusal exposes no cached draft",
+    "Socket transport reconnect revalidates home",
+    "Image reference, caption and table restore with text"
+  ]
+}

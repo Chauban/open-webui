@@ -1,0 +1,853 @@
+[
+  {
+    "errors": [],
+    "failed": [],
+    "network": "400 ms added response delay, gzip, loopback, real production frontend",
+    "phase": "state-matrix",
+    "samples": [
+      {
+        "draftChars": 0,
+        "fresh": 409.7999999523163,
+        "hidden": false,
+        "hiddenAtReady": false,
+        "iteration": 0,
+        "key": "pending",
+        "kind": "home",
+        "preview": 422.89999997615814,
+        "ready": 439.5,
+        "resources": [
+          {
+            "decoded": 8861,
+            "encoded": 806,
+            "end": 409.7999999523163,
+            "path": "/api/v1/me/writing/home",
+            "start": 0.19999992847442627
+          },
+          {
+            "decoded": 2,
+            "encoded": 2,
+            "end": 409.7999999523163,
+            "path": "/api/v1/models/model/profile/image",
+            "start": 16.899999976158142
+          }
+        ],
+        "start": 144063.5,
+        "timeOrigin": 1794489083242.2
+      },
+      {
+        "draftChars": 1946,
+        "editable": "true",
+        "fresh": 429.1999999284744,
+        "hidden": false,
+        "hiddenAtReady": false,
+        "iteration": 0,
+        "key": "pending",
+        "kind": "workspace",
+        "preview": 454.6999999284744,
+        "ready": 462.10000002384186,
+        "resources": [
+          {
+            "decoded": 10664,
+            "encoded": 869,
+            "end": 429.1999999284744,
+            "path": "/api/v1/assignments/pending/workspace",
+            "start": 17.399999976158142
+          }
+        ],
+        "start": 144542,
+        "timeOrigin": 1794489083242.2
+      }
+    ],
+    "scenario": "pending"
+  },
+  {
+    "errors": [],
+    "failed": [],
+    "network": "400 ms added response delay, gzip, loopback, real production frontend",
+    "phase": "state-matrix",
+    "samples": [
+      {
+        "draftChars": 0,
+        "fresh": 403.5,
+        "hidden": false,
+        "hiddenAtReady": false,
+        "iteration": 0,
+        "key": "running",
+        "kind": "home",
+        "preview": 409.89999997615814,
+        "ready": 426.2999999523163,
+        "resources": [
+          {
+            "decoded": 8861,
+            "encoded": 806,
+            "end": 403.5,
+            "path": "/api/v1/me/writing/home",
+            "start": 0.10000002384185791
+          }
+        ],
+        "start": 145060,
+        "timeOrigin": 1794489083242.2
+      },
+      {
+        "draftChars": 1946,
+        "editable": "false",
+        "fresh": 856.5,
+        "hidden": false,
+        "hiddenAtReady": false,
+        "iteration": 0,
+        "key": "running",
+        "kind": "workspace",
+        "preview": 895.2000000476837,
+        "ready": 906.3999999761581,
+        "resources": [
+          {
+            "decoded": 37809,
+            "encoded": 1132,
+            "end": 436.7999999523163,
+            "path": "/api/v1/assignments/running/workspace",
+            "start": 19
+          },
+          {
+            "decoded": 11,
+            "encoded": 11,
+            "end": 856.2999999523163,
+            "path": "/api/v1/me/notifications/mark-read",
+            "start": 437.7000000476837
+          },
+          {
+            "decoded": 33414,
+            "encoded": 865,
+            "end": 856.3999999761581,
+            "path": "/api/v1/chats/chat-running",
+            "start": 439.5
+          },
+          {
+            "decoded": 15,
+            "encoded": 15,
+            "end": 856.5,
+            "path": "/api/tasks/chat/chat-running",
+            "start": 439.60000002384186
+          }
+        ],
+        "start": 145524.39999997616,
+        "timeOrigin": 1794489083242.2
+      }
+    ],
+    "scenario": "running"
+  },
+  {
+    "errors": [],
+    "failed": [],
+    "network": "400 ms added response delay, gzip, loopback, real production frontend",
+    "phase": "state-matrix",
+    "samples": [
+      {
+        "draftChars": 0,
+        "fresh": 408.10000002384186,
+        "hidden": false,
+        "hiddenAtReady": false,
+        "iteration": 0,
+        "key": "failed",
+        "kind": "home",
+        "preview": 419.2000000476837,
+        "ready": 435.8000000715256,
+        "resources": [
+          {
+            "decoded": 8861,
+            "encoded": 806,
+            "end": 408.10000002384186,
+            "path": "/api/v1/me/writing/home",
+            "start": 0.20000004768371582
+          }
+        ],
+        "start": 146484.29999995232,
+        "timeOrigin": 1794489083242.2
+      },
+      {
+        "draftChars": 1946,
+        "editable": "true",
+        "fresh": 833.8000000715256,
+        "hidden": false,
+        "hiddenAtReady": false,
+        "iteration": 0,
+        "key": "failed",
+        "kind": "workspace",
+        "preview": 872.5,
+        "ready": 885.3999999761581,
+        "resources": [
+          {
+            "decoded": 37806,
+            "encoded": 1147,
+            "end": 430.8000000715256,
+            "path": "/api/v1/assignments/failed/workspace",
+            "start": 17.899999976158142
+          },
+          {
+            "decoded": 11,
+            "encoded": 11,
+            "end": 833.6000000238419,
+            "path": "/api/v1/me/notifications/mark-read",
+            "start": 431.60000002384186
+          },
+          {
+            "decoded": 33361,
+            "encoded": 864,
+            "end": 833.8000000715256,
+            "path": "/api/v1/chats/chat-failed",
+            "start": 433.39999997615814
+          },
+          {
+            "decoded": 15,
+            "encoded": 15,
+            "end": 833.8000000715256,
+            "path": "/api/tasks/chat/chat-failed",
+            "start": 433.60000002384186
+          }
+        ],
+        "start": 146958.29999995232,
+        "timeOrigin": 1794489083242.2
+      }
+    ],
+    "scenario": "failed"
+  },
+  {
+    "errors": [],
+    "failed": [],
+    "network": "400 ms added response delay, gzip, loopback, real production frontend",
+    "phase": "state-matrix",
+    "samples": [
+      {
+        "draftChars": 0,
+        "fresh": 421.2000000476837,
+        "hidden": false,
+        "hiddenAtReady": false,
+        "iteration": 0,
+        "key": "readonly",
+        "kind": "home",
+        "preview": 437.7999999523163,
+        "ready": 454.5,
+        "resources": [
+          {
+            "decoded": 8861,
+            "encoded": 806,
+            "end": 421.2000000476837,
+            "path": "/api/v1/me/writing/home",
+            "start": 0.20000004768371582
+          }
+        ],
+        "start": 147915.39999997616,
+        "timeOrigin": 1794489083242.2
+      },
+      {
+        "draftChars": 1946,
+        "editable": "false",
+        "fresh": 845.3000000715256,
+        "hidden": false,
+        "hiddenAtReady": false,
+        "iteration": 0,
+        "key": "readonly",
+        "kind": "workspace",
+        "preview": 872.9000000953674,
+        "ready": 879.5,
+        "resources": [
+          {
+            "decoded": 38032,
+            "encoded": 1223,
+            "end": 428.3000000715256,
+            "path": "/api/v1/assignments/readonly/workspace",
+            "start": 18.700000047683716
+          },
+          {
+            "decoded": 11,
+            "encoded": 11,
+            "end": 845,
+            "path": "/api/v1/me/notifications/mark-read",
+            "start": 429.3000000715256
+          },
+          {
+            "decoded": 34,
+            "encoded": 34,
+            "end": 845.3000000715256,
+            "path": "/api/v1/writing/session-readonly/process-summary",
+            "start": 430.10000002384186
+          },
+          {
+            "decoded": 15,
+            "encoded": 15,
+            "end": 845.2000000476837,
+            "path": "/api/tasks/chat/chat-readonly",
+            "start": 431.7000000476837
+          },
+          {
+            "decoded": 33467,
+            "encoded": 865,
+            "end": 845.3000000715256,
+            "path": "/api/v1/chats/chat-readonly",
+            "start": 431.7000000476837
+          }
+        ],
+        "start": 148407.19999992847,
+        "timeOrigin": 1794489083242.2
+      }
+    ],
+    "scenario": "readonly"
+  },
+  {
+    "errors": [],
+    "failed": [],
+    "network": "400 ms added response delay, gzip, loopback, real production frontend",
+    "phase": "state-matrix",
+    "samples": [
+      {
+        "draftChars": 0,
+        "fresh": 394.5,
+        "hidden": false,
+        "hiddenAtReady": false,
+        "iteration": 0,
+        "key": "generating",
+        "kind": "home",
+        "preview": 408.2999999523163,
+        "ready": 425.10000002384186,
+        "resources": [
+          {
+            "decoded": 8861,
+            "encoded": 806,
+            "end": 394.5,
+            "path": "/api/v1/me/writing/home",
+            "start": 0.10000002384185791
+          }
+        ],
+        "start": 149328.39999997616,
+        "timeOrigin": 1794489083242.2
+      },
+      {
+        "draftChars": 1946,
+        "editable": "false",
+        "fresh": 832.5,
+        "hidden": false,
+        "hiddenAtReady": false,
+        "iteration": 0,
+        "key": "generating",
+        "kind": "workspace",
+        "preview": 870.1000000238419,
+        "ready": 883.1000000238419,
+        "resources": [
+          {
+            "decoded": 37901,
+            "encoded": 1166,
+            "end": 431.2999999523163,
+            "path": "/api/v1/assignments/generating/workspace",
+            "start": 19.699999928474426
+          },
+          {
+            "decoded": 11,
+            "encoded": 11,
+            "end": 832.1000000238419,
+            "path": "/api/v1/me/notifications/mark-read",
+            "start": 432.2999999523163
+          },
+          {
+            "decoded": 33574,
+            "encoded": 875,
+            "end": 832.2999999523163,
+            "path": "/api/v1/chats/chat-generating",
+            "start": 434
+          },
+          {
+            "decoded": 29,
+            "encoded": 29,
+            "end": 832.5,
+            "path": "/api/tasks/chat/chat-generating",
+            "start": 434.10000002384186
+          }
+        ],
+        "start": 149790.5,
+        "timeOrigin": 1794489083242.2
+      }
+    ],
+    "scenario": "generating"
+  },
+  {
+    "errors": [],
+    "failed": [],
+    "network": "400 ms added response delay, gzip, loopback, real production frontend",
+    "phase": "state-matrix",
+    "samples": [
+      {
+        "draftChars": 0,
+        "fresh": 406.59999990463257,
+        "hidden": false,
+        "hiddenAtReady": false,
+        "iteration": 0,
+        "key": "overdue",
+        "kind": "home",
+        "preview": 411.39999997615814,
+        "ready": 425.1999999284744,
+        "resources": [
+          {
+            "decoded": 8861,
+            "encoded": 806,
+            "end": 406.59999990463257,
+            "path": "/api/v1/me/writing/home",
+            "start": 0.09999990463256836
+          }
+        ],
+        "start": 150761.60000002384,
+        "timeOrigin": 1794489083242.2
+      },
+      {
+        "draftChars": 1946,
+        "editable": "true",
+        "fresh": 845.6999999284744,
+        "hidden": false,
+        "hiddenAtReady": false,
+        "iteration": 0,
+        "key": "overdue",
+        "kind": "workspace",
+        "preview": 885.2999999523163,
+        "ready": 897.6999999284744,
+        "resources": [
+          {
+            "decoded": 37847,
+            "encoded": 1162,
+            "end": 425.1999999284744,
+            "path": "/api/v1/assignments/overdue/workspace",
+            "start": 19.299999952316284
+          },
+          {
+            "decoded": 11,
+            "encoded": 11,
+            "end": 845.3999999761581,
+            "path": "/api/v1/me/notifications/mark-read",
+            "start": 426
+          },
+          {
+            "decoded": 33414,
+            "encoded": 865,
+            "end": 845.6000000238419,
+            "path": "/api/v1/chats/chat-overdue",
+            "start": 427.5
+          },
+          {
+            "decoded": 15,
+            "encoded": 15,
+            "end": 845.6999999284744,
+            "path": "/api/tasks/chat/chat-overdue",
+            "start": 427.60000002384186
+          }
+        ],
+        "start": 151224,
+        "timeOrigin": 1794489083242.2
+      }
+    ],
+    "scenario": "overdue"
+  },
+  {
+    "errors": [],
+    "failed": [],
+    "network": "400 ms added response delay, gzip, loopback, real production frontend",
+    "phase": "state-matrix",
+    "samples": [
+      {
+        "draftChars": 0,
+        "fresh": 418,
+        "hidden": false,
+        "hiddenAtReady": false,
+        "iteration": 0,
+        "key": "unread",
+        "kind": "home",
+        "preview": 425.5,
+        "ready": 442.10000002384186,
+        "resources": [
+          {
+            "decoded": 8861,
+            "encoded": 806,
+            "end": 418,
+            "path": "/api/v1/me/writing/home",
+            "start": 0.10000002384185791
+          }
+        ],
+        "start": 152194.79999995232,
+        "timeOrigin": 1794489083242.2
+      },
+      {
+        "draftChars": 1946,
+        "editable": "true",
+        "fresh": 414.89999997615814,
+        "hidden": false,
+        "hiddenAtReady": false,
+        "iteration": 0,
+        "key": "unread",
+        "kind": "workspace",
+        "preview": 440.09999990463257,
+        "ready": 451.2999999523163,
+        "resources": [
+          {
+            "decoded": 22462,
+            "encoded": 958,
+            "end": 414.89999997615814,
+            "path": "/api/v1/assignments/unread/workspace",
+            "start": 16.899999976158142
+          }
+        ],
+        "start": 152676.10000002384,
+        "timeOrigin": 1794489083242.2
+      }
+    ],
+    "scenario": "unread"
+  },
+  {
+    "errors": [],
+    "failed": [],
+    "network": "400 ms added response delay, gzip, loopback, real production frontend",
+    "phase": "state-matrix",
+    "samples": [
+      {
+        "draftChars": 0,
+        "fresh": 408.5,
+        "hidden": false,
+        "hiddenAtReady": false,
+        "iteration": 0,
+        "key": "scratch",
+        "kind": "home",
+        "preview": 422.7999999523163,
+        "ready": 439.60000002384186,
+        "resources": [
+          {
+            "decoded": 8861,
+            "encoded": 806,
+            "end": 408.5,
+            "path": "/api/v1/me/writing/home",
+            "start": 0.10000002384185791
+          }
+        ],
+        "start": 153180.89999997616,
+        "timeOrigin": 1794489083242.2
+      },
+      {
+        "draftChars": 1946,
+        "editable": "true",
+        "fresh": 414,
+        "hidden": false,
+        "hiddenAtReady": false,
+        "iteration": 0,
+        "key": "scratch",
+        "kind": "workspace",
+        "preview": 444.7999999523163,
+        "ready": 451.39999997615814,
+        "resources": [
+          {
+            "decoded": 22357,
+            "encoded": 890,
+            "end": 414,
+            "path": "/api/v1/assignments/scratch/workspace",
+            "start": 19.5
+          }
+        ],
+        "start": 153657.39999997616,
+        "timeOrigin": 1794489083242.2
+      }
+    ],
+    "scenario": "scratch"
+  },
+  {
+    "errors": [],
+    "failed": [],
+    "network": "400 ms added response delay, gzip, loopback, real production frontend",
+    "phase": "state-matrix",
+    "samples": [
+      {
+        "draftChars": 0,
+        "fresh": 406.1999999284744,
+        "hidden": false,
+        "hiddenAtReady": false,
+        "iteration": 0,
+        "key": "literature",
+        "kind": "home",
+        "preview": 410.09999990463257,
+        "ready": 425.39999997615814,
+        "resources": [
+          {
+            "decoded": 8861,
+            "encoded": 806,
+            "end": 406.1999999284744,
+            "path": "/api/v1/me/writing/home",
+            "start": 0.19999992847442627
+          }
+        ],
+        "start": 154161.60000002384,
+        "timeOrigin": 1794489083242.2
+      },
+      {
+        "draftChars": 1946,
+        "editable": "true",
+        "fresh": 809.2999999523163,
+        "hidden": false,
+        "hiddenAtReady": false,
+        "iteration": 0,
+        "key": "literature",
+        "kind": "workspace",
+        "preview": 844.8999999761581,
+        "ready": 857.7999999523163,
+        "resources": [
+          {
+            "decoded": 37763,
+            "encoded": 1103,
+            "end": 406.5,
+            "path": "/api/v1/assignments/literature/workspace",
+            "start": 19
+          },
+          {
+            "decoded": 11,
+            "encoded": 11,
+            "end": 809,
+            "path": "/api/v1/me/notifications/mark-read",
+            "start": 407.39999997615814
+          },
+          {
+            "decoded": 33573,
+            "encoded": 868,
+            "end": 809.2999999523163,
+            "path": "/api/v1/chats/chat-literature",
+            "start": 408.89999997615814
+          },
+          {
+            "decoded": 15,
+            "encoded": 15,
+            "end": 809.1999999284744,
+            "path": "/api/tasks/chat/chat-literature",
+            "start": 409
+          }
+        ],
+        "start": 154624.10000002384,
+        "timeOrigin": 1794489083242.2
+      }
+    ],
+    "scenario": "literature"
+  },
+  {
+    "errors": [],
+    "failed": [],
+    "network": "400 ms added response delay, gzip, loopback, real production frontend",
+    "phase": "state-matrix",
+    "samples": [
+      {
+        "draftChars": 0,
+        "fresh": 413.8000000715256,
+        "hidden": false,
+        "hiddenAtReady": false,
+        "iteration": 0,
+        "key": "returned",
+        "kind": "home",
+        "preview": 425.7000000476837,
+        "ready": 441.7000000476837,
+        "resources": [
+          {
+            "decoded": 8861,
+            "encoded": 806,
+            "end": 413.8000000715256,
+            "path": "/api/v1/me/writing/home",
+            "start": 0.20000004768371582
+          }
+        ],
+        "start": 155545.29999995232,
+        "timeOrigin": 1794489083242.2
+      },
+      {
+        "draftChars": 1946,
+        "editable": "true",
+        "fresh": 832,
+        "hidden": false,
+        "hiddenAtReady": false,
+        "iteration": 0,
+        "key": "returned",
+        "kind": "workspace",
+        "preview": 867.5,
+        "ready": 880.6000000238419,
+        "resources": [
+          {
+            "decoded": 37962,
+            "encoded": 1213,
+            "end": 429.10000002384186,
+            "path": "/api/v1/assignments/returned/workspace",
+            "start": 17.399999976158142
+          },
+          {
+            "decoded": 11,
+            "encoded": 11,
+            "end": 831.7000000476837,
+            "path": "/api/v1/me/notifications/mark-read",
+            "start": 430.2000000476837
+          },
+          {
+            "decoded": 15,
+            "encoded": 15,
+            "end": 832,
+            "path": "/api/tasks/chat/chat-returned",
+            "start": 431.8000000715256
+          },
+          {
+            "decoded": 33467,
+            "encoded": 865,
+            "end": 831.8999999761581,
+            "path": "/api/v1/chats/chat-returned",
+            "start": 431.8000000715256
+          }
+        ],
+        "start": 156025.79999995232,
+        "timeOrigin": 1794489083242.2
+      }
+    ],
+    "scenario": "returned"
+  },
+  {
+    "errors": [],
+    "failed": [],
+    "network": "400 ms added response delay, gzip, loopback, real production frontend",
+    "phase": "state-matrix",
+    "samples": [
+      {
+        "draftChars": 0,
+        "fresh": 421.1999999284744,
+        "hidden": false,
+        "hiddenAtReady": false,
+        "iteration": 0,
+        "key": "illustrated",
+        "kind": "home",
+        "preview": 425.39999997615814,
+        "ready": 442.1999999284744,
+        "resources": [
+          {
+            "decoded": 8861,
+            "encoded": 806,
+            "end": 421.1999999284744,
+            "path": "/api/v1/me/writing/home",
+            "start": 0.19999992847442627
+          }
+        ],
+        "start": 156945.10000002384,
+        "timeOrigin": 1794489083242.2
+      },
+      {
+        "draftChars": 2033,
+        "editable": "true",
+        "fresh": 820.3000000715256,
+        "hidden": false,
+        "hiddenAtReady": false,
+        "iteration": 0,
+        "key": "illustrated",
+        "kind": "workspace",
+        "preview": 863.3000000715256,
+        "ready": 875.1000000238419,
+        "resources": [
+          {
+            "decoded": 38401,
+            "encoded": 1296,
+            "end": 434,
+            "path": "/api/v1/assignments/illustrated/workspace",
+            "start": 16.90000009536743
+          },
+          {
+            "decoded": 11,
+            "encoded": 11,
+            "end": 820,
+            "path": "/api/v1/me/notifications/mark-read",
+            "start": 434.7000000476837
+          },
+          {
+            "decoded": 33896,
+            "encoded": 903,
+            "end": 820.3000000715256,
+            "path": "/api/v1/chats/chat-illustrated",
+            "start": 436.3000000715256
+          },
+          {
+            "decoded": 15,
+            "encoded": 15,
+            "end": 820.3000000715256,
+            "path": "/api/tasks/chat/chat-illustrated",
+            "start": 436.40000009536743
+          }
+        ],
+        "start": 157426.69999992847,
+        "timeOrigin": 1794489083242.2
+      }
+    ],
+    "scenario": "illustrated"
+  },
+  {
+    "errors": [],
+    "failed": [],
+    "network": "400 ms added response delay, gzip, loopback, real production frontend",
+    "phase": "state-matrix",
+    "samples": [
+      {
+        "draftChars": 0,
+        "fresh": 397.60000002384186,
+        "hidden": false,
+        "hiddenAtReady": false,
+        "iteration": 0,
+        "key": "stress",
+        "kind": "home",
+        "preview": 409.7000000476837,
+        "ready": 426.39999997615814,
+        "resources": [
+          {
+            "decoded": 8861,
+            "encoded": 806,
+            "end": 397.60000002384186,
+            "path": "/api/v1/me/writing/home",
+            "start": 0.20000004768371582
+          }
+        ],
+        "start": 158360.89999997616,
+        "timeOrigin": 1794489083242.2
+      },
+      {
+        "draftChars": 97298,
+        "editable": "true",
+        "fresh": 1128.5,
+        "hidden": false,
+        "hiddenAtReady": false,
+        "iteration": 0,
+        "key": "stress",
+        "kind": "workspace",
+        "preview": 1682.6999999284744,
+        "ready": 1782.8999999761581,
+        "resources": [
+          {
+            "decoded": 1796461,
+            "encoded": 8282,
+            "end": 472.39999997615814,
+            "path": "/api/v1/assignments/stress/workspace",
+            "start": 17.299999952316284
+          },
+          {
+            "decoded": 11,
+            "encoded": 11,
+            "end": 1082.8999999761581,
+            "path": "/api/v1/me/notifications/mark-read",
+            "start": 480.39999997615814
+          },
+          {
+            "decoded": 15,
+            "encoded": 15,
+            "end": 1083.3999999761581,
+            "path": "/api/tasks/chat/chat-stress",
+            "start": 482.7999999523163
+          },
+          {
+            "decoded": 29799291,
+            "encoded": 127427,
+            "end": 1128.5,
+            "path": "/api/v1/chats/chat-stress",
+            "start": 482.7999999523163
+          }
+        ],
+        "start": 158826.5,
+        "timeOrigin": 1794489083242.2
+      }
+    ],
+    "scenario": "stress"
+  }
+]

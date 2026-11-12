@@ -10,13 +10,13 @@
 	import { toast } from 'svelte-sonner';
 	import { educationNotificationSummary, folders, selectedFolder, user } from '$lib/stores';
 	import { refreshChatList } from '$lib/stores/chatList';
-
 	import {
-		createPersonalWriting,
-		deletePersonalWriting,
-		getWritingHome,
-		joinClassroom
-	} from '$lib/apis/education';
+		writingHomeRequests,
+		writingHomeIdentity,
+		writingHomeEvents
+	} from '$lib/apis/education/home';
+
+	import { createPersonalWriting, deletePersonalWriting, joinClassroom } from '$lib/apis/education';
 	import {
 		formatEpoch,
 		getClassroomDisplayName,
@@ -54,6 +54,11 @@
 	let showDeleteConfirm = false;
 	let unsubscribeNotifications;
 	let notificationsInitialized = false;
+	let disposed = false;
+	let identity = '';
+	let layoutScope = '';
+	let unsubscribeUser;
+	let latestRequest = 0;
 
 	const formatTimestamp = (timestamp?: number | null) =>
 		typeof timestamp === 'number' && timestamp > 0 ? formatEpoch(timestamp) : t('Unknown');
@@ -200,6 +205,7 @@
 		try {
 			await joinClassroom(localStorage.token, { invite_code: inviteCode.trim() });
 			inviteCode = '';
+			writingHomeRequests.invalidate();
 			await loadData();
 			toast.success(t('Joined classroom.'));
 		} catch (error) {
@@ -212,23 +218,43 @@
 	// Fetch-only: refreshes `home` without touching
 	// `activeTab`, so background refreshes never yank the user off their current tab.
 	const fetchHomeData = async () => {
-		if (homeLoading) {
-			return null;
-		}
+		const request = ++latestRequest;
+		const token = localStorage.token;
+		const key = writingHomeIdentity(get(user), token, location.origin);
+		identity = key;
 		homeLoading = true;
 		loadError = '';
 		try {
-			const data = await getWritingHome(localStorage.token);
+			const data = await writingHomeRequests.load(key, token);
+			if (
+				disposed ||
+				request !== latestRequest ||
+				!data ||
+				key !== writingHomeIdentity(get(user), localStorage.token, location.origin)
+			)
+				return null;
 			const sessionUser = get(user);
 			const role = sessionUser?.education_role || data?.role;
 			home = data;
+			layoutScope = key + JSON.stringify((data.classrooms ?? []).map((c) => c.id).sort());
 			return { role };
 		} catch (error) {
+			if (
+				disposed ||
+				request !== latestRequest ||
+				key !== writingHomeIdentity(get(user), localStorage.token, location.origin)
+			)
+				return null;
+			home = null;
+			writingHomeRequests.invalidate();
 			loadError = resolveErrorMessage(error, t);
 			toast.error(loadError);
 			return null;
 		} finally {
-			homeLoading = false;
+			if (!disposed && request === latestRequest) {
+				homeLoading = false;
+				loaded = true;
+			}
 		}
 	};
 
@@ -240,6 +266,11 @@
 			return;
 		}
 		const { role } = result;
+		const layout = writingHomeRequests.layout(layoutScope);
+		if (layout) {
+			({ activeTab, showDone, showMissed } = layout);
+			return;
+		}
 		if (role === 'student') {
 			activeTab = 'assignment';
 		} else {
@@ -247,27 +278,47 @@
 		}
 	};
 
-	onMount(async () => {
-		await loadData();
-		loaded = true;
-
-		// Refresh the homepage whenever a new education notification arrives (new
-		// assignment published, review completed/returned, etc.) so students who are
-		// sitting on this page see updates without reloading. Uses the fetch-only helper
-		// so a background refresh never changes which tab the user is currently viewing.
-		// Skip the initial value the subscription fires with on subscribe — that's just
-		// this mount's own state, not a new notification.
-		unsubscribeNotifications = educationNotificationSummary.subscribe(() => {
+	const refresh = () => {
+		if (disposed) return;
+		writingHomeRequests.invalidate();
+		home = null;
+		void fetchHomeData();
+	};
+	const onVisible = () => {
+		if (document.visibilityState === 'visible') refresh();
+	};
+	onMount(() => {
+		// Subscribe before starting the read; an event during it must schedule a fresh read.
+		unsubscribeNotifications = writingHomeEvents.subscribe(() => {
 			if (!notificationsInitialized) {
 				notificationsInitialized = true;
 				return;
 			}
-			fetchHomeData();
+			refresh();
 		});
+		unsubscribeUser = user.subscribe((next) => {
+			const key = writingHomeIdentity(next, localStorage.token, location.origin);
+			if (identity && key !== identity) {
+				writingHomeRequests.reset();
+				home = null;
+				loaded = false;
+				void loadData();
+			}
+		});
+		document.addEventListener('visibilitychange', onVisible);
+		window.addEventListener('focus', refresh);
+		void loadData();
 	});
 
 	onDestroy(() => {
+		disposed = true;
+		latestRequest++;
+		if (home && identity === writingHomeIdentity(get(user), localStorage.token, location.origin))
+			writingHomeRequests.remember(layoutScope, { activeTab, showDone, showMissed });
 		unsubscribeNotifications?.();
+		unsubscribeUser?.();
+		document.removeEventListener('visibilitychange', onVisible);
+		window.removeEventListener('focus', refresh);
 	});
 
 	$: assignmentGroups = groupAssignmentItems(home?.assignment_items ?? []);

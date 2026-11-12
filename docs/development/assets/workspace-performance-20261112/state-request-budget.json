@@ -1,0 +1,650 @@
+{
+  "duplicate_initial_state_reads": 0,
+  "requests": [
+    {
+      "path": "v1/me/writing/home",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 405.56,
+      "json_bytes": 9534
+    },
+    {
+      "path": "v1/models/model/profile/image",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 391.34,
+      "json_bytes": 2
+    },
+    {
+      "path": "v1/assignments/pending/workspace",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 409.78,
+      "json_bytes": 11183
+    },
+    {
+      "path": "v1/me/notifications/mark-read",
+      "method": "POST",
+      "status": 200,
+      "duration_ms": 397.56,
+      "json_bytes": 12
+    },
+    {
+      "path": "v1/me/writing/home",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 401.34,
+      "json_bytes": 9534
+    },
+    {
+      "path": "v1/assignments/running/workspace",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 415.54,
+      "json_bytes": 38728
+    },
+    {
+      "path": "v1/me/notifications/mark-read",
+      "method": "POST",
+      "status": 200,
+      "duration_ms": 416.53,
+      "json_bytes": 12
+    },
+    {
+      "path": "v1/chats/chat-running",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 415.23,
+      "json_bytes": 33654
+    },
+    {
+      "path": "tasks/chat/chat-running",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 415.44,
+      "json_bytes": 16
+    },
+    {
+      "path": "v1/me/notifications/summary",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 401.36,
+      "json_bytes": 48
+    },
+    {
+      "path": "v1/writing-sessions/session-running/materials",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 390.48,
+      "json_bytes": 2
+    },
+    {
+      "path": "v1/models/model/profile/image",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 412.82,
+      "json_bytes": 2
+    },
+    {
+      "path": "v1/me/writing/home",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 406.12,
+      "json_bytes": 9534
+    },
+    {
+      "path": "v1/assignments/failed/workspace",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 410.69,
+      "json_bytes": 38725
+    },
+    {
+      "path": "v1/me/notifications/mark-read",
+      "method": "POST",
+      "status": 200,
+      "duration_ms": 399.75,
+      "json_bytes": 12
+    },
+    {
+      "path": "v1/chats/chat-failed",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 398.51,
+      "json_bytes": 33601
+    },
+    {
+      "path": "tasks/chat/chat-failed",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 398.99,
+      "json_bytes": 16
+    },
+    {
+      "path": "v1/me/notifications/summary",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 400.58,
+      "json_bytes": 48
+    },
+    {
+      "path": "v1/writing-sessions/session-failed/materials",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 390.2,
+      "json_bytes": 2
+    },
+    {
+      "path": "v1/models/model/profile/image",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 411.57,
+      "json_bytes": 2
+    },
+    {
+      "path": "v1/me/writing/home",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 418.76,
+      "json_bytes": 9534
+    },
+    {
+      "path": "v1/assignments/readonly/workspace",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 407.55,
+      "json_bytes": 38969
+    },
+    {
+      "path": "tasks/chat/chat-readonly",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 410.83,
+      "json_bytes": 16
+    },
+    {
+      "path": "v1/me/notifications/mark-read",
+      "method": "POST",
+      "status": 200,
+      "duration_ms": 413.69,
+      "json_bytes": 12
+    },
+    {
+      "path": "v1/writing/session-readonly/process-summary",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 413.35,
+      "json_bytes": 35
+    },
+    {
+      "path": "v1/chats/chat-readonly",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 411.89,
+      "json_bytes": 33707
+    },
+    {
+      "path": "v1/me/notifications/summary",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 403.43,
+      "json_bytes": 48
+    },
+    {
+      "path": "v1/users/perf-student/info",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 403.6,
+      "json_bytes": 2
+    },
+    {
+      "path": "v1/writing-sessions/session-readonly/materials",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 395.85,
+      "json_bytes": 2
+    },
+    {
+      "path": "v1/models/model/profile/image",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 409.85,
+      "json_bytes": 2
+    },
+    {
+      "path": "v1/me/writing/home",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 391.14,
+      "json_bytes": 9534
+    },
+    {
+      "path": "v1/assignments/generating/workspace",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 409.41,
+      "json_bytes": 38823
+    },
+    {
+      "path": "v1/me/notifications/mark-read",
+      "method": "POST",
+      "status": 200,
+      "duration_ms": 397.62,
+      "json_bytes": 12
+    },
+    {
+      "path": "v1/chats/chat-generating",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 396.8,
+      "json_bytes": 33814
+    },
+    {
+      "path": "tasks/chat/chat-generating",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 397.18,
+      "json_bytes": 30
+    },
+    {
+      "path": "v1/me/notifications/summary",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 388.29,
+      "json_bytes": 48
+    },
+    {
+      "path": "v1/writing-sessions/session-generating/materials",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 410.22,
+      "json_bytes": 2
+    },
+    {
+      "path": "v1/models/model/profile/image",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 384.8,
+      "json_bytes": 2
+    },
+    {
+      "path": "v1/me/writing/home",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 404.46,
+      "json_bytes": 9534
+    },
+    {
+      "path": "v1/assignments/overdue/workspace",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 403.37,
+      "json_bytes": 38769
+    },
+    {
+      "path": "v1/chats/chat-overdue",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 416.23,
+      "json_bytes": 33654
+    },
+    {
+      "path": "tasks/chat/chat-overdue",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 416.64,
+      "json_bytes": 16
+    },
+    {
+      "path": "v1/me/notifications/mark-read",
+      "method": "POST",
+      "status": 200,
+      "duration_ms": 418.43,
+      "json_bytes": 12
+    },
+    {
+      "path": "v1/me/notifications/summary",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 412.97,
+      "json_bytes": 48
+    },
+    {
+      "path": "v1/writing-sessions/session-overdue/materials",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 403.04,
+      "json_bytes": 2
+    },
+    {
+      "path": "v1/models/model/profile/image",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 410.26,
+      "json_bytes": 2
+    },
+    {
+      "path": "v1/me/writing/home",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 415.77,
+      "json_bytes": 9534
+    },
+    {
+      "path": "v1/assignments/unread/workspace",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 396.19,
+      "json_bytes": 22972
+    },
+    {
+      "path": "v1/me/notifications/mark-read",
+      "method": "POST",
+      "status": 200,
+      "duration_ms": 386.21,
+      "json_bytes": 12
+    },
+    {
+      "path": "v1/writing-sessions/session-unread/materials",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 383.25,
+      "json_bytes": 2
+    },
+    {
+      "path": "v1/me/writing/home",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 406.07,
+      "json_bytes": 9534
+    },
+    {
+      "path": "v1/assignments/scratch/workspace",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 392.21,
+      "json_bytes": 22854
+    },
+    {
+      "path": "v1/me/notifications/mark-read",
+      "method": "POST",
+      "status": 200,
+      "duration_ms": 416.94,
+      "json_bytes": 12
+    },
+    {
+      "path": "v1/folders/folder-scratch/shared/chats",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 413.1,
+      "json_bytes": 286
+    },
+    {
+      "path": "v1/writing-sessions/session-scratch/materials",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 412.77,
+      "json_bytes": 2
+    },
+    {
+      "path": "v1/folders/folder-scratch/update",
+      "method": "POST",
+      "status": 200,
+      "duration_ms": 410.23,
+      "json_bytes": 286
+    },
+    {
+      "path": "v1/me/writing/home",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 404.06,
+      "json_bytes": 9534
+    },
+    {
+      "path": "v1/assignments/literature/workspace",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 385.38,
+      "json_bytes": 38672
+    },
+    {
+      "path": "v1/me/notifications/mark-read",
+      "method": "POST",
+      "status": 200,
+      "duration_ms": 399.68,
+      "json_bytes": 12
+    },
+    {
+      "path": "tasks/chat/chat-literature",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 398.27,
+      "json_bytes": 16
+    },
+    {
+      "path": "v1/chats/chat-literature",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 398.76,
+      "json_bytes": 33813
+    },
+    {
+      "path": "v1/me/notifications/summary",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 414.93,
+      "json_bytes": 48
+    },
+    {
+      "path": "v1/folders/folder-literature/update",
+      "method": "POST",
+      "status": 200,
+      "duration_ms": 414.58,
+      "json_bytes": 297
+    },
+    {
+      "path": "v1/writing-sessions/session-literature/materials",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 405.03,
+      "json_bytes": 2
+    },
+    {
+      "path": "v1/models/model/profile/image",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 412.77,
+      "json_bytes": 2
+    },
+    {
+      "path": "v1/me/writing/home",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 411.62,
+      "json_bytes": 9534
+    },
+    {
+      "path": "v1/assignments/returned/workspace",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 409.07,
+      "json_bytes": 38891
+    },
+    {
+      "path": "v1/me/notifications/mark-read",
+      "method": "POST",
+      "status": 200,
+      "duration_ms": 399.38,
+      "json_bytes": 12
+    },
+    {
+      "path": "tasks/chat/chat-returned",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 398.19,
+      "json_bytes": 16
+    },
+    {
+      "path": "v1/chats/chat-returned",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 398.67,
+      "json_bytes": 33707
+    },
+    {
+      "path": "v1/me/notifications/summary",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 397.31,
+      "json_bytes": 48
+    },
+    {
+      "path": "v1/writing-sessions/session-returned/materials",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 419.49,
+      "json_bytes": 2
+    },
+    {
+      "path": "v1/models/model/profile/image",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 397.03,
+      "json_bytes": 2
+    },
+    {
+      "path": "v1/me/writing/home",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 419.11,
+      "json_bytes": 9534
+    },
+    {
+      "path": "v1/assignments/illustrated/workspace",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 414.54,
+      "json_bytes": 39363
+    },
+    {
+      "path": "v1/chats/chat-illustrated",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 382.06,
+      "json_bytes": 34136
+    },
+    {
+      "path": "tasks/chat/chat-illustrated",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 382.43,
+      "json_bytes": 16
+    },
+    {
+      "path": "v1/me/notifications/mark-read",
+      "method": "POST",
+      "status": 200,
+      "duration_ms": 384.21,
+      "json_bytes": 12
+    },
+    {
+      "path": "v1/me/notifications/summary",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 400.43,
+      "json_bytes": 48
+    },
+    {
+      "path": "v1/writing-sessions/session-illustrated/materials",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 390.78,
+      "json_bytes": 2
+    },
+    {
+      "path": "v1/models/model/profile/image",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 393.44,
+      "json_bytes": 2
+    },
+    {
+      "path": "v1/me/writing/home",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 395.27,
+      "json_bytes": 9534
+    },
+    {
+      "path": "v1/assignments/stress/workspace",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 431.56,
+      "json_bytes": 1834455
+    },
+    {
+      "path": "v1/me/notifications/mark-read",
+      "method": "POST",
+      "status": 200,
+      "duration_ms": 413.14,
+      "json_bytes": 12
+    },
+    {
+      "path": "v1/chats/chat-stress",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 460.49,
+      "json_bytes": 29803711
+    },
+    {
+      "path": "tasks/chat/chat-stress",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 598.52,
+      "json_bytes": 16
+    },
+    {
+      "path": "v1/me/notifications/summary",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 399.37,
+      "json_bytes": 48
+    },
+    {
+      "path": "v1/writing-sessions/session-stress/materials",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 405.77,
+      "json_bytes": 2
+    },
+    {
+      "path": "v1/models/model/profile/image",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 381.75,
+      "json_bytes": 2
+    },
+    {
+      "path": "v1/chats/chat-stress/tags",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 399.86,
+      "json_bytes": 2
+    },
+    {
+      "path": "v1/folders/",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 402.71,
+      "json_bytes": 4326
+    },
+    {
+      "path": "v1/folders/shared",
+      "method": "GET",
+      "status": 200,
+      "duration_ms": 403.04,
+      "json_bytes": 2
+    }
+  ],
+  "model_or_save_writes": 0
+}

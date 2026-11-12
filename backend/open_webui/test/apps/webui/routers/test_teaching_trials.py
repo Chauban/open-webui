@@ -30,6 +30,28 @@ DRAFT = '本段提出一个判断，需要解释证据和理由之间的联系�
 education_client = base_education_client
 
 
+@pytest.mark.parametrize('stage', ['first_read', 'coaching_chat', 'revision_review', 'whole_review'])
+def test_argument_messages_exclude_assessment_and_deadline(stage):
+    config = {
+        'ai': {'prompt': '只讨论论证的完整辅导规则'},
+        'title': '当前论证题目',
+        'description': '当前材料与完成要求',
+    }
+    dialogue = [{'role': 'user', 'content': '请看看我的理由'}]
+    messages = runtime.build_messages(config, stage, DRAFT, dialogue)
+    config.update(
+        rubric_schema={'criteria': [{'key': 'private', 'label': '评分专用标记', 'max_score': 137}]},
+        score_max=137,
+        reflection_questions=[{'prompt': '反思专用标记'}],
+        due_at=2100000000,
+    )
+    assert runtime.build_messages(config, stage, DRAFT, dialogue) == messages
+    assert config['ai']['prompt'] in messages[0]['content']
+    assert config['title'] in messages[0]['content']
+    assert config['description'] in messages[0]['content']
+    assert DRAFT in json.dumps(messages, ensure_ascii=False)
+
+
 @pytest.fixture
 def env(education_client, monkeypatch):
     client, teacher, other, student, outsider, factory = education_client

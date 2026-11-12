@@ -5,6 +5,7 @@
 	import {
 		hasDraftChanges,
 		lastReadDraft,
+		missingReadingMessages,
 		revisionReviewPrompt
 	} from '$lib/utils/revision-conversation';
 	import { mergeReadingHistory } from '$lib/utils/revision-conversation';
@@ -84,11 +85,11 @@
 		forkChatById,
 		getAllTags,
 		getChatById,
-		getTagsById,
 		resolveChatMessageToolCall,
 		updateChatById,
 		updateChatFolderIdById
 	} from '$lib/apis/chats';
+	import { getChatLoadState } from '$lib/apis/chats/load';
 	import { generateOpenAIChatCompletion } from '$lib/apis/openai';
 	import { processUrl, processWebSearch } from '$lib/apis/retrieval';
 	import {
@@ -137,6 +138,18 @@
 	import InputVariablesModal from './MessageInput/InputVariablesModal.svelte';
 
 	export let chatIdProp = '';
+	export let conversationLoading = true;
+	export let writingFolderId: string | null = null;
+	let chatDisposed = false;
+	let chatLoadGeneration = 0;
+	let navigationGeneration = 0;
+	let liveHistoryRevision = 0;
+	let restoringHistory = false;
+	let pendingChatEvents: { event: any; cb: any }[] = [];
+	let workspaceRendered = false;
+	let chatLoadFailed = false;
+	$: conversationLoading = loading;
+	$: if (!loading && projectBaseUrl) workspaceRendered = true;
 	export let embedded = false;
 	export let embeddedTitle = '';
 	export let embeddedChats = [];
@@ -257,20 +270,26 @@
 	export let reserveWorkspaceActions = false;
 	export let revisionReadings: RevisionReading[] = [];
 	let readingHistorySync = '';
-	$: if (revisionMode && chatIdProp && revisionReadings.length) {
-		const key = revisionReadings
-			.filter((record) => record.status === 'ready' && record.context?.chat_id === chatIdProp)
-			.map((record) => record.context.message_id)
-			.join(',');
+	$: if (revisionMode && !loading && chatIdProp && revisionReadings.length) {
+		// 首次加载已包含完成的阅读消息，只在之后的阅读产生新消息时补取历史。
+		const key = missingReadingMessages(revisionReadings, chatIdProp, history.messages).join(',');
 		if (key && key !== readingHistorySync) {
 			readingHistorySync = key;
 			void syncReadingHistory(chatIdProp);
 		}
 	}
 	const syncReadingHistory = async (id: string) => {
+		const token = localStorage.token;
+		const generation = chatLoadGeneration;
 		try {
-			const saved = await getChatById(localStorage.token, id);
-			if (chatIdProp === id && saved?.chat?.history) {
+			const saved = await getChatById(token, id);
+			if (
+				!chatDisposed &&
+				generation === chatLoadGeneration &&
+				token === localStorage.token &&
+				chatIdProp === id &&
+				saved?.chat?.history
+			) {
 				history = mergeReadingHistory(history, saved.chat.history);
 			}
 		} catch (error) {
@@ -967,7 +986,11 @@
 			imageGenerationEnabled = input.imageGenerationEnabled ?? false;
 			codeInterpreterEnabled = input.codeInterpreterEnabled ?? false;
 			if (input.toolApprovalMode) {
-				await handleToolApprovalModeChange(input.toolApprovalMode);
+				// Restoring unsent input is not consent to approve pending tool calls.
+				params = {
+					...params,
+					tool_approval_mode: input.toolApprovalMode === 'ask' ? 'ask' : 'full'
+				};
 			}
 			return true;
 		} catch (e) {
@@ -1010,6 +1033,15 @@
 	}
 
 	const navigateHandler = async () => {
+		chatLoadFailed = false;
+		const navigation = ++navigationGeneration;
+		const targetId = chatIdProp;
+		const token = localStorage.token;
+		const current = () =>
+			!chatDisposed &&
+			navigation === navigationGeneration &&
+			targetId === chatIdProp &&
+			token === localStorage.token;
 		noteChatDebug('navigateHandler start');
 		// Mark the outgoing chat as read before loading the new one.
 		// $chatId still holds the previous chat here — loadChat() updates it.
@@ -1020,6 +1052,7 @@
 
 		clearTimeout(saveControlsTimer);
 		await saveControls();
+		if (!current()) return;
 		loading = true;
 
 		prompt = '';
@@ -1037,12 +1070,16 @@
 		);
 
 		const loaded = chatIdProp ? await loadChat() : false;
+		if (!current()) return;
 		noteChatDebug('loadChat completed inside navigateHandler', { loaded });
 		if (loaded) {
 			await tick();
+			if (!current()) return;
 			loading = false;
 			noteChatDebug('embedded chat loading false');
-			window.setTimeout(() => scrollToBottom(), 0);
+			window.setTimeout(() => {
+				if (current()) void scrollToBottom();
+			}, 0);
 
 			await tick();
 
@@ -1054,15 +1091,19 @@
 			// Process any queued requests if the chat is idle
 			const lastMessage = history.currentId ? history.messages[history.currentId] : null;
 			const isIdle = !lastMessage || lastMessage.role !== 'assistant' || lastMessage.done;
-			if (isIdle) {
+			if (isIdle && !projectBaseUrl) {
 				await processNextInQueue(chatIdProp);
 			}
 
+			if (!current()) return;
 			if (!(await restoreChatInput(storageChatInput))) {
 				await setDefaults();
 			}
 
 			messageInput?.focus({ preventScroll: true });
+		} else if (projectBaseUrl) {
+			chatLoadFailed = true;
+			loading = true;
 		} else if (!embedded) {
 			await goto('/');
 		} else {
@@ -1408,6 +1449,11 @@
 		console.log(event);
 
 		if (event.chat_id === $chatId) {
+			if (restoringHistory) {
+				pendingChatEvents.push({ event, cb });
+				return;
+			}
+			liveHistoryRevision++;
 			await tick();
 			const type = event?.data?.type ?? null;
 			if (type === 'chat:reload') {
@@ -1708,7 +1754,7 @@
 		}
 	};
 
-	$: if (selectedModels !== null) {
+	$: if (!loading && !fixedTeachingModel && selectedModels !== null) {
 		savedModelIds();
 	}
 
@@ -1803,7 +1849,7 @@
 				await tick();
 			}
 
-			if (storageChatInput) {
+			if (!chatIdProp && storageChatInput) {
 				prompt = '';
 				messageInput?.setText('');
 
@@ -1823,6 +1869,10 @@
 		init();
 
 		return () => {
+			chatDisposed = true;
+			pendingChatEvents = [];
+			chatLoadGeneration++;
+			navigationGeneration++;
 			try {
 				clearTimeout(saveControlsTimer);
 				saveControls();
@@ -2454,6 +2504,18 @@
 	};
 
 	const loadChat = async () => {
+		const generation = ++chatLoadGeneration;
+		const id = chatIdProp || $chatId;
+		const previousChatId = chat?.id;
+		restoringHistory = true;
+		pendingChatEvents = pendingChatEvents.filter(({ event }) => event.chat_id === id);
+		const token = localStorage.token;
+		const revision = liveHistoryRevision;
+		const current = () =>
+			!chatDisposed &&
+			generation === chatLoadGeneration &&
+			id === (chatIdProp || $chatId) &&
+			token === localStorage.token;
 		noteChatDebug('loadChat start');
 		// chatIdProp is empty for chats started from the home page (URL set via replaceState)
 		chatId.set(chatIdProp || $chatId);
@@ -2464,17 +2526,26 @@
 			temporaryChatEnabled.set(false);
 		}
 
-		chat = await getChatById(localStorage.token, $chatId).catch(async (error) => {
+		const activeTaskIds = taskIds;
+		const loadState = await getChatLoadState(token, id, current).catch(async (error) => {
+			if (!current()) return null;
 			console.error('[note-chat] getChatById failed', {
 				chatIdProp,
 				activeChatId: $chatId,
 				error
 			});
 			if (!embedded) {
-				await goto('/');
+				if (!projectBaseUrl) await goto('/');
+				else toast.error($i18n.t('Something went wrong. Please try again.'));
 			}
 			return null;
 		});
+		if (!current()) return false;
+		chat = loadState?.chat ?? null;
+		if (!loadState) {
+			restoringHistory = false;
+			return false;
+		}
 		noteChatDebug('getChatById completed', {
 			found: !!chat,
 			chatId: chat?.id,
@@ -2483,12 +2554,18 @@
 		});
 
 		if (chat) {
+			if (writingFolderId && chat.folder_id !== writingFolderId) {
+				restoringHistory = false;
+				toast.error($i18n.t('Something went wrong. Please try again.'));
+				return false;
+			}
 			// An assignment conversation belongs to its writing workspace: opening it as a
 			// plain chat would bypass the workspace's provenance tracking, so bounce it back.
 			if (!allowAssignmentWorkspaceChat) {
 				const guardFolder = chat?.folder_id
 					? await getFolderById(localStorage.token, chat.folder_id).catch(() => null)
 					: null;
+				if (!current()) return false;
 				const guardAssignmentId =
 					((guardFolder?.meta?.mode === 'assignment_writing' ||
 						guardFolder?.meta?.category === 'assignment_project') &&
@@ -2500,13 +2577,9 @@
 				}
 			}
 
-			tags = await getTagsById(localStorage.token, $chatId).catch(async (error) => {
-				console.warn('[note-chat] getTagsById failed; continuing without tags', {
-					chatIdProp,
-					activeChatId: $chatId,
-					error
-				});
-				return [];
+			tags = [];
+			void loadState.tags.then((next) => {
+				if (current() && next) tags = next;
 			});
 			noteChatDebug('getTagsById completed', { tagCount: tags?.length ?? 0 });
 
@@ -2538,10 +2611,14 @@
 
 				oldSelectedModelIds = structuredClone(selectedModels);
 
-				history =
+				const restoredHistory =
 					(chatContent?.history ?? undefined) !== undefined
 						? chatContent.history
 						: convertMessagesToHistory(chatContent.messages);
+				history =
+					revision === liveHistoryRevision || previousChatId !== id
+						? restoredHistory
+						: mergeReadingHistory(history, restoredHistory);
 				if (chat?.current_message_id && history?.messages?.[chat.current_message_id]) {
 					history.currentId = chat.current_message_id;
 				}
@@ -2562,6 +2639,7 @@
 
 				autoScroll = true;
 				await tick();
+				if (!current()) return false;
 
 				// Mark all non-current assistant messages as done
 				if (history.currentId) {
@@ -2580,29 +2658,20 @@
 				// Reconcile active tasks with message state:
 				// If the response is already done, remaining tasks are just background
 				// work (follow-ups, title gen) that shouldn't block the input.
-				const activeTaskIds = taskIds;
 				const currentMessage = history.currentId ? history.messages[history.currentId] : null;
-				const pendingTaskIds = await getTaskIdsByChatId(localStorage.token, $chatId)
-					.then((res) => res?.task_ids ?? [])
-					.catch((error) => {
-						console.warn('[note-chat] getTaskIdsByChatId failed; continuing without tasks', {
-							chatIdProp,
-							activeChatId: $chatId,
-							error
-						});
-						return [];
-					});
+				const pendingTaskIds = loadState.taskIds;
 				noteChatDebug('task reconciliation completed', {
 					pendingTaskCount: pendingTaskIds.length,
 					hasCurrentMessage: !!currentMessage
 				});
-				if (taskIds !== activeTaskIds) {
+				if (taskIds !== activeTaskIds || revision !== liveHistoryRevision) {
 					noteChatDebug('task ids changed during load; aborting stale load');
-					return;
 				}
 				const responseComplete = currentMessage?.role === 'assistant' && currentMessage?.done;
 
-				if (pendingTaskIds.length > 0 && !responseComplete) {
+				if (taskIds !== activeTaskIds || revision !== liveHistoryRevision) {
+					// Keep live task state, then replay events buffered during this read.
+				} else if (pendingTaskIds.length > 0 && !responseComplete) {
 					taskIds = pendingTaskIds;
 				} else {
 					taskIds = null;
@@ -2617,6 +2686,13 @@
 				}
 
 				history = history;
+				restoringHistory = false;
+				const queuedEvents = pendingChatEvents;
+				pendingChatEvents = [];
+				for (const { event, cb } of queuedEvents) {
+					if (!current()) return false;
+					await chatEventHandler(event, cb);
+				}
 				await tick();
 
 				return true;
@@ -2626,6 +2702,7 @@
 					activeChatId: $chatId,
 					chat
 				});
+				restoringHistory = false;
 				return null;
 			}
 		}
@@ -2633,6 +2710,7 @@
 			chatIdProp,
 			activeChatId: $chatId
 		});
+		restoringHistory = false;
 	};
 
 	const scrollToBottom = async (behavior = 'auto') => {
@@ -4249,6 +4327,8 @@
 	};
 
 	const saveControls = async () => {
+		const id = $chatId;
+		const generation = chatLoadGeneration;
 		if (!$chatId || $temporaryChatEnabled) return;
 		const loaded = chat?.chat ?? {};
 		if (equal(params, loaded.params ?? {}) && equal(chatFiles, loaded.files ?? [])) return;
@@ -4261,7 +4341,7 @@
 			return null;
 		});
 		// Refresh the dedupe baseline so a later revert still saves.
-		if (res) chat = res;
+		if (res && !chatDisposed && id === $chatId && generation === chatLoadGeneration) chat = res;
 	};
 
 	const MAX_DRAFT_LENGTH = 5000;
@@ -4516,8 +4596,17 @@
 		: ' '} w-full max-w-full min-w-0 flex flex-col"
 	id={chatContainerId}
 >
-	{#if !loading}
+	{#if !loading || (projectBaseUrl && workspaceRendered)}
 		<div in:fade={{ duration: 50 }} class="w-full h-full flex flex-col">
+			{#if loading && chatLoadFailed}
+				<div
+					role="alert"
+					class="absolute left-1/4 top-1/3 z-20 rounded-xl bg-white p-4 dark:bg-gray-900"
+				>
+					<p>{$i18n.t('Something went wrong. Please try again.')}</p>
+					<button type="button" on:click={() => void navigateHandler()}>{$i18n.t('Retry')}</button>
+				</div>
+			{/if}
 			{#if !embedded && $selectedFolder && $selectedFolder?.meta?.background_image_url}
 				<div
 					class="absolute top-0 left-0 w-full h-full bg-cover bg-center bg-no-repeat"
@@ -4540,7 +4629,11 @@
 			{/if}
 
 			<div class="w-full h-full flex">
-				<div class="h-full flex relative max-w-full min-w-0 flex-1 flex-col">
+				<div
+					class="h-full flex relative max-w-full min-w-0 flex-1 flex-col"
+					class:invisible={loading}
+					inert={loading}
+				>
 					<FilesOverlay show={dragged} />
 					{#if embedded}
 						<div
@@ -4647,10 +4740,10 @@
 								id="messages-container"
 								bind:this={messagesContainerElement}
 								on:scroll={(e) => {
+									const container = e.currentTarget;
 									autoScroll =
-										messagesContainerElement.scrollHeight - messagesContainerElement.scrollTop <=
-										messagesContainerElement.clientHeight + 5;
-									isNearTop = messagesContainerElement.scrollTop <= 100;
+										container.scrollHeight - container.scrollTop <= container.clientHeight + 5;
+									isNearTop = container.scrollTop <= 100;
 								}}
 							>
 								<div class="w-full flex flex-col {revisionMode ? '' : 'h-full'}">
@@ -4982,7 +5075,12 @@
 	{:else if loading}
 		<div class=" flex items-center justify-center h-full w-full">
 			<div class="m-auto">
-				<Spinner className="size-5" />
+				{#if chatLoadFailed}
+					<p role="alert">{$i18n.t('Something went wrong. Please try again.')}</p>
+					<button type="button" on:click={() => void navigateHandler()}>{$i18n.t('Retry')}</button>
+				{:else}
+					<Spinner className="size-5" />
+				{/if}
 			</div>
 		</div>
 	{/if}

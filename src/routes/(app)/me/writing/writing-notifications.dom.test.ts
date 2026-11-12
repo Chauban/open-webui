@@ -24,6 +24,52 @@ import { goto } from '$app/navigation';
 import { getWritingHome } from '$lib/apis/education';
 import { educationNotificationSummary, user } from '$lib/stores';
 import WritingPage from './+page.svelte';
+import { invalidateWritingHome, writingHomeRequests } from '$lib/apis/education/home';
+
+function pendingHome() {
+	let resolve!: (value: any) => void;
+	const promise = new Promise((r) => (resolve = r));
+	return { promise, resolve };
+}
+const homeWith = (title: string) => ({
+	role: 'student',
+	classrooms: [{ id: 'class-a', name: 'Class' }],
+	assignment_items: [{ assignment: { id: title, title }, status: 'draft' }]
+});
+
+test('通知在初次读取期间到达时不漏刷，角标赋值不另发首页请求', async () => {
+	const old = pendingHome(),
+		latest = pendingHome();
+	vi.mocked(getWritingHome).mockReturnValueOnce(old.promise).mockReturnValueOnce(latest.promise);
+	render(WritingPage, { context: new Map([['i18n', readable({ t: (key: string) => key })]]) });
+	await waitFor(() => expect(getWritingHome).toHaveBeenCalledTimes(1));
+	invalidateWritingHome();
+	invalidateWritingHome();
+	old.resolve(homeWith('已隐藏的旧作业'));
+	await waitFor(() => expect(getWritingHome).toHaveBeenCalledTimes(2));
+	expect(screen.queryByText('已隐藏的旧作业')).toBeNull();
+	latest.resolve(homeWith('最新作业'));
+	await screen.findByText('最新作业');
+	educationNotificationSummary.set({ total: 0, by_type: {}, by_assignment: {} });
+	await new Promise((r) => setTimeout(r, 0));
+	expect(getWritingHome).toHaveBeenCalledTimes(2);
+});
+
+test('账号切换清除旧列表，晚到的旧响应不能覆盖新账号', async () => {
+	const old = pendingHome();
+	user.set(sessionUser('student'));
+	vi.mocked(getWritingHome)
+		.mockReturnValueOnce(old.promise)
+		.mockResolvedValue(homeWith('B 的作业'));
+	render(WritingPage, { context: new Map([['i18n', readable({ t: (key: string) => key })]]) });
+	await waitFor(() => expect(getWritingHome).toHaveBeenCalledTimes(1));
+	user.set({ ...sessionUser('student'), id: 'account-b' });
+	await screen.findByText('B 的作业');
+	old.resolve(homeWith('A 的作业'));
+	await new Promise((r) => setTimeout(r, 0));
+	expect(screen.queryByText('A 的作业')).toBeNull();
+	expect(screen.getByText('B 的作业')).toBeTruthy();
+});
 
 const sessionUser = (education_role: string) => ({
 	permissions: {},
@@ -37,6 +83,7 @@ const sessionUser = (education_role: string) => ({
 
 afterEach(() => {
 	cleanup();
+	writingHomeRequests.reset();
 	user.set(sessionUser('student'));
 	educationNotificationSummary.set(null);
 	vi.clearAllMocks();
@@ -91,6 +138,7 @@ test('reveals the reviewed assignment and updates its unread reason without mark
 		by_type: { submission_returned: 1 },
 		by_assignment: { b: { submission_returned: 1 } }
 	});
+	invalidateWritingHome();
 	expect(await screen.findByText('Returned essay')).toBeTruthy();
 	expect(screen.getByText(/Unread return notice/)).toBeTruthy();
 	expect(
@@ -157,6 +205,7 @@ test.each(['student', 'teacher'])(
 		expect(await screen.findByRole('button', { name: 'New Writing' })).toBeTruthy();
 		vi.mocked(getWritingHome).mockResolvedValue({ ...home, personal_writing_enabled: false });
 		educationNotificationSummary.set({ total: 0, by_type: {}, by_assignment: {} });
+		invalidateWritingHome();
 		await waitFor(() => expect(screen.queryByRole('button', { name: 'New Writing' })).toBeNull());
 		expect(screen.queryByRole('button', { name: 'Personal Writing' })).toBeNull();
 		if (role === 'student') {

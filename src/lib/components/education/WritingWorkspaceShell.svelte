@@ -4,17 +4,25 @@
 	import { disclosureSlide } from '$lib/utils/disclosure';
 	import { pollReadingProgress } from './reading-progress';
 	import { teachingApi } from '$lib/apis/education/teaching';
+	import { workspaceBackground } from '$lib/utils/workspace-background';
 	let teachingSummary = null;
 	let teachingNotice = '';
-	async function refreshTeachingSummary() {
-		if (assignment?.task_mode !== 'revise_argument' || !writingSession?.id) return;
-		const next = await teachingApi<any>(`/writing-sessions/${writingSession.id}/teaching-summary`);
-		const seenKey = `teaching-version:${writingSession.id}`;
+	const acceptTeachingSummary = (next) => {
+		if (disposed) return;
+		const seenKey = `teaching-version:${$user?.id}:${writingSession.id}`;
 		const previous = teachingSummary?.revision ?? Number(sessionStorage.getItem(seenKey) || '1');
 		if (next && next.revision > previous)
 			teachingNotice = '老师更新了 AI 辅导方式，接下来的交流将使用新设置。已有内容保留。';
 		if (next) sessionStorage.setItem(seenKey, String(next.revision));
 		teachingSummary = next;
+	};
+	async function refreshTeachingSummary() {
+		if (assignment?.task_mode !== 'revise_argument' || !writingSession?.id) return;
+		const sessionId = writingSession.id;
+		const generation = loadGeneration;
+		const next = await teachingApi<any>(`/writing-sessions/${writingSession.id}/teaching-summary`);
+		if (!disposed && generation === loadGeneration && sessionId === writingSession.id)
+			acceptTeachingSummary(next);
 	}
 	import {
 		reflectionAnswerSignature,
@@ -73,7 +81,6 @@
 	import EduActionMenu from '$lib/components/education/EduActionMenu.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { refreshChatList, refreshFolderChatLists } from '$lib/stores/chatList';
-	import { getChatById } from '$lib/apis/chats';
 	import { prepareAssistantContentForWriting } from '$lib/utils/writing-content';
 	import type { ImportInfo } from '$lib/utils/text-import';
 	import { createSerializedSaveRunner } from '$lib/utils/save-coordinator';
@@ -163,6 +170,14 @@
 	let lastSavedDocument = '';
 	let chatSaveBlocked = false;
 	let disposed = false;
+	let loadGeneration = 0;
+	let pendingDraft: import('$lib/apis/education/types').PendingWritingDraft | null = null;
+	let chatLoading = true;
+	let sidebarGeneration = 0;
+	$: if (loaded && !chatLoading && sidebarGeneration !== loadGeneration) {
+		sidebarGeneration = loadGeneration;
+		void refreshWorkspaceSidebar();
+	}
 	let releaseRetry: (() => void) | null = null;
 	const backupDraft = () => {
 		if (!writingSession || !backupStore) return;
@@ -246,7 +261,7 @@
 		const request = ++processSummaryRequest;
 		try {
 			const summary = await getWritingProcessSummary(localStorage.token, writingSession.id);
-			if (request === processSummaryRequest) {
+			if (!disposed && request === processSummaryRequest) {
 				clarificationAnsweredCount = summary.clarification_answered_count;
 			}
 		} catch (error) {
@@ -290,7 +305,7 @@
 	$: canSubmitAssignment = isAssignment && !isGraded && !needsDraftBaseline;
 	// 确认后回到对话阅读开场；不替学生自动发送提问。
 	const onDraftBaselineSubmitted = async () => {
-		await load();
+		await load(true);
 		showMobileDraft = false;
 	};
 	// 交作业之前可以撤回初稿重来:基线、正文、写作过程和本作业的对话一起删掉。
@@ -302,6 +317,7 @@
 		!isReadOnly &&
 		!isSubmitted &&
 		!readingLocked &&
+		!chatLoading &&
 		!review;
 	let showWithdrawDraftConfirm = false;
 	let withdrawingDraft = false;
@@ -346,12 +362,16 @@
 	};
 
 	let readings: RevisionReading[] = [];
-	$: if (readings.length && hasRevisionCoaching) {
+	const openReadingChat = (linkedChatId: string) => {
+		// 初读由阅读接口创建对话，不经过 Chat 的新对话刷新路径。
+		writingSession = { ...writingSession, active_chat_id: linkedChatId };
+		void refreshFolderChatLists(workspaceProject?.id, { id: linkedChatId });
+		void goto(`${projectBaseUrl}?chat=${linkedChatId}`, { replaceState: true });
+	};
+	$: if (loaded && readings.length && hasRevisionCoaching) {
 		const linkedChatId = readings.find((record) => record.context?.chat_id)?.context.chat_id;
 		if (linkedChatId && !currentChatId) {
-			// 初读由阅读接口创建对话，不经过 Chat 的新对话刷新路径。
-			void refreshFolderChatLists(workspaceProject?.id, { id: linkedChatId });
-			void goto(`${projectBaseUrl}?chat=${linkedChatId}`, { replaceState: true });
+			openReadingChat(linkedChatId);
 		}
 	}
 
@@ -368,37 +388,46 @@
 		hasRevisionCoaching &&
 		!isReadOnly &&
 		(readingPending || chatReadingBusy || readings.some((record) => record.status === 'running'));
-	$: editorLocked = isReadOnly || readingLocked;
+	$: editorLocked = isReadOnly || readingLocked || Boolean(currentChatId && chatLoading);
 	let revisionTimer: ReturnType<typeof setTimeout> | null = null;
 	$: hasRevisionCoaching =
 		isAssignment && isRevision(assignment?.task_mode) && !!writingSession?.draft_baseline_at;
 	const runReading = async (purpose: ReadingPurpose) => {
-		if (readingBusy || !writingSession?.id || isReadOnly) return;
+		if (disposed || readingBusy || !writingSession?.id || isReadOnly) return;
 		if (!selectedModelId) {
 			toast.error($i18n.t('Please select a model.'));
 			return;
 		}
 		readingBusy = true;
 		const baseline = writingSession.draft_baseline_at;
+		const generation = loadGeneration;
+		const token = localStorage.token;
+		const current = () =>
+			!disposed &&
+			generation === loadGeneration &&
+			token === localStorage.token &&
+			writingSession.draft_baseline_at === baseline;
 		try {
 			if (purpose !== 'first_read') await flushDraftBeforeChat();
+			if (!current()) return;
 			const sessionId = writingSession.id;
 			stopReadingProgress?.();
 			stopReadingProgress = pollReadingProgress(
 				() => getRevisionReadings(localStorage.token, sessionId),
 				(records) => {
-					if (writingSession?.id === sessionId && writingSession.draft_baseline_at === baseline)
-						readings = records;
+					if (current() && writingSession?.id === sessionId) readings = records;
 				}
 			);
 			await requestRevisionReading(localStorage.token, sessionId, purpose, selectedModelId);
+			if (!current()) return;
 			stopReadingProgress?.();
-			if (writingSession.draft_baseline_at === baseline)
-				readings = await getRevisionReadings(localStorage.token, writingSession.id);
+			const next = await getRevisionReadings(token, sessionId);
+			if (!current()) return;
+			readings = next;
 			if (readings.some((record) => record.status === 'running'))
 				revisionTimer = setTimeout(() => void refreshRevisionItems(), 4000);
 		} catch (error) {
-			toast.error(resolveErrorMessage(error, t));
+			if (current()) toast.error(resolveErrorMessage(error, t));
 		} finally {
 			stopReadingProgress?.();
 			stopReadingProgress = null;
@@ -407,18 +436,34 @@
 	};
 	const refreshRevisionItems = async () => {
 		if (!hasRevisionCoaching || !writingSession?.id) return;
+		const generation = loadGeneration;
 		try {
-			readings = await getRevisionReadings(localStorage.token, writingSession.id);
+			const next = await getRevisionReadings(localStorage.token, writingSession.id);
+			if (disposed || generation !== loadGeneration) return false;
+			readings = next;
 		} catch (error) {
+			if (disposed || generation !== loadGeneration) return false;
 			preparingReading = false;
 			toast.error(resolveErrorMessage(error, t));
-			return;
+			return false;
 		}
+		await resumeRevisionReading();
+		return true;
+	};
+	const resumeRevisionReading = async (startFirstRead = false) => {
+		if (disposed || !hasRevisionCoaching) return;
+		if (revisionTimer) clearTimeout(revisionTimer);
 		if (readings.some((r) => r.status === 'running') && !isReadOnly)
 			revisionTimer = setTimeout(() => void refreshRevisionItems(), 4000);
-		if (!isReadOnly && !readingBusy && !readings.some((r) => r.purpose === 'first_read')) {
+		if (
+			startFirstRead &&
+			!isReadOnly &&
+			!readingBusy &&
+			!readings.some((r) => r.purpose === 'first_read')
+		) {
+			preparingReading = true;
 			if (!selectedModelId) {
-				revisionTimer = setTimeout(() => void refreshRevisionItems(), 700);
+				revisionTimer = setTimeout(() => void resumeRevisionReading(true), 700);
 				return;
 			}
 			await runReading('first_read');
@@ -443,25 +488,11 @@
 		: isReadOnly
 			? $i18n.t('Graded. The conversation is view-only.')
 			: '';
-	// 进来时直接载入上次那段对话,不落在空白新对话上:
-	// - 定稿后左栏不能再开新对话,空着没有意义,学生用过 AI 就载入那次对话供回看;
-	// - 修订初稿作业写作中,首轮通读那段对话是改稿的主线,学生隔天回来在空白对话里接着问,
-	//   之前 AI 说过什么就看不到了。
-	$: if (loaded && !currentChatId && (isReadOnly || isRevision(assignment?.task_mode))) {
-		void openLastChat();
-	}
-	const openLastChat = async () => {
-		const activeChatId = writingSession?.active_chat_id;
-		if (currentChatId || !activeChatId) return;
-		if (!isReadOnly && !isRevision(assignment?.task_mode)) return;
-		// 对话可能被学生删了:载入不存在的对话会被带回首页,先确认它还在。
-		const exists = await getChatById(localStorage.token, activeChatId)
-			.then(() => true)
-			.catch(() => false);
-		if (!exists || currentChatId || disposed) return;
-		lastPersistedActiveChatId = activeChatId;
-		await goto(`${projectBaseUrl}?chat=${activeChatId}`, { replaceState: true });
-	};
+	// workspace 接口已校验活动对话。首次挂载直接使用它，避免先打开空对话再跳转、重复取历史。
+	// 显式选择的对话优先；从零写作仍保留不带 chat 参数时新建对话的行为。
+	$: currentChatId =
+		$page.url.searchParams.get('chat') ??
+		(isReadOnly || isRevision(assignment?.task_mode) ? (writingSession?.active_chat_id ?? '') : '');
 	const getDefaultPersonalTitle = () => get(i18n).t('Untitled Writing');
 	const normalizePersonalTitle = (value?: string | null) => {
 		const normalized = value?.trim();
@@ -1032,14 +1063,14 @@
 		saveReflectionDraft();
 	};
 	const openSubmitFlow = async () => {
-		if (readingLocked) return;
+		if (editorLocked) return;
 		try {
 			await refreshSubmissionSettings();
 		} catch (error) {
 			toast.error(resolveErrorMessage(error, t));
 			return;
 		}
-		if (!canSubmitAssignment || readingLocked) return;
+		if (!canSubmitAssignment || editorLocked) return;
 		if (!challengeEnabled || challengeSettledThisRound) {
 			showSubmitModal = true;
 			return;
@@ -1071,7 +1102,7 @@
 	};
 
 	const submit = async () => {
-		if (!canSubmitAssignment || readingLocked || isSubmitting) return;
+		if (!canSubmitAssignment || editorLocked || isSubmitting) return;
 		const reflectionError = getReflectionAnswersError(
 			reflectionQuestions,
 			aiUsage,
@@ -1090,7 +1121,7 @@
 				return;
 			}
 
-			if (readingLocked) return;
+			if (editorLocked) return;
 
 			await submitAssignment(localStorage.token, assignment.id, {
 				writing_session_id: writingSession.id,
@@ -1120,35 +1151,54 @@
 	};
 
 	const refreshWorkspaceSidebar = async () => {
+		const generation = loadGeneration;
+		const token = localStorage.token;
 		const projectId = workspaceProject?.id;
 		const activeChatId = writingSession?.active_chat_id;
 		if (!projectId) return;
 		try {
 			// workspace 接口会创建项目或恢复其侧栏可见性，不能等发送新消息才刷新。
-			await refreshFolderChatLists(null);
-			if (!disposed) {
-				await refreshFolderChatLists(projectId, activeChatId ? { id: activeChatId } : null);
-			}
+			await workspaceBackground(
+				`sidebar:${token}:${projectId}`,
+				() => refreshFolderChatLists(projectId, activeChatId ? { id: activeChatId } : null),
+				() => !disposed && generation === loadGeneration && token === localStorage.token
+			);
 		} catch (error) {
 			console.error('Failed to refresh writing sidebar:', error);
 		}
 	};
 
-	const load = async () => {
+	const load = async (startFirstRead = false) => {
+		const generation = ++loadGeneration;
+		const token = localStorage.token;
 		try {
 			const workspace = await loadWorkspace();
+			if (disposed || generation !== loadGeneration || token !== localStorage.token) return;
+			const initial =
+				workspace.initial_state as import('$lib/apis/education/types').WorkspaceInitialState;
+			// Missing required state is a failed load, never evidence that no initial reading exists.
+			if (!initial || !Array.isArray(initial.readings))
+				throw new Error('Workspace state is incomplete');
 			assignment = workspace.assignment ?? null;
 			review = workspace.review ?? null;
 			effectiveDueAt = workspace.effective_due_at ?? null;
 			canSwitchThinking = workspace.can_switch_thinking ?? false;
-			writingSession = workspace.writing_session;
+			writingSession = {
+				...workspace.writing_session,
+				active_chat_id: workspace.active_chat_id ?? workspace.writing_session.active_chat_id
+			};
+			lastPersistedActiveChatId = writingSession.active_chat_id;
+			readings = initial.readings;
+			pendingDraft = initial.pending_draft;
+			challengeDetail = initial.challenge;
+			acceptTeachingSummary(initial.teaching_summary);
 			preparingReading =
+				startFirstRead &&
 				isAssignment &&
 				isRevision(assignment?.task_mode) &&
 				!!writingSession?.draft_baseline_at &&
 				!readings.some((record) => record.purpose === 'first_read');
 			workspaceProject = workspace.project;
-			void refreshWorkspaceSidebar();
 			workspaceNote = workspace.note;
 			isSubmitted = workspace.writing_session?.status === 'submitted';
 			saveStatusKey = 'Saved';
@@ -1176,15 +1226,15 @@
 			sourceRuns = workspace.source_map?.length
 				? provenanceSegmentsToSourceRuns(noteText, workspace.source_map)
 				: normalizeSourceRuns([], noteText.length);
-			currentChatId = $page.url.searchParams.get('chat') ?? '';
-			// 确认状态、正文与等待状态一起渲染，避免异步请求之间挂载空白可编辑稿件。
-			await refreshTeachingSummary().catch((error) => toast.error(resolveErrorMessage(error, t)));
-			void refreshProcessSummary();
-			await selectedFolder.set(workspaceProject);
-			await refreshChallenge();
-			void refreshRevisionItems();
+			selectedFolder.set(workspaceProject);
+			// The workspace response contains all necessary initial business state.
+			await tick();
+			if (disposed || generation !== loadGeneration) return;
+			if (showComposition) void refreshProcessSummary();
 			loaded = true;
+			void resumeRevisionReading(startFirstRead);
 		} catch (error) {
+			if (disposed || generation !== loadGeneration) return;
 			preparingReading = false;
 			loadError = resolveErrorMessage(error, t);
 			toast.error(loadError);
@@ -1202,6 +1252,7 @@
 
 	onDestroy(() => {
 		disposed = true;
+		loadGeneration++;
 		releaseRetry?.();
 		stopReadingProgress?.();
 		if (revisionTimer) clearTimeout(revisionTimer);
@@ -1226,10 +1277,6 @@
 
 	$: if (loaded && workspaceProject?.id && $selectedFolder?.id !== workspaceProject.id) {
 		selectedFolder.set(workspaceProject);
-	}
-
-	$: if (loaded) {
-		currentChatId = $page.url.searchParams.get('chat') ?? '';
 	}
 
 	$: if (
@@ -1267,6 +1314,8 @@
 		编辑器根节点带 min-w-full,会盖掉 prose 自带的 65ch 上限,只能在外面限宽。
 	-->
 	<Chat
+		writingFolderId={workspaceProject?.id ?? null}
+		bind:conversationLoading={chatLoading}
 		fixedTeachingModel={teachingSummary}
 		chatIdProp={currentChatId}
 		{projectBaseUrl}
@@ -1413,7 +1462,7 @@
 							{/if}
 							{#if canSubmitAssignment}
 								<EduButton
-									disabled={readingLocked || recoveryBackups.length > 0}
+									disabled={editorLocked || recoveryBackups.length > 0}
 									variant="primary"
 									on:click={() => {
 										loadReflectionDraft();
@@ -1515,6 +1564,7 @@
 						{/if}
 						{#if needsDraftBaseline}
 							<DraftBaselineStep
+								initialState={pendingDraft}
 								photoTranscriptionEnabled={assignment?.photo_transcription_enabled === true}
 								imageReadingEnabled={assignment?.image_reading_enabled === true}
 								sessionId={writingSession.id}
@@ -1627,7 +1677,7 @@
 				</EduButton>
 				{#if canSubmitAssignment}
 					<EduButton
-						disabled={readingLocked || recoveryBackups.length > 0}
+						disabled={editorLocked || recoveryBackups.length > 0}
 						variant="primary"
 						size="sm"
 						on:click={() => {
@@ -1673,7 +1723,7 @@
 						</div>
 						{#if canSubmitAssignment}
 							<EduButton
-								disabled={readingLocked || recoveryBackups.length > 0}
+								disabled={editorLocked || recoveryBackups.length > 0}
 								size="sm"
 								variant="primary"
 								on:click={() => {
@@ -1772,6 +1822,7 @@
 						{/if}
 						{#if needsDraftBaseline}
 							<DraftBaselineStep
+								initialState={pendingDraft}
 								photoTranscriptionEnabled={assignment?.photo_transcription_enabled === true}
 								imageReadingEnabled={assignment?.image_reading_enabled === true}
 								sessionId={writingSession.id}
@@ -1953,7 +2004,7 @@
 				<EduButton
 					variant="primary"
 					class="flex items-center gap-2 disabled:cursor-not-allowed"
-					disabled={isSubmitting || readingLocked}
+					disabled={isSubmitting || editorLocked}
 					on:click={submit}
 				>
 					{#if isSubmitting}
@@ -1969,5 +2020,10 @@
 {:else if loadError}
 	<div class="mx-auto max-w-3xl px-4 py-16">
 		<EduStateCard tone="error">{loadError}</EduStateCard>
+	</div>
+{:else}
+	<div class="flex h-full w-full items-center justify-center" role="status">
+		<Spinner className="size-5" />
+		<span class="sr-only">{$i18n.t('Loading...')}</span>
 	</div>
 {/if}

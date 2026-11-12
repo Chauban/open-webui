@@ -1,5 +1,6 @@
 from starlette.concurrency import run_in_threadpool
 from open_webui.services.education.task_types import is_revision, TASK_MODES
+from open_webui.services.education.workspace import initial_workspace_state, current_challenge
 from open_webui.services.education.teaching_config import (
     lock_assignment,
     teacher_access,
@@ -412,7 +413,7 @@ async def _get_coaching_prompt(coaching_style: str) -> str:
 
 
 async def _build_assignment_system_prompt(assignment) -> str:
-    """把作业信息、任务说明和辅导风格拼成项目文件夹的系统提示，让写作区里的对话自带作业上下文。"""
+    """只装配题目、要求与辅导规则；不自动注入评分、反思或截止时间。"""
     if is_revision(assignment.task_mode):
         return revision_system_context(assignment)
     lines = [f'【作业】{assignment.title}']
@@ -420,14 +421,6 @@ async def _build_assignment_system_prompt(assignment) -> str:
     description = (assignment.description or '').strip()
     if description:
         lines.append(f'【要求】{description}')
-
-    criteria = assignment.rubric_schema.criteria
-    rubric_text = ' / '.join(f'{c.label}({c.max_score})' for c in criteria)
-    lines.append(f'【评分维度】{rubric_text}，满分 {assignment.score_max}')
-
-    if assignment.due_at:
-        due_text = datetime.fromtimestamp(assignment.due_at).strftime('%Y-%m-%d %H:%M')
-        lines.append(f'【截止】{due_text}')
 
     task_prompt = assignment.teaching_config['prompt']
     if task_prompt:
@@ -2107,6 +2100,7 @@ async def get_teacher_classroom_assignments(
 @router.get('/assignments/{assignment_id}/workspace', response_model=AssignmentWorkspaceResponse)
 async def get_assignment_workspace(
     assignment_id: str,
+    request: Request,
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
@@ -2184,6 +2178,7 @@ async def get_assignment_workspace(
             review=review_view,
             effective_due_at=effective_due_at,
             can_switch_thinking=await _can_switch_thinking(assignment),
+            initial_state=initial_workspace_state(assignment, session, db, getattr(request.app.state, 'MODELS', {})),
         )
 
     review_view, effective_due_at = _build_student_review_view(assignment, user.id, db)
@@ -2198,6 +2193,7 @@ async def get_assignment_workspace(
         review=review_view,
         effective_due_at=effective_due_at,
         can_switch_thinking=await _can_switch_thinking(assignment),
+        initial_state=initial_workspace_state(assignment, session, db, getattr(request.app.state, 'MODELS', {})),
     )
 
 
@@ -2349,11 +2345,13 @@ async def create_personal_writing(
         project=project.model_dump(),
         active_chat_id=None,
         source_map=[],
+        initial_state=initial_workspace_state(None, session, db, {}),
     )
 
 
 @router.get('/writing/{session_id}/workspace', response_model=UnifiedWritingWorkspaceResponse)
 async def get_writing_workspace(
+    request: Request,
     session: WritingSessionModel = Depends(require_owned_writing_session),
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
@@ -2389,6 +2387,7 @@ async def get_writing_workspace(
         )
         active_chat_id = None
 
+    review_view, effective_due_at = _build_student_review_view(assignment, user.id, db) if assignment else (None, None)
     return UnifiedWritingWorkspaceResponse(
         scope=session.scope,
         owner_role=await _get_education_role(user) or user.role,
@@ -2398,6 +2397,10 @@ async def get_writing_workspace(
         project=project.model_dump(),
         active_chat_id=active_chat_id,
         source_map=Education.get_provenance_segments(session.id, db=db),
+        review=review_view,
+        effective_due_at=effective_due_at,
+        can_switch_thinking=await _can_switch_thinking(assignment) if assignment else False,
+        initial_state=initial_workspace_state(assignment, session, db, getattr(request.app.state, 'MODELS', {})),
     )
 
 
@@ -3029,11 +3032,7 @@ async def get_current_assignment_challenge(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Mismatched session')
     _ensure_workspace_session_owner(user, session)
 
-    round_no = Education.resolve_next_submission_round_no(assignment.id, session.owner_user_id, db=db)
-    challenge_session = Education.get_challenge_session_for_round(session.id, round_no, db=db)
-    if challenge_session is None:
-        return None
-    return _challenge_detail(challenge_session, db)
+    return current_challenge(assignment, session, db)
 
 
 @router.post(

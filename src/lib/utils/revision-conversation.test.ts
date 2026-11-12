@@ -3,12 +3,35 @@ import type { RevisionReading } from '$lib/apis/education';
 import {
 	revisionTimeline,
 	lastReadDraft,
+	missingReadingMessages,
 	hasDraftChanges,
 	revisionReviewPrompt
 } from './revision-conversation';
 import { mergeReadingHistory } from './revision-conversation';
 const reading = (id: string, time: number, text: string, status = 'ready') =>
 	({ id, created_at: time, source_text: text, status }) as RevisionReading;
+
+test('已恢复的阅读消息不重复获取历史，后续新阅读只同步当前对话缺失的消息', () => {
+	const linkedReading = (id: string, chatId = 'chat', status = 'ready') =>
+		({
+			...reading(id, 1, '稿件', status),
+			context: { chat_id: chatId, message_id: id }
+		}) as RevisionReading;
+	const history = { first: { id: 'first', content: '已经恢复的初读' } };
+	expect(missingReadingMessages([linkedReading('first')], 'chat', history)).toEqual([]);
+	expect(
+		missingReadingMessages(
+			[
+				linkedReading('first'),
+				linkedReading('new'),
+				linkedReading('pending', 'chat', 'running'),
+				linkedReading('other', 'another-chat')
+			],
+			'chat',
+			history
+		)
+	).toEqual(['new']);
+});
 
 test('真实初读消息和阅读证据只展示一次', () => {
 	const record = {

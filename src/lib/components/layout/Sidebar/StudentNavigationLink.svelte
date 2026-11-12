@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { getContext } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { user } from '$lib/stores';
+	import { writingHomeIdentity, writingHomeRequests } from '$lib/apis/education/home';
 	import Clipboard from '$lib/components/icons/Clipboard.svelte';
 	import Plus from '$lib/components/icons/Plus.svelte';
 	import HotkeyHint from '$lib/components/common/HotkeyHint.svelte';
@@ -41,6 +43,13 @@
 			)
 				return;
 			event.preventDefault();
+			// Start the safe list GET at the user's click, overlapping long-editor teardown.
+			// The destination shares this in-flight read; no hover or workspace prefetch.
+			if (kind === 'assignments' && $user?.id && localStorage.token) {
+				void writingHomeRequests
+					.load(writingHomeIdentity($user, localStorage.token, location.origin), localStorage.token)
+					.catch(() => {});
+			}
 			onNavigate();
 			goto(href);
 		}}

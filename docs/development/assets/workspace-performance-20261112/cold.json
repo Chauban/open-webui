@@ -1,0 +1,20 @@
+{
+  "network": "API 400 ms response delay; full document; browser cache disabled; local static assets",
+  "samples": [
+    {
+      "hidden": false,
+      "ms": 4455.699951171875,
+      "timeOriginChanged": true
+    },
+    {
+      "hidden": false,
+      "ms": 4340.999755859375,
+      "timeOriginChanged": true
+    },
+    {
+      "hidden": false,
+      "ms": 4393.39990234375,
+      "timeOriginChanged": true
+    }
+  ]
+}

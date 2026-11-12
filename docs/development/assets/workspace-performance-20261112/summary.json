@@ -1,0 +1,74 @@
+{
+  "before-empty-home": {
+    "count": 20,
+    "p50_ms": 443.9,
+    "p95_ms": 460.9,
+    "mean_ready_minus_fresh_ms": 25.7
+  },
+  "before-empty-workspace": {
+    "count": 20,
+    "p50_ms": 1262.3,
+    "p95_ms": 1279.6,
+    "mean_ready_minus_fresh_ms": 24.9
+  },
+  "before-ordinary-home": {
+    "count": 20,
+    "p50_ms": 458.2,
+    "p95_ms": 472.9,
+    "mean_ready_minus_fresh_ms": 25.8
+  },
+  "before-ordinary-workspace": {
+    "count": 20,
+    "p50_ms": 1682.9,
+    "p95_ms": 1729.5,
+    "mean_ready_minus_fresh_ms": 50.0
+  },
+  "before-long-home": {
+    "count": 20,
+    "p50_ms": 535.7,
+    "p95_ms": 556.1,
+    "mean_ready_minus_fresh_ms": 24.4
+  },
+  "before-long-workspace": {
+    "count": 20,
+    "p50_ms": 1800,
+    "p95_ms": 1820.2,
+    "mean_ready_minus_fresh_ms": 143.0
+  },
+  "after-empty-home": {
+    "count": 20,
+    "p50_ms": 427.3,
+    "p95_ms": 444,
+    "mean_ready_minus_fresh_ms": 24.9
+  },
+  "after-empty-workspace": {
+    "count": 20,
+    "p50_ms": 446.1,
+    "p95_ms": 463.2,
+    "mean_ready_minus_fresh_ms": 25.3
+  },
+  "after-ordinary-home": {
+    "count": 20,
+    "p50_ms": 426.2,
+    "p95_ms": 442.9,
+    "mean_ready_minus_fresh_ms": 26.1
+  },
+  "after-ordinary-workspace": {
+    "count": 20,
+    "p50_ms": 874.5,
+    "p95_ms": 899.4,
+    "mean_ready_minus_fresh_ms": 46.9
+  },
+  "after-long-home": {
+    "count": 20,
+    "p50_ms": 436.6,
+    "p95_ms": 440.8,
+    "mean_ready_minus_fresh_ms": 26.3
+  },
+  "after-long-workspace": {
+    "count": 20,
+    "p50_ms": 972.6,
+    "p95_ms": 994.2,
+    "mean_ready_minus_fresh_ms": 135.0
+  }
+}

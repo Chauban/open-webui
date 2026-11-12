@@ -4,7 +4,8 @@ import { svelteTesting } from '@testing-library/svelte/vite';
 
 import { viteStaticCopy } from 'vite-plugin-static-copy';
 
-const backendTarget = process.env.WEBUI_BACKEND_URL || 'http://localhost:8080';
+// 本地后端监听 IPv4；直接使用回环 IP，避免每次代理请求重新解析 localhost。
+const backendTarget = process.env.WEBUI_BACKEND_URL || 'http://127.0.0.1:8080';
 
 export default defineConfig({
 	plugins: [

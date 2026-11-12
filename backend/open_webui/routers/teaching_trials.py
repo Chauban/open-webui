@@ -3,7 +3,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from open_webui.internal.db import get_session
 from open_webui.models.config import Config
-from open_webui.models.models import Model
 from open_webui.models.teaching_comparisons import (
     AdoptPlan,
     OpenWorkbench,
@@ -38,7 +37,6 @@ from open_webui.services.education import teaching_trials as trials
 from open_webui.services.education.ai_steps import available_models, get_ai_step_policy
 from open_webui.services.education.teaching_runtime import model_policy, validate_binding
 from open_webui.utils.auth import get_admin_user, get_verified_user
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 router = APIRouter()
@@ -49,27 +47,10 @@ def teaching_summary(
     request: Request, session=Depends(require_owned_writing_session), db: Session = Depends(get_session)
 ):
     from open_webui.models.education import Education
-    from open_webui.services.education.teaching_runtime import assignment_config
+    from open_webui.services.education.workspace import student_teaching_summary
 
     assignment = Education.get_assignment_by_id(session.assignment_id, db=db)
-    if not assignment or assignment.task_mode != 'revise_argument':
-        return None
-    config = assignment_config(assignment, db)
-    model_id = config['ai']['model_id']
-    # Read the current display name, independently of the published teaching binding
-    # and the student's ordinary-chat model permissions.
-    name = db.scalar(select(Model.name).where(Model.id == model_id))
-    if not name:
-        name = (request.app.state.MODELS.get(model_id) or {}).get('name') or model_id
-    return {
-        'id': model_id,
-        'name': name,
-        'owned_by': 'openai',
-        'revision': config['ai_revision'],
-        'change_summary': config['change_summary'],
-        'thinking': config['ai']['thinking'],
-        'info': {'meta': {'capabilities': config['binding']['capabilities']}},
-    }
+    return student_teaching_summary(assignment, db, getattr(request.app.state, 'MODELS', {}))
 
 
 async def teacher(user=Depends(get_verified_user)):

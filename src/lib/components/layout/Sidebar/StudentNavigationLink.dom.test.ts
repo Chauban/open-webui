@@ -3,7 +3,15 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
 import { readable, writable } from 'svelte/store';
 import { afterEach, expect, test, vi } from 'vitest';
 
-vi.mock('$lib/stores', () => ({ settings: writable({ keyboardShortcuts: false }) }));
+vi.mock('$lib/stores', () => ({
+	settings: writable({ keyboardShortcuts: false }),
+	user: readable({ id: 'student' })
+}));
+vi.mock('$lib/apis/education/home', () => ({
+	writingHomeIdentity: () => 'student-scope',
+	writingHomeRequests: { load: vi.fn().mockResolvedValue({}) }
+}));
+import { writingHomeRequests } from '$lib/apis/education/home';
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 import { goto } from '$app/navigation';
 import StudentNavigationLink from './StudentNavigationLink.svelte';
@@ -13,12 +21,14 @@ import zh from '$lib/i18n/locales/zh-CN/translation.json';
 const context = new Map([['i18n', readable({ t: (key: string) => zh[key] ?? key })]]);
 afterEach(() => {
 	cleanup();
+	localStorage.clear();
 	vi.clearAllMocks();
 });
 
 test.each([false, true])(
 	'assignment and chat destinations stay distinct when collapsed=%s',
 	async (collapsed) => {
+		localStorage.token = 'test-token';
 		const onNavigate = vi.fn();
 		render(StudentNavigationLink, {
 			context,
@@ -32,6 +42,10 @@ test.each([false, true])(
 		await fireEvent(assignments, assignmentClick);
 		expect(assignmentClick.defaultPrevented).toBe(true);
 		expect(goto).toHaveBeenLastCalledWith('/me/writing');
+		expect(writingHomeRequests.load).toHaveBeenCalledWith('student-scope', 'test-token');
+		expect(vi.mocked(writingHomeRequests.load).mock.invocationCallOrder[0]).toBeLessThan(
+			vi.mocked(goto).mock.invocationCallOrder[0]
+		);
 		expect(onNavigate).toHaveBeenCalledOnce();
 
 		render(StudentNavigationLink, { context, props: { kind: 'free-chat', collapsed } });

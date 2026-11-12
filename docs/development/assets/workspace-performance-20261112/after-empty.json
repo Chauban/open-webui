@@ -1,0 +1,909 @@
+{
+  "phase": "after",
+  "scenario": "empty",
+  "network": "400 ms added response delay, gzip, loopback, real production frontend",
+  "samples": [
+    {
+      "kind": "home",
+      "key": "empty",
+      "start": 62605.89999997616,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 402.10000002384186,
+      "ready": 418.7000000476837,
+      "fresh": 396.39999997615814,
+      "resources": [
+        {
+          "path": "/api/v1/me/writing/home",
+          "start": 0.10000002384185791,
+          "end": 396.39999997615814,
+          "encoded": 754,
+          "decoded": 7681
+        }
+      ],
+      "hiddenAtReady": false,
+      "draftChars": 0,
+      "iteration": 0
+    },
+    {
+      "kind": "workspace",
+      "key": "empty",
+      "start": 63065.700000047684,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 445.59999990463257,
+      "ready": 459.09999990463257,
+      "fresh": 431.59999990463257,
+      "resources": [
+        {
+          "path": "/api/v1/assignments/empty/workspace",
+          "start": 13,
+          "end": 431.59999990463257,
+          "encoded": 680,
+          "decoded": 1578
+        }
+      ],
+      "hiddenAtReady": false,
+      "editable": "true",
+      "draftChars": 0,
+      "iteration": 0
+    },
+    {
+      "kind": "home",
+      "key": "empty",
+      "start": 63565.299999952316,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 426.10000002384186,
+      "ready": 442.90000009536743,
+      "fresh": 414.7000000476837,
+      "resources": [
+        {
+          "path": "/api/v1/me/writing/home",
+          "start": 0.30000007152557373,
+          "end": 414.7000000476837,
+          "encoded": 754,
+          "decoded": 7681
+        }
+      ],
+      "hiddenAtReady": false,
+      "draftChars": 0,
+      "iteration": 1
+    },
+    {
+      "kind": "workspace",
+      "key": "empty",
+      "start": 64046,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 440.7000000476837,
+      "ready": 446,
+      "fresh": 427.2999999523163,
+      "resources": [
+        {
+          "path": "/api/v1/assignments/empty/workspace",
+          "start": 17.799999952316284,
+          "end": 427.2999999523163,
+          "encoded": 680,
+          "decoded": 1578
+        }
+      ],
+      "hiddenAtReady": false,
+      "editable": "true",
+      "draftChars": 0,
+      "iteration": 1
+    },
+    {
+      "kind": "home",
+      "key": "empty",
+      "start": 64531.10000002384,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 394.6999999284744,
+      "ready": 411.1999999284744,
+      "fresh": 391.39999997615814,
+      "resources": [
+        {
+          "path": "/api/v1/me/writing/home",
+          "start": 0.10000002384185791,
+          "end": 391.39999997615814,
+          "encoded": 754,
+          "decoded": 7681
+        }
+      ],
+      "hiddenAtReady": false,
+      "draftChars": 0,
+      "iteration": 2
+    },
+    {
+      "kind": "workspace",
+      "key": "empty",
+      "start": 64981.799999952316,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 451.40000009536743,
+      "ready": 459.8000000715256,
+      "fresh": 438.3000000715256,
+      "resources": [
+        {
+          "path": "/api/v1/assignments/empty/workspace",
+          "start": 16.200000047683716,
+          "end": 438.3000000715256,
+          "encoded": 680,
+          "decoded": 1578
+        }
+      ],
+      "hiddenAtReady": false,
+      "editable": "true",
+      "draftChars": 0,
+      "iteration": 2
+    },
+    {
+      "kind": "home",
+      "key": "empty",
+      "start": 65480.700000047684,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 411,
+      "ready": 427.6999999284744,
+      "fresh": 400.5,
+      "resources": [
+        {
+          "path": "/api/v1/me/writing/home",
+          "start": 0.19999992847442627,
+          "end": 400.5,
+          "encoded": 754,
+          "decoded": 7681
+        }
+      ],
+      "hiddenAtReady": false,
+      "draftChars": 0,
+      "iteration": 3
+    },
+    {
+      "kind": "workspace",
+      "key": "empty",
+      "start": 65947.20000004768,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 428.1999999284744,
+      "ready": 444.5,
+      "fresh": 412.59999990463257,
+      "resources": [
+        {
+          "path": "/api/v1/assignments/empty/workspace",
+          "start": 16.899999976158142,
+          "end": 412.59999990463257,
+          "encoded": 680,
+          "decoded": 1578
+        }
+      ],
+      "hiddenAtReady": false,
+      "editable": "true",
+      "draftChars": 0,
+      "iteration": 3
+    },
+    {
+      "kind": "home",
+      "key": "empty",
+      "start": 66432.10000002384,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 426.2999999523163,
+      "ready": 443.60000002384186,
+      "fresh": 410.89999997615814,
+      "resources": [
+        {
+          "path": "/api/v1/me/writing/home",
+          "start": 0.19999992847442627,
+          "end": 410.89999997615814,
+          "encoded": 754,
+          "decoded": 7681
+        }
+      ],
+      "hiddenAtReady": false,
+      "draftChars": 0,
+      "iteration": 4
+    },
+    {
+      "kind": "workspace",
+      "key": "empty",
+      "start": 66914.20000004768,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 440,
+      "ready": 445.1999999284744,
+      "fresh": 426.2999999523163,
+      "resources": [
+        {
+          "path": "/api/v1/assignments/empty/workspace",
+          "start": 17.399999976158142,
+          "end": 426.2999999523163,
+          "encoded": 680,
+          "decoded": 1578
+        }
+      ],
+      "hiddenAtReady": false,
+      "editable": "true",
+      "draftChars": 0,
+      "iteration": 4
+    },
+    {
+      "kind": "home",
+      "key": "empty",
+      "start": 67398,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 410.2999999523163,
+      "ready": 427,
+      "fresh": 407.10000002384186,
+      "resources": [
+        {
+          "path": "/api/v1/me/writing/home",
+          "start": 0.2999999523162842,
+          "end": 407.10000002384186,
+          "encoded": 754,
+          "decoded": 7681
+        }
+      ],
+      "hiddenAtReady": false,
+      "draftChars": 0,
+      "iteration": 5
+    },
+    {
+      "kind": "workspace",
+      "key": "empty",
+      "start": 67862.20000004768,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 437.5,
+      "ready": 446.09999990463257,
+      "fresh": 424.5,
+      "resources": [
+        {
+          "path": "/api/v1/assignments/empty/workspace",
+          "start": 18.59999990463257,
+          "end": 424.5,
+          "encoded": 680,
+          "decoded": 1578
+        }
+      ],
+      "hiddenAtReady": false,
+      "editable": "true",
+      "draftChars": 0,
+      "iteration": 5
+    },
+    {
+      "kind": "home",
+      "key": "empty",
+      "start": 68347.89999997616,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 410.5,
+      "ready": 427.10000002384186,
+      "fresh": 402.7000000476837,
+      "resources": [
+        {
+          "path": "/api/v1/me/writing/home",
+          "start": 0.10000002384185791,
+          "end": 402.7000000476837,
+          "encoded": 754,
+          "decoded": 7681
+        }
+      ],
+      "hiddenAtReady": false,
+      "draftChars": 0,
+      "iteration": 6
+    },
+    {
+      "kind": "workspace",
+      "key": "empty",
+      "start": 68813.5,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 445.89999997615814,
+      "ready": 462.10000002384186,
+      "fresh": 430,
+      "resources": [
+        {
+          "path": "/api/v1/assignments/empty/workspace",
+          "start": 17.5,
+          "end": 430,
+          "encoded": 680,
+          "decoded": 1578
+        }
+      ],
+      "hiddenAtReady": false,
+      "editable": "true",
+      "draftChars": 0,
+      "iteration": 6
+    },
+    {
+      "kind": "home",
+      "key": "empty",
+      "start": 69315.10000002384,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 428,
+      "ready": 445.10000002384186,
+      "fresh": 413.1999999284744,
+      "resources": [
+        {
+          "path": "/api/v1/me/writing/home",
+          "start": 0.10000002384185791,
+          "end": 413.1999999284744,
+          "encoded": 754,
+          "decoded": 7681
+        }
+      ],
+      "hiddenAtReady": false,
+      "draftChars": 0,
+      "iteration": 7
+    },
+    {
+      "kind": "workspace",
+      "key": "empty",
+      "start": 69799.5,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 440.2000000476837,
+      "ready": 442.2000000476837,
+      "fresh": 421.10000002384186,
+      "resources": [
+        {
+          "path": "/api/v1/assignments/empty/workspace",
+          "start": 17.200000047683716,
+          "end": 421.10000002384186,
+          "encoded": 680,
+          "decoded": 1578
+        }
+      ],
+      "hiddenAtReady": false,
+      "editable": "true",
+      "draftChars": 0,
+      "iteration": 7
+    },
+    {
+      "kind": "home",
+      "key": "empty",
+      "start": 70281.29999995232,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 410.60000002384186,
+      "ready": 427.3000000715256,
+      "fresh": 403.7000000476837,
+      "resources": [
+        {
+          "path": "/api/v1/me/writing/home",
+          "start": 0.30000007152557373,
+          "end": 403.7000000476837,
+          "encoded": 754,
+          "decoded": 7681
+        }
+      ],
+      "hiddenAtReady": false,
+      "draftChars": 0,
+      "iteration": 8
+    },
+    {
+      "kind": "workspace",
+      "key": "empty",
+      "start": 70747.29999995232,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 447.8000000715256,
+      "ready": 461.2000000476837,
+      "fresh": 434.8000000715256,
+      "resources": [
+        {
+          "path": "/api/v1/assignments/empty/workspace",
+          "start": 17.40000009536743,
+          "end": 434.8000000715256,
+          "encoded": 680,
+          "decoded": 1578
+        }
+      ],
+      "hiddenAtReady": false,
+      "editable": "true",
+      "draftChars": 0,
+      "iteration": 8
+    },
+    {
+      "kind": "home",
+      "key": "empty",
+      "start": 71250.10000002384,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 425.10000002384186,
+      "ready": 441.7999999523163,
+      "fresh": 415.1999999284744,
+      "resources": [
+        {
+          "path": "/api/v1/me/writing/home",
+          "start": 0.10000002384185791,
+          "end": 415.1999999284744,
+          "encoded": 754,
+          "decoded": 7681
+        }
+      ],
+      "hiddenAtReady": false,
+      "draftChars": 0,
+      "iteration": 9
+    },
+    {
+      "kind": "workspace",
+      "key": "empty",
+      "start": 71730.20000004768,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 414.39999997615814,
+      "ready": 429.09999990463257,
+      "fresh": 400.59999990463257,
+      "resources": [
+        {
+          "path": "/api/v1/assignments/empty/workspace",
+          "start": 17.299999952316284,
+          "end": 400.59999990463257,
+          "encoded": 680,
+          "decoded": 1578
+        }
+      ],
+      "hiddenAtReady": false,
+      "editable": "true",
+      "draftChars": 0,
+      "iteration": 9
+    },
+    {
+      "kind": "home",
+      "key": "empty",
+      "start": 72201.20000004768,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 424,
+      "ready": 440.6999999284744,
+      "fresh": 411.7999999523163,
+      "resources": [
+        {
+          "path": "/api/v1/me/writing/home",
+          "start": 0.19999992847442627,
+          "end": 411.7999999523163,
+          "encoded": 754,
+          "decoded": 7681
+        }
+      ],
+      "hiddenAtReady": false,
+      "draftChars": 0,
+      "iteration": 10
+    },
+    {
+      "kind": "workspace",
+      "key": "empty",
+      "start": 72679.20000004768,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 430.39999997615814,
+      "ready": 446.39999997615814,
+      "fresh": 414.6999999284744,
+      "resources": [
+        {
+          "path": "/api/v1/assignments/empty/workspace",
+          "start": 18.5,
+          "end": 414.6999999284744,
+          "encoded": 680,
+          "decoded": 1578
+        }
+      ],
+      "hiddenAtReady": false,
+      "editable": "true",
+      "draftChars": 0,
+      "iteration": 10
+    },
+    {
+      "kind": "home",
+      "key": "empty",
+      "start": 73165.89999997616,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 392.8000000715256,
+      "ready": 409.60000002384186,
+      "fresh": 388.89999997615814,
+      "resources": [
+        {
+          "path": "/api/v1/me/writing/home",
+          "start": 0.20000004768371582,
+          "end": 388.89999997615814,
+          "encoded": 754,
+          "decoded": 7681
+        }
+      ],
+      "hiddenAtReady": false,
+      "draftChars": 0,
+      "iteration": 11
+    },
+    {
+      "kind": "workspace",
+      "key": "empty",
+      "start": 73612.79999995232,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 435.2000000476837,
+      "ready": 446.2000000476837,
+      "fresh": 420.7000000476837,
+      "resources": [
+        {
+          "path": "/api/v1/assignments/empty/workspace",
+          "start": 18.700000047683716,
+          "end": 420.7000000476837,
+          "encoded": 680,
+          "decoded": 1578
+        }
+      ],
+      "hiddenAtReady": false,
+      "editable": "true",
+      "draftChars": 0,
+      "iteration": 11
+    },
+    {
+      "kind": "home",
+      "key": "empty",
+      "start": 74100.89999997616,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 409.2000000476837,
+      "ready": 424.7000000476837,
+      "fresh": 400.89999997615814,
+      "resources": [
+        {
+          "path": "/api/v1/me/writing/home",
+          "start": 0.20000004768371582,
+          "end": 400.89999997615814,
+          "encoded": 754,
+          "decoded": 7681
+        }
+      ],
+      "hiddenAtReady": false,
+      "draftChars": 0,
+      "iteration": 12
+    },
+    {
+      "kind": "workspace",
+      "key": "empty",
+      "start": 74564.70000004768,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 418.7999999523163,
+      "ready": 427.6999999284744,
+      "fresh": 405.5,
+      "resources": [
+        {
+          "path": "/api/v1/assignments/empty/workspace",
+          "start": 18.09999990463257,
+          "end": 405.5,
+          "encoded": 680,
+          "decoded": 1578
+        }
+      ],
+      "hiddenAtReady": false,
+      "editable": "true",
+      "draftChars": 0,
+      "iteration": 12
+    },
+    {
+      "kind": "home",
+      "key": "empty",
+      "start": 75034.20000004768,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 424.5,
+      "ready": 441.2999999523163,
+      "fresh": 416.59999990463257,
+      "resources": [
+        {
+          "path": "/api/v1/me/writing/home",
+          "start": 0.09999990463256836,
+          "end": 416.59999990463257,
+          "encoded": 754,
+          "decoded": 7681
+        }
+      ],
+      "hiddenAtReady": false,
+      "draftChars": 0,
+      "iteration": 13
+    },
+    {
+      "kind": "workspace",
+      "key": "empty",
+      "start": 75512.5,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 447.39999997615814,
+      "ready": 463.2000000476837,
+      "fresh": 432.39999997615814,
+      "resources": [
+        {
+          "path": "/api/v1/assignments/empty/workspace",
+          "start": 18.799999952316284,
+          "end": 432.39999997615814,
+          "encoded": 680,
+          "decoded": 1578
+        }
+      ],
+      "hiddenAtReady": false,
+      "editable": "true",
+      "draftChars": 0,
+      "iteration": 13
+    },
+    {
+      "kind": "home",
+      "key": "empty",
+      "start": 76015,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 427.39999997615814,
+      "ready": 444,
+      "fresh": 410.7999999523163,
+      "resources": [
+        {
+          "path": "/api/v1/me/writing/home",
+          "start": 0.20000004768371582,
+          "end": 410.7999999523163,
+          "encoded": 754,
+          "decoded": 7681
+        }
+      ],
+      "hiddenAtReady": false,
+      "draftChars": 0,
+      "iteration": 14
+    },
+    {
+      "kind": "workspace",
+      "key": "empty",
+      "start": 76496.39999997616,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 443.89999997615814,
+      "ready": 446.3000000715256,
+      "fresh": 428.3000000715256,
+      "resources": [
+        {
+          "path": "/api/v1/assignments/empty/workspace",
+          "start": 18.5,
+          "end": 428.3000000715256,
+          "encoded": 680,
+          "decoded": 1578
+        }
+      ],
+      "hiddenAtReady": false,
+      "editable": "true",
+      "draftChars": 0,
+      "iteration": 14
+    },
+    {
+      "kind": "home",
+      "key": "empty",
+      "start": 76983.5,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 425.5,
+      "ready": 442.2000000476837,
+      "fresh": 419.2000000476837,
+      "resources": [
+        {
+          "path": "/api/v1/me/writing/home",
+          "start": 0.20000004768371582,
+          "end": 419.2000000476837,
+          "encoded": 754,
+          "decoded": 7681
+        }
+      ],
+      "hiddenAtReady": false,
+      "draftChars": 0,
+      "iteration": 15
+    },
+    {
+      "kind": "workspace",
+      "key": "empty",
+      "start": 77463,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 435.60000002384186,
+      "ready": 445.89999997615814,
+      "fresh": 422.60000002384186,
+      "resources": [
+        {
+          "path": "/api/v1/assignments/empty/workspace",
+          "start": 18.799999952316284,
+          "end": 422.60000002384186,
+          "encoded": 680,
+          "decoded": 1578
+        }
+      ],
+      "hiddenAtReady": false,
+      "editable": "true",
+      "draftChars": 0,
+      "iteration": 15
+    },
+    {
+      "kind": "home",
+      "key": "empty",
+      "start": 77948.89999997616,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 410,
+      "ready": 426.8000000715256,
+      "fresh": 403,
+      "resources": [
+        {
+          "path": "/api/v1/me/writing/home",
+          "start": 0.20000004768371582,
+          "end": 403,
+          "encoded": 754,
+          "decoded": 7681
+        }
+      ],
+      "hiddenAtReady": false,
+      "draftChars": 0,
+      "iteration": 16
+    },
+    {
+      "kind": "workspace",
+      "key": "empty",
+      "start": 78414.39999997616,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 412.60000002384186,
+      "ready": 428.2000000476837,
+      "fresh": 399.2000000476837,
+      "resources": [
+        {
+          "path": "/api/v1/assignments/empty/workspace",
+          "start": 17.100000023841858,
+          "end": 399.2000000476837,
+          "encoded": 680,
+          "decoded": 1578
+        }
+      ],
+      "hiddenAtReady": false,
+      "editable": "true",
+      "draftChars": 0,
+      "iteration": 16
+    },
+    {
+      "kind": "home",
+      "key": "empty",
+      "start": 78882.70000004768,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 413.39999997615814,
+      "ready": 427.1999999284744,
+      "fresh": 409.1999999284744,
+      "resources": [
+        {
+          "path": "/api/v1/me/writing/home",
+          "start": 0.09999990463256836,
+          "end": 409.1999999284744,
+          "encoded": 754,
+          "decoded": 7681
+        }
+      ],
+      "hiddenAtReady": false,
+      "draftChars": 0,
+      "iteration": 17
+    },
+    {
+      "kind": "workspace",
+      "key": "empty",
+      "start": 79347.79999995232,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 436.5,
+      "ready": 444.7000000476837,
+      "fresh": 423.60000002384186,
+      "resources": [
+        {
+          "path": "/api/v1/assignments/empty/workspace",
+          "start": 17.800000071525574,
+          "end": 423.60000002384186,
+          "encoded": 680,
+          "decoded": 1578
+        }
+      ],
+      "hiddenAtReady": false,
+      "editable": "true",
+      "draftChars": 0,
+      "iteration": 17
+    },
+    {
+      "kind": "home",
+      "key": "empty",
+      "start": 79832.10000002384,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 410.89999997615814,
+      "ready": 427.10000002384186,
+      "fresh": 407.5,
+      "resources": [
+        {
+          "path": "/api/v1/me/writing/home",
+          "start": 0.10000002384185791,
+          "end": 407.5,
+          "encoded": 754,
+          "decoded": 7681
+        }
+      ],
+      "hiddenAtReady": false,
+      "draftChars": 0,
+      "iteration": 18
+    },
+    {
+      "kind": "workspace",
+      "key": "empty",
+      "start": 80296.60000002384,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 433.60000002384186,
+      "ready": 446.10000002384186,
+      "fresh": 421,
+      "resources": [
+        {
+          "path": "/api/v1/assignments/empty/workspace",
+          "start": 18.100000023841858,
+          "end": 421,
+          "encoded": 680,
+          "decoded": 1578
+        }
+      ],
+      "hiddenAtReady": false,
+      "editable": "true",
+      "draftChars": 0,
+      "iteration": 18
+    },
+    {
+      "kind": "home",
+      "key": "empty",
+      "start": 80781.79999995232,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 410.90000009536743,
+      "ready": 427.5,
+      "fresh": 401.3000000715256,
+      "resources": [
+        {
+          "path": "/api/v1/me/writing/home",
+          "start": 0.20000004768371582,
+          "end": 401.3000000715256,
+          "encoded": 754,
+          "decoded": 7681
+        }
+      ],
+      "hiddenAtReady": false,
+      "draftChars": 0,
+      "iteration": 19
+    },
+    {
+      "kind": "workspace",
+      "key": "empty",
+      "start": 81246.5,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 447.10000002384186,
+      "ready": 463.5,
+      "fresh": 433.39999997615814,
+      "resources": [
+        {
+          "path": "/api/v1/assignments/empty/workspace",
+          "start": 18.799999952316284,
+          "end": 433.39999997615814,
+          "encoded": 680,
+          "decoded": 1578
+        }
+      ],
+      "hiddenAtReady": false,
+      "editable": "true",
+      "draftChars": 0,
+      "iteration": 19
+    }
+  ],
+  "errors": [],
+  "failed": []
+}

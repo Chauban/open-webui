@@ -45,7 +45,13 @@ afterEach(() => {
 const start = async (imageReadingEnabled = false, photoTranscriptionEnabled = false) => {
 	const onSubmitted = vi.fn();
 	render(DraftBaselineStep, {
-		props: { sessionId: 'session-1', imageReadingEnabled, photoTranscriptionEnabled, onSubmitted },
+		props: {
+			sessionId: 'session-1',
+			initialState: { content_json: textDocument(''), materials: [], revision: 0 },
+			imageReadingEnabled,
+			photoTranscriptionEnabled,
+			onSubmitted
+		},
 		context
 	});
 	await waitFor(() =>
@@ -104,12 +110,15 @@ test('恢复确认前保存的图文稿件', async () => {
 			{ type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: '已保存标题' }] }
 		]
 	};
-	api.getPendingWritingDraft.mockResolvedValue({
-		content_json: document,
-		materials: [],
-		revision: 3
+	render(DraftBaselineStep, {
+		props: {
+			sessionId: 'session-1',
+			initialState: { content_json: document, materials: [], revision: 3 },
+			onSubmitted: vi.fn()
+		},
+		context
 	});
-	await start();
+	await waitFor(() => expect(input().readOnly).toBe(false));
 	expect(JSON.parse(input().value)).toEqual(document);
 	expect(api.savePendingWritingDraft).not.toHaveBeenCalled();
 });
@@ -223,12 +232,25 @@ test('保存冲突时保留内容，不确认也不导出旧稿', async () => {
 	expect(api.submitDraftBaseline).not.toHaveBeenCalled();
 	expect(JSON.parse(input().value)).toEqual(textDocument('字'.repeat(230)));
 });
-test('读取暂存失败时不允许空稿覆盖已有稿件', async () => {
-	api.getPendingWritingDraft.mockRejectedValueOnce(new Error('offline'));
-	render(DraftBaselineStep, { props: { sessionId: 'session-1', onSubmitted: vi.fn() }, context });
-	await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('offline'));
-	expect(input().readOnly).toBe(true);
-	expect(api.savePendingWritingDraft).not.toHaveBeenCalled();
+test('聚合暂存只消费一次，后来的初始属性不覆盖学生输入', async () => {
+	const view = render(DraftBaselineStep, {
+		props: {
+			sessionId: 'session-1',
+			initialState: { content_json: textDocument('服务器暂存'), materials: [], revision: 7 },
+			onSubmitted: vi.fn()
+		},
+		context
+	});
+	await waitFor(() => expect(input().readOnly).toBe(false));
+	expect(input().value).toContain('服务器暂存');
+	expect(api.getPendingWritingDraft).not.toHaveBeenCalled();
+	await fireEvent.input(input(), { target: { value: '正在写的新内容' } });
+	await view.rerender({
+		initialState: { content_json: textDocument('迟到的旧稿'), materials: [], revision: 6 }
+	});
+	expect(input().value).toContain('正在写的新内容');
+	await waitFor(() => expect(api.savePendingWritingDraft).toHaveBeenCalled(), { timeout: 2000 });
+	expect(api.savePendingWritingDraft.mock.calls[0][2].expected_revision).toBe(7);
 });
 
 test('手写稿转录直接进入正文并保留已有内容，确认可用且携带原件', async () => {

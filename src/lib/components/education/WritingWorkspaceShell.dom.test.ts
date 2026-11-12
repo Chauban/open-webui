@@ -17,7 +17,8 @@ const api = vi.hoisted(() => ({
 	autosaveWritingSession: vi.fn(),
 	createWritingVersion: vi.fn(),
 	createEditorOperations: vi.fn(),
-	createProvenanceSegments: vi.fn()
+	createProvenanceSegments: vi.fn(),
+	setWritingSessionActiveChat: vi.fn()
 }));
 const sidebar = vi.hoisted(() => ({
 	refreshFolderChatLists: vi.fn(),
@@ -76,6 +77,14 @@ const draftJson = {
 	content: [{ type: 'paragraph', content: [{ type: 'text', text: draft }] }]
 };
 const workspace = (confirmed = false) => ({
+	initial_state: {
+		teaching_summary: { revision: 1 },
+		pending_draft: confirmed
+			? null
+			: { content_json: { type: 'doc', content: [] }, materials: [], revision: 0 },
+		readings: confirmed ? [{ purpose: 'first_read', status: 'ready' }] : [],
+		challenge: null
+	},
 	assignment: { id: 'assignment-1', task_mode: 'revise_argument', reflection_questions: [] },
 	writing_session: {
 		id: 'session-1',
@@ -177,70 +186,29 @@ function expectWaitingWithDraft() {
 	).toBe(true);
 }
 
-test('确认初稿后，配置加载、阅读记录加载与初读请求之间持续等待，编辑器首次挂载即有完整稿件', async () => {
-	const summary = deferred<unknown>();
-	const readings = deferred<unknown[]>();
+test('确认初稿后才启动初读，期间锁定完整稿件，失败保留稿件', async () => {
 	const reading = deferred<void>();
-	api.teachingApi.mockResolvedValueOnce({ revision: 1 }).mockReturnValueOnce(summary.promise);
-	api.getRevisionReadings
-		.mockReturnValueOnce(readings.promise)
-		.mockResolvedValueOnce([{ purpose: 'first_read', status: 'ready' }]);
 	api.requestRevisionReading.mockReturnValueOnce(reading.promise);
+	const confirmed = workspace(true);
+	confirmed.initial_state.readings = [];
 	render(WritingWorkspaceShell, {
 		props: {
-			loadWorkspace: vi
-				.fn()
-				.mockResolvedValueOnce(workspace())
-				.mockResolvedValueOnce(workspace(true))
+			loadWorkspace: vi.fn().mockResolvedValueOnce(workspace()).mockResolvedValueOnce(confirmed)
 		},
 		context
 	});
 	await confirmDraft();
-	await waitFor(() => expect(api.teachingApi).toHaveBeenCalledTimes(2));
+	await waitFor(() => expect(api.requestRevisionReading).toHaveBeenCalledOnce());
 	expectWaitingWithDraft();
-	summary.resolve({ revision: 1 });
-	await waitFor(() => expect(api.getRevisionReadings).toHaveBeenCalledTimes(1));
-	expectWaitingWithDraft();
-	readings.resolve([]);
-	await waitFor(() => expect(api.requestRevisionReading).toHaveBeenCalledTimes(1));
-	expectWaitingWithDraft();
-	reading.resolve();
-	await waitFor(() =>
-		expect((screen.getByTestId('workspace-editor') as HTMLTextAreaElement).readOnly).toBe(false)
-	);
-	expect(screen.getByTestId('workspace-chat').getAttribute('aria-busy')).toBe('false');
-});
-
-test.each(['records', 'request'])('初读 %s 失败后退出等待并保留确认稿，仍可提交', async (stage) => {
-	const failure = deferred<never>();
-	if (stage === 'records') api.getRevisionReadings.mockReturnValueOnce(failure.promise);
-	else api.requestRevisionReading.mockReturnValueOnce(failure.promise);
-	render(WritingWorkspaceShell, {
-		props: {
-			loadWorkspace: vi
-				.fn()
-				.mockResolvedValueOnce(workspace())
-				.mockResolvedValueOnce(workspace(true))
-		},
-		context
-	});
-	await confirmDraft();
-	await waitFor(() =>
-		expect(
-			stage === 'records' ? api.getRevisionReadings : api.requestRevisionReading
-		).toHaveBeenCalledTimes(1)
-	);
-	expectWaitingWithDraft();
-	failure.reject(new Error('Network unavailable'));
+	reading.reject(new Error('Model unavailable'));
 	await waitFor(() =>
 		expect((screen.getByTestId('workspace-editor') as HTMLTextAreaElement).readOnly).toBe(false)
 	);
 	expect((screen.getByTestId('workspace-editor') as HTMLTextAreaElement).value).toBe(
 		JSON.stringify(draftJson)
 	);
-	expect(
-		(screen.getByText('Submit Assignment').closest('button') as HTMLButtonElement).disabled
-	).toBe(false);
+	expect(api.getPendingWritingDraft).not.toHaveBeenCalled();
+	expect(api.teachingApi).not.toHaveBeenCalled();
 });
 
 async function openWriting() {
@@ -266,35 +234,26 @@ test.each(['from_scratch', 'revise_draft', 'revise_argument'])(
 			props: { loadWorkspace: vi.fn().mockResolvedValue(data) },
 			context
 		});
-		await waitFor(() => expect(sidebar.refreshFolderChatLists).toHaveBeenCalledWith(null));
-		expect(sidebar.refreshFolderChatLists).not.toHaveBeenCalledWith('project-1', null);
-		tree.resolve();
 		await waitFor(() =>
 			expect(sidebar.refreshFolderChatLists).toHaveBeenCalledWith('project-1', null)
 		);
+		expect(sidebar.refreshFolderChatLists).not.toHaveBeenCalledWith(null);
+		tree.resolve();
+		await tick();
+		expect(sidebar.refreshFolderChatLists).toHaveBeenCalledTimes(1);
 	}
 );
 
-test('初读生成唯一对话后刷新侧栏并跳入作业对话', async () => {
-	api.getRevisionReadings
-		.mockResolvedValueOnce([])
-		.mockResolvedValue([
-			{ purpose: 'first_read', status: 'ready', context: { chat_id: 'chat-1' } }
-		]);
-	api.requestRevisionReading.mockResolvedValue(undefined);
+test('重入没有初读的确认稿也不调用模型', async () => {
+	const data = workspace(true);
+	data.initial_state.readings = [];
 	render(WritingWorkspaceShell, {
-		props: {
-			projectBaseUrl: '/assignments/assignment-1/write',
-			loadWorkspace: vi.fn().mockResolvedValue(workspace(true))
-		},
+		props: { loadWorkspace: vi.fn().mockResolvedValue(data) },
 		context
 	});
-	await waitFor(() =>
-		expect(sidebar.refreshFolderChatLists).toHaveBeenCalledWith('project-1', { id: 'chat-1' })
-	);
-	expect(goto).toHaveBeenCalledWith('/assignments/assignment-1/write?chat=chat-1', {
-		replaceState: true
-	});
+	await screen.findByTestId('workspace-editor');
+	expect(api.requestRevisionReading).not.toHaveBeenCalled();
+	expect(api.getRevisionReadings).not.toHaveBeenCalled();
 });
 
 test('已批改作业仍显示唯一对话，同页点击作业入口后继续原对话', async () => {
@@ -315,9 +274,7 @@ test('已批改作业仍显示唯一对话，同页点击作业入口后继续�
 		context
 	});
 	await waitFor(() =>
-		expect(goto).toHaveBeenCalledWith('/assignments/assignment-1/write?chat=chat-1', {
-			replaceState: true
-		})
+		expect(screen.getByTestId('workspace-chat').getAttribute('data-initial-chat-id')).toBe('chat-1')
 	);
 	expect(sidebar.refreshFolderChatLists).toHaveBeenCalledWith('project-1', { id: 'chat-1' });
 	setUrl('?chat=chat-1');
@@ -325,12 +282,74 @@ test('已批改作业仍显示唯一对话，同页点击作业入口后继续�
 	vi.mocked(goto).mockClear();
 	setUrl();
 	await waitFor(() =>
-		expect(goto).toHaveBeenCalledWith('/assignments/assignment-1/write?chat=chat-1', {
-			replaceState: true
-		})
+		expect(screen.getByTestId('workspace-chat').getAttribute('data-chat-id')).toBe('chat-1')
 	);
+	expect(goto).not.toHaveBeenCalled();
+	expect(chatApi.getChatById).not.toHaveBeenCalled();
 	expect((screen.getByTestId('workspace-editor') as HTMLTextAreaElement).readOnly).toBe(true);
 	expect(api.requestRevisionReading).not.toHaveBeenCalled();
+});
+
+test.each(['ready', 'failed', 'running'])(
+	'聚合状态恢复原稿与原对话，无重复读取或初读（%s）',
+	async (status) => {
+		const response = deferred<any>();
+		render(WritingWorkspaceShell, { props: { loadWorkspace: () => response.promise }, context });
+		expect(screen.queryByTestId('workspace-chat')).toBeNull();
+		expect(screen.getByRole('status').textContent).toContain('Loading...');
+		const data = workspace(true);
+		data.initial_state.readings = [{ purpose: 'first_read', status }];
+		response.resolve({ ...data, active_chat_id: 'chat-1' });
+		const editor = (await screen.findByTestId('workspace-editor')) as HTMLTextAreaElement;
+		await waitFor(() => expect(editor.readOnly).toBe(status === 'running'));
+		expect(editor.value).toBe(JSON.stringify(draftJson));
+		expect(screen.getByTestId('workspace-chat').getAttribute('data-initial-chat-id')).toBe(
+			'chat-1'
+		);
+		expect(api.requestRevisionReading).not.toHaveBeenCalled();
+		expect(api.getRevisionReadings).not.toHaveBeenCalled();
+		expect(api.teachingApi).not.toHaveBeenCalled();
+		expect(api.getPendingWritingDraft).not.toHaveBeenCalled();
+	}
+);
+
+test('关键恢复失败不挂载空稿、不启动模型；离开后的响应不更新侧栏', async () => {
+	const response = deferred<any>();
+	const view = render(WritingWorkspaceShell, {
+		props: { loadWorkspace: () => response.promise },
+		context
+	});
+	view.unmount();
+	response.resolve(workspace(true));
+	await tick();
+	expect(sidebar.refreshFolderChatLists).not.toHaveBeenCalled();
+	expect(api.requestRevisionReading).not.toHaveBeenCalled();
+	render(WritingWorkspaceShell, {
+		props: { loadWorkspace: vi.fn().mockRejectedValue(new Error('恢复失败')) },
+		context
+	});
+	await screen.findByText(/恢复失败/);
+	expect(screen.queryByTestId('workspace-editor')).toBeNull();
+});
+
+test('显式选择的对话优先于原活动对话', async () => {
+	(page as unknown as Writable<{ url: URL }>).set({
+		url: new URL('http://localhost/assignments/assignment-1/write?chat=selected-chat')
+	});
+	api.setWritingSessionActiveChat.mockResolvedValue({});
+	api.getRevisionReadings.mockResolvedValue([{ purpose: 'first_read', status: 'ready' }]);
+	render(WritingWorkspaceShell, {
+		props: {
+			loadWorkspace: vi.fn().mockResolvedValue({ ...workspace(true), active_chat_id: 'chat-1' })
+		},
+		context
+	});
+	await waitFor(() =>
+		expect(screen.getByTestId('workspace-chat').getAttribute('data-initial-chat-id')).toBe(
+			'selected-chat'
+		)
+	);
+	expect(api.setWritingSessionActiveChat).toHaveBeenCalledTimes(1);
 });
 
 test('格式失败保留本地稿，停止自动重试；聊天输入不清空，手动重试成功后才发送', async () => {

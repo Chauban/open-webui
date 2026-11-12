@@ -1,0 +1,1329 @@
+{
+  "phase": "after",
+  "scenario": "ordinary",
+  "network": "400 ms added response delay, gzip, loopback, real production frontend",
+  "samples": [
+    {
+      "kind": "home",
+      "key": "ordinary",
+      "start": 4214.100000023842,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 428.10000002384186,
+      "ready": 439.89999997615814,
+      "fresh": 420.7999999523163,
+      "resources": [
+        {
+          "path": "/api/v1/me/writing/home",
+          "start": 0.19999992847442627,
+          "end": 420.7999999523163,
+          "encoded": 754,
+          "decoded": 7681
+        }
+      ],
+      "hiddenAtReady": false,
+      "draftChars": 0,
+      "iteration": 0
+    },
+    {
+      "kind": "workspace",
+      "key": "ordinary",
+      "start": 4693.299999952316,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 871,
+      "ready": 887.3000000715256,
+      "fresh": 808.6000000238419,
+      "resources": [
+        {
+          "path": "/api/v1/assignments/ordinary/workspace",
+          "start": 17.700000047683716,
+          "end": 421.7000000476837,
+          "encoded": 1165,
+          "decoded": 37865
+        },
+        {
+          "path": "/api/v1/me/notifications/mark-read",
+          "start": 422.8000000715256,
+          "end": 808.4000000953674,
+          "encoded": 11,
+          "decoded": 11
+        },
+        {
+          "path": "/api/tasks/chat/chat-ordinary",
+          "start": 425.60000002384186,
+          "end": 808.6000000238419,
+          "encoded": 15,
+          "decoded": 15
+        },
+        {
+          "path": "/api/v1/chats/chat-ordinary",
+          "start": 425.60000002384186,
+          "end": 808.4000000953674,
+          "encoded": 555,
+          "decoded": 3382
+        }
+      ],
+      "hiddenAtReady": false,
+      "editable": "true",
+      "draftChars": 1946,
+      "iteration": 0
+    },
+    {
+      "kind": "home",
+      "key": "ordinary",
+      "start": 5630.399999976158,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 423.60000002384186,
+      "ready": 440.5,
+      "fresh": 412.3000000715256,
+      "resources": [
+        {
+          "path": "/api/v1/me/writing/home",
+          "start": 0.20000004768371582,
+          "end": 412.3000000715256,
+          "encoded": 754,
+          "decoded": 7681
+        }
+      ],
+      "hiddenAtReady": false,
+      "draftChars": 0,
+      "iteration": 1
+    },
+    {
+      "kind": "workspace",
+      "key": "ordinary",
+      "start": 6108,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 877.7000000476837,
+      "ready": 888.6000000238419,
+      "fresh": 842.3999999761581,
+      "resources": [
+        {
+          "path": "/api/v1/assignments/ordinary/workspace",
+          "start": 19.200000047683716,
+          "end": 425.5,
+          "encoded": 1165,
+          "decoded": 37865
+        },
+        {
+          "path": "/api/v1/me/notifications/mark-read",
+          "start": 426.5,
+          "end": 842,
+          "encoded": 11,
+          "decoded": 11
+        },
+        {
+          "path": "/api/v1/chats/chat-ordinary",
+          "start": 428,
+          "end": 842.2000000476837,
+          "encoded": 555,
+          "decoded": 3382
+        },
+        {
+          "path": "/api/tasks/chat/chat-ordinary",
+          "start": 428.2000000476837,
+          "end": 842.3999999761581,
+          "encoded": 15,
+          "decoded": 15
+        }
+      ],
+      "hiddenAtReady": false,
+      "editable": "true",
+      "draftChars": 1946,
+      "iteration": 1
+    },
+    {
+      "kind": "home",
+      "key": "ordinary",
+      "start": 7062.600000023842,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 424.89999997615814,
+      "ready": 441.60000002384186,
+      "fresh": 414.89999997615814,
+      "resources": [
+        {
+          "path": "/api/v1/me/writing/home",
+          "start": 0.19999992847442627,
+          "end": 414.89999997615814,
+          "encoded": 754,
+          "decoded": 7681
+        }
+      ],
+      "hiddenAtReady": false,
+      "draftChars": 0,
+      "iteration": 2
+    },
+    {
+      "kind": "workspace",
+      "key": "ordinary",
+      "start": 7544,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 841.2999999523163,
+      "ready": 852,
+      "fresh": 806.2000000476837,
+      "resources": [
+        {
+          "path": "/api/v1/assignments/ordinary/workspace",
+          "start": 16.299999952316284,
+          "end": 417.7999999523163,
+          "encoded": 1165,
+          "decoded": 37865
+        },
+        {
+          "path": "/api/v1/me/notifications/mark-read",
+          "start": 418.60000002384186,
+          "end": 806.1000000238419,
+          "encoded": 11,
+          "decoded": 11
+        },
+        {
+          "path": "/api/v1/chats/chat-ordinary",
+          "start": 420.2000000476837,
+          "end": 806.1000000238419,
+          "encoded": 555,
+          "decoded": 3382
+        },
+        {
+          "path": "/api/tasks/chat/chat-ordinary",
+          "start": 420.2999999523163,
+          "end": 806.2000000476837,
+          "encoded": 15,
+          "decoded": 15
+        }
+      ],
+      "hiddenAtReady": false,
+      "editable": "true",
+      "draftChars": 1946,
+      "iteration": 2
+    },
+    {
+      "kind": "home",
+      "key": "ordinary",
+      "start": 8445.899999976158,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 409.3000000715256,
+      "ready": 426.2000000476837,
+      "fresh": 401.60000002384186,
+      "resources": [
+        {
+          "path": "/api/v1/me/writing/home",
+          "start": 0.10000002384185791,
+          "end": 401.60000002384186,
+          "encoded": 754,
+          "decoded": 7681
+        }
+      ],
+      "hiddenAtReady": false,
+      "draftChars": 0,
+      "iteration": 3
+    },
+    {
+      "kind": "workspace",
+      "key": "ordinary",
+      "start": 8909.399999976158,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 859,
+      "ready": 873.5,
+      "fresh": 823.3999999761581,
+      "resources": [
+        {
+          "path": "/api/v1/assignments/ordinary/workspace",
+          "start": 18.399999976158142,
+          "end": 420,
+          "encoded": 1165,
+          "decoded": 37865
+        },
+        {
+          "path": "/api/v1/me/notifications/mark-read",
+          "start": 421,
+          "end": 823.1000000238419,
+          "encoded": 11,
+          "decoded": 11
+        },
+        {
+          "path": "/api/v1/chats/chat-ordinary",
+          "start": 422.60000002384186,
+          "end": 823.2000000476837,
+          "encoded": 555,
+          "decoded": 3382
+        },
+        {
+          "path": "/api/tasks/chat/chat-ordinary",
+          "start": 422.7000000476837,
+          "end": 823.3999999761581,
+          "encoded": 15,
+          "decoded": 15
+        }
+      ],
+      "hiddenAtReady": false,
+      "editable": "true",
+      "draftChars": 1946,
+      "iteration": 3
+    },
+    {
+      "kind": "home",
+      "key": "ordinary",
+      "start": 9830.899999976158,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 423.39999997615814,
+      "ready": 442,
+      "fresh": 415.10000002384186,
+      "resources": [
+        {
+          "path": "/api/v1/me/writing/home",
+          "start": 0.10000002384185791,
+          "end": 415.10000002384186,
+          "encoded": 754,
+          "decoded": 7681
+        }
+      ],
+      "hiddenAtReady": false,
+      "draftChars": 0,
+      "iteration": 4
+    },
+    {
+      "kind": "workspace",
+      "key": "ordinary",
+      "start": 10310.100000023842,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 873.3999999761581,
+      "ready": 883.7999999523163,
+      "fresh": 837.6999999284744,
+      "resources": [
+        {
+          "path": "/api/v1/assignments/ordinary/workspace",
+          "start": 17,
+          "end": 432.10000002384186,
+          "encoded": 1165,
+          "decoded": 37865
+        },
+        {
+          "path": "/api/v1/me/notifications/mark-read",
+          "start": 433,
+          "end": 837.6000000238419,
+          "encoded": 11,
+          "decoded": 11
+        },
+        {
+          "path": "/api/v1/chats/chat-ordinary",
+          "start": 434.6999999284744,
+          "end": 837.6999999284744,
+          "encoded": 555,
+          "decoded": 3382
+        },
+        {
+          "path": "/api/tasks/chat/chat-ordinary",
+          "start": 434.6999999284744,
+          "end": 837.6999999284744,
+          "encoded": 15,
+          "decoded": 15
+        }
+      ],
+      "hiddenAtReady": false,
+      "editable": "true",
+      "draftChars": 1946,
+      "iteration": 4
+    },
+    {
+      "kind": "home",
+      "key": "ordinary",
+      "start": 11230.5,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 407.39999997615814,
+      "ready": 424.39999997615814,
+      "fresh": 394.89999997615814,
+      "resources": [
+        {
+          "path": "/api/v1/me/writing/home",
+          "start": 0.20000004768371582,
+          "end": 394.89999997615814,
+          "encoded": 754,
+          "decoded": 7681
+        }
+      ],
+      "hiddenAtReady": false,
+      "draftChars": 0,
+      "iteration": 5
+    },
+    {
+      "kind": "workspace",
+      "key": "ordinary",
+      "start": 11692.5,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 862.2000000476837,
+      "ready": 873.3999999761581,
+      "fresh": 831,
+      "resources": [
+        {
+          "path": "/api/v1/assignments/ordinary/workspace",
+          "start": 17.799999952316284,
+          "end": 427.60000002384186,
+          "encoded": 1165,
+          "decoded": 37865
+        },
+        {
+          "path": "/api/v1/me/notifications/mark-read",
+          "start": 428.7999999523163,
+          "end": 830.8999999761581,
+          "encoded": 11,
+          "decoded": 11
+        },
+        {
+          "path": "/api/v1/chats/chat-ordinary",
+          "start": 430.60000002384186,
+          "end": 831,
+          "encoded": 555,
+          "decoded": 3382
+        },
+        {
+          "path": "/api/tasks/chat/chat-ordinary",
+          "start": 430.7000000476837,
+          "end": 830.8999999761581,
+          "encoded": 15,
+          "decoded": 15
+        }
+      ],
+      "hiddenAtReady": false,
+      "editable": "true",
+      "draftChars": 1946,
+      "iteration": 5
+    },
+    {
+      "kind": "home",
+      "key": "ordinary",
+      "start": 12612.5,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 408.60000002384186,
+      "ready": 425.39999997615814,
+      "fresh": 403.2999999523163,
+      "resources": [
+        {
+          "path": "/api/v1/me/writing/home",
+          "start": 0.20000004768371582,
+          "end": 403.2999999523163,
+          "encoded": 754,
+          "decoded": 7681
+        }
+      ],
+      "hiddenAtReady": false,
+      "draftChars": 0,
+      "iteration": 6
+    },
+    {
+      "kind": "workspace",
+      "key": "ordinary",
+      "start": 13075.5,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 895.7000000476837,
+      "ready": 908.1000000238419,
+      "fresh": 859.6000000238419,
+      "resources": [
+        {
+          "path": "/api/v1/assignments/ordinary/workspace",
+          "start": 20,
+          "end": 438.7999999523163,
+          "encoded": 1165,
+          "decoded": 37865
+        },
+        {
+          "path": "/api/v1/me/notifications/mark-read",
+          "start": 439.60000002384186,
+          "end": 859.3999999761581,
+          "encoded": 11,
+          "decoded": 11
+        },
+        {
+          "path": "/api/v1/chats/chat-ordinary",
+          "start": 441.2000000476837,
+          "end": 859.3999999761581,
+          "encoded": 555,
+          "decoded": 3382
+        },
+        {
+          "path": "/api/tasks/chat/chat-ordinary",
+          "start": 441.2999999523163,
+          "end": 859.6000000238419,
+          "encoded": 15,
+          "decoded": 15
+        }
+      ],
+      "hiddenAtReady": false,
+      "editable": "true",
+      "draftChars": 1946,
+      "iteration": 6
+    },
+    {
+      "kind": "home",
+      "key": "ordinary",
+      "start": 14030.600000023842,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 407.39999997615814,
+      "ready": 424.10000002384186,
+      "fresh": 400.2999999523163,
+      "resources": [
+        {
+          "path": "/api/v1/me/writing/home",
+          "start": 0.10000002384185791,
+          "end": 400.2999999523163,
+          "encoded": 754,
+          "decoded": 7681
+        }
+      ],
+      "hiddenAtReady": false,
+      "draftChars": 0,
+      "iteration": 7
+    },
+    {
+      "kind": "workspace",
+      "key": "ordinary",
+      "start": 14492.200000047684,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 856.7999999523163,
+      "ready": 868.6999999284744,
+      "fresh": 821.2999999523163,
+      "resources": [
+        {
+          "path": "/api/v1/assignments/ordinary/workspace",
+          "start": 18.59999990463257,
+          "end": 418.5,
+          "encoded": 1165,
+          "decoded": 37865
+        },
+        {
+          "path": "/api/v1/me/notifications/mark-read",
+          "start": 419.39999997615814,
+          "end": 821,
+          "encoded": 11,
+          "decoded": 11
+        },
+        {
+          "path": "/api/v1/chats/chat-ordinary",
+          "start": 421.09999990463257,
+          "end": 821.1999999284744,
+          "encoded": 555,
+          "decoded": 3382
+        },
+        {
+          "path": "/api/tasks/chat/chat-ordinary",
+          "start": 421.09999990463257,
+          "end": 821.2999999523163,
+          "encoded": 15,
+          "decoded": 15
+        }
+      ],
+      "hiddenAtReady": false,
+      "editable": "true",
+      "draftChars": 1946,
+      "iteration": 7
+    },
+    {
+      "kind": "home",
+      "key": "ordinary",
+      "start": 15415.899999976158,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 405.7000000476837,
+      "ready": 422.2000000476837,
+      "fresh": 392.7000000476837,
+      "resources": [
+        {
+          "path": "/api/v1/me/writing/home",
+          "start": 0.10000002384185791,
+          "end": 392.7000000476837,
+          "encoded": 754,
+          "decoded": 7681
+        }
+      ],
+      "hiddenAtReady": false,
+      "draftChars": 0,
+      "iteration": 8
+    },
+    {
+      "kind": "workspace",
+      "key": "ordinary",
+      "start": 15876,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 864.2000000476837,
+      "ready": 874.8999999761581,
+      "fresh": 831.5,
+      "resources": [
+        {
+          "path": "/api/v1/assignments/ordinary/workspace",
+          "start": 20,
+          "end": 432.10000002384186,
+          "encoded": 1165,
+          "decoded": 37865
+        },
+        {
+          "path": "/api/v1/me/notifications/mark-read",
+          "start": 432.89999997615814,
+          "end": 831.2999999523163,
+          "encoded": 11,
+          "decoded": 11
+        },
+        {
+          "path": "/api/v1/chats/chat-ordinary",
+          "start": 434.5,
+          "end": 831.3999999761581,
+          "encoded": 555,
+          "decoded": 3382
+        },
+        {
+          "path": "/api/tasks/chat/chat-ordinary",
+          "start": 434.60000002384186,
+          "end": 831.5,
+          "encoded": 15,
+          "decoded": 15
+        }
+      ],
+      "hiddenAtReady": false,
+      "editable": "true",
+      "draftChars": 1946,
+      "iteration": 8
+    },
+    {
+      "kind": "home",
+      "key": "ordinary",
+      "start": 16795.899999976158,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 425.7000000476837,
+      "ready": 442.3000000715256,
+      "fresh": 408.5,
+      "resources": [
+        {
+          "path": "/api/v1/me/writing/home",
+          "start": 0.20000004768371582,
+          "end": 408.5,
+          "encoded": 754,
+          "decoded": 7681
+        }
+      ],
+      "hiddenAtReady": false,
+      "draftChars": 0,
+      "iteration": 9
+    },
+    {
+      "kind": "workspace",
+      "key": "ordinary",
+      "start": 17275.200000047684,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 860.7999999523163,
+      "ready": 871.8999999761581,
+      "fresh": 827.6999999284744,
+      "resources": [
+        {
+          "path": "/api/v1/assignments/ordinary/workspace",
+          "start": 18.699999928474426,
+          "end": 424,
+          "encoded": 1165,
+          "decoded": 37865
+        },
+        {
+          "path": "/api/v1/me/notifications/mark-read",
+          "start": 424.7999999523163,
+          "end": 827.3999999761581,
+          "encoded": 11,
+          "decoded": 11
+        },
+        {
+          "path": "/api/v1/chats/chat-ordinary",
+          "start": 426.2999999523163,
+          "end": 827.5,
+          "encoded": 555,
+          "decoded": 3382
+        },
+        {
+          "path": "/api/tasks/chat/chat-ordinary",
+          "start": 426.39999997615814,
+          "end": 827.6999999284744,
+          "encoded": 15,
+          "decoded": 15
+        }
+      ],
+      "hiddenAtReady": false,
+      "editable": "true",
+      "draftChars": 1946,
+      "iteration": 9
+    },
+    {
+      "kind": "home",
+      "key": "ordinary",
+      "start": 18196.200000047684,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 410,
+      "ready": 426.09999990463257,
+      "fresh": 402.09999990463257,
+      "resources": [
+        {
+          "path": "/api/v1/me/writing/home",
+          "start": 0.19999992847442627,
+          "end": 402.09999990463257,
+          "encoded": 754,
+          "decoded": 7681
+        }
+      ],
+      "hiddenAtReady": false,
+      "draftChars": 0,
+      "iteration": 10
+    },
+    {
+      "kind": "workspace",
+      "key": "ordinary",
+      "start": 18660.100000023842,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 871.2999999523163,
+      "ready": 882,
+      "fresh": 838.1000000238419,
+      "resources": [
+        {
+          "path": "/api/v1/assignments/ordinary/workspace",
+          "start": 17.399999976158142,
+          "end": 420.7999999523163,
+          "encoded": 1165,
+          "decoded": 37865
+        },
+        {
+          "path": "/api/v1/me/notifications/mark-read",
+          "start": 421.7999999523163,
+          "end": 837.8999999761581,
+          "encoded": 11,
+          "decoded": 11
+        },
+        {
+          "path": "/api/v1/chats/chat-ordinary",
+          "start": 423.2999999523163,
+          "end": 838.1000000238419,
+          "encoded": 555,
+          "decoded": 3382
+        },
+        {
+          "path": "/api/tasks/chat/chat-ordinary",
+          "start": 423.2999999523163,
+          "end": 838.1000000238419,
+          "encoded": 15,
+          "decoded": 15
+        }
+      ],
+      "hiddenAtReady": false,
+      "editable": "true",
+      "draftChars": 1946,
+      "iteration": 10
+    },
+    {
+      "kind": "home",
+      "key": "ordinary",
+      "start": 19580.200000047684,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 424.7999999523163,
+      "ready": 441.59999990463257,
+      "fresh": 417.5,
+      "resources": [
+        {
+          "path": "/api/v1/me/writing/home",
+          "start": 0.2999999523162842,
+          "end": 417.5,
+          "encoded": 754,
+          "decoded": 7681
+        }
+      ],
+      "hiddenAtReady": false,
+      "draftChars": 0,
+      "iteration": 11
+    },
+    {
+      "kind": "workspace",
+      "key": "ordinary",
+      "start": 20059.799999952316,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 868.3000000715256,
+      "ready": 879.5,
+      "fresh": 833.2000000476837,
+      "resources": [
+        {
+          "path": "/api/v1/assignments/ordinary/workspace",
+          "start": 18,
+          "end": 430.60000002384186,
+          "encoded": 1165,
+          "decoded": 37865
+        },
+        {
+          "path": "/api/v1/me/notifications/mark-read",
+          "start": 431.40000009536743,
+          "end": 833,
+          "encoded": 11,
+          "decoded": 11
+        },
+        {
+          "path": "/api/v1/chats/chat-ordinary",
+          "start": 432.90000009536743,
+          "end": 833.1000000238419,
+          "encoded": 555,
+          "decoded": 3382
+        },
+        {
+          "path": "/api/tasks/chat/chat-ordinary",
+          "start": 432.90000009536743,
+          "end": 833.2000000476837,
+          "encoded": 15,
+          "decoded": 15
+        }
+      ],
+      "hiddenAtReady": false,
+      "editable": "true",
+      "draftChars": 1946,
+      "iteration": 11
+    },
+    {
+      "kind": "home",
+      "key": "ordinary",
+      "start": 20979.700000047684,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 426.5,
+      "ready": 443,
+      "fresh": 411.1999999284744,
+      "resources": [
+        {
+          "path": "/api/v1/me/writing/home",
+          "start": 0.19999992847442627,
+          "end": 411.1999999284744,
+          "encoded": 754,
+          "decoded": 7681
+        }
+      ],
+      "hiddenAtReady": false,
+      "draftChars": 0,
+      "iteration": 12
+    },
+    {
+      "kind": "workspace",
+      "key": "ordinary",
+      "start": 21460.100000023842,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 881.5,
+      "ready": 892.7999999523163,
+      "fresh": 847,
+      "resources": [
+        {
+          "path": "/api/v1/assignments/ordinary/workspace",
+          "start": 19,
+          "end": 427.6999999284744,
+          "encoded": 1165,
+          "decoded": 37865
+        },
+        {
+          "path": "/api/v1/me/notifications/mark-read",
+          "start": 429.5,
+          "end": 846.6000000238419,
+          "encoded": 11,
+          "decoded": 11
+        },
+        {
+          "path": "/api/v1/chats/chat-ordinary",
+          "start": 431.10000002384186,
+          "end": 846.6999999284744,
+          "encoded": 555,
+          "decoded": 3382
+        },
+        {
+          "path": "/api/tasks/chat/chat-ordinary",
+          "start": 431.1999999284744,
+          "end": 847,
+          "encoded": 15,
+          "decoded": 15
+        }
+      ],
+      "hiddenAtReady": false,
+      "editable": "true",
+      "draftChars": 1946,
+      "iteration": 12
+    },
+    {
+      "kind": "home",
+      "key": "ordinary",
+      "start": 22396.600000023842,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 411,
+      "ready": 425.2999999523163,
+      "fresh": 407.2999999523163,
+      "resources": [
+        {
+          "path": "/api/v1/me/writing/home",
+          "start": 0.19999992847442627,
+          "end": 407.2999999523163,
+          "encoded": 754,
+          "decoded": 7681
+        }
+      ],
+      "hiddenAtReady": false,
+      "draftChars": 0,
+      "iteration": 13
+    },
+    {
+      "kind": "workspace",
+      "key": "ordinary",
+      "start": 22859.100000023842,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 852.3999999761581,
+      "ready": 862.6000000238419,
+      "fresh": 821.3999999761581,
+      "resources": [
+        {
+          "path": "/api/v1/assignments/ordinary/workspace",
+          "start": 18.699999928474426,
+          "end": 431.2999999523163,
+          "encoded": 1165,
+          "decoded": 37865
+        },
+        {
+          "path": "/api/v1/me/notifications/mark-read",
+          "start": 432.39999997615814,
+          "end": 821.1999999284744,
+          "encoded": 11,
+          "decoded": 11
+        },
+        {
+          "path": "/api/v1/chats/chat-ordinary",
+          "start": 433.89999997615814,
+          "end": 821.3999999761581,
+          "encoded": 555,
+          "decoded": 3382
+        },
+        {
+          "path": "/api/tasks/chat/chat-ordinary",
+          "start": 433.89999997615814,
+          "end": 821.3999999761581,
+          "encoded": 15,
+          "decoded": 15
+        }
+      ],
+      "hiddenAtReady": false,
+      "editable": "true",
+      "draftChars": 1946,
+      "iteration": 13
+    },
+    {
+      "kind": "home",
+      "key": "ordinary",
+      "start": 23765.399999976158,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 423.3000000715256,
+      "ready": 440,
+      "fresh": 409.3000000715256,
+      "resources": [
+        {
+          "path": "/api/v1/me/writing/home",
+          "start": 0.20000004768371582,
+          "end": 409.3000000715256,
+          "encoded": 754,
+          "decoded": 7681
+        }
+      ],
+      "hiddenAtReady": false,
+      "draftChars": 0,
+      "iteration": 14
+    },
+    {
+      "kind": "workspace",
+      "key": "ordinary",
+      "start": 24242.299999952316,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 852.7000000476837,
+      "ready": 864.8000000715256,
+      "fresh": 819.9000000953674,
+      "resources": [
+        {
+          "path": "/api/v1/assignments/ordinary/workspace",
+          "start": 18.90000009536743,
+          "end": 415.2000000476837,
+          "encoded": 1165,
+          "decoded": 37865
+        },
+        {
+          "path": "/api/v1/me/notifications/mark-read",
+          "start": 416.2000000476837,
+          "end": 819.7000000476837,
+          "encoded": 11,
+          "decoded": 11
+        },
+        {
+          "path": "/api/v1/chats/chat-ordinary",
+          "start": 417.90000009536743,
+          "end": 819.8000000715256,
+          "encoded": 555,
+          "decoded": 3382
+        },
+        {
+          "path": "/api/tasks/chat/chat-ordinary",
+          "start": 417.90000009536743,
+          "end": 819.9000000953674,
+          "encoded": 15,
+          "decoded": 15
+        }
+      ],
+      "hiddenAtReady": false,
+      "editable": "true",
+      "draftChars": 1946,
+      "iteration": 14
+    },
+    {
+      "kind": "home",
+      "key": "ordinary",
+      "start": 25148.299999952316,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 407.40000009536743,
+      "ready": 423.8000000715256,
+      "fresh": 397.40000009536743,
+      "resources": [
+        {
+          "path": "/api/v1/me/writing/home",
+          "start": 0.20000004768371582,
+          "end": 397.40000009536743,
+          "encoded": 754,
+          "decoded": 7681
+        }
+      ],
+      "hiddenAtReady": false,
+      "draftChars": 0,
+      "iteration": 15
+    },
+    {
+      "kind": "workspace",
+      "key": "ordinary",
+      "start": 25609.600000023842,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 888.1999999284744,
+      "ready": 899.3999999761581,
+      "fresh": 856.8999999761581,
+      "resources": [
+        {
+          "path": "/api/v1/assignments/ordinary/workspace",
+          "start": 18.5,
+          "end": 437.6999999284744,
+          "encoded": 1165,
+          "decoded": 37865
+        },
+        {
+          "path": "/api/v1/me/notifications/mark-read",
+          "start": 438.6999999284744,
+          "end": 856.6000000238419,
+          "encoded": 11,
+          "decoded": 11
+        },
+        {
+          "path": "/api/v1/chats/chat-ordinary",
+          "start": 440,
+          "end": 856.7999999523163,
+          "encoded": 555,
+          "decoded": 3382
+        },
+        {
+          "path": "/api/tasks/chat/chat-ordinary",
+          "start": 440.10000002384186,
+          "end": 856.8999999761581,
+          "encoded": 15,
+          "decoded": 15
+        }
+      ],
+      "hiddenAtReady": false,
+      "editable": "true",
+      "draftChars": 1946,
+      "iteration": 15
+    },
+    {
+      "kind": "home",
+      "key": "ordinary",
+      "start": 26564.399999976158,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 407.7000000476837,
+      "ready": 424.5,
+      "fresh": 397.7000000476837,
+      "resources": [
+        {
+          "path": "/api/v1/me/writing/home",
+          "start": 0.20000004768371582,
+          "end": 397.7000000476837,
+          "encoded": 754,
+          "decoded": 7681
+        }
+      ],
+      "hiddenAtReady": false,
+      "draftChars": 0,
+      "iteration": 16
+    },
+    {
+      "kind": "workspace",
+      "key": "ordinary",
+      "start": 27027.399999976158,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 863.2000000476837,
+      "ready": 874.3999999761581,
+      "fresh": 831.5,
+      "resources": [
+        {
+          "path": "/api/v1/assignments/ordinary/workspace",
+          "start": 17.200000047683716,
+          "end": 414.2000000476837,
+          "encoded": 1165,
+          "decoded": 37865
+        },
+        {
+          "path": "/api/v1/me/notifications/mark-read",
+          "start": 415.2000000476837,
+          "end": 831.1000000238419,
+          "encoded": 11,
+          "decoded": 11
+        },
+        {
+          "path": "/api/v1/chats/chat-ordinary",
+          "start": 416.60000002384186,
+          "end": 831.2000000476837,
+          "encoded": 555,
+          "decoded": 3382
+        },
+        {
+          "path": "/api/tasks/chat/chat-ordinary",
+          "start": 416.7000000476837,
+          "end": 831.5,
+          "encoded": 15,
+          "decoded": 15
+        }
+      ],
+      "hiddenAtReady": false,
+      "editable": "true",
+      "draftChars": 1946,
+      "iteration": 16
+    },
+    {
+      "kind": "home",
+      "key": "ordinary",
+      "start": 27947.200000047684,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 426,
+      "ready": 442.89999997615814,
+      "fresh": 410.2999999523163,
+      "resources": [
+        {
+          "path": "/api/v1/me/writing/home",
+          "start": 0.19999992847442627,
+          "end": 410.2999999523163,
+          "encoded": 754,
+          "decoded": 7681
+        }
+      ],
+      "hiddenAtReady": false,
+      "draftChars": 0,
+      "iteration": 17
+    },
+    {
+      "kind": "workspace",
+      "key": "ordinary",
+      "start": 28427.100000023842,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 864.3999999761581,
+      "ready": 874.5,
+      "fresh": 827.7999999523163,
+      "resources": [
+        {
+          "path": "/api/v1/assignments/ordinary/workspace",
+          "start": 18.899999976158142,
+          "end": 425.5,
+          "encoded": 1165,
+          "decoded": 37865
+        },
+        {
+          "path": "/api/v1/me/notifications/mark-read",
+          "start": 426.5,
+          "end": 827.3999999761581,
+          "encoded": 11,
+          "decoded": 11
+        },
+        {
+          "path": "/api/v1/chats/chat-ordinary",
+          "start": 428.10000002384186,
+          "end": 827.5,
+          "encoded": 555,
+          "decoded": 3382
+        },
+        {
+          "path": "/api/tasks/chat/chat-ordinary",
+          "start": 428.10000002384186,
+          "end": 827.7999999523163,
+          "encoded": 15,
+          "decoded": 15
+        }
+      ],
+      "hiddenAtReady": false,
+      "editable": "true",
+      "draftChars": 1946,
+      "iteration": 17
+    },
+    {
+      "kind": "home",
+      "key": "ordinary",
+      "start": 29347,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 408.7000000476837,
+      "ready": 425.5,
+      "fresh": 405.2999999523163,
+      "resources": [
+        {
+          "path": "/api/v1/me/writing/home",
+          "start": 0.20000004768371582,
+          "end": 405.2999999523163,
+          "encoded": 754,
+          "decoded": 7681
+        }
+      ],
+      "hiddenAtReady": false,
+      "draftChars": 0,
+      "iteration": 18
+    },
+    {
+      "kind": "workspace",
+      "key": "ordinary",
+      "start": 29809.299999952316,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 876.7000000476837,
+      "ready": 893,
+      "fresh": 844.5,
+      "resources": [
+        {
+          "path": "/api/v1/assignments/ordinary/workspace",
+          "start": 18.800000071525574,
+          "end": 426.3000000715256,
+          "encoded": 1165,
+          "decoded": 37865
+        },
+        {
+          "path": "/api/v1/me/notifications/mark-read",
+          "start": 427,
+          "end": 844.2000000476837,
+          "encoded": 11,
+          "decoded": 11
+        },
+        {
+          "path": "/api/v1/chats/chat-ordinary",
+          "start": 428.5,
+          "end": 844.3000000715256,
+          "encoded": 555,
+          "decoded": 3382
+        },
+        {
+          "path": "/api/tasks/chat/chat-ordinary",
+          "start": 428.7000000476837,
+          "end": 844.5,
+          "encoded": 15,
+          "decoded": 15
+        }
+      ],
+      "hiddenAtReady": false,
+      "editable": "true",
+      "draftChars": 1946,
+      "iteration": 18
+    },
+    {
+      "kind": "home",
+      "key": "ordinary",
+      "start": 30781.600000023842,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 424.1999999284744,
+      "ready": 440.89999997615814,
+      "fresh": 418,
+      "resources": [
+        {
+          "path": "/api/v1/me/writing/home",
+          "start": 0.10000002384185791,
+          "end": 418,
+          "encoded": 754,
+          "decoded": 7681
+        }
+      ],
+      "hiddenAtReady": false,
+      "draftChars": 0,
+      "iteration": 19
+    },
+    {
+      "kind": "workspace",
+      "key": "ordinary",
+      "start": 31259.5,
+      "timeOrigin": 1794487748609.5,
+      "hidden": false,
+      "preview": 852.7000000476837,
+      "ready": 862.7999999523163,
+      "fresh": 820.5,
+      "resources": [
+        {
+          "path": "/api/v1/assignments/ordinary/workspace",
+          "start": 18.799999952316284,
+          "end": 418.89999997615814,
+          "encoded": 1165,
+          "decoded": 37865
+        },
+        {
+          "path": "/api/v1/me/notifications/mark-read",
+          "start": 419.7000000476837,
+          "end": 820.2000000476837,
+          "encoded": 11,
+          "decoded": 11
+        },
+        {
+          "path": "/api/v1/chats/chat-ordinary",
+          "start": 421.2999999523163,
+          "end": 820.3999999761581,
+          "encoded": 555,
+          "decoded": 3382
+        },
+        {
+          "path": "/api/tasks/chat/chat-ordinary",
+          "start": 421.2999999523163,
+          "end": 820.5,
+          "encoded": 15,
+          "decoded": 15
+        }
+      ],
+      "hiddenAtReady": false,
+      "editable": "true",
+      "draftChars": 1946,
+      "iteration": 19
+    }
+  ],
+  "errors": [],
+  "failed": []
+}
