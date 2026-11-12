@@ -89,6 +89,23 @@
 	let name = '';
 	$: currentFolder = folders?.[folderId] ?? null;
 	$: folderHref = currentFolder && folderHrefBuilder ? folderHrefBuilder(currentFolder) : null;
+	let closing = false;
+
+	const closeFolderHandler = async () => {
+		if (closing || !currentFolder) return;
+		if (clickTimer) {
+			clearTimeout(clickTimer);
+			clickTimer = null;
+		}
+		closing = true;
+		try {
+			await onCloseFolder(currentFolder);
+		} catch {
+			toast($i18n.t('Could not save sidebar changes. The project has been restored.'));
+		} finally {
+			closing = false;
+		}
+	};
 
 	const formatUnreadCount = (count) =>
 		new Intl.NumberFormat(undefined, {
@@ -894,11 +911,13 @@
 
 				{#if showVisibilityToggle}
 					<button
+						type="button"
 						class="absolute z-10 right-2 hover-reveal self-center flex items-center rounded-full border border-gray-200 bg-white px-2 py-1 text-xs text-gray-600 dark:border-gray-700 dark:bg-gray-850 dark:text-gray-300"
+						disabled={closing}
 						on:click={async (e) => {
 							e.stopPropagation();
 							e.stopImmediatePropagation();
-							await onCloseFolder(currentFolder);
+							await closeFolderHandler();
 						}}
 						aria-label={$i18n.t('Close')}
 					>
@@ -928,9 +947,7 @@
 							onExport={() => {
 								exportHandler();
 							}}
-							onClose={async () => {
-								await onCloseFolder(currentFolder);
-							}}
+							onClose={closeFolderHandler}
 							showCreateSub={!lockFolders}
 							onCreateSubFolder={() => {
 								createSubFolderParentId = folderId;

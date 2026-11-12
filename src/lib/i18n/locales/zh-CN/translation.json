@@ -1226,6 +1226,7 @@
 	"Clone Chat": "克隆对话",
 	"Clone of {{TITLE}}": "{{TITLE}} 的副本",
 	"Close": "关闭",
+	"Could not save sidebar changes. The project has been restored.": "侧栏设置未能保存，已恢复此项目，可重新关闭。",
 	"Close Banner": "关闭横幅",
 	"Close Configure Connection Modal": "关闭外部连接配置弹窗",
 	"Close Modal": "关闭弹窗",

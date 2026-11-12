@@ -146,6 +146,7 @@
 	// section and open the writing workspace instead of a plain chat.
 	let writingProjects = {};
 	let writingProjectRegistry = {};
+	const closingWritingFolders = new Set<string>();
 
 	// 普通分组和写作分组各有一套 registry;对话状态(生成中、已读、标题)要两边都通知到。
 	const getAllFolderEntries = (): any[] => [
@@ -194,7 +195,7 @@
 			...folderList.filter(
 				(folder) => isPersonalWritingProject(folder) && $config?.features?.enable_personal_writing
 			)
-		].filter((folder) => !isSidebarClosedWriting(folder));
+		].filter((folder) => !isSidebarClosedWriting(folder) && !closingWritingFolders.has(folder.id));
 
 		const next = {};
 		for (const folder of writingFolderList) {
@@ -211,25 +212,27 @@
 		writingProjects = next;
 	};
 
-	const toggleWritingFolderVisibility = async (folder) => {
-		if (!folder?.id) return;
-		const nextMeta = {
-			...(folder.meta || {}),
-			hidden_from_sidebar: !Boolean(folder?.meta?.hidden_from_sidebar)
-		};
-		const updated = await updateFolderById(localStorage.token, folder.id, {
-			name: folder.name,
-			meta: nextMeta,
-			data: folder.data || {}
-		}).catch((error) => {
-			toast.error(`${error}`);
-			return null;
-		});
-		if (!updated) return;
-		if ($selectedFolder?.id === folder.id) {
-			selectedFolder.set(null);
+	const closeWritingFolder = async (folder) => {
+		if (!folder?.id || closingWritingFolders.has(folder.id)) return;
+		// Hide immediately, including during background list refreshes.
+		closingWritingFolders.add(folder.id);
+		buildWritingProjects($_folders);
+		try {
+			const updated = await updateFolderById(localStorage.token, folder.id, {
+				meta: { hidden_from_sidebar: true }
+			});
+			if (!updated) throw new Error('Sidebar visibility was not saved');
+			// Older list responses must not undo the saved visibility.
+			folderLoadGate.next();
+			_folders.update((items) => items.map((item) => (item.id === folder.id ? updated : item)));
+			if ($selectedFolder?.id === folder.id) {
+				selectedFolder.set(null);
+			}
+		} finally {
+			closingWritingFolders.delete(folder.id);
+			// A failed save restores this entry from the latest list, preserving other changes.
+			buildWritingProjects($_folders);
 		}
-		await initFolders();
 	};
 	let showSharedFolders = false;
 	let showChatsMenu = false;
@@ -1669,7 +1672,7 @@
 								{shiftKey}
 								lockFolders={true}
 								showVisibilityToggle={true}
-								onCloseFolder={toggleWritingFolderVisibility}
+								onCloseFolder={closeWritingFolder}
 								folderHrefBuilder={(folder) =>
 									getProjectMode(folder) === 'assignment_writing' && folder?.meta?.assignment_id
 										? `/assignments/${folder.meta.assignment_id}/write`
