@@ -68,7 +68,7 @@ if [ "$BUILD" = 1 ]; then
     step "构建前端（约 3 分钟）"
     # /tmp 有 sticky 保护：别的用户留下的同名日志 root 也写不进，先删
     rm -f /tmp/rw-build.log
-    if ! as_app /opt/rightwrite/build.sh > /tmp/rw-build.log 2>&1; then
+    if ! as_app env APP_BUILD_HASH="$TARGET" /opt/rightwrite/build.sh > /tmp/rw-build.log 2>&1; then
         tail -n 30 /tmp/rw-build.log
         fail "构建失败，应用已停止（完整日志 /tmp/rw-build.log）"
     fi
