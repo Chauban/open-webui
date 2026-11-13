@@ -4,6 +4,7 @@ Only trusted resource adapters may install a binding on request.state. Nothing
 in the client request (including metadata) grants model access.
 """
 
+import asyncio
 import copy
 import hashlib
 import json
@@ -12,6 +13,7 @@ import uuid
 from functools import lru_cache
 from pathlib import Path
 
+import anyio
 from fastapi import HTTPException
 from sqlalchemy import func
 from starlette.concurrency import run_in_threadpool
@@ -540,6 +542,31 @@ async def execute_first_read(request, user, config, context, dialogue):
     return feedback.model_dump()
 
 
+def _finish_cancelled_reading(context):
+    """Close this interrupted call atomically, without reviving a withdrawn reading."""
+    from open_webui.models.education_types import RevisionReading
+
+    with get_db_context() as db:
+        call = db.get(TeachingCall, context['call_id'])
+        if call is None:
+            return
+        lock_assignment(call.assignment_id, db)
+        db.expire_all()
+        call = db.get(TeachingCall, context['call_id'])
+        if call is None or call.status != 'running':
+            return
+        completed_at = int(time.time())
+        call.context = copy.deepcopy(context)
+        call.status = 'failed'
+        call.completed_at = completed_at
+        reading = db.get(RevisionReading, call.id)
+        if reading is not None and reading.status == 'running':
+            reading.context = copy.deepcopy(context)
+            reading.status = 'failed'
+            reading.completed_at = completed_at
+        db.commit()
+
+
 async def formal_first_read(request, user, session, assignment, form, db, dialogue):
     from sqlalchemy import func
 
@@ -600,6 +627,13 @@ async def formal_first_read(request, user, session, assignment, form, db, dialog
     try:
         feedback = await execute_first_read(request, user, config, context, relevant_dialogue)
         context['status'] = 'ready'
+    except asyncio.CancelledError:
+        context['status'] = 'failed'
+        context['error_type'] = 'CancelledError'
+        # The request's cancellation must not cancel the database finalization too.
+        with anyio.CancelScope(shield=True):
+            await run_in_threadpool(_finish_cancelled_reading, context)
+        raise
     except Exception as error:
         context['status'] = 'failed'
         context['error_type'] = type(error).__name__

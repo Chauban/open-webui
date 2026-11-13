@@ -935,6 +935,74 @@ def test_worker_update_invalidates_old_trial_but_keeps_published_assignment_usab
     assert action(env, old_trial, 'confirm', DRAFT).status_code == 409
 
 
+@pytest.mark.parametrize('cancel_mode', ['task', 'scope', 'withdrawn'])
+def test_formal_read_cancellation_closes_records_and_allows_explicit_retry(env, monkeypatch, cancel_mode):
+    import anyio
+    from starlette.requests import Request
+    from open_webui.models.education_types import RevisionReading
+    from open_webui.models.notes import Note
+    from open_webui.services.education.revision_reading import ReadingRequest
+
+    assignment = publish(env, prepare(env)).json()[0]
+    sid = student_session(env, assignment)
+    with env.factory() as db:
+        session = Education.get_writing_session_by_id(sid, db=db)
+        original_note = copy.deepcopy(db.get(Note, session.note_id).data)
+    original_execute = runtime.execute_first_read
+    scope = None
+
+    async def cancel(request, user, config, context, dialogue):
+        if cancel_mode == 'withdrawn':
+            with env.factory() as db:
+                db.query(RevisionReading).filter_by(id=context['call_id']).delete()
+                db.commit()
+        if cancel_mode == 'scope':
+            scope.cancel()
+            await anyio.sleep(0)
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(runtime, 'execute_first_read', cancel)
+
+    async def invoke():
+        nonlocal scope
+        request = Request({'type': 'http', 'method': 'POST', 'path': '/reading', 'headers': [], 'app': env.client.app})
+        with env.factory() as db:
+            session = Education.get_writing_session_by_id(sid, db=db)
+            current = Education.get_assignment_by_id(assignment['id'], db=db)
+            if cancel_mode == 'scope':
+                with anyio.CancelScope() as scope:
+                    await runtime.formal_first_read(request, env.student, session, current, ReadingRequest(purpose='first_read'), db, [])
+            else:
+                with pytest.raises(asyncio.CancelledError):
+                    await runtime.formal_first_read(request, env.student, session, current, ReadingRequest(purpose='first_read'), db, [])
+
+    asyncio.run(invoke())
+    with env.factory() as db:
+        call = db.query(TeachingCall).filter_by(session_id=sid).one()
+        cancelled_id = call.id
+        assert call.status == 'failed'
+        assert call.completed_at is not None
+        assert call.context['error_type'] == 'CancelledError'
+        assert call.context['source_text'] == DRAFT
+        reading = db.get(RevisionReading, call.id)
+        if cancel_mode == 'withdrawn':
+            assert reading is None
+        else:
+            assert reading.status == 'failed'
+            assert reading.completed_at == call.completed_at
+            assert reading.feedback is None
+            assert reading.source_text == DRAFT
+        assert db.get(Note, session.note_id).data == original_note
+
+    monkeypatch.setattr(runtime, 'execute_first_read', original_execute)
+    retry = env.client.post(f'/api/v1/writing-sessions/{sid}/readings', json={'purpose': 'first_read'})
+    assert retry.status_code == 200, retry.text
+    assert retry.json()['status'] == 'ready'
+    assert retry.json()['id'] != cancelled_id
+    with env.factory() as db:
+        assert db.get(TeachingCall, cancelled_id).status == 'failed'
+
+
 def test_accepted_call_retains_execution_snapshot_for_internal_retry(env, monkeypatch):
     from starlette.requests import Request
 
