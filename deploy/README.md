@@ -76,6 +76,8 @@ sudo tail -n 30 /opt/rightwrite/releases/dual-20261113-0300/timer.log
 
 `schedule-armed.json` 和 `final-preparation-result.json` 只证明准备及计划已就绪，不能当作部署成功；实际结果以 `scheduled-status.json` 的 `success`、正式核验记录、应用/构建 SHA 与公网状态为准。若用户取消此计划，应在两台停止对应 timer，并在各自 `/etc/rightwrite/releases/20261113/` 创建 `cancelled` 标记；不要据此撤掉其他任务的维护标记。详细预演与本次进度见两份实例记录。
 
+实际结果补充：哈工深于 03:06 完成；南科大因长期未结束的初读状态中止，用户另行授权后于 08:24 补发恢复。南科大当前恢复结果在 `/opt/rightwrite/releases/sustech-recovery-20261113/recovery-status.json`，夜间 failed 记录保留。下次安排前应核对长期 running 与模型调用终态，提前处理明确异常；不通过删除记录或无条件忽略运行状态来放行部署。
+
 ## 凭据与实例配置
 
 SSH 别名 `rightwrite`、`rightwrite-hitsz` 由本机 `~/.ssh/config` 配置；私钥留在本机或密钥管理器。服务器的 `rightwrite.env`、`.cos.yaml`、数据库及备份不入库。
