@@ -19,7 +19,7 @@ from open_webui.models.teaching_trials import (
     PreparationCreate,
     PreparationUpdate,
     PublishPreparation,
-    TeachingModelPolicy,
+    TeachingModelPolicyUpdate,
     TeachingPreparation,
     TeachingTrialSession,
     TrialAction,
@@ -33,6 +33,7 @@ from open_webui.routers.education import (
 from open_webui.services.education import teaching_comparisons as comparisons
 from open_webui.services.education import teaching_preparations as preparations
 from open_webui.services.education import teaching_search
+from open_webui.services.education import teaching_model_settings
 from open_webui.services.education import teaching_trials as trials
 from open_webui.services.education.ai_steps import available_models, get_ai_step_policy
 from open_webui.services.education.teaching_runtime import model_policy, validate_binding
@@ -95,8 +96,15 @@ async def set_teaching_search(form: teaching_search.SearchPolicy, user=Depends(g
     return form
 
 
+@router.get('/admin/teaching-models')
+def get_teaching_model_settings(user=Depends(get_admin_user), db: Session = Depends(get_session)):
+    return teaching_model_settings.settings_snapshot(db)
+
+
 @router.put('/admin/teaching-models')
-async def set_teaching_models(request: Request, form: TeachingModelPolicy, user=Depends(get_admin_user)):
+async def set_teaching_models(
+    request: Request, form: TeachingModelPolicyUpdate, user=Depends(get_admin_user), db: Session = Depends(get_session)
+):
     models = await available_models(request, user)
     if any(
         mid not in models
@@ -106,8 +114,7 @@ async def set_teaching_models(request: Request, form: TeachingModelPolicy, user=
         for mid in form.model_ids
     ):
         raise HTTPException(400, 'Choose available non-arena teaching models')
-    await Config.upsert({'education.teaching_models': form.model_dump()})
-    return form
+    return await teaching_model_settings.save_settings(request, user, form, db)
 
 
 @router.get('/teacher/teaching-preparations')

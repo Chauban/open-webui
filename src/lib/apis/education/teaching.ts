@@ -93,6 +93,7 @@ export async function trialAction(
 
 export function preparationAssignment(draft: AssignmentDraft, classrooms: string[]) {
 	return {
+		draft_min_chars: draft.taskMode === 'from_scratch' ? 0 : (draft.draftMinChars ?? 0),
 		photo_transcription_enabled: draft.photoTranscriptionEnabled,
 		image_reading_enabled: draft.imageReadingEnabled,
 		title: draft.title,
@@ -125,6 +126,7 @@ export function assignmentFromPreparation(
 	a: Preparation['payload']['assignment']
 ): AssignmentDraft {
 	return {
+		draftMinChars: a.draft_min_chars || undefined,
 		photoTranscriptionEnabled: a.photo_transcription_enabled,
 		imageReadingEnabled: a.image_reading_enabled,
 		title: a.title,

@@ -67,7 +67,7 @@
 		...(baselineHelp
 			? [
 					t(
-						'The confirmed draft is saved as the starting point of your revision. Before final submission, you can withdraw it from the top-right "…" menu and import it again.'
+						'Your confirmed first draft is the starting point for revision. Before you submit the assignment for the first time, choose “Withdraw first draft” to start again.'
 					)
 				]
 			: [])

@@ -8,6 +8,7 @@ import asyncio
 import copy
 import hashlib
 import json
+import logging
 import time
 import uuid
 from functools import lru_cache
@@ -79,8 +80,10 @@ async def model_policy():
 
 
 async def resolve_binding(request, user, candidate):
-    policy = await model_policy()
-    model_id = candidate.model_id
+    return await resolve_model_binding(request, user, candidate.model_id, await model_policy())
+
+
+async def resolve_model_binding(request, user, model_id, policy):
     if model_id not in policy.model_ids:
         raise HTTPException(409, 'This model is not authorized for teaching')
     models = await available_models(request, user)
@@ -567,6 +570,28 @@ def _finish_cancelled_reading(context):
         db.commit()
 
 
+async def notify_model_unavailable(assignment, db):
+    from open_webui.models.education import EducationNotification
+    from open_webui.socket.main import emit_to_users
+
+    # Called under the assignment lock before an AI call has been created.
+    notice_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f'teaching-model-unavailable:{assignment.current_ai_revision_id}'))
+    if db.get(EducationNotification, notice_id):
+        return
+    payload = {'assignment_id': assignment.id, 'assignment_title': assignment.title}
+    kind = 'teaching_model_unavailable'
+    db.add(
+        EducationNotification(
+            id=notice_id, user_id=assignment.teacher_id, type=kind, payload_json=payload, created_at=int(time.time())
+        )
+    )
+    db.commit()
+    try:
+        await emit_to_users('education:notification', {'type': kind, 'payload': payload}, [assignment.teacher_id])
+    except Exception:
+        logging.getLogger(__name__).exception('Could not emit teaching model availability notification')
+
+
 async def formal_first_read(request, user, session, assignment, form, db, dialogue):
     from sqlalchemy import func
 
@@ -590,17 +615,31 @@ async def formal_first_read(request, user, session, assignment, form, db, dialog
     relevant_dialogue = [] if form.purpose == 'first_read' else saved_dialogue(session, db)
     request_key = fingerprint([config_fingerprint(config), form.purpose, source,
         model_materials(session.id, assignment.image_reading_enabled, db), assignment.image_reading_enabled, relevant_dialogue])
-    old = db.query(TeachingCall).filter_by(session_id=session.id, request_key=request_key).first()
+    # Reuse the most recent attempt for these exact inputs, including explicit retries.
+    old = (
+        db.query(TeachingCall)
+        .filter(
+            TeachingCall.session_id == session.id,
+            (TeachingCall.request_key == request_key) | TeachingCall.request_key.startswith(request_key + ':'),
+        )
+        .order_by(TeachingCall.sequence.desc())
+        .first()
+    )
     if old and old.status in ('ready', 'running'):
         reading = db.get(RevisionReading, old.id)
         if reading:
             result = serialize_reading(reading)
             db.commit()
             return result
-    # A deliberate retry after failure is a new call; never overwrite failed evidence.
+    # Keep failed evidence and give the next attempt its own idempotency key.
     if old:
         request_key += ':' + str(uuid.uuid4())
-    await validate_binding(request, user, config)
+    try:
+        await validate_binding(request, user, config)
+    except HTTPException as error:
+        if error.status_code == 409:
+            await notify_model_unavailable(assignment, db)
+        raise
     config, context = capture_formal(session, request_key, form.purpose, db, user=user)
     reading = RevisionReading(
         id=context['call_id'],

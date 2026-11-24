@@ -27,6 +27,7 @@ from open_webui.models.teaching_trials import (
     TeachingTrialSession,
 )
 from open_webui.services.education.teaching_config import latest_teaching_config, lock_assignment, teacher_access
+from open_webui.services.education.teaching_model_settings import lock_policy
 from open_webui.services.education.teaching_runtime import (
     config_fingerprint,
     execution_version,
@@ -206,7 +207,9 @@ def publication_assignment(row):
 
 async def publish(request, user, preparation_id, form, db):  # noqa: C901 -- one atomic publication transaction
     initial = owned(TeachingPreparation, preparation_id, user, db)
-    # Lock order is always assignment -> preparation -> session.
+    # Both publication paths lock the policy before any assignment.
+    if initial.payload['assignment']['task_mode'] == 'revise_argument':
+        await run_in_threadpool(lock_policy, db)
     if initial.assignment_id:
         await run_in_threadpool(lock_assignment, initial.assignment_id, db)
     row = await run_in_threadpool(owned, TeachingPreparation, preparation_id, user, db, lock=True)

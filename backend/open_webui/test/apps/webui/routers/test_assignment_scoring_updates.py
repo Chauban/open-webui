@@ -14,7 +14,7 @@ from open_webui.test.apps.webui.routers.test_education_smoke import (
 from open_webui.test.apps.webui.routers.test_education_smoke import (
     education_client as education_client,
 )
-from open_webui.test.apps.webui.routers.test_revision_coaching import setup, submit
+from open_webui.test.apps.webui.routers.test_revision_coaching import complete_first_read, setup, submit
 
 
 def scoring(mode, maximum):
@@ -38,9 +38,11 @@ def grade(config, value):
 
 @pytest.mark.parametrize('mode', ['from_scratch', 'revise_draft', 'revise_argument'])
 @pytest.mark.parametrize('initial_mode', ['dimensions', 'total'])
-def test_pending_uses_new_scoring_and_published_grades_keep_their_standard(education_client, mode, initial_mode):
+def test_pending_uses_new_scoring_and_published_grades_keep_their_standard(education_client, monkeypatch, mode, initial_mode):
     client, teacher, _, student, _, factory = education_client
     assignment, sid, _ = setup(client, teacher, student, mode=mode, scoring=initial_mode)
+    if assignment['task_mode'] != 'from_scratch':
+        complete_first_read(client, sid, monkeypatch)
     submitted = submit(client, assignment, sid).json()
     submission_id = submitted['submission_id']
     with factory() as db:
@@ -97,9 +99,10 @@ def test_pending_uses_new_scoring_and_published_grades_keep_their_standard(educa
         assert [event.scoring_config.model_dump() for event in events] == [new, new]
 
 
-def test_scoring_change_clears_incompatible_draft_scores_and_keeps_comments(education_client):
+def test_scoring_change_clears_incompatible_draft_scores_and_keeps_comments(education_client, monkeypatch):
     client, teacher, _, student, _, _ = education_client
     assignment, sid, _ = setup(client, teacher, student, mode='revise_draft', scoring='total')
+    complete_first_read(client, sid, monkeypatch)
     submitted = submit(client, assignment, sid).json()
     UserContext.current_user = teacher
     detail_url = f'/api/v1/teacher/submissions/{submitted["submission_id"]}'
@@ -123,9 +126,10 @@ def test_scoring_change_clears_incompatible_draft_scores_and_keeps_comments(educ
     assert response.status_code == 200, response.text
 
 
-def test_scoring_update_keeps_validation_permissions_and_other_locks(education_client):
+def test_scoring_update_keeps_validation_permissions_and_other_locks(education_client, monkeypatch):
     client, teacher, other_teacher, student, _, _ = education_client
     assignment, sid, _ = setup(client, teacher, student, mode='revise_draft')
+    complete_first_read(client, sid, monkeypatch)
     assert submit(client, assignment, sid).status_code == 200
     url = f'/api/v1/assignments/{assignment["id"]}'
     UserContext.current_user = other_teacher
@@ -141,7 +145,7 @@ def test_scoring_update_keeps_validation_permissions_and_other_locks(education_c
 
 
 @pytest.mark.parametrize('mode', ['total', 'dimensions'])
-def test_populated_scoring_migration_preserves_original_grades_and_evidence(education_client, mode):
+def test_populated_scoring_migration_preserves_original_grades_and_evidence(education_client, monkeypatch, mode):
     import json
 
     import open_webui.env as env
@@ -152,6 +156,7 @@ def test_populated_scoring_migration_preserves_original_grades_and_evidence(educ
 
     client, teacher, _, student, _, factory = education_client
     assignment, sid, _ = setup(client, teacher, student, mode='revise_draft', scoring=mode)
+    complete_first_read(client, sid, monkeypatch)
     submitted = submit(client, assignment, sid).json()
     UserContext.current_user = teacher
     response = client.post(
@@ -191,13 +196,14 @@ def test_populated_scoring_migration_preserves_original_grades_and_evidence(educ
 
 
 @pytest.mark.parametrize('change_standard', [False, True])
-def test_round_progress_only_compares_scores_under_the_same_standard(education_client, change_standard):
+def test_round_progress_only_compares_scores_under_the_same_standard(education_client, monkeypatch, change_standard):
     import asyncio
 
     from open_webui.models.config import Config
 
     client, teacher, _, student, _, _ = education_client
     assignment, sid, _ = setup(client, teacher, student, mode='revise_draft', scoring='total')
+    complete_first_read(client, sid, monkeypatch)
     first = submit(client, assignment, sid).json()
     UserContext.current_user = teacher
     asyncio.run(Config.upsert({'education.enable_return': True}))

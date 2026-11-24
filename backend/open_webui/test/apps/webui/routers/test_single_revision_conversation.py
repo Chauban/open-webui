@@ -18,7 +18,7 @@ from open_webui.services.education.single_conversation import (
     apply_consolidation,
 )
 from open_webui.test.apps.webui.routers.test_education_smoke import education_client, UserContext
-from open_webui.test.apps.webui.routers.test_revision_coaching import setup, submit
+from open_webui.test.apps.webui.routers.test_revision_coaching import complete_first_read, setup, submit
 
 
 def folder_for(SessionLocal, sid):
@@ -107,11 +107,12 @@ def test_concurrent_first_requests_create_only_one_conversation(education_client
         assert db.query(Chat).filter_by(folder_id=folder).count() == 1
 
 
-def test_consolidation_preserves_selected_chat_draft_and_submission(education_client):
+def test_consolidation_preserves_selected_chat_draft_and_submission(education_client, monkeypatch):
     client, teacher, _, student, _, SessionLocal = education_client
     assignment, sid, _ = setup(client, teacher, student)
     folder = folder_for(SessionLocal, sid)
     cid = client.post('/api/v1/chats/new', json={'chat': chat_body('keep'), 'folder_id': folder}).json()['id']
+    complete_first_read(client, sid, monkeypatch)
     result = submit(client, assignment, sid)
     assert result.status_code == 200, result.text
     with SessionLocal() as db:

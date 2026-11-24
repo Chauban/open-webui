@@ -13,7 +13,7 @@ from open_webui.models.education import Submission
 from open_webui.services.education import ai_steps, materials
 from open_webui.services.education.writing_document import document_text
 from open_webui.test.apps.webui.routers.test_education_smoke import UserContext
-from open_webui.test.apps.webui.routers.test_revision_coaching import DRAFT, setup, submit
+from open_webui.test.apps.webui.routers.test_revision_coaching import complete_first_read, DRAFT, setup, submit
 from open_webui.test.apps.webui.routers.test_writing_materials import (
     education_client as base_client,
 )
@@ -73,7 +73,7 @@ def upload(client, sid, purpose):
 
 @pytest.mark.parametrize('mode', ['from_scratch', 'revise_draft', 'revise_argument'])
 def test_photo_becomes_prose_without_reference_permission_and_freezes_original(
-    education_client,
+    education_client, monkeypatch,
     storage,
     models,
     mode,
@@ -122,6 +122,8 @@ def test_photo_becomes_prose_without_reference_permission_and_freezes_original(
     assert saved.status_code == 200, saved.text
     with factory() as db:
         assert materials.model_materials(sid, True, db) == []  # Source photos are not reference attachments.
+    if assignment['task_mode'] != 'from_scratch':
+        complete_first_read(client, sid, monkeypatch)
     submitted = submit(client, assignment, sid, final_content_json=imported['content_json'], final_content_text=DRAFT)
     assert submitted.status_code == 200, submitted.text
     set_photo(client, teacher, student, assignment, False)

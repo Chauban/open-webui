@@ -158,6 +158,12 @@ def model_stub(monkeypatch, feedback=None, *, text=None):
     return calls
 
 
+def complete_first_read(client, sid, monkeypatch):
+    model_stub(monkeypatch, feedback={'understanding': '', 'strength': None, 'focus': [], 'overview': '已完成初读。'})
+    result = client.post(f'/api/v1/writing-sessions/{sid}/readings', json={'purpose': 'first_read'})
+    assert result.json()['status'] == 'ready'
+
+
 def test_authorization_create_copy_switch_and_revoke_existing(education_client):
     client, teacher, _, student, _, factory = education_client
     assignment, sid, payload = setup(client, teacher, student)
@@ -182,7 +188,7 @@ def test_authorization_create_copy_switch_and_revoke_existing(education_client):
 
 @pytest.mark.parametrize('mode', ['revise_draft', 'revise_argument'])
 @pytest.mark.parametrize('state', ['no_read', 'failed', 'unresolved', 'no_changes'])
-def test_submission_has_no_ai_gate(education_client, monkeypatch, mode, state):
+def test_revision_submission_requires_completed_first_read(education_client, monkeypatch, mode, state):
     client, teacher, _, student, _, factory = education_client
     assignment, sid, _ = setup(client, teacher, student, mode)
     if state != 'no_read':
@@ -198,11 +204,45 @@ def test_submission_has_no_ai_gate(education_client, monkeypatch, mode, state):
         )
         assert result.status_code == 200, result.text
     result = submit(client, assignment, sid)
+    if state in ('no_read', 'failed'):
+        assert result.status_code == 409
+        with factory() as db:
+            assert db.query(Submission).count() == 0
+        if state == 'failed':
+            complete_first_read(client, sid, monkeypatch)
+            assert submit(client, assignment, sid).status_code == 200
+        return
     assert result.status_code == 200, result.text
     with factory() as db:
         frozen = db.get(Submission, result.json()['submission_id']).stats_json
         assert 'revision_items' not in frozen
         assert frozen['assignment_config']['task_mode'] == mode
+
+
+def test_cancelled_literature_first_read_releases_draft_for_retry(education_client, monkeypatch):
+    from types import SimpleNamespace
+
+    client, teacher, _, student, _, factory = education_client
+    assignment, sid, _ = setup(client, teacher, student, mode='revise_draft')
+    model_stub(monkeypatch)
+
+    async def cancelled(*args, **kwargs):
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(readings, 'call_step_model', cancelled)
+    with factory() as db:
+        session = Education.get_writing_session_by_id(sid, db=db)
+        current = Education.get_assignment_by_id(assignment['id'], db=db)
+        with pytest.raises(asyncio.CancelledError):
+            asyncio.run(readings.read_revision(
+                SimpleNamespace(state=SimpleNamespace()), student, session, current,
+                readings.ReadingRequest(purpose='first_read'), db, [],
+            ))
+    records = client.get(f'/api/v1/writing-sessions/{sid}/readings').json()
+    assert [(row['status'], row['source_text']) for row in records] == [('failed', DRAFT)]
+    assert submit(client, assignment, sid).status_code == 409
+    complete_first_read(client, sid, monkeypatch)
+    assert submit(client, assignment, sid).status_code == 200
 
 
 def test_reading_context_is_identical_for_four_scoring_variants(education_client, monkeypatch):
@@ -407,8 +447,8 @@ def test_provider_boundary_bypasses_model_system_only_for_revision(monkeypatch, 
 
 def test_late_reading_does_not_change_frozen_submission(education_client, monkeypatch):
     client, teacher, _, student, _, factory = education_client
-    assignment, sid, _ = setup(client, teacher, student)
-    model_stub(monkeypatch)
+    assignment, sid, _ = setup(client, teacher, student, mode='revise_draft')
+    complete_first_read(client, sid, monkeypatch)
     started, finish = Event(), Event()
     original = readings.call_step_model
 
@@ -419,7 +459,7 @@ def test_late_reading_does_not_change_frozen_submission(education_client, monkey
 
     monkeypatch.setattr(readings, 'call_step_model', delayed)
     with ThreadPoolExecutor() as pool:
-        future = pool.submit(client.post, f'/api/v1/writing-sessions/{sid}/readings', json={'purpose': 'first_read'})
+        future = pool.submit(client.post, f'/api/v1/writing-sessions/{sid}/readings', json={'purpose': 'revision_review'})
         assert started.wait(5)
         result = submit(client, assignment, sid)
         assert result.status_code == 200, result.text
@@ -427,13 +467,14 @@ def test_late_reading_does_not_change_frozen_submission(education_client, monkey
         assert future.result().json()['status'] == 'ready'
     with factory() as db:
         frozen = db.get(Submission, result.json()['submission_id']).stats_json
-        assert frozen['revision_readings'] == []
-        assert db.query(RevisionReading).filter_by(writing_session_id=sid, status='ready').count() == 1
+        assert [row['purpose'] for row in frozen['revision_readings']] == ['first_read']
+        assert db.query(RevisionReading).filter_by(writing_session_id=sid, status='ready').count() == 2
 
 
-def test_total_only_no_reflection_no_prompts_and_safe_correction(education_client):
+def test_total_only_no_reflection_no_prompts_and_safe_correction(education_client, monkeypatch):
     client, teacher, _, student, _, factory = education_client
     assignment, sid, _ = setup(client, teacher, student, scoring='total')
+    complete_first_read(client, sid, monkeypatch)
     submitted = submit(client, assignment, sid).json()
     UserContext.current_user = teacher
     url = f'/api/v1/teacher/submissions/{submitted["submission_id"]}/review'
@@ -455,9 +496,10 @@ def test_total_only_no_reflection_no_prompts_and_safe_correction(education_clien
         assert db.query(SubmissionReviewEvent).count() == 2
 
 
-def test_stale_grade_after_resubmission_is_rejected(education_client):
+def test_stale_grade_after_resubmission_is_rejected(education_client, monkeypatch):
     client, teacher, _, student, _, _ = education_client
     assignment, sid, _ = setup(client, teacher, student, scoring='total')
+    complete_first_read(client, sid, monkeypatch)
     first = submit(client, assignment, sid).json()
     second = submit(client, assignment, sid, final_content_text=DRAFT + '新稿').json()
     assert first['submission_id'] == second['submission_id']
@@ -469,10 +511,11 @@ def test_stale_grade_after_resubmission_is_rejected(education_client):
     assert response.status_code == 409
 
 
-def test_changed_reflection_requires_version_and_preserves_old_snapshot(education_client):
+def test_changed_reflection_requires_version_and_preserves_old_snapshot(education_client, monkeypatch):
     client, teacher, _, student, _, factory = education_client
     question = _reflection_questions()[1]
     assignment, sid, _ = setup(client, teacher, student, questions=[question])
+    complete_first_read(client, sid, monkeypatch)
     answers = [{'question_id': question['id'], 'text': '旧回答'}]
     first = submit(client, assignment, sid, reflection_answers=answers).json()
     UserContext.current_user = teacher
@@ -492,6 +535,7 @@ def test_changed_reflection_requires_version_and_preserves_old_snapshot(educatio
 def test_return_feedback_is_preserved_but_excluded_from_ai_context(education_client, monkeypatch, mode):
     client, teacher, _, student, _, factory = education_client
     assignment, sid, _ = setup(client, teacher, student, mode=mode, scoring='total')
+    complete_first_read(client, sid, monkeypatch)
     submitted = submit(client, assignment, sid).json()
     UserContext.current_user = teacher
     url = f'/api/v1/teacher/submissions/{submitted["submission_id"]}/review'
@@ -507,12 +551,12 @@ def test_return_feedback_is_preserved_but_excluded_from_ai_context(education_cli
     assert client.post(url, json={**body, 'returned_comment': '更正后的意见'}).status_code == 200
     UserContext.current_user = student
     calls = model_stub(monkeypatch)
-    for purpose in ('first_read', 'revision_review', 'whole_review'):
+    for purpose in ('revision_review', 'whole_review'):
         result = client.post(f'/api/v1/writing-sessions/{sid}/readings', json={'purpose': purpose})
         assert result.status_code == 200, result.text
         assert result.json()['status'] == 'ready'
         assert 'returned_feedback' not in result.json()['context']
-    assert len(calls) == 3
+    assert len(calls) == 2
     for excluded in (body['returned_comment'], '更正后的意见', '教师已发布退回意见'):
         assert excluded not in json.dumps(calls, ensure_ascii=False)
     monkeypatch.setattr(readings, 'get_db_context', factory)
@@ -582,6 +626,7 @@ def test_published_review_and_concurrent_resubmit_share_a_lock(education_client,
 
     client, teacher, _, student, _, factory = education_client
     assignment, sid, _ = setup(client, teacher, student, scoring='total')
+    complete_first_read(client, sid, monkeypatch)
     first = submit(client, assignment, sid).json()
     grading, release, submit_attempt = Event(), Event(), Event()
     original_projection = router.project_profile_evidence
@@ -615,9 +660,10 @@ def test_published_review_and_concurrent_resubmit_share_a_lock(education_client,
         assert db.get(Submission, first['submission_id']).final_version_id == first['final_version_id']
 
 
-def test_late_chat_cannot_change_teacher_submission_evidence(education_client):
+def test_late_chat_cannot_change_teacher_submission_evidence(education_client, monkeypatch):
     client, teacher, _, student, _, factory = education_client
     assignment, sid, _ = setup(client, teacher, student, scoring='total')
+    complete_first_read(client, sid, monkeypatch)
     first = submit(client, assignment, sid).json()
     result = client.post(
         f'/api/v1/writing-sessions/{sid}/chat/messages/late',
@@ -627,12 +673,13 @@ def test_late_chat_cannot_change_teacher_submission_evidence(education_client):
     UserContext.current_user = teacher
     detail = client.get(f'/api/v1/teacher/submissions/{first["submission_id"]}')
     assert detail.status_code == 200, detail.text
-    assert detail.json()['prompt_timeline'] == []
+    assert all(message.get('id') != 'late' for message in detail.json()['prompt_timeline'])
 
 
-def test_draft_review_is_not_a_student_grade(education_client):
+def test_draft_review_is_not_a_student_grade(education_client, monkeypatch):
     client, teacher, _, student, _, _ = education_client
     assignment, sid, _ = setup(client, teacher, student, scoring='total')
+    complete_first_read(client, sid, monkeypatch)
     first = submit(client, assignment, sid).json()
     UserContext.current_user = teacher
     result = client.post(
@@ -656,6 +703,7 @@ def test_submission_waits_for_async_writer_without_blocking_loop(education_clien
 
     client, teacher, _, student, _, _ = education_client
     assignment, sid, _ = setup(client, teacher, student)
+    complete_first_read(client, sid, monkeypatch)
     reached_lock = Event()
     original_lock = router.lock_assignment
 

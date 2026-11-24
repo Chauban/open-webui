@@ -337,6 +337,8 @@ def test_trial_and_formal_first_read_provider_boundary_matches(env):
 def test_inflight_v1_is_not_overwritten_by_v2_and_submission_freezes_all(env):
     first = publish(env, prepare(env)).json()[0]
     sid = student_session(env, first)
+    initial_read = env.client.post(f'/api/v1/writing-sessions/{sid}/readings', json={'purpose': 'first_read'})
+    assert initial_read.json()['status'] == 'ready'
     with env.factory() as db:
         session = Education.get_writing_session_by_id(sid, db=db)
         config1, call1 = runtime.capture_formal(session, 'request-1', 'coaching_chat', db, user=env.student)
@@ -364,6 +366,80 @@ def test_inflight_v1_is_not_overwritten_by_v2_and_submission_freezes_all(env):
     assert {r['revision'] for r in frozen['revisions']} == {1, 2}
     with env.factory() as db:
         assert db.get(Submission, submitted.json()['submission_id']).stats_json == frozen_submission
+
+
+def test_trial_uses_teacher_draft_minimum(env):
+    data = payload(env)
+    data['assignment']['draft_min_chars'] = 3
+    session = trial(env, prepare(env, data))
+    assert action(env, session, 'confirm', '一 二').status_code == 400
+    assert action(env, session, 'confirm', '一 二 三').status_code == 200
+
+
+def test_admin_model_replacement_is_atomic_and_preserves_recorded_calls(env):
+    first = publish(env, prepare(env)).json()[0]
+    second = publish(env, prepare(env, payload(env, title='第二份作业'))).json()[0]
+    sid = student_session(env, first)
+    reading_url = f'/api/v1/writing-sessions/{sid}/readings'
+    original_read = env.client.post(reading_url, json={'purpose': 'first_read'}).json()
+    assert original_read['status'] == 'ready'
+    path = '/api/v1/admin/teaching-models'
+    assert env.client.get(path).status_code == 401
+    UserContext.current_user = SimpleNamespace(id='admin', role='admin')
+    settings = env.client.get(path).json()
+    assert {a['id'] for a in settings['assignments']} == {first['id'], second['id']}
+    default_change = env.client.put(path, json={
+        'expected_snapshot': settings['snapshot'], 'model_ids': ['model-A', 'model-B'],
+        'recommended_model_id': 'model-B',
+    }).json()
+    assert all(a['model_id'] == 'model-A' for a in default_change['assignments'])
+    change = dict(expected_snapshot=default_change['snapshot'], model_ids=['model-B'],
+                  recommended_model_id='model-B')
+    assert env.client.put(path, json=change).status_code == 400
+    assert env.client.get(path).json() == default_change
+    change['replacements'] = {'model-A': 'model-B'}
+    response = env.client.put(path, json=change)
+    assert response.status_code == 200, response.text
+    assert all(a['model_id'] == 'model-B' for a in response.json()['assignments'])
+    assert env.client.put(path, json=change).status_code == 409
+    UserContext.current_user = env.student
+    assert env.client.get(reading_url).json()[0]['model_id'] == 'model-A'
+    followup = env.client.post(reading_url, json={'purpose': 'revision_review', 'model_id': 'model-A'})
+    assert followup.json()['model_id'] == 'model-B'
+    submitted = env.client.post(f'/api/v1/assignments/{first["id"]}/submit', json=_submit_body(sid, DRAFT))
+    assert submitted.status_code == 200, submitted.text
+    with env.factory() as db:
+        evidence = db.get(Submission, submitted.json()['submission_id']).stats_json['teaching_evidence']
+        assert [call['context']['config']['ai']['model_id'] for call in evidence['calls']] == ['model-A', 'model-B']
+
+
+def test_failed_first_read_can_retry_with_replacement_without_resubmitting_draft(env):
+    assignment = publish(env, prepare(env)).json()[0]
+    sid = student_session(env, assignment)
+    url = f'/api/v1/writing-sessions/{sid}/readings'
+    # A supplier model can disappear between publication and the first student request.
+    del env.client.app.state.MODELS['model-A']
+    for _ in range(2):
+        assert env.client.post(url, json={'purpose': 'first_read'}).status_code == 409
+    assert env.client.post(f'/api/v1/assignments/{assignment["id"]}/submit',
+                           json=_submit_body(sid, DRAFT)).status_code == 409
+    with env.factory() as db:
+        assert db.query(EducationNotification).filter_by(
+            user_id=env.teacher.id, type='teaching_model_unavailable'
+        ).count() == 1
+    UserContext.current_user = SimpleNamespace(id='admin', role='admin')
+    path = '/api/v1/admin/teaching-models'
+    before = env.client.get(path).json()
+    result = env.client.put(path, json=dict(expected_snapshot=before['snapshot'], model_ids=['model-B'],
+                                recommended_model_id='model-B', replacements={'model-A': 'model-B'}))
+    assert result.status_code == 200, result.text
+    UserContext.current_user = env.student
+    ready = env.client.post(url, json={'purpose': 'first_read', 'model_id': 'model-A'}).json()
+    assert (ready['status'], ready['model_id'], ready['source_text']) == ('ready', 'model-B', DRAFT)
+    assert env.client.post(url, json={'purpose': 'first_read'}).json()['id'] == ready['id']
+    assert len(env.calls) == 1
+    assert env.client.post(f'/api/v1/assignments/{assignment["id"]}/submit',
+                           json=_submit_body(sid, DRAFT)).status_code == 200
 
 
 def test_trial_fingerprint_ignores_grading_and_invalidates_model_changes(env):

@@ -91,7 +91,6 @@ from open_webui.models.education import (
     ClassroomResponse,
     DashboardItem,
     DashboardResponse,
-    DRAFT_BASELINE_MIN_CHARS,
     DraftBaselineForm,
     EditorOperationCreateForm,
     Education,
@@ -1036,6 +1035,7 @@ async def update_assignment(
             'title',
             'description',
             'due_at',
+            'draft_min_chars',
             'reflection_questions',
             'rubric_schema',
             'score_max',
@@ -2820,7 +2820,7 @@ async def submit_draft_baseline(
     db: Session = Depends(get_session),
 ):
     """修订初稿作业:冻结课外写好的初稿为修改起点,同时成为编辑器的初始正文。"""
-    await run_in_threadpool(lock_assignment, session.assignment_id, db)
+    assignment = await run_in_threadpool(lock_assignment, session.assignment_id, db)
     _ensure_draft_baseline_open(session, db)
 
     content = checked_content(form_data.content_json, form_data.text, session.id, db)
@@ -2828,7 +2828,7 @@ async def submit_draft_baseline(
     pending = (db.get(Note, session.note_id).data or {}).get('pending_draft')
     if pending is not None and (pending['revision'] != form_data.expected_draft_revision or pending['content_json'] != content['json']):
         raise HTTPException(409, 'This draft changed in another window. Reload before saving.')
-    if len(''.join(content['md'].split())) < DRAFT_BASELINE_MIN_CHARS:
+    if len(''.join(content['md'].split())) < max(1, assignment.draft_min_chars):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail='First draft is too short',
@@ -3216,6 +3216,15 @@ async def submit_assignment(
         _ensure_workspace_session_owner(user, session)
         ensure_writing_session_writable(session, db)
         _ensure_draft_baseline_ready(session, db)
+
+        if is_revision(assignment.task_mode):
+            from open_webui.models.education_types import RevisionReading
+
+            completed = db.query(RevisionReading.id).filter_by(
+                writing_session_id=session.id, purpose='first_read', status='ready'
+            ).first()
+            if completed is None:
+                raise HTTPException(409, '请先完成 AI 初读，再提交作业。')
 
         # 修订初稿作业不问「用了 AI 吗」:首轮通读是平台替学生发起的,一定用了。
         # 让学生自报只会多一个和对话记录矛盾的口子,所以这里一律记为用了,不看客户端。

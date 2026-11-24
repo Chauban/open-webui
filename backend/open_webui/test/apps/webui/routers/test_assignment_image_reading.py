@@ -11,7 +11,7 @@ import pytest
 from open_webui.models.education import Submission
 from open_webui.services.education import draft_import, materials
 from open_webui.test.apps.webui.routers.test_education_smoke import UserContext
-from open_webui.test.apps.webui.routers.test_revision_coaching import DRAFT, model_stub, setup, submit
+from open_webui.test.apps.webui.routers.test_revision_coaching import complete_first_read, DRAFT, model_stub, setup, submit
 from open_webui.test.apps.webui.routers.test_writing_materials import (
     education_client as base_client,
 )
@@ -87,7 +87,7 @@ def test_default_off_keeps_originals_and_never_resolves_a_vision_model(
 
 
 @pytest.mark.parametrize('mode', ['from_scratch', 'revise_draft', 'revise_argument'])
-def test_only_assignment_teacher_can_toggle_and_snapshot_setting_is_immutable(education_client, mode):
+def test_only_assignment_teacher_can_toggle_and_snapshot_setting_is_immutable(education_client, monkeypatch, mode):
     client, teacher, other_teacher, student, _, factory = education_client
     assignment, sid, _ = setup(client, teacher, student, mode)
     url = f'/api/v1/assignments/{assignment["id"]}'
@@ -107,6 +107,8 @@ def test_only_assignment_teacher_can_toggle_and_snapshot_setting_is_immutable(ed
         == 422
     )
     UserContext.current_user = student
+    if assignment['task_mode'] != 'from_scratch':
+        complete_first_read(client, sid, monkeypatch)
     submitted = submit(client, assignment, sid)
     assert submitted.status_code == 200, submitted.text
     disabled = switch(client, teacher, student, assignment, False)

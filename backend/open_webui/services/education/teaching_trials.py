@@ -10,7 +10,7 @@ from sqlalchemy import update
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import StreamingResponse
 
-from open_webui.models.education import DRAFT_BASELINE_MIN_CHARS, get_db_context
+from open_webui.models.education import get_db_context
 from open_webui.models.teaching_trials import TeachingPreparation, TeachingTrialEvent, TeachingTrialSession
 from open_webui.services.education.reading_conversation import reading_reply
 from open_webui.services.education.teaching_preparations import (
@@ -104,6 +104,7 @@ async def create_trial(request, user, form, db):
         state = copy.deepcopy(event.state)
         state['status'] = 'active' if state['baseline'] is not None else 'draft'
         state['running_event_id'] = None
+    state['draft_min_chars'] = preparation.payload['assignment'].get('draft_min_chars', 0)
     trial = TeachingTrialSession(
         id=str(uuid.uuid4()),
         owner_id=user.id,
@@ -170,7 +171,7 @@ async def trial_action(request, user, trial_id, form, db):  # noqa: C901 -- expl
         if state['baseline'] is not None:
             raise HTTPException(409, 'First draft has already been confirmed')
         paragraphs = normalize_draft_paragraphs(form.text)
-        if sum(len(''.join(p.split())) for p in paragraphs) < DRAFT_BASELINE_MIN_CHARS:
+        if sum(len(''.join(p.split())) for p in paragraphs) < max(1, state.get('draft_min_chars', 0)):
             raise HTTPException(400, 'First draft is too short')
         state.update(baseline='\n'.join(paragraphs), draft='\n'.join(paragraphs), status='active')
         stage = 'first_read'

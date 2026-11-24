@@ -78,7 +78,6 @@
 	import DraftBaselineStep from '$lib/components/education/DraftBaselineStep.svelte';
 	import EditorImportDialog from '$lib/components/education/EditorImportDialog.svelte';
 	import ThinkingSwitch from '$lib/components/education/ThinkingSwitch.svelte';
-	import EduActionMenu from '$lib/components/education/EduActionMenu.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { refreshChatList, refreshFolderChatLists } from '$lib/stores/chatList';
 	import { prepareAssistantContentForWriting } from '$lib/utils/writing-content';
@@ -320,42 +319,35 @@
 		!chatLoading &&
 		!review;
 	let showWithdrawDraftConfirm = false;
-	let withdrawingDraft = false;
-	$: withdrawDraftMenu = [
-		{
-			label: 'Withdraw first draft and start over',
-			danger: true,
-			onClick: () => (showWithdrawDraftConfirm = true)
-		}
-	];
+	$: if (!canWithdrawDraft) showWithdrawDraftConfirm = false;
 	const withdrawDraft = async () => {
-		if (withdrawingDraft || !writingSession || readingLocked) return;
+		if (!canWithdrawDraft) return;
 		// 正在存的那一笔落库前删掉会被它写回来,等它存完再撤。
-		if (saving) {
-			toast.info($i18n.t('Saving. Please try again in a moment.'));
-			return;
-		}
-		withdrawingDraft = true;
+		if (saving) throw new Error(t('Saving. Please try again in a moment.'));
+		const hadPendingSave = autoSaveTimer !== null;
 		if (autoSaveTimer) clearTimeout(autoSaveTimer);
 		autoSaveTimer = null;
-		unsavedOperations = [];
-		pendingSource = null;
 		try {
 			await resetDraftBaseline(localStorage.token, writingSession.id);
 		} catch (error) {
-			toast.error(resolveErrorMessage(error, t));
-			withdrawingDraft = false;
-			return;
+			if (hadPendingSave && !disposed) scheduleSave();
+			throw new Error(resolveErrorMessage(error, t));
+		}
+		unsavedOperations = [];
+		pendingSource = null;
+		try {
+			backupStore?.clear();
+		} catch {
+			localSafe = false;
 		}
 		lastPersistedActiveChatId = null;
-		showMobileDraft = false;
 		// 撤回后回到第一步,通读结论、补看和「替学生发首轮」都作废。不先清掉的话,跳回作业页、
 		// 重新加载完之前开场白会被当成新对话自动发出去,留下一段没有初稿的空对话。
 		if (revisionTimer) clearTimeout(revisionTimer);
 		revisionTimer = null;
 		await goto(projectBaseUrl, { replaceState: true });
 		await load();
-		withdrawingDraft = false;
+		if (narrowLayout) showMobileDraft = true;
 		void refreshFolderChatLists(workspaceProject?.id);
 		void refreshChatList(localStorage.token, { refreshPinned: true });
 		toast.success($i18n.t('First draft withdrawn. Submit your first draft again.'));
@@ -380,6 +372,8 @@
 	// 工作区已收到确认稿，但辅导配置、阅读记录或模型选择可能仍在加载。
 	let preparingReading = false;
 	$: readingPending = (preparingReading && !isReadOnly) || readingBusy;
+	$: needsFirstRead = isRevision(assignment?.task_mode) &&
+		!readings.some((record) => record.purpose === 'first_read' && record.status === 'ready');
 	$: readingProgressInChat =
 		readings.some((record) => record.status === 'running') ||
 		(readingPending && readings.length === 0);
@@ -394,7 +388,7 @@
 		isAssignment && isRevision(assignment?.task_mode) && !!writingSession?.draft_baseline_at;
 	const runReading = async (purpose: ReadingPurpose) => {
 		if (disposed || readingBusy || !writingSession?.id || isReadOnly) return;
-		if (!selectedModelId) {
+		if (purpose !== 'first_read' && assignment?.task_mode !== 'revise_argument' && !selectedModelId) {
 			toast.error($i18n.t('Please select a model.'));
 			return;
 		}
@@ -418,7 +412,8 @@
 					if (current() && writingSession?.id === sessionId) readings = records;
 				}
 			);
-			await requestRevisionReading(localStorage.token, sessionId, purpose, selectedModelId);
+			await requestRevisionReading(token, sessionId, purpose,
+				assignment?.task_mode === 'revise_argument' ? undefined : selectedModelId);
 			if (!current()) return;
 			stopReadingProgress?.();
 			const next = await getRevisionReadings(token, sessionId);
@@ -427,7 +422,10 @@
 			if (readings.some((record) => record.status === 'running'))
 				revisionTimer = setTimeout(() => void refreshRevisionItems(), 4000);
 		} catch (error) {
-			if (current()) toast.error(resolveErrorMessage(error, t));
+			if (current()) {
+				toast.error(resolveErrorMessage(error, t));
+				revisionTimer = setTimeout(() => void refreshRevisionItems(), 4000);
+			}
 		} finally {
 			stopReadingProgress?.();
 			stopReadingProgress = null;
@@ -462,10 +460,6 @@
 			!readings.some((r) => r.purpose === 'first_read')
 		) {
 			preparingReading = true;
-			if (!selectedModelId) {
-				revisionTimer = setTimeout(() => void resumeRevisionReading(true), 700);
-				return;
-			}
 			await runReading('first_read');
 		}
 		preparingReading = false;
@@ -1063,7 +1057,7 @@
 		saveReflectionDraft();
 	};
 	const openSubmitFlow = async () => {
-		if (editorLocked) return;
+		if (editorLocked || needsFirstRead) return;
 		try {
 			await refreshSubmissionSettings();
 		} catch (error) {
@@ -1102,7 +1096,7 @@
 	};
 
 	const submit = async () => {
-		if (!canSubmitAssignment || editorLocked || isSubmitting) return;
+		if (!canSubmitAssignment || editorLocked || isSubmitting || needsFirstRead) return;
 		const reflectionError = getReflectionAnswersError(
 			reflectionQuestions,
 			aiUsage,
@@ -1296,6 +1290,19 @@
 	}
 </script>
 
+{#snippet withdrawDraftButton()}
+	{#if canWithdrawDraft}
+		<EduButton
+			size="sm"
+			variant="danger"
+			aria-haspopup="dialog"
+			on:click={() => (showWithdrawDraftConfirm = true)}
+		>
+			{$i18n.t('Withdraw first draft')}
+		</EduButton>
+	{/if}
+{/snippet}
+
 <svelte:window
 	bind:innerWidth={viewportWidth}
 	on:beforeunload={(event) => {
@@ -1351,6 +1358,14 @@
 		rightPanelClassName="hidden lg:flex"
 	>
 		<svelte:fragment slot="input-accessory">
+			{#if canSubmitAssignment && needsFirstRead && !readingLocked}
+				<div role="status" class="px-4 py-2 text-sm text-amber-700 dark:text-amber-300">
+					{t('初稿已保存。请先完成 AI 初读，再提交作业。')}
+					<button class="ml-2 underline" disabled={editorLocked} on:click={() => runReading('first_read')}>
+						{t('重试初读')}
+					</button>
+				</div>
+			{/if}
 			{#if chatSaveBlocked || saveProblem || recoveryBackups.length}
 				<p role="status" class="px-4 py-2 text-sm text-amber-700 dark:text-amber-300">
 					{t(
@@ -1460,9 +1475,10 @@
 									{saveStatusDisplay}
 								</div>
 							{/if}
+							{@render withdrawDraftButton()}
 							{#if canSubmitAssignment}
 								<EduButton
-									disabled={editorLocked || recoveryBackups.length > 0}
+									disabled={editorLocked || needsFirstRead || recoveryBackups.length > 0}
 									variant="primary"
 									on:click={() => {
 										loadReflectionDraft();
@@ -1471,9 +1487,6 @@
 								>
 									{$i18n.t(isSubmitted ? 'Resubmit Assignment' : 'Submit Assignment')}
 								</EduButton>
-							{/if}
-							{#if canWithdrawDraft}
-								<EduActionMenu items={withdrawDraftMenu} />
 							{/if}
 						</div>
 					</div>
@@ -1497,7 +1510,7 @@
 								<AssignmentBrief {assignment} />
 								{#if hasRevisionCoaching && !isReadOnly && !isSubmitted && !readingLocked}
 									<p class="mt-2 text-xs leading-relaxed text-gray-500">
-										{$i18n.t('初稿已保存，还未交作业。你可以边聊边改，完成后点击「提交作业」。')}
+										{$i18n.t(needsFirstRead ? '初稿已保存。请先完成 AI 初读，再提交作业。' : '初稿已保存，还未交作业。你可以边聊边改，完成后点击「提交作业」。')}
 									</p>
 								{/if}
 								<ChallengeChecklist
@@ -1564,6 +1577,7 @@
 						{/if}
 						{#if needsDraftBaseline}
 							<DraftBaselineStep
+								minChars={assignment?.draft_min_chars ?? 0}
 								initialState={pendingDraft}
 								photoTranscriptionEnabled={assignment?.photo_transcription_enabled === true}
 								imageReadingEnabled={assignment?.image_reading_enabled === true}
@@ -1660,24 +1674,31 @@
 			<div
 				class="pointer-events-auto flex items-center gap-2 rounded-full border border-gray-200 dark:border-gray-800 bg-white/95 dark:bg-gray-850/95 px-3 py-2 shadow-lg backdrop-blur"
 			>
-				{#if !isReadOnly}
+				{#if !isReadOnly && !canWithdrawDraft}
 					<div
 						class="rounded-full bg-stone-100 dark:bg-gray-800 px-3 py-1 text-xs text-gray-600 dark:text-gray-400"
 					>
 						{saveStatusDisplay}
 					</div>
 				{/if}
+				{@render withdrawDraftButton()}
 				<EduButton
 					size="sm"
+					class={canWithdrawDraft ? 'flex-col !gap-0' : ''}
 					on:click={() => {
 						showMobileDraft = true;
 					}}
 				>
 					{$i18n.t(isAssignment ? 'Assignment Content' : 'Writing Content')}
+					{#if canWithdrawDraft}
+						<span class="text-xs font-normal text-gray-500 dark:text-gray-400">
+							{saveStatusDisplay}
+						</span>
+					{/if}
 				</EduButton>
 				{#if canSubmitAssignment}
 					<EduButton
-						disabled={editorLocked || recoveryBackups.length > 0}
+						disabled={editorLocked || needsFirstRead || recoveryBackups.length > 0}
 						variant="primary"
 						size="sm"
 						on:click={() => {
@@ -1705,8 +1726,8 @@
 						? 'max-h-[40%] overflow-y-auto'
 						: ''}"
 				>
-					<div class="flex items-start justify-between gap-4">
-						<div class="min-w-0 flex-1">
+					<div class="flex flex-wrap items-start gap-2">
+						<div class="min-w-0 {canWithdrawDraft ? 'basis-full' : 'flex-1'}">
 							<div class="text-xs text-gray-500 dark:text-gray-400">
 								{$i18n.t(isAssignment ? 'Assignment Writing' : 'Writing')}
 							</div>
@@ -1721,9 +1742,10 @@
 								</p>
 							{/if}
 						</div>
+						{@render withdrawDraftButton()}
 						{#if canSubmitAssignment}
 							<EduButton
-								disabled={editorLocked || recoveryBackups.length > 0}
+								disabled={editorLocked || needsFirstRead || recoveryBackups.length > 0}
 								size="sm"
 								variant="primary"
 								on:click={() => {
@@ -1734,9 +1756,6 @@
 							>
 								{$i18n.t(isSubmitted ? 'Resubmit Assignment' : 'Submit Assignment')}
 							</EduButton>
-						{/if}
-						{#if canWithdrawDraft}
-							<EduActionMenu items={withdrawDraftMenu} />
 						{/if}
 						<EduButton
 							size="sm"
@@ -1767,7 +1786,7 @@
 								<AssignmentBrief {assignment} />
 								{#if hasRevisionCoaching && !isReadOnly && !isSubmitted && !readingLocked}
 									<p class="mt-2 text-xs leading-relaxed text-gray-500">
-										{$i18n.t('初稿已保存，还未交作业。你可以边聊边改，完成后点击「提交作业」。')}
+										{$i18n.t(needsFirstRead ? '初稿已保存。请先完成 AI 初读，再提交作业。' : '初稿已保存，还未交作业。你可以边聊边改，完成后点击「提交作业」。')}
 									</p>
 								{/if}
 								<ChallengeChecklist
@@ -1822,6 +1841,7 @@
 						{/if}
 						{#if needsDraftBaseline}
 							<DraftBaselineStep
+								minChars={assignment?.draft_min_chars ?? 0}
 								initialState={pendingDraft}
 								photoTranscriptionEnabled={assignment?.photo_transcription_enabled === true}
 								imageReadingEnabled={assignment?.image_reading_enabled === true}
@@ -1931,11 +1951,21 @@
 			variant="danger"
 			bind:show={showWithdrawDraftConfirm}
 			title={$i18n.t('Withdraw first draft and start over')}
-			message={$i18n.t(
-				'Your first draft, every edit since, and all AI conversations in this assignment will be deleted. You will submit your first draft again. This cannot be undone.'
-			)}
-			on:confirm={withdrawDraft}
-		/>
+			cancelLabel={$i18n.t('Keep editing')}
+			confirmLabel={$i18n.t('Confirm withdrawal')}
+			onConfirm={withdrawDraft}
+		>
+			<p class="font-semibold">
+				{$i18n.t(
+					'Withdrawing means starting this assignment from scratch and permanently losing all your progress.'
+				)}
+			</p>
+			<ul class="mt-3 list-disc space-y-1 ps-5">
+				<li>{$i18n.t('Your confirmed first draft and current text')}</li>
+				<li>{$i18n.t('All edits and saved versions')}</li>
+				<li>{$i18n.t('AI reading feedback and the entire conversation')}</li>
+			</ul>
+		</ConfirmDialog>
 	{/if}
 
 	{#if isAssignment && showChallenge && assignment}
@@ -2004,7 +2034,7 @@
 				<EduButton
 					variant="primary"
 					class="flex items-center gap-2 disabled:cursor-not-allowed"
-					disabled={isSubmitting || editorLocked}
+					disabled={isSubmitting || editorLocked || needsFirstRead}
 					on:click={submit}
 				>
 					{#if isSubmitting}

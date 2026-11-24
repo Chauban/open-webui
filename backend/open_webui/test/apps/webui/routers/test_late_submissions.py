@@ -12,6 +12,7 @@ from open_webui.models.education import SubmissionReview
 from open_webui.services.education.submission_timing import build_submission_timing
 from open_webui.test.apps.webui.routers.test_education_smoke import (
     UserContext,
+    finish_first_read as finish_first_read,
     _setup_revise_draft_assignment,
     _setup_submitted_assignment,
     _submit_assignment,
@@ -75,7 +76,7 @@ def test_pending_resubmission_updates_timing_but_return_preserves_prior_round(ed
     ]
 
 
-def test_late_revision_can_confirm_reset_and_submit_baseline(education_client):
+def test_late_revision_can_confirm_reset_and_submit_baseline(education_client, finish_first_read):
     client, teacher, _, student, _, _ = education_client
     assignment, session_id = _setup_revise_draft_assignment(client, teacher, student, due_at=1)
     baseline_url = f'/api/v1/writing-sessions/{session_id}/draft-baseline'
@@ -83,8 +84,12 @@ def test_late_revision_can_confirm_reset_and_submit_baseline(education_client):
         confirmed = client.post(baseline_url, json={'text': 'A university writing draft. ' * 30})
         assert confirmed.status_code == 200, confirmed.text
         if _ == 0:
+            finish_first_read(client, session_id)
             reset = client.delete(baseline_url)
             assert reset.status_code == 200, reset.text
+    # A reading of the withdrawn draft cannot satisfy the new baseline.
+    assert _submit_assignment(client, assignment['id']).status_code == 409
+    finish_first_read(client, session_id)
     submitted = _submit_assignment(client, assignment['id'])
     assert submitted.status_code == 200, submitted.text
 
@@ -95,7 +100,9 @@ def test_late_argument_can_confirm_baseline_and_submit(env):
     response = publish(env, prepare(env, data))
     assert response.status_code == 200, response.text
     assignment = response.json()[0]
-    student_session(env, assignment)
+    sid = student_session(env, assignment)
+    first = env.client.post(f'/api/v1/writing-sessions/{sid}/readings', json={'purpose': 'first_read'})
+    assert first.json()['status'] == 'ready'
     submitted = _submit_assignment(env.client, assignment['id'])
     assert submitted.status_code == 200, submitted.text
     UserContext.current_user = env.teacher

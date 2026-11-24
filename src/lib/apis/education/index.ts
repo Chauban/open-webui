@@ -287,6 +287,7 @@ export type AiStepPolicy = {
 export const createAssignment = async (
 	token: string,
 	payload: {
+		draft_min_chars?: number;
 		photo_transcription_enabled?: boolean;
 		image_reading_enabled?: boolean;
 		title: string;
@@ -441,6 +442,7 @@ export const updateAssignment = async (
 		expected_config_revision: number;
 		change_summary: string;
 		adopt_latest_teaching_config?: boolean;
+		draft_min_chars?: number;
 		photo_transcription_enabled?: boolean;
 		image_reading_enabled?: boolean;
 		title?: string;
@@ -1418,7 +1420,7 @@ export const requestRevisionReading = (
 	token: string,
 	sessionId: string,
 	purpose: ReadingPurpose,
-	modelId: string
+	modelId?: string
 ): Promise<RevisionReading> =>
 	fetch(`${WEBUI_API_BASE_URL}/writing-sessions/${sessionId}/readings`, {
 		method: 'POST',

@@ -41,6 +41,7 @@ beforeEach(() => {
 		rubric_schema: { criteria: [] },
 		task_mode: 'from_scratch',
 		coaching_style: 'balanced',
+		draft_min_chars: 0,
 		photo_transcription_enabled: false,
 		image_reading_enabled: false,
 		challenge_enabled: false,

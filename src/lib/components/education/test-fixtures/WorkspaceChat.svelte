@@ -5,6 +5,7 @@
 	export let revisionMode = false;
 	export let readingBusy = false;
 	export let conversationLoading = false;
+	export let showRightPanel = true;
 	export let onSelectedModelsChange;
 	export let beforeSend: () => Promise<void>;
 	let prompt = '';
@@ -35,5 +36,5 @@
 		}}>Test send</button
 	>
 	{#if sent}<span>Test sent</span>{/if}
-	<slot name="right-panel" />
+	{#if showRightPanel}<slot name="right-panel" />{/if}
 </div>

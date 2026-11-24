@@ -16,6 +16,7 @@ import {
 export type RubricCriterionDraft = { key: string; label: string; maxScore: string };
 
 export type AssignmentDraft = {
+	draftMinChars?: number;
 	photoTranscriptionEnabled: boolean;
 	imageReadingEnabled: boolean;
 	scoringMode: 'dimensions' | 'total';
@@ -41,6 +42,7 @@ export const draftThinkingFrom = (params?: AssignmentModelParams | null) => ({
 });
 
 export type AssignmentPayload = {
+	draft_min_chars: number;
 	photo_transcription_enabled: boolean;
 	image_reading_enabled: boolean;
 	scoring_mode: 'dimensions' | 'total';
@@ -96,6 +98,10 @@ export const buildAssignmentPayload = (
 	if (!draft.title.trim()) return { error: t('Assignment title is required.') };
 	if (!draft.dueAt) return { error: t('Assignment due time is required.') };
 
+	if (draft.taskMode !== 'from_scratch' && draft.draftMinChars != null &&
+		(!Number.isInteger(draft.draftMinChars) || draft.draftMinChars < 0 || draft.draftMinChars > 200000)) {
+		return { error: t('初稿最低字数须为 0 到 200000 之间的整数。') };
+	}
 	const scoringError = getAssignmentScoringError(draft, t);
 	if (scoringError) return { error: scoringError };
 	const scoreMax = Number(draft.scoreMax);
@@ -122,6 +128,7 @@ export const buildAssignmentPayload = (
 
 	return {
 		payload: {
+			draft_min_chars: draft.taskMode === 'from_scratch' ? 0 : (draft.draftMinChars ?? 0),
 			photo_transcription_enabled: draft.photoTranscriptionEnabled,
 			image_reading_enabled: draft.imageReadingEnabled,
 			scoring_mode: draft.scoringMode,

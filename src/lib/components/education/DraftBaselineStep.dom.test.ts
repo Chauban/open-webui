@@ -42,7 +42,7 @@ afterEach(() => {
 	cleanup();
 	vi.clearAllMocks();
 });
-const start = async (imageReadingEnabled = false, photoTranscriptionEnabled = false) => {
+const start = async (imageReadingEnabled = false, photoTranscriptionEnabled = false, minChars = 0) => {
 	const onSubmitted = vi.fn();
 	render(DraftBaselineStep, {
 		props: {
@@ -50,6 +50,7 @@ const start = async (imageReadingEnabled = false, photoTranscriptionEnabled = fa
 			initialState: { content_json: textDocument(''), materials: [], revision: 0 },
 			imageReadingEnabled,
 			photoTranscriptionEnabled,
+			minChars,
 			onSubmitted
 		},
 		context
@@ -85,12 +86,12 @@ test('初稿输入同步备份，刷新后明确选择恢复，保存失败保�
 	expect(api.submitDraftBaseline).not.toHaveBeenCalled();
 });
 test('正文门槛不计空白，确认提交完整文档', async () => {
-	const done = await start();
-	await fireEvent.input(input(), { target: { value: '字'.repeat(199) + '  \n' } });
+	const done = await start(false, false, 17);
+	await fireEvent.input(input(), { target: { value: '字'.repeat(16) + '  \n' } });
 	expect((screen.getByText('Confirm this is my first draft') as HTMLButtonElement).disabled).toBe(
 		true
 	);
-	const text = '字'.repeat(220);
+	const text = '字'.repeat(17);
 	await fireEvent.input(input(), { target: { value: text } });
 	await fireEvent.click(screen.getByText('Confirm this is my first draft'));
 	await waitFor(() => expect(done).toHaveBeenCalledOnce());
@@ -175,7 +176,7 @@ test('识图关闭仍能上传照片，图像内容不充当字数', async () =>
 		true
 	);
 	expect(
-		screen.getByText('请补充至少 200 字正文。图片和未转入正文的识别文字不计入字数。')
+		screen.getByText('图片和未转入正文的识别文字不计入字数。请补充正文。')
 	).toBeTruthy();
 });
 test('照片按文件名自然排序并保留原件，不在浏览器压缩替换原件', async () => {

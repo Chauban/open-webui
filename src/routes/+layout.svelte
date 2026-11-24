@@ -904,6 +904,8 @@
 
 		if (data?.type === 'assignment_published') {
 			toast.info($i18n.t('New assignment: {{title}}', { title }));
+		} else if (data?.type === 'teaching_model_unavailable') {
+			toast.warning($i18n.t('《{{title}}》的初读模型不可用，请检查作业的 AI 辅导设置。', { title }));
 		} else if (data?.type === 'submission_created') {
 			toast.info(
 				$i18n.t('{{name}} submitted {{title}}', { name: payload.student_name ?? '', title })

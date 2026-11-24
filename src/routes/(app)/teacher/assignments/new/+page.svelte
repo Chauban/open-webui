@@ -125,6 +125,7 @@
 						scoreMax: String(source.assignment.score_max),
 						coachingStyle: source.assignment.coaching_style,
 						taskMode: source.assignment.task_mode,
+						draftMinChars: source.assignment.draft_min_chars || undefined,
 						photoTranscriptionEnabled: source.assignment.photo_transcription_enabled,
 						imageReadingEnabled: source.assignment.image_reading_enabled,
 						challengeEnabled: source.assignment.challenge_enabled ?? false,

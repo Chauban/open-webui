@@ -5,7 +5,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[5]))
 import pytest
 from open_webui.services.education.process_review import build_process_catalog, catalog_metadata, compare_snapshots
 from open_webui.test.apps.webui.routers.test_education_smoke import education_client, UserContext
-from open_webui.test.apps.webui.routers.test_revision_coaching import setup, submit, DRAFT
+from open_webui.test.apps.webui.routers.test_revision_coaching import complete_first_read, setup, submit, DRAFT
 
 
 def facts():
@@ -68,9 +68,10 @@ def test_mismatched_version_id_keeps_actual_model_snapshot_and_empty_start():
     assert catalog['snapshots'][0]['kind'] == 'empty_start'
 
 
-def test_process_api_is_frozen_scoped_and_rejects_resubmit_conflict(education_client):
+def test_process_api_is_frozen_scoped_and_rejects_resubmit_conflict(education_client, monkeypatch):
     client, teacher, other_teacher, student, _, factory = education_client
     assignment, sid, _ = setup(client, teacher, student, scoring='total')
+    complete_first_read(client, sid, monkeypatch)
     version = client.post(
         f'/api/v1/writing-sessions/{sid}/versions',
         json={'trigger_type': 'autosave', 'content_text': DRAFT + '中间修改。'},

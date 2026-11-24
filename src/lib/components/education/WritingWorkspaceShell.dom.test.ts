@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { readable, type Writable } from 'svelte/store';
 import { tick } from 'svelte';
 import { page } from '$app/stores';
@@ -8,6 +8,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
 const api = vi.hoisted(() => ({
 	submitDraftBaseline: vi.fn(),
+	resetDraftBaseline: vi.fn(),
 	getRevisionReadings: vi.fn(),
 	requestRevisionReading: vi.fn(),
 	getWritingProcessSummary: vi.fn(),
@@ -60,11 +61,6 @@ vi.mock('./ChallengeChecklist.svelte', () => import('./test-fixtures/WorkspaceEm
 vi.mock('./ReflectionAnswerForm.svelte', () => import('./test-fixtures/WorkspaceEmpty.svelte'));
 vi.mock('./EditorImportDialog.svelte', () => import('./test-fixtures/WorkspaceEmpty.svelte'));
 vi.mock('./ThinkingSwitch.svelte', () => import('./test-fixtures/WorkspaceEmpty.svelte'));
-vi.mock('./EduActionMenu.svelte', () => import('./test-fixtures/WorkspaceEmpty.svelte'));
-vi.mock(
-	'$lib/components/common/ConfirmDialog.svelte',
-	() => import('./test-fixtures/WorkspaceEmpty.svelte')
-);
 
 import WritingWorkspaceShell from './WritingWorkspaceShell.svelte';
 import { createWritingBackup } from '$lib/utils/writing-backup';
@@ -130,6 +126,7 @@ beforeEach(() => {
 });
 afterEach(() => {
 	cleanup();
+	vi.unstubAllGlobals();
 	vi.resetAllMocks();
 	sessionStorage.clear();
 });
@@ -144,6 +141,78 @@ async function confirmDraft() {
 	);
 	await fireEvent.click(screen.getByText('Confirm this is my first draft'));
 }
+
+test.each([
+	{ width: 1280, mode: 'revise_draft' },
+	{ width: 375, mode: 'revise_argument' }
+])('$mode 可直接查看撤回后果，取消保留稿件，确认后才返回初稿步骤', async ({ width, mode }) => {
+	vi.stubGlobal('innerWidth', width);
+	const data = workspace(true);
+	data.assignment.task_mode = mode;
+	const loadWorkspace = vi.fn().mockResolvedValueOnce(data).mockResolvedValue(workspace());
+	render(WritingWorkspaceShell, { props: { loadWorkspace }, context });
+	const withdraw = await screen.findByRole('button', { name: 'Withdraw first draft' });
+	await fireEvent.click(withdraw);
+	const dialog = await screen.findByRole('dialog', { name: 'Withdraw first draft and start over' });
+	expect(within(dialog).getByText('Your confirmed first draft and current text')).toBeTruthy();
+	expect(within(dialog).getByText('All edits and saved versions')).toBeTruthy();
+	expect(within(dialog).getByText('AI reading feedback and the entire conversation')).toBeTruthy();
+	expect(within(dialog).getByRole('list').previousElementSibling?.textContent?.trim()).toBe(
+		'Withdrawing means starting this assignment from scratch and permanently losing all your progress.'
+	);
+	await fireEvent.click(within(dialog).getByRole('button', { name: 'Keep editing' }));
+	expect(screen.queryByRole('dialog')).toBeNull();
+	expect(api.resetDraftBaseline).not.toHaveBeenCalled();
+	expect(loadWorkspace).toHaveBeenCalledTimes(1);
+
+	let draftPanel: HTMLElement = document.body;
+	if (width < 1024) {
+		await fireEvent.click(screen.getByRole('button', { name: /Assignment Content/ }));
+		draftPanel = await screen.findByRole('dialog', { name: 'Assignment Writing' });
+	}
+	const editor = within(draftPanel).getByTestId('workspace-editor') as HTMLTextAreaElement;
+	expect(editor.value).toBe(JSON.stringify(draftJson));
+	await fireEvent.click(within(draftPanel).getByRole('button', { name: 'Withdraw first draft' }));
+	const confirm = screen.getByRole('button', { name: 'Confirm withdrawal' });
+	const request = deferred<void>();
+	api.resetDraftBaseline.mockReturnValueOnce(request.promise);
+	await fireEvent.click(confirm);
+	expect((confirm as HTMLButtonElement).disabled).toBe(true);
+	expect(api.resetDraftBaseline).toHaveBeenCalledTimes(1);
+	expect(api.resetDraftBaseline).toHaveBeenCalledWith(localStorage.token, 'session-1');
+	request.resolve();
+	expect(await screen.findByPlaceholderText('Paste your first draft here, or drop a file in')).toBeTruthy();
+	expect(screen.queryByRole('button', { name: 'Withdraw first draft' })).toBeNull();
+});
+
+test.each(['submitted', 'returned'])('交过的作业不能撤回初稿（%s）', async (status) => {
+	const data = workspace(true);
+	render(WritingWorkspaceShell, {
+		props: {
+			loadWorkspace: async () => ({
+				...data,
+				writing_session: { ...data.writing_session, status: status === 'returned' ? 'draft' : status },
+				review: status === 'returned' ? { review_status: 'returned' } : null
+			})
+		},
+		context
+	});
+	await screen.findByTestId('workspace-editor');
+	expect(screen.queryByRole('button', { name: 'Withdraw first draft' })).toBeNull();
+});
+
+test('撤回失败时弹窗提示错误，未保存的修改仍可保存', async () => {
+	api.resetDraftBaseline.mockRejectedValueOnce(new Error('Withdrawal failed'));
+	await openWriting();
+	await fireEvent.input(screen.getByTestId('workspace-editor'), { target: { value: '刚刚改写的正文' } });
+	await fireEvent.click(screen.getByRole('button', { name: 'Withdraw first draft' }));
+	const dialog = await screen.findByRole('dialog', { name: 'Withdraw first draft and start over' });
+	await fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm withdrawal' }));
+	expect((await within(dialog).findByRole('alert')).textContent).toContain('Withdrawal failed');
+	await fireEvent.click(within(dialog).getByRole('button', { name: 'Keep editing' }));
+	await waitFor(() => expect(api.createEditorOperations).toHaveBeenCalled(), { timeout: 2500 });
+	expect(api.autosaveWritingSession.mock.calls[0][2].content_text).toBe('刚刚改写的正文');
+});
 
 test.each([false, true])('past-due writing stays editable unless graded (%s)', async (graded) => {
 	const data = {
@@ -186,14 +255,17 @@ function expectWaitingWithDraft() {
 	).toBe(true);
 }
 
-test('确认初稿后才启动初读，期间锁定完整稿件，失败保留稿件', async () => {
+test.each(['revise_argument', 'revise_draft'])('%s 确认初稿后启动初读，失败保留原稿并可重试', async (mode) => {
 	const reading = deferred<void>();
 	api.requestRevisionReading.mockReturnValueOnce(reading.promise);
+	const pending = workspace();
+	pending.assignment.task_mode = mode;
 	const confirmed = workspace(true);
+	confirmed.assignment.task_mode = mode;
 	confirmed.initial_state.readings = [];
 	render(WritingWorkspaceShell, {
 		props: {
-			loadWorkspace: vi.fn().mockResolvedValueOnce(workspace()).mockResolvedValueOnce(confirmed)
+			loadWorkspace: vi.fn().mockResolvedValueOnce(pending).mockResolvedValueOnce(confirmed)
 		},
 		context
 	});
@@ -209,6 +281,12 @@ test('确认初稿后才启动初读，期间锁定完整稿件，失败保留�
 	);
 	expect(api.getPendingWritingDraft).not.toHaveBeenCalled();
 	expect(api.teachingApi).not.toHaveBeenCalled();
+	const submitButton = screen.getByRole('button', { name: 'Submit Assignment' }) as HTMLButtonElement;
+	expect(submitButton.disabled).toBe(true);
+	api.getRevisionReadings.mockResolvedValue([{ purpose: 'first_read', status: 'ready' }]);
+	await fireEvent.click(screen.getByRole('button', { name: '重试初读' }));
+	await waitFor(() => expect(submitButton.disabled).toBe(false));
+	expect(api.requestRevisionReading).toHaveBeenCalledTimes(2);
 });
 
 async function openWriting() {

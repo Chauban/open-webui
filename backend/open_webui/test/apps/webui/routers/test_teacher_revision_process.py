@@ -6,13 +6,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[5]))
 
 import pytest
 from open_webui.test.apps.webui.routers.test_education_smoke import education_client, UserContext
-from open_webui.test.apps.webui.routers.test_revision_coaching import setup, submit
+from open_webui.test.apps.webui.routers.test_revision_coaching import complete_first_read, setup, submit
 
 
 @pytest.mark.parametrize('preset', [True, False])
-def test_teacher_sees_frozen_review_action_and_reading_source(education_client, preset):
+def test_teacher_sees_frozen_review_action_and_reading_source(education_client, monkeypatch, preset):
     client, teacher, _, student, _, factory = education_client
     assignment, sid, _ = setup(client, teacher, student, scoring='total')
+    complete_first_read(client, sid, monkeypatch)
     stamp = int(time.time())
     user_message = {
         'id': 'question',
@@ -65,4 +66,4 @@ def test_teacher_sees_frozen_review_action_and_reading_source(education_client, 
     assert question['auto_started'] is preset
     assert detail['round_prompt_count'] == (0 if preset else 1)
     contexts = detail['submission']['stats_json']['chat_contexts']
-    assert contexts[0]['source_text'] == 'AI 当时读过的稿件'
+    assert any(row['source_text'] == 'AI 当时读过的稿件' for row in contexts)

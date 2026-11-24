@@ -37,7 +37,7 @@
 	export let onSubmitted: () => Promise<void> | void;
 	const i18n = getContext<Writable<I18n>>('i18n');
 	const t = (key: string) => get(i18n).t(key);
-	const MIN_CHARS = 200;
+	export let minChars = 0;
 	let document: WritingNode = textDocument('');
 	let materials: WritingMaterial[] = [];
 	let revision = 0;
@@ -110,7 +110,7 @@
 	let queue = Promise.resolve();
 	let disposed = false;
 	$: text = documentText(document);
-	$: charCount = text.replace(/\s/g, '').length;
+	$: charCount = Array.from(text.replace(/\s/g, '')).length;
 	$: busy = loading || loadFailed || importing || submitting;
 	const fingerprint = () => JSON.stringify({ document, materials: materials.map((m) => m.id) });
 	onMount(() => {
@@ -205,7 +205,7 @@
 		changed();
 	}
 	async function confirm() {
-		if (busy || backups.length || charCount < MIN_CHARS) return;
+		if (busy || backups.length || charCount < Math.max(1, minChars)) return;
 		submitting = true;
 		try {
 			await save();
@@ -327,10 +327,10 @@
 				}}
 			/>
 		</div>
-		{#if charCount < MIN_CHARS && hasDocumentContent(document)}<p
+		{#if charCount < Math.max(1, minChars) && hasDocumentContent(document)}<p
 				class="mt-2 shrink-0 text-xs text-gray-500"
 			>
-				{$i18n.t('请补充至少 200 字正文。图片和未转入正文的识别文字不计入字数。')}
+				{$i18n.t('图片和未转入正文的识别文字不计入字数。请补充正文。')}
 			</p>{/if}
 		{#if error}<p role="alert" class="mt-2 shrink-0 text-sm text-red-600">{error}</p>{/if}
 	</div>
@@ -338,13 +338,13 @@
 		class="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-gray-200 bg-stone-50 pt-3 pb-[env(safe-area-inset-bottom)] dark:border-gray-700 dark:bg-gray-900"
 	>
 		<div
-			class="text-xs tabular-nums {charCount < MIN_CHARS ? 'text-gray-500' : 'text-emerald-600'}"
+			class="text-xs tabular-nums {charCount < Math.max(1, minChars) ? 'text-gray-500' : 'text-emerald-600'}"
 		>
-			{$i18n.t('{{count}} / {{min}} characters at least', { count: charCount, min: MIN_CHARS })}
+			{minChars ? $i18n.t('{{count}} / {{min}} characters at least', { count: charCount, min: minChars }) : $i18n.t('{{COUNT}} characters', { COUNT: charCount })}
 		</div>
 		<EduButton
 			variant="primary"
-			disabled={busy || backups.length > 0 || charCount < MIN_CHARS}
+			disabled={busy || backups.length > 0 || charCount < Math.max(1, minChars)}
 			on:click={confirm}
 			>{submitting ? $i18n.t('Saving...') : $i18n.t('Confirm this is my first draft')}</EduButton
 		>

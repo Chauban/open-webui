@@ -11,14 +11,14 @@ export const TASK_TYPES = [
 	{
 		key: 'revise_draft',
 		title: '修订初稿（文献综述）',
-		hint: '确认文献综述初稿后，按需讨论、修改并自主提交。',
+		hint: '文献综述初稿须完成 AI 初读后提交，学生可按需讨论和修改。',
 		requiresBaseline: true,
 		readerCheck: false
 	},
 	{
 		key: 'revise_argument',
 		title: '修订初稿（段落论证）',
-		hint: '确认论证初稿后，围绕观点、理由、证据与回应讨论，自主决定提交。',
+		hint: '论证初稿须完成 AI 初读后提交，学生可围绕观点、理由、证据与回应讨论。',
 		requiresBaseline: true,
 		readerCheck: false
 	}

@@ -1,4 +1,4 @@
-"""Voluntary readings tied to immutable source text and teaching context."""
+"""Revision readings tied to a saved draft and its teaching context."""
 
 import hashlib
 import asyncio
@@ -10,6 +10,7 @@ import uuid
 import unicodedata
 from typing import Literal
 
+import anyio
 from starlette.concurrency import run_in_threadpool
 from sqlalchemy import func
 
@@ -271,48 +272,6 @@ async def read_revision(request, user, session, assignment, form, db, dialogue):
     ]
     feedback = None
     attempts = prior_attempts
-    for attempt in range(2):
-        raw = None
-        try:
-            if form.purpose == 'first_read':
-                response = await call_step_model(
-                    request, user, step='first_read', model=model, messages=messages, policy=policy
-                )
-            elif form.purpose == 'revision_review':
-                response = await call_step_model(
-                    request, user, step='revision_review', model=model, messages=messages, policy=policy
-                )
-            else:
-                response = await call_step_model(
-                    request, user, step='whole_review', model=model, messages=messages, policy=policy
-                )
-            raw = response['choices'][0]['message']['content']
-            feedback = ReadingFeedback.model_validate(_extract_json_object(raw))
-            observations = [*feedback.focus, *([feedback.strength] if feedback.strength else [])]
-            for item in observations:
-                anchored = anchor_quote(source, item.quote)
-                if anchored is None:
-                    raise ValueError('Reading quotes did not match the source draft')
-                item.quote = anchored
-            attempts.append({'input': copy.deepcopy(messages), 'output': raw, 'valid': True})
-            break
-        except Exception as error:
-            attempts.append(
-                {'input': copy.deepcopy(messages), 'output': raw, 'valid': False, 'error_type': type(error).__name__}
-            )
-            log.warning('Revision reading failed (%s, attempt %s): %s', reading_id, attempt + 1, type(error).__name__)
-            feedback = None
-            if raw is None:
-                break
-            messages.append({'role': 'assistant', 'content': raw})
-            messages.append(
-                {
-                    'role': 'user',
-                    'content': '输出未满足格式或逐字引文要求。请重新检查：understanding、strength、focus、overview 是四个同级字段，focus 不能放入 strength。引文必须逐字存在于当前保存稿。只按以下 JSON schema 输出，不改动事实判断：'
-                    + json.dumps(ReadingFeedback.model_json_schema(), ensure_ascii=False),
-                }
-            )
-
     def persist_reading():
         lock_assignment(assignment.id, db)
         db.expire_all()
@@ -342,7 +301,55 @@ async def read_revision(request, user, session, assignment, form, db, dialogue):
         row = db.query(RevisionReading).filter_by(id=reading_id).populate_existing().first()
         return serialize_reading(row) if row is not None else {'status': 'failed', 'id': reading_id}
 
-    return await run_in_threadpool(persist_reading)
+    for attempt in range(2):
+        raw = None
+        try:
+            if form.purpose == 'first_read':
+                response = await call_step_model(
+                    request, user, step='first_read', model=model, messages=messages, policy=policy
+                )
+            elif form.purpose == 'revision_review':
+                response = await call_step_model(
+                    request, user, step='revision_review', model=model, messages=messages, policy=policy
+                )
+            else:
+                response = await call_step_model(
+                    request, user, step='whole_review', model=model, messages=messages, policy=policy
+                )
+            raw = response['choices'][0]['message']['content']
+            feedback = ReadingFeedback.model_validate(_extract_json_object(raw))
+            observations = [*feedback.focus, *([feedback.strength] if feedback.strength else [])]
+            for item in observations:
+                anchored = anchor_quote(source, item.quote)
+                if anchored is None:
+                    raise ValueError('Reading quotes did not match the source draft')
+                item.quote = anchored
+            attempts.append({'input': copy.deepcopy(messages), 'output': raw, 'valid': True})
+            break
+        except asyncio.CancelledError:
+            attempts.append({'input': copy.deepcopy(messages), 'output': None, 'valid': False, 'error_type': 'CancelledError'})
+            with anyio.CancelScope(shield=True):
+                await run_in_threadpool(persist_reading)
+            raise
+        except Exception as error:
+            attempts.append(
+                {'input': copy.deepcopy(messages), 'output': raw, 'valid': False, 'error_type': type(error).__name__}
+            )
+            log.warning('Revision reading failed (%s, attempt %s): %s', reading_id, attempt + 1, type(error).__name__)
+            feedback = None
+            if raw is None:
+                break
+            messages.append({'role': 'assistant', 'content': raw})
+            messages.append(
+                {
+                    'role': 'user',
+                    'content': '输出未满足格式或逐字引文要求。请重新检查：understanding、strength、focus、overview 是四个同级字段，focus 不能放入 strength。引文必须逐字存在于当前保存稿。只按以下 JSON schema 输出，不改动事实判断：'
+                    + json.dumps(ReadingFeedback.model_json_schema(), ensure_ascii=False),
+                }
+            )
+
+    with anyio.CancelScope(shield=True):
+        return await run_in_threadpool(persist_reading)
 
 
 def revision_model_view(model):

@@ -22,6 +22,8 @@ const context = new Map([['i18n', readable({ t: (key: string) => key })]]);
 beforeEach(() => {
 	vi.clearAllMocks();
 	vi.mocked(teachingApi).mockResolvedValue({
+		snapshot: 'snapshot',
+		assignments: [],
 		policy: { model_ids: ['public-model', 'private-model'], recommended_model_id: 'private-model' }
 	});
 });
@@ -62,6 +64,8 @@ test('推荐列表及保存内容排除非公开的已选项', async () => {
 	await fireEvent.change(select, { target: { value: 'public-model' } });
 	await fireEvent.click(screen.getByRole('button', { name: '保存教学模型' }));
 	expect(teachingApi).toHaveBeenLastCalledWith('/admin/teaching-models', 'PUT', {
+		expected_snapshot: 'snapshot',
+		replacements: {},
 		model_ids: ['public-model'],
 		recommended_model_id: 'public-model'
 	});
@@ -71,8 +75,34 @@ test('推荐列表及保存内容排除非公开的已选项', async () => {
 	expect(select.value).toBe('');
 	await fireEvent.click(screen.getByRole('button', { name: '保存教学模型' }));
 	expect(teachingApi).toHaveBeenLastCalledWith('/admin/teaching-models', 'PUT', {
+		expected_snapshot: 'snapshot',
+		replacements: {},
 		model_ids: [],
 		recommended_model_id: null
+	});
+});
+
+test('停用在用模型须指定替代项；仅调整推荐不会替换作业', async () => {
+	models.set([publicModel, { ...publicModel, id: 'next', name: '新模型' }] as any);
+	vi.mocked(teachingApi).mockResolvedValue({
+		snapshot: 'before',
+		policy: { model_ids: ['public-model', 'next'], recommended_model_id: 'next' },
+		assignments: [{ id: 'a', classroom: '16班', title: '论证', model_id: 'public-model' }]
+	});
+	render(TeachingModels, { context });
+	await screen.findByText('16班 · 论证');
+	const save = screen.getByRole('button', { name: '保存教学模型' }) as HTMLButtonElement;
+	await fireEvent.click(screen.getByRole('checkbox', { name: '公开模型' }));
+	expect(save.disabled).toBe(true);
+	await fireEvent.change(screen.getByRole('combobox', { name: '替换这些作业的模型' }), {
+		target: { value: 'next' }
+	});
+	await fireEvent.click(save);
+	expect(teachingApi).toHaveBeenLastCalledWith('/admin/teaching-models', 'PUT', {
+		expected_snapshot: 'before',
+		model_ids: ['next'],
+		recommended_model_id: 'next',
+		replacements: { 'public-model': 'next' }
 	});
 });
 

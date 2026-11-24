@@ -107,6 +107,7 @@ async def run_comparison(request, user, work_id, form, db):
         state = copy.deepcopy(event.state)
         state.update(status='active' if state['baseline'] is not None else 'draft', running_event_id=None)
         state.pop('submission_preview', None)
+    state['draft_min_chars'] = preparation.payload['assignment'].get('draft_min_chars', 0)
     configs = []
     for candidate in payload.candidates:
         if candidate.web_search:

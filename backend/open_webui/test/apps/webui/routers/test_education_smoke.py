@@ -6470,6 +6470,14 @@ _DRAFT_TEXT = "　　" + "初稿第一段," * 30 + "\n\n  " + "初稿第二段�
 _DRAFT_MD = ("初稿第一段," * 30) + "\n\n  " + ("初稿第二段。" * 20)
 
 
+@pytest.fixture
+def finish_first_read(monkeypatch):
+    from functools import partial
+    from open_webui.test.apps.webui.routers.test_revision_coaching import complete_first_read
+
+    return partial(complete_first_read, monkeypatch=monkeypatch)
+
+
 def _setup_revise_draft_assignment(client, teacher, student, **overrides):
     UserContext.current_user = teacher
     classroom = client.post("/api/v1/classrooms", json={"name": "Revise Class"}).json()[
@@ -6557,7 +6565,34 @@ def test_revise_draft_assignment_rejects_challenge(education_client):
     assert res.json()["task_mode"] == "revise_draft"
 
 
-def test_revise_draft_requires_baseline_before_editing_and_chat(education_client):
+@pytest.mark.parametrize(("settings", "text", "status"), [
+    ({}, "字", 200),
+    ({"draft_min_chars": 3}, "一 二　", 400),
+    ({"draft_min_chars": 3}, "一 二 三", 200),
+])
+def test_assignment_minimum_draft_length(education_client, settings, text, status):
+    client, teacher, _, student, _, _ = education_client
+    assignment, session_id = _setup_revise_draft_assignment(client, teacher, student, **settings)
+    assert assignment["draft_min_chars"] == settings.get("draft_min_chars", 0)
+    result = client.post(f"/api/v1/writing-sessions/{session_id}/draft-baseline", json={"text": text})
+    assert result.status_code == status, result.text
+
+
+def test_teacher_can_clear_existing_assignment_draft_minimum(education_client):
+    client, teacher, _, student, _, _ = education_client
+    assignment, sid = _setup_revise_draft_assignment(client, teacher, student, draft_min_chars=50)
+    UserContext.current_user = teacher
+    url = f"/api/v1/assignments/{assignment['id']}"
+    settings = {"expected_config_revision": assignment["config_revision"], "change_summary": "允许短稿"}
+    assert client.patch(url, json={**settings, "draft_min_chars": -1}).status_code == 422
+    updated = client.patch(url, json={**settings, "draft_min_chars": 0})
+    assert updated.status_code == 200, updated.text
+    UserContext.current_user = student
+    assert client.get(f"{url}/workspace").json()["assignment"]["draft_min_chars"] == 0
+    assert client.post(f"/api/v1/writing-sessions/{sid}/draft-baseline", json={"text": "字"}).status_code == 200
+
+
+def test_revise_draft_requires_baseline_before_editing_and_chat(education_client, finish_first_read):
     client, teacher, _, student, _, SessionLocal = education_client
     assignment, session_id = _setup_revise_draft_assignment(client, teacher, student)
 
@@ -6589,7 +6624,7 @@ def test_revise_draft_requires_baseline_before_editing_and_chat(education_client
 
     res = client.post(
         f"/api/v1/writing-sessions/{session_id}/draft-baseline",
-        json={"text": "太短了。"},
+        json={"text": "　 "},
     )
     assert res.status_code == 400, res.text
 
@@ -6625,6 +6660,7 @@ def test_revise_draft_requires_baseline_before_editing_and_chat(education_client
     for url, body in blocked[:3]:
         res = client.post(url, json=body)
         assert res.status_code == 200, (url, res.text)
+    finish_first_read(client, session_id)
     res = client.post(
         f"/api/v1/assignments/{assignment['id']}/submit",
         json=_submit_body(session_id, _DRAFT_MD + "\n改过的一句。"),
@@ -6665,7 +6701,7 @@ def test_draft_baseline_only_for_revise_draft_assignments(education_client):
     assert res.status_code == 400, res.text
 
 
-def test_withdrawing_first_draft_clears_draft_process_and_chats(education_client):
+def test_withdrawing_first_draft_clears_draft_process_and_chats(education_client, finish_first_read):
     client, teacher, _, student, _, SessionLocal = education_client
     assignment, session_id = _setup_revise_draft_assignment(client, teacher, student)
     url = f"/api/v1/writing-sessions/{session_id}/draft-baseline"
@@ -6708,6 +6744,7 @@ def test_withdrawing_first_draft_clears_draft_process_and_chats(education_client
 
     # 回到交初稿那一步,可以重新交;交过作业之后就不能再撤回
     assert client.post(url, json={"text": _DRAFT_TEXT}).status_code == 200
+    finish_first_read(client, session_id)
     res = client.post(
         f"/api/v1/assignments/{assignment['id']}/submit",
         json=_submit_body(session_id, _DRAFT_MD + "\n改过的一句。"),
@@ -6973,7 +7010,7 @@ _DEFERRED_PAYLOAD = {
 
 
 
-def test_coaching_styles_switch_drops_the_style_prompt(education_client):
+def test_coaching_styles_switch_drops_the_style_prompt(education_client, finish_first_read):
     client, teacher, _, student, _, SessionLocal = education_client
     assignment, session_id = _revise_draft_with_baseline(
         client, teacher, student, coaching_style="socratic"
@@ -6991,6 +7028,7 @@ def test_coaching_styles_switch_drops_the_style_prompt(education_client):
     assert task in prompt
 
     UserContext.current_user = student
+    finish_first_read(client, session_id)
     res = client.post(
         f"/api/v1/assignments/{assignment['id']}/submit",
         json=_submit_body(session_id, _DRAFT_MD),
@@ -7005,7 +7043,7 @@ def test_coaching_styles_switch_drops_the_style_prompt(education_client):
     assert coaching["task_prompt"] == task
 
 
-def test_revise_draft_always_records_ai_use(education_client):
+def test_revise_draft_always_records_ai_use(education_client, finish_first_read):
     """修订初稿不问「用了 AI 吗」:首轮通读是平台发起的,客户端报什么都记为用了。"""
     client, teacher, _, student, _, _ = education_client
     assignment, session_id = _setup_revise_draft_assignment(
@@ -7016,6 +7054,7 @@ def test_revise_draft_always_records_ai_use(education_client):
         json={"text": _DRAFT_TEXT},
     )
     # 报「没用」也按用了校验:只给用了 AI 的学生看的题照样必答、照样收
+    finish_first_read(client, session_id)
     res = client.post(
         f"/api/v1/assignments/{assignment['id']}/submit",
         json={
@@ -7041,7 +7080,7 @@ def _diff_sides(blocks):
     return old, new
 
 
-def test_revise_draft_analysis_starts_from_the_declared_draft(education_client):
+def test_revise_draft_analysis_starts_from_the_declared_draft(education_client, finish_first_read):
     client, teacher, _, student, _, _ = education_client
     assignment, session_id = _setup_revise_draft_assignment(client, teacher, student)
     res = client.post(
@@ -7050,6 +7089,7 @@ def test_revise_draft_analysis_starts_from_the_declared_draft(education_client):
     )
     assert res.status_code == 200, res.text
 
+    finish_first_read(client, session_id)
     first_final = _DRAFT_MD + "\n补上的一句。"
     submission_id = _revise_and_submit(
         client, assignment, session_id, first_final, len(_DRAFT_MD)

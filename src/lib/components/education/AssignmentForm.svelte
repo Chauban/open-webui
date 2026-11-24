@@ -201,6 +201,13 @@
 						{/each}
 					</div>
 					<div class="mt-2 text-xs text-gray-400">{$i18n.t(taskModeHint)}</div>
+					{#if isReviseDraft}
+						<label class="mt-3 grid gap-1 text-sm">
+							{$i18n.t('初稿最低字数')}
+							<input type="number" min="0" max="200000" step="1" bind:value={draft.draftMinChars}
+								placeholder={$i18n.t('不限字数')} class={EDU_FIELD_CLASS} />
+						</label>
+					{/if}
 					{#if allowedTaskModes.length < TASK_MODES.length && !taskModeLocked}
 						<p class="mt-2 text-xs text-gray-500">
 							{$i18n.t('可布置的作业类型由管理员设置。如需其他类型，请联系管理员。')}

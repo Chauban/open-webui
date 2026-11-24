@@ -41,6 +41,8 @@ def test_submission_preserves_published_fallback(env, monkeypatch, fallback):
     assert result.status_code == 200, result.text
     assignment = result.json()[0]
     sid = student_session(env, assignment)
+    first = env.client.post(f'/api/v1/writing-sessions/{sid}/readings', json={'purpose': 'first_read'})
+    assert first.json()['status'] == 'ready', first.text
     with env.factory() as db:
         session = Education.get_writing_session_by_id(sid, db=db)
         config, call = runtime.capture_formal(session, 'fallback-call', 'coaching_chat', db, user=env.student)
@@ -56,7 +58,7 @@ def test_submission_preserves_published_fallback(env, monkeypatch, fallback):
         binding = evidence['revisions'][0]['config']['binding']
         assert binding.get('fallback') == fallback
         assert ('fallback' in binding) == (fallback is not None)
-        assert evidence['calls'][0]['context']['config']['binding'].get('fallback') == fallback
+        assert all(item['context']['config']['binding'].get('fallback') == fallback for item in evidence['calls'])
         assert db.get(AssignmentAiRevision, config['ai_revision_id']).config == original_revision
         assert db.query(Submission).count() == 1
 

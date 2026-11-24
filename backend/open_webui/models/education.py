@@ -55,7 +55,6 @@ ThinkingSetting = Literal["model_default", "off", "low", "medium", "high"]
 ThinkingControl = Literal["admin", "teacher", "student"]
 
 # 初稿最短字数(去掉空白后的字符数)。
-DRAFT_BASELINE_MIN_CHARS = 200
 # 提交前质疑环节。辅导档位管的是「AI 帮多少」,质疑管的是「交之前挑多狠、挑哪几个维度」,
 # 两者是两个互不兼任的角色:辅导助手不带质疑口吻,质疑读者不提供辅导。
 ChallengeStatus = Literal["in_progress", "completed", "skipped"]
@@ -123,6 +122,7 @@ class Assignment(Base):
     description = Column(Text, nullable=True)
     teacher_id = Column(Text, nullable=False)
     hidden = Column(Boolean, nullable=False, default=False, server_default=text('false'))
+    draft_min_chars = Column(Integer, nullable=False, default=0, server_default=text("0"))
     photo_transcription_enabled = Column(Boolean, nullable=False, default=False, server_default=text('false'))
     image_reading_enabled = Column(Boolean, nullable=False, default=False, server_default=text('false'))
     classroom_id = Column(Text, nullable=True)
@@ -1148,6 +1148,7 @@ class AssignmentModel(BaseModel):
 
     id: str
     hidden: bool = False
+    draft_min_chars: int = 0
     photo_transcription_enabled: bool = False
     image_reading_enabled: bool = False
     title: str
@@ -1547,6 +1548,7 @@ class EducationNotificationModel(BaseModel):
 
 class AssignmentCreateForm(BaseModel):
     model_config = ConfigDict(extra='forbid')
+    draft_min_chars: int = Field(default=0, ge=0, le=200000, strict=True)
     photo_transcription_enabled: bool = Field(default=False, strict=True)
     image_reading_enabled: bool = Field(default=False, strict=True)
     title: str
@@ -1606,6 +1608,7 @@ class AssignmentChangeForm(BaseModel):
 
 class AssignmentUpdateForm(AssignmentChangeForm):
     model_config = ConfigDict(extra='forbid')
+    draft_min_chars: int = Field(default=0, ge=0, le=200000, strict=True)
     photo_transcription_enabled: Optional[bool] = Field(default=None, strict=True)
     image_reading_enabled: Optional[bool] = Field(default=None, strict=True)
     title: Optional[str] = None
@@ -3126,6 +3129,8 @@ class EducationTable:
                 if form_data.challenge_enabled is None:
                     raise ValueError("Challenge switch is required")
                 assignment.challenge_enabled = form_data.challenge_enabled
+            if 'draft_min_chars' in form_data.model_fields_set:
+                assignment.draft_min_chars = form_data.draft_min_chars
             if 'photo_transcription_enabled' in form_data.model_fields_set:
                 if form_data.photo_transcription_enabled is None:
                     raise ValueError('Photo transcription must be a boolean')
@@ -3209,6 +3214,7 @@ class EducationTable:
                 scoring_mode=form_data.scoring_mode,
                 teaching_config=teaching_config,
                 challenge_enabled=form_data.challenge_enabled,
+                draft_min_chars=form_data.draft_min_chars,
                 photo_transcription_enabled=form_data.photo_transcription_enabled,
                 image_reading_enabled=form_data.image_reading_enabled,
                 challenge_rounds=form_data.challenge_rounds,

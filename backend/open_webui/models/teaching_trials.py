@@ -85,6 +85,7 @@ class DraftModelParams(StrictModel):
 class DraftAssignment(StrictModel):
     """Editable values, including incomplete numbers/questions; never used for execution."""
 
+    draft_min_chars: StrictInt = Field(default=0, ge=0, le=200000)
     photo_transcription_enabled: StrictBool = False
     image_reading_enabled: StrictBool = False
     title: str = Field(default='', max_length=1000)
@@ -175,6 +176,11 @@ class TeachingModelPolicy(StrictModel):
         if self.recommended_model_id and self.recommended_model_id not in self.model_ids:
             raise ValueError('Recommended model must be authorized')
         return self
+
+
+class TeachingModelPolicyUpdate(TeachingModelPolicy):
+    expected_snapshot: str = Field(min_length=64, max_length=64)
+    replacements: dict[str, str] = Field(default_factory=dict)
 
 
 class ModelRoute(StrictModel):

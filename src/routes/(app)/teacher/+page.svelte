@@ -8,7 +8,11 @@
 	import dayjs from '$lib/dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
 
-	import { getTeacherOverview } from '$lib/apis/education';
+	import {
+		getTeacherOverview,
+		getEducationNotificationSummary,
+		markEducationNotificationsRead
+	} from '$lib/apis/education';
 	import { config, educationNotificationSummary } from '$lib/stores';
 	import TeacherPageShell from '$lib/components/education/TeacherPageShell.svelte';
 	import EduBadge from '$lib/components/education/EduBadge.svelte';
@@ -77,6 +81,18 @@
 	onDestroy(() => {
 		unsubscribeNotifications?.();
 	});
+	async function openModelSettings(id: string) {
+		await goto(`/teacher/assignments/${id}/settings`);
+		try {
+			await markEducationNotificationsRead(localStorage.token, {
+				types: ['teaching_model_unavailable'],
+				assignment_id: id
+			});
+			educationNotificationSummary.set(await getEducationNotificationSummary(localStorage.token));
+		} catch (error) {
+			console.error('Could not mark teaching notification as read', error);
+		}
+	}
 </script>
 
 <TeacherPageShell title={$i18n.t('Teaching Overview')}>
@@ -91,6 +107,16 @@
 	</svelte:fragment>
 
 	<div class="mx-auto max-w-6xl px-4 py-6">
+		{#each Object.entries($educationNotificationSummary?.by_assignment ?? {}) as [id, counts]}
+			{#if counts.teaching_model_unavailable}
+				<button
+					class="mb-2 block text-sm text-amber-700 underline"
+					on:click={() => openModelSettings(id)}
+				>
+					{$i18n.t('有作业的初读模型不可用，查看作业设置')}
+				</button>
+			{/if}
+		{/each}
 		{#if loadError}
 			<EduStateCard tone="error">{loadError}</EduStateCard>
 		{:else if loading}
